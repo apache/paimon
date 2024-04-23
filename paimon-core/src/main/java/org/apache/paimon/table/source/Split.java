@@ -42,4 +42,13 @@ public interface Split extends Serializable {
     default Optional<List<RawFile>> convertToRawFiles() {
         return Optional.empty();
     }
+
+    /**
+     * Return the deletion file of the data file, indicating which row in the data file was deleted.
+     *
+     * <p>If there is no corresponding deletion file, the element will be null.
+     */
+    default Optional<List<DeletionFile>> deletionFiles() {
+        return Optional.empty();
+    }
 }

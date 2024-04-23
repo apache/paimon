@@ -19,7 +19,6 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.data.InternalRow;
@@ -33,18 +32,15 @@ import org.apache.paimon.operation.KeyValueFileStoreScan;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.RowKindGenerator;
-import org.apache.paimon.table.sink.SequenceGenerator;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.KeyValueTableRead;
 import org.apache.paimon.table.source.MergeTreeSplitGenerator;
 import org.apache.paimon.table.source.SplitGenerator;
-import org.apache.paimon.table.source.ValueContentRowDataRecordIterator;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 
@@ -75,7 +71,7 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    protected FileStoreTable copy(TableSchema newTableSchema) {
+    public FileStoreTable copy(TableSchema newTableSchema) {
         return new PrimaryKeyFileStoreTable(fileIO, path, newTableSchema, catalogEnvironment);
     }
 
@@ -90,7 +86,7 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
 
             MergeFunctionFactory<KeyValue> mfFactory =
                     PrimaryKeyTableUtils.createMergeFunctionFactory(tableSchema, extractor);
-            if (options.changelogProducer() == ChangelogProducer.LOOKUP) {
+            if (options.needLookup()) {
                 mfFactory =
                         LookupMergeFunction.wrap(
                                 mfFactory, new RowType(extractor.keyFields(tableSchema)), rowType);
@@ -100,7 +96,7 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                     new KeyValueFileStore(
                             fileIO(),
                             schemaManager(),
-                            tableSchema.id(),
+                            tableSchema,
                             tableSchema.crossPartitionUpdate(),
                             options,
                             tableSchema.logicalPartitionType(),
@@ -118,10 +114,13 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     protected SplitGenerator splitGenerator() {
+        CoreOptions options = store().options();
         return new MergeTreeSplitGenerator(
                 store().newKeyComparator(),
-                store().options().splitTargetSize(),
-                store().options().splitOpenFileCost());
+                options.splitTargetSize(),
+                options.splitOpenFileCost(),
+                options.deletionVectorsEnabled(),
+                options.mergeEngine());
     }
 
     @Override
@@ -156,25 +155,8 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public InnerTableRead newRead() {
-        return new KeyValueTableRead(store().newRead(), schema()) {
-
-            @Override
-            public void projection(int[][] projection) {
-                read.withValueProjection(projection);
-            }
-
-            @Override
-            protected RecordReader.RecordIterator<InternalRow> rowDataRecordIteratorFromKv(
-                    RecordReader.RecordIterator<KeyValue> kvRecordIterator) {
-                return new ValueContentRowDataRecordIterator(kvRecordIterator);
-            }
-
-            @Override
-            public InnerTableRead forceKeepDelete() {
-                read.forceKeepDelete();
-                return this;
-            }
-        };
+        return new KeyValueTableRead(
+                () -> store().newRead(), () -> store().newBatchRawFileRead(), schema());
     }
 
     @Override
@@ -187,24 +169,20 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
             String commitUser, ManifestCacheFilter manifestFilter) {
         TableSchema schema = schema();
         CoreOptions options = store().options();
-        final SequenceGenerator sequenceGenerator = SequenceGenerator.create(schema, options);
-        final RowKindGenerator rowKindGenerator = RowKindGenerator.create(schema, options);
-        final KeyValue kv = new KeyValue();
+        RowKindGenerator rowKindGenerator = RowKindGenerator.create(schema, options);
+        KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
                 store().newWrite(commitUser, manifestFilter),
                 createRowKeyExtractor(),
                 record -> {
                     InternalRow row = record.row();
-                    long sequenceNumber =
-                            sequenceGenerator == null
-                                    ? KeyValue.UNKNOWN_SEQUENCE
-                                    : sequenceGenerator.generate(row);
                     RowKind rowKind =
                             rowKindGenerator == null
                                     ? row.getRowKind()
                                     : rowKindGenerator.generate(row);
-                    return kv.replace(record.primaryKey(), sequenceNumber, rowKind, row);
-                });
+                    return kv.replace(record.primaryKey(), KeyValue.UNKNOWN_SEQUENCE, rowKind, row);
+                },
+                CoreOptions.fromMap(tableSchema.options()).ignoreDelete());
     }
 
     @Override

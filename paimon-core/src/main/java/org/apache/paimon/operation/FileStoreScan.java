@@ -25,7 +25,9 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.operation.metrics.ScanMetrics;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.utils.Filter;
@@ -44,6 +46,8 @@ public interface FileStoreScan {
     FileStoreScan withPartitionFilter(Predicate predicate);
 
     FileStoreScan withPartitionFilter(List<BinaryRow> partitions);
+
+    FileStoreScan withPartitionFilter(PartitionPredicate predicate);
 
     FileStoreScan withBucket(int bucket);
 
@@ -69,6 +73,12 @@ public interface FileStoreScan {
 
     /** Produce a {@link Plan}. */
     Plan plan();
+
+    /**
+     * Read {@link SimpleFileEntry}s, SimpleFileEntry only retains some critical information, so it
+     * cannot perform filtering based on statistical information.
+     */
+    List<SimpleFileEntry> readSimpleEntries();
 
     /** Result plan of this scan. */
     interface Plan {

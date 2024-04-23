@@ -15,6 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.spark.PaimonSparkTestBase
@@ -101,6 +102,6 @@ class DynamicBucketTableTest extends PaimonSparkTestBase {
     val error = intercept[UnsupportedOperationException] {
       spark.sql("INSERT INTO T VALUES ('1', 'a', 'p')")
     }.getMessage
-    assert(error.contains("Write with bucket mode GLOBAL_DYNAMIC is not supported"))
+    assert(error.contains("Spark doesn't support GLOBAL_DYNAMIC mode"))
   }
 }

@@ -34,6 +34,7 @@ import javax.annotation.Nullable;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
@@ -80,13 +81,11 @@ public class RescaleBucketITCase extends CatalogITCaseBase {
                         + "INSERT INTO `T4` SELECT * FROM `S0`;\n"
                         + "END";
 
-        sEnv.getConfig().getConfiguration().set(SavepointConfigOptions.SAVEPOINT_PATH, path);
-
         // step1: run streaming insert
         JobClient jobClient = startJobAndCommitSnapshot(streamSql, null);
 
         // step2: stop with savepoint
-        stopJobSafely(jobClient);
+        String savepointPath = stopJobSafely(jobClient);
 
         final Snapshot snapshotBeforeRescale = findLatestSnapshot("T3");
         assertThat(snapshotBeforeRescale).isNotNull();
@@ -107,6 +106,9 @@ public class RescaleBucketITCase extends CatalogITCaseBase {
         assertThat(batchSql("SELECT * FROM T3")).containsExactlyInAnyOrderElementsOf(committedData);
 
         // step5: resume streaming job
+        sEnv.getConfig()
+                .getConfiguration()
+                .set(SavepointConfigOptions.SAVEPOINT_PATH, savepointPath);
         JobClient resumedJobClient =
                 startJobAndCommitSnapshot(streamSql, snapshotAfterRescale.id());
         // stop job
@@ -144,11 +146,13 @@ public class RescaleBucketITCase extends CatalogITCaseBase {
         return jobClient;
     }
 
-    private void stopJobSafely(JobClient client) throws ExecutionException, InterruptedException {
-        client.stopWithSavepoint(true, path, SavepointFormatType.DEFAULT);
+    private String stopJobSafely(JobClient client) throws ExecutionException, InterruptedException {
+        CompletableFuture<String> savepointPath =
+                client.stopWithSavepoint(true, path, SavepointFormatType.DEFAULT);
         while (!client.getJobStatus().get().isGloballyTerminalState()) {
             Thread.sleep(2000L);
         }
+        return savepointPath.get();
     }
 
     private void assertLatestSchema(

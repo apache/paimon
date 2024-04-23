@@ -72,7 +72,7 @@ public abstract class ManifestFileMetaTestBase {
                         fileName,
                         0, // not used
                         0, // not used
-                        binaryRow, // not useds
+                        binaryRow, // not used
                         binaryRow, // not used
                         StatsTestUtils.newEmptyTableStats(), // not used
                         StatsTestUtils.newEmptyTableStats(), // not used
@@ -81,18 +81,14 @@ public abstract class ManifestFileMetaTestBase {
                         0, // not used
                         0, // not used
                         Collections.emptyList(),
-                        Timestamp.fromEpochMillis(200000)));
+                        Timestamp.fromEpochMillis(200000),
+                        0L, // not used
+                        null // not used
+                        ));
     }
 
     protected ManifestFileMeta makeManifest(ManifestEntry... entries) {
-        ManifestFileMeta writtenMeta = getManifestFile().write(Arrays.asList(entries)).get(0);
-        return new ManifestFileMeta(
-                writtenMeta.fileName(),
-                entries.length * 100, // for testing purpose
-                writtenMeta.numAddedFiles(),
-                writtenMeta.numDeletedFiles(),
-                writtenMeta.partitionStats(),
-                0);
+        return getManifestFile().write(Arrays.asList(entries)).get(0);
     }
 
     abstract ManifestFile getManifestFile();
@@ -103,16 +99,19 @@ public abstract class ManifestFileMetaTestBase {
             List<ManifestFileMeta> input, List<ManifestFileMeta> merged) {
         List<ManifestEntry> inputEntry =
                 input.stream()
-                        .flatMap(f -> getManifestFile().read(f.fileName()).stream())
+                        .flatMap(f -> getManifestFile().read(f.fileName(), f.fileSize()).stream())
                         .collect(Collectors.toList());
         List<String> entryBeforeMerge =
-                ManifestEntry.mergeEntries(inputEntry).stream()
+                FileEntry.mergeEntries(inputEntry).stream()
+                        .filter(entry -> entry.kind() == FileKind.ADD)
                         .map(entry -> entry.kind() + "-" + entry.file().fileName())
                         .collect(Collectors.toList());
 
         List<String> entryAfterMerge = new ArrayList<>();
         for (ManifestFileMeta manifestFileMeta : merged) {
-            List<ManifestEntry> entries = getManifestFile().read(manifestFileMeta.fileName());
+            List<ManifestEntry> entries =
+                    getManifestFile()
+                            .read(manifestFileMeta.fileName(), manifestFileMeta.fileSize());
             for (ManifestEntry entry : entries) {
                 entryAfterMerge.add(entry.kind() + "-" + entry.file().fileName());
             }
@@ -143,7 +142,10 @@ public abstract class ManifestFileMetaTestBase {
             List<ManifestFileMeta> mergedMainfest, List<String> expecteded) {
         List<String> actual =
                 mergedMainfest.stream()
-                        .flatMap(file -> getManifestFile().read(file.fileName()).stream())
+                        .flatMap(
+                                file ->
+                                        getManifestFile().read(file.fileName(), file.fileSize())
+                                                .stream())
                         .map(f -> f.kind() + "-" + f.file().fileName())
                         .collect(Collectors.toList());
         assertThat(actual).hasSameElementsAs(expecteded);
@@ -157,8 +159,8 @@ public abstract class ManifestFileMetaTestBase {
         assertThat(actual.partitionStats()).isEqualTo(expected.partitionStats());
 
         // check content
-        assertThat(manifestFile.read(actual.fileName()))
-                .isEqualTo(manifestFile.read(expected.fileName()));
+        assertThat(manifestFile.read(actual.fileName(), actual.fileSize()))
+                .isEqualTo(manifestFile.read(expected.fileName(), expected.fileSize()));
     }
 
     protected List<ManifestFileMeta> createBaseManifestFileMetas(boolean hasPartition) {
@@ -241,7 +243,8 @@ public abstract class ManifestFileMetaTestBase {
                         0, // not used
                         0, // not used
                         0, // not used
-                        0 // not used
-                        ));
+                        0, // not used
+                        0L,
+                        null));
     }
 }

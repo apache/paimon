@@ -61,6 +61,9 @@ public interface RecordWriter<T> {
      */
     CommitIncrement prepareCommit(boolean waitCompaction) throws Exception;
 
+    /** Check if a compaction is in progress, or if a compaction result remains to be fetched. */
+    boolean isCompacting();
+
     /**
      * Sync the writer. The structure related to file reading and writing is thread unsafe, there
      * are asynchronous threads inside the writer, which should be synced before reading data.

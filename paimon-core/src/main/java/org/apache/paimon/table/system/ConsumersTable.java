@@ -115,7 +115,10 @@ public class ConsumersTable implements ReadonlyTable {
         @Override
         public Plan innerPlan() {
             return () ->
-                    Collections.singletonList(new ConsumersTable.ConsumersSplit(fileIO, location));
+                    Collections.singletonList(
+                            new ConsumersTable.ConsumersSplit(
+                                    new ConsumerManager(fileIO, location).listAllIds().size(),
+                                    location));
         }
     }
 
@@ -124,17 +127,17 @@ public class ConsumersTable implements ReadonlyTable {
 
         private static final long serialVersionUID = 1L;
 
-        private final FileIO fileIO;
+        private final long rowCount;
         private final Path location;
 
-        private ConsumersSplit(FileIO fileIO, Path location) {
-            this.fileIO = fileIO;
+        private ConsumersSplit(long rowCount, Path location) {
+            this.rowCount = rowCount;
             this.location = location;
         }
 
         @Override
         public long rowCount() {
-            return new ConsumerManager(fileIO, location).listAllIds().size();
+            return rowCount;
         }
 
         @Override

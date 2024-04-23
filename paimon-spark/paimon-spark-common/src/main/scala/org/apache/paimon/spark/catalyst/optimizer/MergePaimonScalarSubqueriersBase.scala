@@ -15,13 +15,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark.catalyst.optimizer
 
 import org.apache.paimon.spark.PaimonScan
+import org.apache.paimon.spark.util.CTERelationRefUtils
 
 import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, AttributeMap, CreateNamedStruct, Expression, ExprId, GetStructField, LeafExpression, Literal, NamedExpression, PredicateHelper, ScalarSubquery, Unevaluable}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
-import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, CTERelationDef, CTERelationRef, Filter, Join, LogicalPlan, Project, Subquery, WithCTE}
+import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, CTERelationDef, Filter, Join, LogicalPlan, Project, Subquery, WithCTE}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.trees.TreePattern.{SCALAR_SUBQUERY, SCALAR_SUBQUERY_REFERENCE, TreePattern}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
@@ -86,7 +88,7 @@ trait MergePaimonScalarSubqueriersBase extends Rule[LogicalPlan] with PredicateH
     val newPlan = removeReferences(planWithReferences, cache)
     val subqueryCTEs = cache.filter(_.merged).map(_.plan.asInstanceOf[CTERelationDef])
     if (subqueryCTEs.nonEmpty) {
-      WithCTE(newPlan, subqueryCTEs.toSeq)
+      WithCTE(newPlan, subqueryCTEs)
     } else {
       newPlan
     }
@@ -128,12 +130,12 @@ trait MergePaimonScalarSubqueriersBase extends Rule[LogicalPlan] with PredicateH
                 } else {
                   header.attributes
                 }
-                cache(subqueryIndex) = Header(newHeaderAttributes, mergedPlan, true)
+                cache(subqueryIndex) = Header(newHeaderAttributes, mergedPlan, merged = true)
                 subqueryIndex -> headerIndex
             })
       })
       .getOrElse {
-        cache += Header(Seq(output), plan, false)
+        cache += Header(Seq(output), plan, merged = false)
         cache.length - 1 -> 0
       }
   }
@@ -265,7 +267,7 @@ trait MergePaimonScalarSubqueriersBase extends Rule[LogicalPlan] with PredicateH
   protected def mergePaimonScan(scan1: PaimonScan, scan2: PaimonScan): Option[PaimonScan] = {
     if (
       scan1.table == scan2.table &&
-      scan1.filters.sameElements(scan2.filters) &&
+      scan1.filters == scan2.filters &&
       scan1.pushDownLimit == scan2.pushDownLimit
     ) {
 
@@ -290,7 +292,7 @@ trait MergePaimonScalarSubqueriersBase extends Rule[LogicalPlan] with PredicateH
       plan)
   }
 
-  protected def mapAttributes[T <: Expression](expr: T, outputMap: AttributeMap[Attribute]) = {
+  protected def mapAttributes[T <: Expression](expr: T, outputMap: AttributeMap[Attribute]): T = {
     expr.transform { case a: Attribute => outputMap.getOrElse(a, a) }.asInstanceOf[T]
   }
 
@@ -360,7 +362,10 @@ trait MergePaimonScalarSubqueriersBase extends Rule[LogicalPlan] with PredicateH
               val subqueryCTE = header.plan.asInstanceOf[CTERelationDef]
               GetStructField(
                 createScalarSubquery(
-                  CTERelationRef(subqueryCTE.id, _resolved = true, subqueryCTE.output),
+                  CTERelationRefUtils.createCTERelationRef(
+                    subqueryCTE.id,
+                    _resolved = true,
+                    subqueryCTE.output),
                   ssr.exprId),
                 ssr.headerIndex)
             } else {

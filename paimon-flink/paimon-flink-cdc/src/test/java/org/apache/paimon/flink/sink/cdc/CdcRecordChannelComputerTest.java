@@ -18,9 +18,11 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -49,10 +51,14 @@ public class CdcRecordChannelComputerTest {
 
     @Test
     public void testSchemaWithPartition() throws Exception {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
         RowType rowType =
                 RowType.of(
                         new DataType[] {DataTypes.INT(), DataTypes.BIGINT(), DataTypes.DOUBLE()},
                         new String[] {"pt", "k", "v"});
+
+        Options options = new Options();
+        options.set(CoreOptions.BUCKET, random.nextInt(1, 5));
 
         SchemaManager schemaManager =
                 new SchemaManager(LocalFileIO.create(), new Path(tempDir.toString()));
@@ -62,10 +68,9 @@ public class CdcRecordChannelComputerTest {
                                 rowType.getFields(),
                                 Collections.singletonList("pt"),
                                 Arrays.asList("pt", "k"),
-                                new HashMap<>(),
+                                options.toMap(),
                                 ""));
 
-        ThreadLocalRandom random = ThreadLocalRandom.current();
         int numInputs = random.nextInt(1000) + 1;
         List<Map<String, String>> input = new ArrayList<>();
         for (int i = 0; i < numInputs; i++) {
@@ -81,10 +86,14 @@ public class CdcRecordChannelComputerTest {
 
     @Test
     public void testSchemaNoPartition() throws Exception {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
         RowType rowType =
                 RowType.of(
                         new DataType[] {DataTypes.BIGINT(), DataTypes.DOUBLE()},
                         new String[] {"k", "v"});
+
+        Options options = new Options();
+        options.set(CoreOptions.BUCKET, random.nextInt(1, 5));
 
         SchemaManager schemaManager =
                 new SchemaManager(LocalFileIO.create(), new Path(tempDir.toString()));
@@ -94,10 +103,9 @@ public class CdcRecordChannelComputerTest {
                                 rowType.getFields(),
                                 Collections.emptyList(),
                                 Collections.singletonList("k"),
-                                new HashMap<>(),
+                                options.toMap(),
                                 ""));
 
-        ThreadLocalRandom random = ThreadLocalRandom.current();
         int numInputs = random.nextInt(1000) + 1;
         List<Map<String, String>> input = new ArrayList<>();
         for (int i = 0; i < numInputs; i++) {

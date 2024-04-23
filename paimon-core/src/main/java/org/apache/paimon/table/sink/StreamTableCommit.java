@@ -22,7 +22,6 @@ import org.apache.paimon.annotation.Public;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * A {@link TableCommit} for stream processing. You can use this class to commit multiple times.
@@ -32,17 +31,6 @@ import java.util.Set;
  */
 @Public
 public interface StreamTableCommit extends TableCommit {
-
-    /**
-     * Filter committed commits. Return uncommitted identifiers. This method is used for failover
-     * cases.
-     *
-     * @deprecated Use {@link StreamTableCommit#filterAndCommit} to filter and commit all {@link
-     *     CommitMessage} in question with one method call, instead of calling this method first and
-     *     then call {@link StreamTableCommit#commit}.
-     */
-    @Deprecated
-    Set<Long> filterCommitted(Set<Long> commitIdentifiers);
 
     /**
      * Create a new commit. One commit may generate up to two snapshots, one for adding new files

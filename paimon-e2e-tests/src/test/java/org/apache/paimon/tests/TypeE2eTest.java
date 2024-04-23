@@ -97,16 +97,10 @@ public class TypeE2eTest extends E2eTestBase {
                 tableDdl,
                 createResultSink("result1", schema));
 
-        String flinkVersion = System.getProperty("test.flink.version");
         String expected =
-                flinkVersion.startsWith("1.14")
-                        ? "true, 1, 10, 100, 1000, 1.1, 1.11, 12.456, "
-                                + "123456789123456789.12345678, hi, hello, table桌子store商店, "
-                                + "[116, 97, 98, 108, 101, -26, -95, -116, -27, -83, -112, 115, 116, 111, 114, 101, -27, -107, -122, -27, -70, -105], "
-                                + "2022-04-28, 2022-04-28T15:35:45.123, [hi, hello, null, test], +I[1, 10, 测试]"
-                        : "true, 1, 10, 100, 1000, 1.1, 1.11, 12.456, "
-                                + "123456789123456789.12345678, hi, hello, table桌子store商店, [116], "
-                                + "2022-04-28, 2022-04-28T15:35:45.123, [hi, hello, null, test], +I[1, 10, 测试]";
+                "true, 1, 10, 100, 1000, 1.1, 1.11, 12.456, "
+                        + "123456789123456789.12345678, hi, hello, table桌子store商店, [116], "
+                        + "2022-04-28, 2022-04-28T15:35:45.123, [hi, hello, null, test], +I[1, 10, 测试]";
         checkResult(
                 expected,
                 "null, null, null, null, null, null, null, null, null, "
@@ -189,18 +183,11 @@ public class TypeE2eTest extends E2eTestBase {
                 tableDdl,
                 createResultSink("result1", schema));
 
-        String flinkVersion = System.getProperty("test.flink.version");
         String expected =
-                flinkVersion.startsWith("1.14")
-                        ? "1, true, 1, 10, 100, 1000, 1.1, 1.11, 12.456, "
-                                + "123456789123456789.12345678, hi, hello, table桌子store商店, "
-                                + "[116, 97, 98, 108, 101, -26, -95, -116, -27, -83, -112, 115, 116, 111, 114, 101, -27, -107, -122, -27, -70, -105], "
-                                + "2022-04-28, 2022-04-28T15:35:45.123, [hi, hello, null, test], +I[1, 10, 测试], "
-                                + "{hi=1, test=3, hello=null}"
-                        : "1, true, 1, 10, 100, 1000, 1.1, 1.11, 12.456, "
-                                + "123456789123456789.12345678, hi, hello, table桌子store商店, [116], "
-                                + "2022-04-28, 2022-04-28T15:35:45.123, [hi, hello, null, test], +I[1, 10, 测试], "
-                                + "{hi=1, test=3, hello=null}";
+                "1, true, 1, 10, 100, 1000, 1.1, 1.11, 12.456, "
+                        + "123456789123456789.12345678, hi, hello, table桌子store商店, [116], "
+                        + "2022-04-28, 2022-04-28T15:35:45.123, [hi, hello, null, test], +I[1, 10, 测试], "
+                        + "{hi=1, test=3, hello=null}";
         checkResult(
                 expected,
                 "2, null, null, null, null, null, null, null, null, null, "

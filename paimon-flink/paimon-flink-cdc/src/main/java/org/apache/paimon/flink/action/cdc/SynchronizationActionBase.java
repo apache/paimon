@@ -20,12 +20,16 @@ package org.apache.paimon.flink.action.cdc;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.cdc.watermark.CdcWatermarkStrategy;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.FlatMapFunction;
@@ -40,6 +44,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.TagCreationMode.WATERMARK;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_GROUP;
@@ -170,6 +176,39 @@ public abstract class SynchronizationActionBase extends ActionBase {
     protected abstract void buildSink(
             DataStream<RichCdcMultiplexRecord> input,
             EventParser.Factory<RichCdcMultiplexRecord> parserFactory);
+
+    protected FileStoreTable alterTableOptions(Identifier identifier, FileStoreTable table) {
+        // doesn't support altering bucket here
+        Map<String, String> dynamicOptions = new HashMap<>(tableConfig);
+        dynamicOptions.remove(CoreOptions.BUCKET.key());
+
+        // remove immutable options and options with equal values
+        Map<String, String> oldOptions = table.options();
+        Set<String> immutableOptionKeys = CoreOptions.getImmutableOptionKeys();
+        dynamicOptions
+                .entrySet()
+                .removeIf(
+                        entry ->
+                                immutableOptionKeys.contains(entry.getKey())
+                                        || Objects.equals(
+                                                oldOptions.get(entry.getKey()), entry.getValue()));
+
+        // alter the table dynamic options
+        List<SchemaChange> optionChanges =
+                dynamicOptions.entrySet().stream()
+                        .map(entry -> SchemaChange.setOption(entry.getKey(), entry.getValue()))
+                        .collect(Collectors.toList());
+
+        try {
+            catalog.alterTable(identifier, optionChanges, false);
+        } catch (Catalog.TableNotExistException
+                | Catalog.ColumnAlreadyExistException
+                | Catalog.ColumnNotExistException e) {
+            throw new RuntimeException("This is unexpected.", e);
+        }
+
+        return table.copy(dynamicOptions);
+    }
 
     @Override
     public void run() throws Exception {

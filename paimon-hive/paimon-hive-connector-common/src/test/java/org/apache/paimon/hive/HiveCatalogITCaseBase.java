@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,6 +20,7 @@ package org.apache.paimon.hive;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogLock;
+import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.hive.annotation.Minio;
@@ -177,6 +178,10 @@ public abstract class HiveCatalogITCaseBase {
         Path tablePath = new Path(path, "test_db2.db/t");
         assertThat(tablePath.getFileSystem().exists(tablePath)).isTrue();
         assertThatThrownBy(() -> tEnv.executeSql("DROP DATABASE test_db2").await())
+                .hasRootCauseInstanceOf(ValidationException.class)
+                .hasRootCauseMessage("Cannot drop a database which is currently in use.");
+        tEnv.executeSql("USE test_db");
+        assertThatThrownBy(() -> tEnv.executeSql("DROP DATABASE test_db2").await())
                 .hasRootCauseInstanceOf(DatabaseNotEmptyException.class)
                 .hasRootCauseMessage("Database test_db2 in catalog my_hive is not empty.");
 
@@ -277,7 +282,7 @@ public abstract class HiveCatalogITCaseBase {
                 .isTrue();
         tEnv.executeSql("DROP TABLE t").await();
         Path tablePath = new Path(path, "test_db.db/t");
-        assertThat(tablePath.getFileSystem().exists(tablePath)).isFalse();
+        assertThat(tablePath.getFileSystem().exists(tablePath)).isTrue();
     }
 
     @Test
@@ -689,11 +694,9 @@ public abstract class HiveCatalogITCaseBase {
     @Test
     public void testHiveLock() throws InterruptedException {
         tEnv.executeSql("CREATE TABLE t (a INT)");
-        CatalogLock.Factory lockFactory =
-                ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get())
-                        .catalog()
-                        .lockFactory()
-                        .get();
+        Catalog catalog =
+                ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
+        CatalogLockFactory lockFactory = catalog.lockFactory().get();
 
         AtomicInteger count = new AtomicInteger(0);
         List<Thread> threads = new ArrayList<>();
@@ -708,7 +711,8 @@ public abstract class HiveCatalogITCaseBase {
             Thread thread =
                     new Thread(
                             () -> {
-                                CatalogLock lock = lockFactory.create();
+                                CatalogLock lock =
+                                        lockFactory.createLock(catalog.lockContext().get());
                                 for (int j = 0; j < 10; j++) {
                                     try {
                                         lock.runWithLock("test_db", "t", unsafeIncrement);
@@ -933,6 +937,32 @@ public abstract class HiveCatalogITCaseBase {
                         "2\t20\t2023-10-17",
                         "3\t30\t2023-10-17",
                         "4\t40\t2023-10-17");
+    }
+
+    @Test
+    public void testDeletePartitionForTag() throws Exception {
+        tEnv.executeSql(
+                "CREATE TABLE t (\n"
+                        + "    k INT,\n"
+                        + "    v BIGINT,\n"
+                        + "    PRIMARY KEY (k) NOT ENFORCED\n"
+                        + ") WITH (\n"
+                        + "    'bucket' = '2',\n"
+                        + "    'metastore.tag-to-partition' = 'dt'\n"
+                        + ")");
+        tEnv.executeSql("INSERT INTO t VALUES (1, 10), (2, 20)").await();
+        tEnv.executeSql("CALL sys.create_tag('test_db.t', '2023-10-16', 1)");
+        tEnv.executeSql("INSERT INTO t VALUES (3, 30)").await();
+        tEnv.executeSql("CALL sys.create_tag('test_db.t', '2023-10-17', 2)");
+
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
+                .containsExactlyInAnyOrder("dt=2023-10-16", "dt=2023-10-17");
+
+        tEnv.executeSql("CALL sys.delete_tag('test_db.t', '2023-10-16')");
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
+                .containsExactlyInAnyOrder("dt=2023-10-17");
+
+        assertThat(hiveShell.executeQuery("SELECT k, v FROM t WHERE dt='2023-10-16'")).isEmpty();
     }
 
     @Test

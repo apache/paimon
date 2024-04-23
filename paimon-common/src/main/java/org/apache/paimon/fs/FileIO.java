@@ -37,6 +37,7 @@ import java.io.Serializable;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -101,6 +102,22 @@ public interface FileIO extends Serializable {
      * @return the statuses of the files/directories in the given path
      */
     FileStatus[] listStatus(Path path) throws IOException;
+
+    /**
+     * List the statuses of the directories in the given path if the path is a directory.
+     *
+     * <p>{@link FileIO} implementation may have optimization for list directories.
+     *
+     * @param path given path
+     * @return the statuses of the directories in the given path
+     */
+    default FileStatus[] listDirectories(Path path) throws IOException {
+        FileStatus[] statuses = listStatus(path);
+        if (statuses != null) {
+            statuses = Arrays.stream(statuses).filter(FileStatus::isDir).toArray(FileStatus[]::new);
+        }
+        return statuses;
+    }
 
     /**
      * Check if exists.
@@ -316,13 +333,24 @@ public interface FileIO extends Serializable {
                             + "')");
         }
 
-        Map<String, FileIOLoader> loaders = discoverLoaders();
-        FileIOLoader loader = loaders.get(uri.getScheme());
+        FileIOLoader loader = null;
+        List<IOException> ioExceptionList = new ArrayList<>();
+
+        // load preferIO
+        FileIOLoader preferIOLoader = config.preferIO();
+        try {
+            loader = checkAccess(preferIOLoader, path, config);
+        } catch (IOException ioException) {
+            ioExceptionList.add(ioException);
+        }
+
+        if (loader == null) {
+            Map<String, FileIOLoader> loaders = discoverLoaders();
+            loader = loaders.get(uri.getScheme());
+        }
 
         // load fallbackIO
         FileIOLoader fallbackIO = config.fallbackIO();
-
-        List<IOException> ioExceptionList = new ArrayList<>();
 
         if (loader != null) {
             Set<String> options =
@@ -374,6 +402,13 @@ public interface FileIO extends Serializable {
 
         if (loader == null) {
             String fallbackMsg = "";
+            String preferMsg = "";
+            if (preferIOLoader != null) {
+                preferMsg =
+                        " "
+                                + preferIOLoader.getClass().getSimpleName()
+                                + " also cannot access this path.";
+            }
             if (fallbackIO != null) {
                 fallbackMsg =
                         " "
@@ -384,8 +419,8 @@ public interface FileIO extends Serializable {
                     new UnsupportedSchemeException(
                             String.format(
                                     "Could not find a file io implementation for scheme '%s' in the classpath."
-                                            + "%s Hadoop FileSystem also cannot access this path '%s'.",
-                                    uri.getScheme(), fallbackMsg, path));
+                                            + "%s %s Hadoop FileSystem also cannot access this path '%s'.",
+                                    uri.getScheme(), preferMsg, fallbackMsg, path));
             for (IOException ioException : ioExceptionList) {
                 ex.addSuppressed(ioException);
             }

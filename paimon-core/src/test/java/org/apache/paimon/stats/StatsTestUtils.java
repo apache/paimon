@@ -18,9 +18,11 @@
 
 package org.apache.paimon.stats;
 
+import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -30,6 +32,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Utils for stats related tests. */
 public class StatsTestUtils {
+
+    public static FieldStats[] convertWithoutSchemaEvolution(
+            BinaryTableStats stats, RowType rowType) {
+        RowDataToObjectArrayConverter converter = new RowDataToObjectArrayConverter(rowType);
+        Object[] mins = converter.convert(stats.minValues());
+        Object[] maxs = converter.convert(stats.maxValues());
+        FieldStats[] ret = new FieldStats[rowType.getFieldCount()];
+        BinaryArray nulls = stats.nullCounts();
+        for (int i = 0; i < ret.length; i++) {
+            ret[i] = new FieldStats(mins[i], maxs[i], nulls.isNullAt(i) ? null : nulls.getLong(i));
+        }
+        return ret;
+    }
 
     @SuppressWarnings("unchecked")
     public static <T> void checkRollingFileStats(

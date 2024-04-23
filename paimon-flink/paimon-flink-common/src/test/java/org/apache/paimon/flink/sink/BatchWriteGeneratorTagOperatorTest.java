@@ -63,6 +63,7 @@ public class BatchWriteGeneratorTagOperatorTest extends CommitterOperatorTest {
                                 () ->
                                         new VersionedSerializerWrapper<>(
                                                 new ManifestCommittableSerializer())));
+        committerOperator.open();
 
         TableCommitImpl tableCommit = table.newCommit(initialCommitUser);
 

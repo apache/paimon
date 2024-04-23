@@ -91,6 +91,7 @@ public class KafkaActionUtils {
         kafkaSourceBuilder
                 .setValueOnlyDeserializer(new CdcDeserializationSchema())
                 .setGroupId(kafkaPropertiesGroupId(kafkaConfig));
+
         Properties properties = createKafkaProperties(kafkaConfig);
 
         StartupMode startupMode =

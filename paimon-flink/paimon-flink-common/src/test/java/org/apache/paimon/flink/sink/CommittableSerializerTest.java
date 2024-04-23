@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.io.CompactIncrement;
-import org.apache.paimon.io.NewFilesIncrement;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
@@ -42,10 +42,10 @@ public class CommittableSerializerTest {
 
     @Test
     public void testFile() throws IOException {
-        NewFilesIncrement newFilesIncrement = randomNewFilesIncrement();
+        DataIncrement dataIncrement = randomNewFilesIncrement();
         CompactIncrement compactIncrement = randomCompactIncrement();
         CommitMessage committable =
-                new CommitMessageImpl(row(0), 1, newFilesIncrement, compactIncrement);
+                new CommitMessageImpl(row(0), 1, dataIncrement, compactIncrement);
         CommitMessage newCommittable =
                 (CommitMessage)
                         serializer

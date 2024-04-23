@@ -96,7 +96,9 @@ public abstract class FormatReadWriteTest {
         out.close();
 
         RecordReader<InternalRow> reader =
-                format.createReaderFactory(rowType).createReader(fileIO, file);
+                format.createReaderFactory(rowType)
+                        .createReader(
+                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)));
         List<InternalRow> result = new ArrayList<>();
         reader.forEachRemaining(row -> result.add(serializer.copy(row)));
 
@@ -123,7 +125,9 @@ public abstract class FormatReadWriteTest {
         out.close();
 
         RecordReader<InternalRow> reader =
-                format.createReaderFactory(rowType).createReader(fileIO, file);
+                format.createReaderFactory(rowType)
+                        .createReader(
+                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)));
         List<InternalRow> result = new ArrayList<>();
         reader.forEachRemaining(result::add);
         assertThat(result.size()).isEqualTo(1);

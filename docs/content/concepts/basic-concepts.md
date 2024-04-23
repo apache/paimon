@@ -26,9 +26,35 @@ under the License.
 
 # Basic Concepts
 
+## File Layouts
+
+All files of a table are stored under one base directory. Paimon files are organized in a layered style. The following image illustrates the file layout. Starting from a snapshot file, Paimon readers can recursively access all records from the table.
+
+{{< img src="/img/file-layout.png">}}
+
 ## Snapshot
 
-A snapshot captures the state of a table at some point in time. Users can access the latest data of a table through the latest snapshot. By time traveling, users can also access the previous state of a table through an earlier snapshot.
+All snapshot files are stored in the `snapshot` directory.
+
+A snapshot file is a JSON file containing information about this snapshot, including
+
+* the schema file in use
+* the manifest list containing all changes of this snapshot
+
+A snapshot captures the state of a table at some point in time. Users can access the latest data of a table through the
+latest snapshot. By time traveling, users can also access the previous state of a table through an earlier snapshot.
+
+## Manifest Files
+
+All manifest lists and manifest files are stored in the `manifest` directory.
+
+A manifest list is a list of manifest file names.
+
+A manifest file is a file containing changes about LSM data files and changelog files. For example, which LSM data file is created and which file is deleted in the corresponding snapshot.
+
+## Data Files
+
+Data files are grouped by partitions. Currently, Paimon supports using orc (default), parquet and avro as data file's format.
 
 ## Partition
 
@@ -36,24 +62,14 @@ Paimon adopts the same partitioning concept as Apache Hive to separate data.
 
 Partitioning is an optional way of dividing a table into related parts based on the values of particular columns like date, city, and department. Each table can have one or more partition keys to identify a particular partition.
 
-By partitioning, users can efficiently operate on a slice of records in the table. See [file layouts]({{< ref "concepts/file-layouts" >}}) for how files are divided into multiple partitions.
-
-{{< hint info >}}
-If you need cross partition upsert (primary keys not contain all partition fields), see [Cross partition Upsert]({{< ref "concepts/primary-key-table/data-distribution#cross-partitions-upsert-dynamic-bucket-mode">}}) mode.
-{{< /hint >}}
-
-## Bucket
-
-Unpartitioned tables, or partitions in partitioned tables, are sub-divided into buckets, to provide extra structure to the data that may be used for more efficient querying.
-
-The range for a bucket is determined by the hash value of one or more columns in the records. Users can specify bucketing columns by providing the [`bucket-key` option]({{< ref "maintenance/configurations#coreoptions" >}}). If no `bucket-key` option is specified, the primary key (if defined) or the complete record will be used as the bucket key.
-
-A bucket is the smallest storage unit for reads and writes, so the number of buckets limits the maximum processing parallelism. This number should not be too big, though, as it will result in lots of small files and low read performance. In general, the recommended data size in each bucket is about 200MB - 1GB.
-
-See [file layouts]({{< ref "concepts/file-layouts" >}}) for how files are divided into buckets. Also, see [rescale bucket]({{< ref "maintenance/rescale-bucket" >}}) if you want to adjust the number of buckets after a table is created.
+By partitioning, users can efficiently operate on a slice of records in the table.
 
 ## Consistency Guarantees
 
-Paimon writers use two-phase commit protocol to atomically commit a batch of records to the table. Each commit produces at most two [snapshots]({{< ref "concepts/basic-concepts#snapshot" >}}) at commit time.
+Paimon writers use two-phase commit protocol to atomically commit a batch of records to the table. Each commit produces
+at most two [snapshots]({{< ref "concepts/basic-concepts#snapshot" >}}) at commit time.
 
-For any two writers modifying a table at the same time, as long as they do not modify the same bucket, their commits can occur in parallel. If they modify the same bucket, only snapshot isolation is guaranteed. That is, the final table state may be a mix of the two commits, but no changes are lost.
+For any two writers modifying a table at the same time, as long as they do not modify the same partition, their commits 
+can occur in parallel. If they modify the same partition, only snapshot isolation is guaranteed. That is, the final table 
+state may be a mix of the two commits, but no changes are lost.
+See [dedicated compaction job]({{< ref "maintenance/dedicated-compaction#dedicated-compaction-job" >}}) for more info.

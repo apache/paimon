@@ -20,7 +20,6 @@ package org.apache.paimon.flink.service;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.utils.InternalTypeInfo;
-import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -38,7 +37,7 @@ import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
 public class QueryService {
 
     public static void build(StreamExecutionEnvironment env, Table table, int parallelism) {
-        ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
+        ReadableConfig conf = env.getConfiguration();
         Preconditions.checkArgument(
                 conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING,
                 "Query Service only supports streaming mode.");

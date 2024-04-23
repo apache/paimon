@@ -26,4 +26,6 @@ package org.apache.paimon.table.sink;
 public interface TagCallback extends AutoCloseable {
 
     void notifyCreation(String tagName);
+
+    void notifyDeletion(String tagName);
 }

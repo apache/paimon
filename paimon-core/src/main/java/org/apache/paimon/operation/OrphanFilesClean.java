@@ -18,8 +18,10 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.Changelog;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -56,7 +58,7 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.io.DataFilePathFactory.BUCKET_PATH_PREFIX;
+import static org.apache.paimon.utils.FileStorePathFactory.BUCKET_PATH_PREFIX;
 
 /**
  * To remove the data files and metadata files that are not used by table (so-called "orphan
@@ -91,6 +93,7 @@ public class OrphanFilesClean {
 
     // an estimated value of how many files were deleted
     private int deletedFilesNum = 0;
+    private final List<Path> deleteFiles;
     private long olderThanMillis = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(1);
 
     public OrphanFilesClean(FileStoreTable table) {
@@ -104,6 +107,7 @@ public class OrphanFilesClean {
         this.manifestList = store.manifestListFactory().create();
         this.manifestFile = store.manifestFileFactory().create();
         this.indexFileHandler = store.newIndexFileHandler();
+        this.deleteFiles = new ArrayList<>();
     }
 
     public OrphanFilesClean olderThan(String timestamp) {
@@ -124,9 +128,16 @@ public class OrphanFilesClean {
         List<Path> nonSnapshotFiles = snapshotManager.tryGetNonSnapshotFiles(this::oldEnough);
         nonSnapshotFiles.forEach(this::deleteFileOrDirQuietly);
         deletedFilesNum += nonSnapshotFiles.size();
+        deleteFiles.addAll(nonSnapshotFiles);
 
-        Set<String> usedFiles = getUsedFiles();
+        // specially handle the changelog directory
+        List<Path> nonChangelogFiles = snapshotManager.tryGetNonChangelogFiles(this::oldEnough);
+        nonChangelogFiles.forEach(this::deleteFileOrDirQuietly);
+        deletedFilesNum += nonChangelogFiles.size();
+        deleteFiles.addAll(nonChangelogFiles);
+
         Map<String, Path> candidates = getCandidateDeletingFiles();
+        Set<String> usedFiles = getUsedFiles();
 
         Set<String> deleted = new HashSet<>(candidates.keySet());
         deleted.removeAll(usedFiles);
@@ -136,8 +147,14 @@ public class OrphanFilesClean {
             deleteFileOrDirQuietly(path);
         }
         deletedFilesNum += deleted.size();
+        deleteFiles.addAll(deleted.stream().map(candidates::get).collect(Collectors.toList()));
 
         return deletedFilesNum;
+    }
+
+    @VisibleForTesting
+    List<Path> getDeleteFiles() {
+        return deleteFiles;
     }
 
     /** Get all the files used by snapshots and tags. */
@@ -147,6 +164,7 @@ public class OrphanFilesClean {
         Set<Snapshot> readSnapshots = new HashSet<>(snapshotManager.safelyGetAllSnapshots());
         List<Snapshot> taggedSnapshots = tagManager.taggedSnapshots();
         readSnapshots.addAll(taggedSnapshots);
+        readSnapshots.addAll(snapshotManager.safelyGetAllChangelogs());
 
         return FileUtils.COMMON_IO_FORK_JOIN_POOL
                 .submit(
@@ -154,8 +172,16 @@ public class OrphanFilesClean {
                                 readSnapshots
                                         .parallelStream()
                                         .flatMap(
-                                                snapshot ->
-                                                        getUsedFilesForSnapshot(snapshot).stream())
+                                                snapshot -> {
+                                                    if (snapshot instanceof Changelog) {
+                                                        return getUsedFilesForChangelog(
+                                                                (Changelog) snapshot)
+                                                                .stream();
+                                                    } else {
+                                                        return getUsedFilesForSnapshot(snapshot)
+                                                                .stream();
+                                                    }
+                                                })
                                         .collect(Collectors.toSet()))
                 .get();
     }
@@ -182,6 +208,41 @@ public class OrphanFilesClean {
             LOG.debug("Failed to get candidate deleting files.", e);
             return Collections.emptyMap();
         }
+    }
+
+    private List<String> getUsedFilesForChangelog(Changelog changelog) {
+        List<String> files = new ArrayList<>();
+        if (changelog.changelogManifestList() != null) {
+            files.add(changelog.changelogManifestList());
+        }
+
+        try {
+            // try to read manifests
+            List<ManifestFileMeta> manifestFileMetas =
+                    retryReadingFiles(
+                            () ->
+                                    manifestList.readWithIOException(
+                                            changelog.changelogManifestList()));
+            if (manifestFileMetas == null) {
+                return Collections.emptyList();
+            }
+            List<String> manifestFileName =
+                    manifestFileMetas.stream()
+                            .map(ManifestFileMeta::fileName)
+                            .collect(Collectors.toList());
+            files.addAll(manifestFileName);
+
+            // try to read data files
+            List<String> dataFiles = retryReadingDataFiles(manifestFileName);
+            if (dataFiles == null) {
+                return Collections.emptyList();
+            }
+            files.addAll(dataFiles);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
+        return files;
     }
 
     /**
@@ -415,7 +476,10 @@ public class OrphanFilesClean {
                     .forEach(
                             p -> {
                                 deleteFileOrDirQuietly(p);
-                                deletedFilesNum++;
+                                synchronized (deleteFiles) {
+                                    deleteFiles.add(p);
+                                    deletedFilesNum++;
+                                }
                             });
         }
 

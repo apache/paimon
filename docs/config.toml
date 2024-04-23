@@ -44,13 +44,13 @@ pygmentsUseClasses = true
   Branch = "master"
 
   # The github repository for Apache Paimon
-  Repo = "//github.com/apache/incubator-paimon"
+  Repo = "//github.com/apache/paimon"
 
-  GithubRepo = "https://github.com/apache/incubator-paimon.git"
+  GithubRepo = "https://github.com/apache/paimon.git"
 
-  TrinoGithubRepo = "https://github.com/apache/incubator-paimon-trino.git"
+  TrinoGithubRepo = "https://github.com/apache/paimon-trino.git"
 
-  PrestoGithubRepo = "https://github.com/apache/incubator-paimon-presto.git"
+  PrestoGithubRepo = "https://github.com/apache/paimon-presto.git"
 
   # This suffix is appended to the Scala-dependent Maven artifact names
   ScalaVersion = "_2.12"

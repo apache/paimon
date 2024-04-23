@@ -27,6 +27,7 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.RowType;
 
 import java.io.Serializable;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -76,9 +77,15 @@ public interface Table extends Serializable {
     @Experimental
     void createTag(String tagName, long fromSnapshotId);
 
+    @Experimental
+    void createTag(String tagName, long fromSnapshotId, Duration timeRetained);
+
     /** Create a tag from latest snapshot. */
     @Experimental
     void createTag(String tagName);
+
+    @Experimental
+    void createTag(String tagName, Duration timeRetained);
 
     /** Delete a tag by name. */
     @Experimental
@@ -99,6 +106,9 @@ public interface Table extends Serializable {
     /** Manually expire snapshots, parameters can be controlled independently of table options. */
     @Experimental
     ExpireSnapshots newExpireSnapshots();
+
+    @Experimental
+    ExpireSnapshots newExpireChangelog();
 
     // =============== Read & Write Operations ==================
 

@@ -72,13 +72,15 @@ public final class GeneratedClass<T> implements Serializable {
         }
     }
 
-    @SuppressWarnings("unchecked")
-    public T newInstance(ClassLoader classLoader, Object... args) {
+    /** Create a new instance of this generated class. */
+    public static <T> T newInstance(Class<T> clazz, Object[] references) {
         try {
-            return (T) compile(classLoader).getConstructors()[0].newInstance(args);
-        } catch (Exception e) {
-            throw new RuntimeException(
-                    "Could not instantiate generated class '" + className + "'", e);
+            return clazz.getConstructor(Object[].class)
+                    // Because Constructor.newInstance(Object... initargs), we need to load
+                    // references into a new Object[], otherwise it cannot be compiled.
+                    .newInstance(new Object[] {references});
+        } catch (Throwable e) {
+            throw new RuntimeException("Could not instantiate generated class '" + clazz + "'", e);
         }
     }
 

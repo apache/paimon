@@ -33,10 +33,13 @@ under the License.
 
     <properties>
         <parquet.version>1.13.1</parquet.version>
-        <orc.version>1.8.3</orc.version>
+        <orc.version>1.9.2</orc.version>
         <joda-time.version>2.5</joda-time.version>
         <commons.pool.version>1.6</commons.pool.version>
         <commons.lang3.version>3.12.0</commons.lang3.version>
+        <zstd-jni.version>1.5.5-11</zstd-jni.version>
+        <storage-api.version>2.8.1</storage-api.version>
+        <protobuf-java.version>3.17.3</protobuf-java.version>
     </properties>
 
     <dependencies>
@@ -51,6 +54,12 @@ under the License.
             <groupId>org.xerial.snappy</groupId>
             <artifactId>snappy-java</artifactId>
             <version>${snappy.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.github.luben</groupId>
+            <artifactId>zstd-jni</artifactId>
+            <version>${zstd-jni.version}</version>
         </dependency>
 
         <!-- Hadoop -->
@@ -116,6 +125,24 @@ under the License.
             <version>${commons.lang3.version}</version>
         </dependency>
 
+        <dependency>
+            <groupId>org.apache.hive</groupId>
+            <artifactId>hive-storage-api</artifactId>
+            <version>${storage-api.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>hadoop-hdfs</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java</artifactId>
+            <version>${protobuf-java.version}</version>
+        </dependency>
+
         <!-- Orc End -->
 
         <!-- Avro Start -->
@@ -149,6 +176,10 @@ under the License.
                 <exclusion>
                     <groupId>org.xerial.snappy</groupId>
                     <artifactId>snappy-java</artifactId>
+                </exclusion>
+                <exclusion>
+                    <artifactId>zstd-jni</artifactId>
+                    <groupId>com.github.luben</groupId>
                 </exclusion>
             </exclusions>
         </dependency>

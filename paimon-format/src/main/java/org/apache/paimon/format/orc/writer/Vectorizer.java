@@ -20,11 +20,9 @@ package org.apache.paimon.format.orc.writer;
 
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.orc.TypeDescription;
-import org.apache.orc.Writer;
 
 import java.io.IOException;
 import java.io.Serializable;
-import java.nio.ByteBuffer;
 
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -41,8 +39,6 @@ public abstract class Vectorizer<T> implements Serializable {
 
     private final TypeDescription schema;
 
-    private transient Writer writer;
-
     public Vectorizer(final String schema) {
         checkNotNull(schema);
         this.schema = TypeDescription.fromString(schema);
@@ -55,30 +51,6 @@ public abstract class Vectorizer<T> implements Serializable {
      */
     public TypeDescription getSchema() {
         return this.schema;
-    }
-
-    /**
-     * Users are not supposed to use this method since this is intended to be used only by the
-     * {@link OrcBulkWriter}.
-     *
-     * @param writer the underlying ORC Writer.
-     */
-    public void setWriter(Writer writer) {
-        this.writer = writer;
-    }
-
-    /**
-     * Adds arbitrary user metadata to the outgoing ORC file.
-     *
-     * <p>Users who want to dynamically add new metadata either based on either the input or from an
-     * external system can do so by calling <code>addUserMetadata(...)</code> inside the overridden
-     * vectorize() method.
-     *
-     * @param key a key to label the data with.
-     * @param value the contents of the metadata.
-     */
-    public void addUserMetadata(String key, ByteBuffer value) {
-        this.writer.addUserMetadata(key, value);
     }
 
     /**

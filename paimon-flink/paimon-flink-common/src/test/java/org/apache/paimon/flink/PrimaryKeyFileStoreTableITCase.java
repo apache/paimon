@@ -26,11 +26,8 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.utils.FailingFileIO;
 
 import org.apache.flink.api.common.JobStatus;
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.core.execution.JobClient;
-import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
@@ -42,7 +39,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 import java.io.IOException;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -53,7 +49,6 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for changelog table with primary keys. */
@@ -74,32 +69,6 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         if (random.nextBoolean()) {
             tableDefaultProperties.put(CoreOptions.LOCAL_MERGE_BUFFER_SIZE.key(), "256 kb");
         }
-    }
-
-    private TableEnvironment createBatchTableEnvironment() {
-        return TableEnvironment.create(EnvironmentSettings.newInstance().inBatchMode().build());
-    }
-
-    private TableEnvironment createStreamingTableEnvironment(int checkpointIntervalMs) {
-        TableEnvironment sEnv =
-                TableEnvironment.create(
-                        EnvironmentSettings.newInstance().inStreamingMode().build());
-        // set checkpoint interval to a random number to emulate different speed of commit
-        sEnv.getConfig()
-                .getConfiguration()
-                .set(CHECKPOINTING_INTERVAL, Duration.ofMillis(checkpointIntervalMs));
-        sEnv.getConfig()
-                .set(
-                        ExecutionConfigOptions.TABLE_EXEC_SINK_UPSERT_MATERIALIZE,
-                        ExecutionConfigOptions.UpsertMaterialize.NONE);
-        return sEnv;
-    }
-
-    private StreamExecutionEnvironment createStreamExecutionEnvironment(int checkpointIntervalMs) {
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.getCheckpointConfig().setCheckpointingMode(CheckpointingMode.EXACTLY_ONCE);
-        env.getCheckpointConfig().setCheckpointInterval(checkpointIntervalMs);
-        return env;
     }
 
     private String createCatalogSql(String catalogName, String warehouse) {
@@ -138,10 +107,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     @Timeout(1200)
     public void testFullCompactionWithLongCheckpointInterval() throws Exception {
         // create table
-        TableEnvironment bEnv = createBatchTableEnvironment();
-        bEnv.getConfig()
-                .getConfiguration()
-                .set(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 1);
+        TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().parallelism(1).build();
         bEnv.executeSql(createCatalogSql("testCatalog", path));
         bEnv.executeSql("USE CATALOG testCatalog");
         bEnv.executeSql(
@@ -156,18 +122,23 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                         + ")");
 
         // run select job
-        TableEnvironment sEnv = createStreamingTableEnvironment(100);
-        sEnv.getConfig()
-                .getConfiguration()
-                .set(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 1);
+        TableEnvironment sEnv =
+                tableEnvironmentBuilder()
+                        .streamingMode()
+                        .checkpointIntervalMs(100)
+                        .parallelism(1)
+                        .build();
         sEnv.executeSql(createCatalogSql("testCatalog", path));
         sEnv.executeSql("USE CATALOG testCatalog");
         CloseableIterator<Row> it = sEnv.executeSql("SELECT * FROM T").collect();
 
         // run compact job
-        StreamExecutionEnvironment env = createStreamExecutionEnvironment(2000);
+        StreamExecutionEnvironment env =
+                streamExecutionEnvironmentBuilder()
+                        .streamingMode()
+                        .checkpointIntervalMs(2000)
+                        .build();
         env.setParallelism(1);
-        env.setRestartStrategy(RestartStrategies.noRestart());
         new CompactAction(path, "default", "T").withStreamExecutionEnvironment(env).build();
         JobClient client = env.executeAsync();
 
@@ -199,10 +170,11 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
 
     private void innerTestChangelogProducing(List<String> options) throws Exception {
         TableEnvironment sEnv =
-                createStreamingTableEnvironment(ThreadLocalRandom.current().nextInt(900) + 100);
-        sEnv.getConfig()
-                .getConfiguration()
-                .set(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 1);
+                tableEnvironmentBuilder()
+                        .streamingMode()
+                        .checkpointIntervalMs(ThreadLocalRandom.current().nextInt(900) + 100)
+                        .parallelism(1)
+                        .build();
 
         sEnv.executeSql(createCatalogSql("testCatalog", path + "/warehouse"));
         sEnv.executeSql("USE CATALOG testCatalog");
@@ -273,7 +245,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     @Test
     @Timeout(1200)
     public void testNoChangelogProducerBatchRandom() throws Exception {
-        TableEnvironment bEnv = createBatchTableEnvironment();
+        TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().build();
         testNoChangelogProducerRandom(bEnv, 1, false);
     }
 
@@ -281,14 +253,19 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     @Timeout(1200)
     public void testNoChangelogProducerStreamingRandom() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
-        TableEnvironment sEnv = createStreamingTableEnvironment(random.nextInt(900) + 100);
+        TableEnvironment sEnv =
+                tableEnvironmentBuilder()
+                        .streamingMode()
+                        .checkpointIntervalMs(random.nextInt(900) + 100)
+                        .allowRestart()
+                        .build();
         testNoChangelogProducerRandom(sEnv, random.nextInt(1, 3), random.nextBoolean());
     }
 
     @Test
     @Timeout(1200)
     public void testFullCompactionChangelogProducerBatchRandom() throws Exception {
-        TableEnvironment bEnv = createBatchTableEnvironment();
+        TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().build();
         testFullCompactionChangelogProducerRandom(bEnv, 1, false);
     }
 
@@ -296,7 +273,12 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     @Timeout(1200)
     public void testFullCompactionChangelogProducerStreamingRandom() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
-        TableEnvironment sEnv = createStreamingTableEnvironment(random.nextInt(900) + 100);
+        TableEnvironment sEnv =
+                tableEnvironmentBuilder()
+                        .streamingMode()
+                        .checkpointIntervalMs(random.nextInt(900) + 100)
+                        .allowRestart()
+                        .build();
         testFullCompactionChangelogProducerRandom(sEnv, random.nextInt(1, 3), random.nextBoolean());
     }
 
@@ -304,14 +286,19 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     @Timeout(1200)
     public void testStandAloneFullCompactJobRandom() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
-        TableEnvironment sEnv = createStreamingTableEnvironment(random.nextInt(900) + 100);
+        TableEnvironment sEnv =
+                tableEnvironmentBuilder()
+                        .streamingMode()
+                        .checkpointIntervalMs(random.nextInt(900) + 100)
+                        .allowRestart()
+                        .build();
         testStandAloneFullCompactJobRandom(sEnv, random.nextInt(1, 3), random.nextBoolean());
     }
 
     @Test
     @Timeout(1200)
     public void testLookupChangelogProducerBatchRandom() throws Exception {
-        TableEnvironment bEnv = createBatchTableEnvironment();
+        TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().build();
         testLookupChangelogProducerRandom(bEnv, 1, false);
     }
 
@@ -319,7 +306,12 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     @Timeout(1200)
     public void testLookupChangelogProducerStreamingRandom() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
-        TableEnvironment sEnv = createStreamingTableEnvironment(random.nextInt(900) + 100);
+        TableEnvironment sEnv =
+                tableEnvironmentBuilder()
+                        .streamingMode()
+                        .checkpointIntervalMs(random.nextInt(900) + 100)
+                        .allowRestart()
+                        .build();
         testLookupChangelogProducerRandom(sEnv, random.nextInt(1, 3), random.nextBoolean());
     }
 
@@ -327,7 +319,12 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     @Timeout(1200)
     public void testStandAloneLookupJobRandom() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
-        TableEnvironment sEnv = createStreamingTableEnvironment(random.nextInt(900) + 100);
+        TableEnvironment sEnv =
+                tableEnvironmentBuilder()
+                        .streamingMode()
+                        .checkpointIntervalMs(random.nextInt(900) + 100)
+                        .allowRestart()
+                        .build();
         testStandAloneLookupJobRandom(sEnv, random.nextInt(1, 3), random.nextBoolean());
     }
 
@@ -338,7 +335,22 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
 
     private void testNoChangelogProducerRandom(
             TableEnvironment tEnv, int numProducers, boolean enableFailure) throws Exception {
-        List<TableResult> results = testRandom(tEnv, numProducers, enableFailure, "'bucket' = '4'");
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        boolean enableDeletionVectors = random.nextBoolean();
+        if (enableDeletionVectors) {
+            // Deletion vectors mode not support concurrent write
+            numProducers = 1;
+        }
+        List<TableResult> results =
+                testRandom(
+                        tEnv,
+                        numProducers,
+                        enableFailure,
+                        "'bucket' = '4',"
+                                + String.format(
+                                        "'deletion-vectors.enabled' = '%s'",
+                                        enableDeletionVectors));
+
         for (TableResult result : results) {
             result.await();
         }
@@ -370,7 +382,11 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     private void testLookupChangelogProducerRandom(
             TableEnvironment tEnv, int numProducers, boolean enableFailure) throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
-
+        boolean enableDeletionVectors = random.nextBoolean();
+        if (enableDeletionVectors) {
+            // Deletion vectors mode not support concurrent write
+            numProducers = 1;
+        }
         testRandom(
                 tEnv,
                 numProducers,
@@ -379,7 +395,11 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                         + String.format(
                                 "'write-buffer-size' = '%s',",
                                 random.nextBoolean() ? "512kb" : "1mb")
-                        + "'changelog-producer' = 'lookup'");
+                        + "'changelog-producer' = 'lookup',"
+                        + String.format(
+                                "'changelog-producer.lookup-wait' = '%s',", random.nextBoolean())
+                        + String.format(
+                                "'deletion-vectors.enabled' = '%s'", enableDeletionVectors));
 
         // sleep for a random amount of time to check
         // if we can first read complete records then read incremental records correctly
@@ -410,8 +430,12 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
 
         for (int i = enableConflicts ? 2 : 1; i > 0; i--) {
             StreamExecutionEnvironment env =
-                    createStreamExecutionEnvironment(random.nextInt(1900) + 100);
-            env.setParallelism(2);
+                    streamExecutionEnvironmentBuilder()
+                            .streamingMode()
+                            .checkpointIntervalMs(random.nextInt(1900) + 100)
+                            .parallelism(2)
+                            .allowRestart()
+                            .build();
             new CompactAction(path, "default", "T").withStreamExecutionEnvironment(env).build();
             env.executeAsync();
         }
@@ -436,6 +460,8 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                                 "'write-buffer-size' = '%s',",
                                 random.nextBoolean() ? "512kb" : "1mb")
                         + "'changelog-producer' = 'lookup',"
+                        + String.format(
+                                "'changelog-producer.lookup-wait' = '%s',", random.nextBoolean())
                         + "'write-only' = 'true'");
 
         // sleep for a random amount of time to check
@@ -444,7 +470,11 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
 
         for (int i = enableConflicts ? 2 : 1; i > 0; i--) {
             StreamExecutionEnvironment env =
-                    createStreamExecutionEnvironment(random.nextInt(1900) + 100);
+                    streamExecutionEnvironmentBuilder()
+                            .streamingMode()
+                            .checkpointIntervalMs(random.nextInt(1900) + 100)
+                            .allowRestart()
+                            .build();
             env.setParallelism(2);
             new CompactAction(path, "default", "T").withStreamExecutionEnvironment(env).build();
             env.executeAsync();
@@ -458,10 +488,12 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     private void checkChangelogTestResult(int numProducers) throws Exception {
-        TableEnvironment sEnv = createStreamingTableEnvironment(100);
-        sEnv.getConfig()
-                .getConfiguration()
-                .set(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 1);
+        TableEnvironment sEnv =
+                tableEnvironmentBuilder()
+                        .streamingMode()
+                        .checkpointIntervalMs(100)
+                        .parallelism(1)
+                        .build();
         sEnv.executeSql(createCatalogSql("testCatalog", path));
         sEnv.executeSql("USE CATALOG testCatalog");
 
@@ -576,7 +608,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     private void checkBatchResult(int numProducers) throws Exception {
-        TableEnvironment bEnv = createBatchTableEnvironment();
+        TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().build();
         bEnv.executeSql(createCatalogSql("testCatalog", path));
         bEnv.executeSql("USE CATALOG testCatalog");
 

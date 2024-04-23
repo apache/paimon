@@ -18,18 +18,34 @@
 
 package org.apache.paimon.format.avro;
 
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FormatReaderContext;
+import org.apache.paimon.format.FormatWriter;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.util.ArrayList;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for avro file format. */
 public class AvroFileFormatTest {
+
+    @TempDir java.nio.file.Path tempPath;
 
     private static AvroFileFormat fileFormat;
 
@@ -84,5 +100,32 @@ public class AvroFileFormatTest {
 
         RowType rowType = new RowType(dataFields);
         fileFormat.validateDataFields(rowType);
+    }
+
+    @Test
+    void testReadRowPosition() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT().notNull());
+        FileFormat format = new AvroFileFormat(new Options());
+
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
+            FormatWriter writer = format.createWriterFactory(rowType).create(out, null);
+            for (int i = 0; i < 1000000; i++) {
+                writer.addElement(GenericRow.of(i));
+            }
+            writer.flush();
+            writer.finish();
+        }
+
+        try (RecordReader<InternalRow> reader =
+                format.createReaderFactory(rowType)
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file))); ) {
+            reader.forEachRemainingWithPosition(
+                    (rowPosition, row) -> assertThat(row.getInt(0) == rowPosition).isTrue());
+        }
     }
 }

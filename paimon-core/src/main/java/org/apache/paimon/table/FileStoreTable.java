@@ -25,6 +25,7 @@ import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.BinaryTableStats;
 import org.apache.paimon.table.query.LocalTableQuery;
+import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.types.RowType;
@@ -80,11 +81,10 @@ public interface FileStoreTable extends DataTable {
     @Override
     FileStoreTable copy(Map<String, String> dynamicOptions);
 
+    FileStoreTable copy(TableSchema newTableSchema);
+
     /** Doesn't change table schema even when there exists time travel scan options. */
     FileStoreTable copyWithoutTimeTravel(Map<String, String> dynamicOptions);
-
-    /** Sometimes we have to change some Immutable options to implement features. */
-    FileStoreTable internalCopyWithoutCheck(Map<String, String> dynamicOptions);
 
     /** TODO: this method is weird, old options will overwrite new options. */
     FileStoreTable copyWithLatestSchema();
@@ -106,4 +106,6 @@ public interface FileStoreTable extends DataTable {
     }
 
     boolean supportStreamingReadOverwrite();
+
+    RowKeyExtractor createRowKeyExtractor();
 }

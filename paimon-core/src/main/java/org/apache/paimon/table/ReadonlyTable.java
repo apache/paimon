@@ -25,6 +25,7 @@ import org.apache.paimon.table.sink.InnerTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.InnerStreamTableScan;
 
+import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -110,7 +111,23 @@ public interface ReadonlyTable extends InnerTable {
     }
 
     @Override
+    default void createTag(String tagName, long fromSnapshotId, Duration timeRetained) {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support createTag.",
+                        this.getClass().getSimpleName()));
+    }
+
+    @Override
     default void createTag(String tagName) {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support createTag.",
+                        this.getClass().getSimpleName()));
+    }
+
+    @Override
+    default void createTag(String tagName, Duration timeRetained) {
         throw new UnsupportedOperationException(
                 String.format(
                         "Readonly Table %s does not support createTag.",
@@ -154,6 +171,14 @@ public interface ReadonlyTable extends InnerTable {
         throw new UnsupportedOperationException(
                 String.format(
                         "Readonly Table %s does not support expireSnapshots.",
+                        this.getClass().getSimpleName()));
+    }
+
+    @Override
+    default ExpireSnapshots newExpireChangelog() {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support expireChangelog.",
                         this.getClass().getSimpleName()));
     }
 }

@@ -25,12 +25,17 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.io.RollingFileWriter;
+import org.apache.paimon.mergetree.DropDeleteReader;
 import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.MergeTreeReaders;
 import org.apache.paimon.mergetree.SortedRun;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.utils.FieldsComparator;
 
+import javax.annotation.Nullable;
+
+import java.io.IOException;
 import java.util.Comparator;
 import java.util.List;
 
@@ -40,6 +45,7 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
     protected final KeyValueFileReaderFactory readerFactory;
     protected final KeyValueFileWriterFactory writerFactory;
     protected final Comparator<InternalRow> keyComparator;
+    @Nullable protected final FieldsComparator userDefinedSeqComparator;
     protected final MergeFunctionFactory<KeyValue> mfFactory;
     protected final MergeSorter mergeSorter;
 
@@ -47,11 +53,13 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
             KeyValueFileReaderFactory readerFactory,
             KeyValueFileWriterFactory writerFactory,
             Comparator<InternalRow> keyComparator,
+            @Nullable FieldsComparator userDefinedSeqComparator,
             MergeFunctionFactory<KeyValue> mfFactory,
             MergeSorter mergeSorter) {
         this.readerFactory = readerFactory;
         this.writerFactory = writerFactory;
         this.keyComparator = keyComparator;
+        this.userDefinedSeqComparator = userDefinedSeqComparator;
         this.mfFactory = mfFactory;
         this.mergeSorter = mergeSorter;
     }
@@ -66,16 +74,29 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
             int outputLevel, boolean dropDelete, List<List<SortedRun>> sections) throws Exception {
         RollingFileWriter<KeyValue, DataFileMeta> writer =
                 writerFactory.createRollingMergeTreeFileWriter(outputLevel);
-        RecordReader<KeyValue> sectionsReader =
-                MergeTreeReaders.readerForMergeTree(
-                        sections,
-                        dropDelete,
-                        readerFactory,
-                        keyComparator,
-                        mfFactory.create(),
-                        mergeSorter);
-        writer.write(new RecordReaderIterator<>(sectionsReader));
+        RecordReader<KeyValue> reader =
+                readerForMergeTree(sections, new ReducerMergeFunctionWrapper(mfFactory.create()));
+        if (dropDelete) {
+            reader = new DropDeleteReader(reader);
+        }
+        writer.write(new RecordReaderIterator<>(reader));
         writer.close();
-        return new CompactResult(extractFilesFromSections(sections), writer.result());
+        List<DataFileMeta> before = extractFilesFromSections(sections);
+        notifyRewriteCompactBefore(before);
+        return new CompactResult(before, writer.result());
     }
+
+    protected <T> RecordReader<T> readerForMergeTree(
+            List<List<SortedRun>> sections, MergeFunctionWrapper<T> mergeFunctionWrapper)
+            throws IOException {
+        return MergeTreeReaders.readerForMergeTree(
+                sections,
+                readerFactory,
+                keyComparator,
+                userDefinedSeqComparator,
+                mergeFunctionWrapper,
+                mergeSorter);
+    }
+
+    protected void notifyRewriteCompactBefore(List<DataFileMeta> files) {}
 }

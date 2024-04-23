@@ -34,16 +34,16 @@ public class DataFilePathFactory {
 
     public static final String CHANGELOG_FILE_PREFIX = "changelog-";
 
-    public static final String BUCKET_PATH_PREFIX = "bucket-";
+    public static final String INDEX_PATH_SUFFIX = ".index";
 
-    private final Path bucketDir;
+    private final Path parent;
     private final String uuid;
 
     private final AtomicInteger pathCount;
     private final String formatIdentifier;
 
-    public DataFilePathFactory(Path root, String partition, int bucket, String formatIdentifier) {
-        this.bucketDir = bucketPath(root, partition, bucket);
+    public DataFilePathFactory(Path parent, String formatIdentifier) {
+        this.parent = parent;
         this.uuid = UUID.randomUUID().toString();
 
         this.pathCount = new AtomicInteger(0);
@@ -60,11 +60,11 @@ public class DataFilePathFactory {
 
     private Path newPath(String prefix) {
         String name = prefix + uuid + "-" + pathCount.getAndIncrement() + "." + formatIdentifier;
-        return new Path(bucketDir, name);
+        return new Path(parent, name);
     }
 
     public Path toPath(String fileName) {
-        return new Path(bucketDir + "/" + fileName);
+        return new Path(parent + "/" + fileName);
     }
 
     @VisibleForTesting
@@ -72,8 +72,8 @@ public class DataFilePathFactory {
         return uuid;
     }
 
-    public static Path bucketPath(Path tablePath, String partition, int bucket) {
-        return new Path(tablePath + "/" + partition + "/" + BUCKET_PATH_PREFIX + bucket);
+    public static Path toFileIndexPath(Path filePath) {
+        return new Path(filePath.getParent(), filePath.getName() + INDEX_PATH_SUFFIX);
     }
 
     public static String formatIdentifier(String fileName) {

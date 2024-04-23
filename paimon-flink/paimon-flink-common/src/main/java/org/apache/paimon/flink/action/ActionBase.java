@@ -23,7 +23,6 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.LogicalTypeConversion;
-import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
@@ -56,8 +55,8 @@ public abstract class ActionBase implements Action {
         catalogOptions = Options.fromMap(catalogConfig);
         catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse);
 
-        catalog = FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
-        flinkCatalog = FlinkCatalogFactory.createCatalog(catalogName, catalog, catalogOptions);
+        catalog = initPaimonCatalog();
+        flinkCatalog = initFlinkCatalog();
 
         // use the default env if user doesn't pass one
         initFlinkEnv(StreamExecutionEnvironment.getExecutionEnvironment());
@@ -68,7 +67,15 @@ public abstract class ActionBase implements Action {
         return this;
     }
 
-    private void initFlinkEnv(StreamExecutionEnvironment env) {
+    protected Catalog initPaimonCatalog() {
+        return FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
+    }
+
+    protected FlinkCatalog initFlinkCatalog() {
+        return FlinkCatalogFactory.createCatalog(catalogName, catalog, catalogOptions);
+    }
+
+    protected void initFlinkEnv(StreamExecutionEnvironment env) {
         this.env = env;
         // we enable object reuse, we copy the un-reusable object ourselves.
         this.env.getConfig().enableObjectReuse();
@@ -80,7 +87,7 @@ public abstract class ActionBase implements Action {
     }
 
     protected void execute(String defaultName) throws Exception {
-        ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
+        ReadableConfig conf = env.getConfiguration();
         String name = conf.getOptional(PipelineOptions.NAME).orElse(defaultName);
         env.execute(name);
     }

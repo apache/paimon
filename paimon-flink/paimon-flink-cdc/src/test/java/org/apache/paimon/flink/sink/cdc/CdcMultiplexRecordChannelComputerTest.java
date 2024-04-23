@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
@@ -75,6 +76,7 @@ public class CdcMultiplexRecordChannelComputerTest {
         catalog.createDatabase(databaseName, true);
 
         Options conf = new Options();
+        conf.set(CoreOptions.BUCKET, ThreadLocalRandom.current().nextInt(1, 5));
         conf.set(CdcRecordStoreWriteOperator.RETRY_SLEEP_TIME, Duration.ofMillis(10));
 
         RowType rowTypeWithPartition =
@@ -130,7 +132,6 @@ public class CdcMultiplexRecordChannelComputerTest {
 
     @Test
     public void testSchemaNoPartition() {
-
         ThreadLocalRandom random = ThreadLocalRandom.current();
         int numInputs = random.nextInt(1000) + 1;
         List<Map<String, String>> input = new ArrayList<>();

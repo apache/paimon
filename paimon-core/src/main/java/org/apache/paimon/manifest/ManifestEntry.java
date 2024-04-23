@@ -19,29 +19,26 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TinyIntType;
-import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.FileUtils;
-import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.Filter;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
-import java.util.Collection;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.stream.Collectors;
+import java.util.function.Function;
 
 import static org.apache.paimon.utils.SerializationUtils.newBytesType;
 
 /** Entry of a manifest file, representing an addition / deletion of a data file. */
-public class ManifestEntry {
+public class ManifestEntry implements FileEntry {
 
     private final FileKind kind;
     // for tables without partition this field should be a row with 0 columns (not null)
@@ -59,16 +56,39 @@ public class ManifestEntry {
         this.file = file;
     }
 
+    @Override
     public FileKind kind() {
         return kind;
     }
 
+    @Override
     public BinaryRow partition() {
         return partition;
     }
 
+    @Override
     public int bucket() {
         return bucket;
+    }
+
+    @Override
+    public int level() {
+        return file.level();
+    }
+
+    @Override
+    public String fileName() {
+        return file.fileName();
+    }
+
+    @Override
+    public BinaryRow minKey() {
+        return file.minKey();
+    }
+
+    @Override
+    public BinaryRow maxKey() {
+        return file.maxKey();
     }
 
     public int totalBuckets() {
@@ -79,6 +99,7 @@ public class ManifestEntry {
         return file;
     }
 
+    @Override
     public Identifier identifier() {
         return new Identifier(partition, bucket, file.level(), file.fileName());
     }
@@ -116,129 +137,56 @@ public class ManifestEntry {
         return String.format("{%s, %s, %d, %d, %s}", kind, partition, bucket, totalBuckets, file);
     }
 
-    public static Collection<ManifestEntry> mergeEntries(Iterable<ManifestEntry> entries) {
-        LinkedHashMap<Identifier, ManifestEntry> map = new LinkedHashMap<>();
-        mergeEntries(entries, map);
-        return map.values();
-    }
+    /**
+     * According to the {@link ManifestCacheFilter}, entry that needs to be cached will be retained,
+     * so the entry that will not be accessed in the future will not be cached.
+     *
+     * <p>Implemented to {@link InternalRow} is for performance (No deserialization).
+     */
+    public static Filter<InternalRow> createCacheRowFilter(
+            @Nullable ManifestCacheFilter manifestCacheFilter, int numOfBuckets) {
+        if (manifestCacheFilter == null) {
+            return Filter.alwaysTrue();
+        }
 
-    public static void mergeEntries(
-            ManifestFile manifestFile,
-            List<ManifestFileMeta> manifestFiles,
-            Map<Identifier, ManifestEntry> map) {
-        List<CompletableFuture<List<ManifestEntry>>> manifestReadFutures =
-                manifestFiles.stream()
-                        .map(
-                                manifestFileMeta ->
-                                        CompletableFuture.supplyAsync(
-                                                () ->
-                                                        manifestFile.read(
-                                                                manifestFileMeta.fileName()),
-                                                FileUtils.COMMON_IO_FORK_JOIN_POOL))
-                        .collect(Collectors.toList());
-
-        try {
-            for (CompletableFuture<List<ManifestEntry>> taskResult : manifestReadFutures) {
-                mergeEntries(taskResult.get(), map);
+        Function<InternalRow, BinaryRow> partitionGetter =
+                ManifestEntrySerializer.partitionGetter();
+        Function<InternalRow, Integer> bucketGetter = ManifestEntrySerializer.bucketGetter();
+        Function<InternalRow, Integer> totalBucketGetter =
+                ManifestEntrySerializer.totalBucketGetter();
+        return row -> {
+            if (numOfBuckets != totalBucketGetter.apply(row)) {
+                return true;
             }
-        } catch (ExecutionException | InterruptedException e) {
-            throw new RuntimeException("Failed to read manifest file.", e);
-        }
-    }
 
-    public static void mergeEntries(
-            Iterable<ManifestEntry> entries, Map<Identifier, ManifestEntry> map) {
-        for (ManifestEntry entry : entries) {
-            ManifestEntry.Identifier identifier = entry.identifier();
-            switch (entry.kind()) {
-                case ADD:
-                    Preconditions.checkState(
-                            !map.containsKey(identifier),
-                            "Trying to add file %s which is already added. Manifest might be corrupted.",
-                            identifier);
-                    map.put(identifier, entry);
-                    break;
-                case DELETE:
-                    // each dataFile will only be added once and deleted once,
-                    // if we know that it is added before then both add and delete entry can be
-                    // removed because there won't be further operations on this file,
-                    // otherwise we have to keep the delete entry because the add entry must be
-                    // in the previous manifest files
-                    if (map.containsKey(identifier)) {
-                        map.remove(identifier);
-                    } else {
-                        map.put(identifier, entry);
-                    }
-                    break;
-                default:
-                    throw new UnsupportedOperationException(
-                            "Unknown value kind " + entry.kind().name());
-            }
-        }
-    }
-
-    public static void assertNoDelete(Collection<ManifestEntry> entries) {
-        for (ManifestEntry entry : entries) {
-            Preconditions.checkState(
-                    entry.kind() != FileKind.DELETE,
-                    "Trying to delete file %s which is not previously added. Manifest might be corrupted.",
-                    entry.file().fileName());
-        }
+            return manifestCacheFilter.test(partitionGetter.apply(row), bucketGetter.apply(row));
+        };
     }
 
     /**
-     * The same {@link Identifier} indicates that the {@link ManifestEntry} refers to the same data
-     * file.
+     * Read the corresponding entries based on the current required partition and bucket.
+     *
+     * <p>Implemented to {@link InternalRow} is for performance (No deserialization).
      */
-    public static class Identifier {
-        public final BinaryRow partition;
-        public final int bucket;
-        public final int level;
-        public final String fileName;
-
-        /* Cache the hash code for the string */
-        private Integer hash;
-
-        private Identifier(BinaryRow partition, int bucket, int level, String fileName) {
-            this.partition = partition;
-            this.bucket = bucket;
-            this.level = level;
-            this.fileName = fileName;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (!(o instanceof Identifier)) {
+    public static Filter<InternalRow> createEntryRowFilter(
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable Filter<Integer> bucketFilter,
+            int numOfBuckets) {
+        Function<InternalRow, BinaryRow> partitionGetter =
+                ManifestEntrySerializer.partitionGetter();
+        Function<InternalRow, Integer> bucketGetter = ManifestEntrySerializer.bucketGetter();
+        Function<InternalRow, Integer> totalBucketGetter =
+                ManifestEntrySerializer.totalBucketGetter();
+        return row -> {
+            if ((partitionFilter != null && !partitionFilter.test(partitionGetter.apply(row)))) {
                 return false;
             }
-            Identifier that = (Identifier) o;
-            return Objects.equals(partition, that.partition)
-                    && bucket == that.bucket
-                    && level == that.level
-                    && Objects.equals(fileName, that.fileName);
-        }
 
-        @Override
-        public int hashCode() {
-            if (hash == null) {
-                hash = Objects.hash(partition, bucket, level, fileName);
+            if (bucketFilter != null && numOfBuckets == totalBucketGetter.apply(row)) {
+                return bucketFilter.test(bucketGetter.apply(row));
             }
-            return hash;
-        }
 
-        @Override
-        public String toString() {
-            return String.format("{%s, %d, %d, %s}", partition, bucket, level, fileName);
-        }
-
-        public String toString(FileStorePathFactory pathFactory) {
-            return pathFactory.getPartitionString(partition)
-                    + ", bucket "
-                    + bucket
-                    + ", level "
-                    + level
-                    + ", file "
-                    + fileName;
-        }
+            return true;
+        };
     }
 }

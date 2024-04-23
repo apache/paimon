@@ -167,6 +167,10 @@ public class Options implements Serializable {
         return getRawValue(key).map(OptionsUtils::convertToInt).orElse(defaultValue);
     }
 
+    public synchronized double getDouble(String key, double defaultValue) {
+        return getRawValue(key).map(OptionsUtils::convertToDouble).orElse(defaultValue);
+    }
+
     public synchronized String getString(String key, String defaultValue) {
         return getRawValue(key).map(OptionsUtils::convertToString).orElse(defaultValue);
     }

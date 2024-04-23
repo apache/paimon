@@ -69,7 +69,7 @@ public class TableScanTest extends ScannerTestBase {
 
     @Test
     public void testPushDownLimit() throws Exception {
-        createAppenOnlyTable();
+        createAppendOnlyTable();
 
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);

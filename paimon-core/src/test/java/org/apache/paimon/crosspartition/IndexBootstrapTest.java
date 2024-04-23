@@ -97,6 +97,11 @@ public class IndexBootstrapTest extends TableTestBase {
                 .containsExactlyInAnyOrder(
                         GenericRow.of(2, 1, 3), GenericRow.of(4, 2, 5), GenericRow.of(6, 3, 7));
         result.clear();
+
+        // In ParallelExecution, latch.countDown first, then close the reader, it may not be closed
+        // here, (this is good, beneficial for query speed) but TableTestBase.after will check leak
+        // streams. So sleep here to avoid unstable.
+        Thread.sleep(1000);
     }
 
     @Test
@@ -132,7 +137,9 @@ public class IndexBootstrapTest extends TableTestBase {
                 Timestamp.fromLocalDateTime(
                         Instant.ofEpochMilli(timeMillis)
                                 .atZone(ZoneId.systemDefault())
-                                .toLocalDateTime()));
+                                .toLocalDateTime()),
+                0L,
+                null);
     }
 
     private Pair<InternalRow, Integer> row(int pt, int col, int pk, int bucket) {

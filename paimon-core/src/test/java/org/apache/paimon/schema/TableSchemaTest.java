@@ -18,6 +18,7 @@
 
 package org.apache.paimon.schema;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -30,7 +31,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.CoreOptions.AGG_FUNCTION;
 import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
+import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 import static org.apache.paimon.CoreOptions.SEQUENCE_FIELD;
 import static org.apache.paimon.schema.SchemaValidation.validateTableSchema;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -116,6 +120,82 @@ public class TableSchemaTest {
         assertThatThrownBy(() -> RowType.currentHighestFieldId(fields2))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessage("Broken schema, field id 0 is duplicated.");
+    }
+
+    @Test
+    public void testSequenceField() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.INT()),
+                        new DataField(2, "f2", DataTypes.INT()),
+                        new DataField(3, "f3", DataTypes.INT()));
+        List<String> partitionKeys = Collections.singletonList("f0");
+        List<String> primaryKeys = Collections.singletonList("f1");
+        Map<String, String> options = new HashMap<>();
+
+        TableSchema schema =
+                new TableSchema(1, fields, 10, partitionKeys, primaryKeys, options, "");
+
+        options.put(SEQUENCE_FIELD.key(), "f3");
+        assertThatThrownBy(() -> validateTableSchema(schema))
+                .hasMessageContaining(
+                        "You can not use sequence.field in cross partition update case (Primary key constraint '[f1]' not include all partition fields '[f0]').");
+
+        options.put(SEQUENCE_FIELD.key(), "f4");
+        assertThatThrownBy(() -> validateTableSchema(schema))
+                .hasMessageContaining("Sequence field: 'f4' can not be found in table schema.");
+
+        options.put(SEQUENCE_FIELD.key(), "f2,f3,f3");
+        assertThatThrownBy(() -> validateTableSchema(schema))
+                .hasMessageContaining("Sequence field 'f3' is defined repeatedly.");
+
+        options.put(SEQUENCE_FIELD.key(), "f3");
+        options.put(MERGE_ENGINE.key(), CoreOptions.MergeEngine.FIRST_ROW.toString());
+        assertThatThrownBy(() -> validateTableSchema(schema))
+                .hasMessageContaining(
+                        "Do not support use sequence field on FIRST_MERGE merge engine.");
+
+        options.put(FIELDS_PREFIX + ".f3." + AGG_FUNCTION, "max");
+        assertThatThrownBy(() -> validateTableSchema(schema))
+                .hasMessageContaining("Should not define aggregation on sequence field: 'f3'.");
+    }
+
+    @Test
+    public void testFieldsPrefix() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.INT()),
+                        new DataField(2, "f2", DataTypes.INT()));
+        List<String> primaryKeys = Collections.singletonList("f0");
+        Map<String, String> options = new HashMap<>();
+        options.put(MERGE_ENGINE.key(), CoreOptions.MergeEngine.AGGREGATE.toString());
+        options.put(FIELDS_PREFIX + ".f1." + AGG_FUNCTION, "max");
+        options.put(FIELDS_PREFIX + ".fake_col." + AGG_FUNCTION, "max");
+        TableSchema schema =
+                new TableSchema(1, fields, 10, Collections.emptyList(), primaryKeys, options, "");
+        assertThatThrownBy(() -> validateTableSchema(schema))
+                .hasMessageContaining("Field fake_col can not be found in table schema.");
+    }
+
+    @Test
+    public void testBucket() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.INT()),
+                        new DataField(2, "f2", DataTypes.INT()));
+        List<String> partitionKeys = Collections.singletonList("f0");
+        List<String> primaryKeys = Collections.singletonList("f1");
+        Map<String, String> options = new HashMap<>();
+
+        TableSchema schema =
+                new TableSchema(1, fields, 10, partitionKeys, primaryKeys, options, "");
+
+        options.put(BUCKET.key(), "-2");
+        assertThatThrownBy(() -> validateTableSchema(schema))
+                .hasMessageContaining("The number of buckets needs to be greater than 0.");
     }
 
     static RowType newRowType(boolean isNullable, int fieldId) {

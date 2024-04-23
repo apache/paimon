@@ -18,7 +18,6 @@
 
 package org.apache.paimon.stats;
 
-import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastFieldGetter;
 import org.apache.paimon.casting.CastedRow;
 import org.apache.paimon.data.BinaryArray;
@@ -37,14 +36,12 @@ import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.InternalRowUtils;
 import org.apache.paimon.utils.ProjectedRow;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.IntStream;
 
 import static org.apache.paimon.utils.SerializationUtils.newBytesType;
 
@@ -53,32 +50,20 @@ public class FieldStatsArraySerializer {
 
     private final InternalRowSerializer serializer;
 
-    private final InternalRow.FieldGetter[] fieldGetters;
-
     @Nullable private final int[] indexMapping;
-    @Nullable private final CastExecutor<Object, Object>[] converterMapping;
     @Nullable private final CastFieldGetter[] castFieldGetters;
 
     public FieldStatsArraySerializer(RowType type) {
-        this(type, null, null, null);
+        this(type, null, null);
     }
 
     public FieldStatsArraySerializer(
             RowType type,
             @Nullable int[] indexMapping,
-            @Nullable CastExecutor<Object, Object>[] converterMapping,
             @Nullable CastFieldGetter[] castFieldGetters) {
         RowType safeType = toAllFieldsNullableRowType(type);
         this.serializer = new InternalRowSerializer(safeType);
-        this.fieldGetters =
-                IntStream.range(0, safeType.getFieldCount())
-                        .mapToObj(
-                                i ->
-                                        InternalRowUtils.createNullCheckingFieldGetter(
-                                                safeType.getTypeAt(i), i))
-                        .toArray(InternalRow.FieldGetter[]::new);
         this.indexMapping = indexMapping;
-        this.converterMapping = converterMapping;
         this.castFieldGetters = castFieldGetters;
     }
 
@@ -96,43 +81,6 @@ public class FieldStatsArraySerializer {
                 serializer.toBinaryRow(minValues).copy(),
                 serializer.toBinaryRow(maxValues).copy(),
                 BinaryArray.fromLongArray(nullCounts));
-    }
-
-    public FieldStats[] fromBinary(BinaryTableStats array) {
-        return fromBinary(array, null);
-    }
-
-    public FieldStats[] fromBinary(BinaryTableStats array, @Nullable Long rowCount) {
-        int fieldCount = indexMapping == null ? fieldGetters.length : indexMapping.length;
-        FieldStats[] stats = new FieldStats[fieldCount];
-        BinaryArray nullCounts = array.nullCounts();
-        for (int i = 0; i < fieldCount; i++) {
-            int fieldIndex = indexMapping == null ? i : indexMapping[i];
-            if (fieldIndex < 0 || fieldIndex >= array.minValues().getFieldCount()) {
-                // simple evolution for add column
-                if (rowCount == null) {
-                    throw new RuntimeException("Schema Evolution for stats needs row count.");
-                }
-                stats[i] = new FieldStats(null, null, rowCount);
-            } else {
-                CastExecutor<Object, Object> converter =
-                        converterMapping == null ? null : converterMapping[i];
-                Object min = fieldGetters[fieldIndex].getFieldOrNull(array.minValues());
-                min = converter == null || min == null ? min : converter.cast(min);
-
-                Object max = fieldGetters[fieldIndex].getFieldOrNull(array.maxValues());
-                max = converter == null || max == null ? max : converter.cast(max);
-
-                stats[i] =
-                        new FieldStats(
-                                min,
-                                max,
-                                nullCounts.isNullAt(fieldIndex)
-                                        ? null
-                                        : nullCounts.getLong(fieldIndex));
-            }
-        }
-        return stats;
     }
 
     public InternalRow evolution(BinaryRow values) {

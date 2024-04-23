@@ -34,22 +34,30 @@ import java.util.List;
 /** A {@link LookupTable} for primary key table which provides lookup by secondary key. */
 public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
 
-    private final RocksDBSetState<InternalRow, InternalRow> indexState;
-
     private final KeyProjectedRow secKeyRow;
 
-    public SecondaryIndexLookupTable(Context context, long lruCacheSize) throws IOException {
+    private RocksDBSetState<InternalRow, InternalRow> indexState;
+
+    public SecondaryIndexLookupTable(Context context, long lruCacheSize) {
         super(context, lruCacheSize / 2, context.table.primaryKeys());
         List<String> fieldNames = projectedType.getFieldNames();
         int[] secKeyMapping = context.joinKey.stream().mapToInt(fieldNames::indexOf).toArray();
         this.secKeyRow = new KeyProjectedRow(secKeyMapping);
+    }
+
+    @Override
+    public void open() throws Exception {
+        openStateFactory();
+        createTableState();
         this.indexState =
                 stateFactory.setState(
                         "sec-index",
-                        InternalSerializers.create(TypeUtils.project(projectedType, secKeyMapping)),
                         InternalSerializers.create(
-                                TypeUtils.project(projectedType, primaryKeyMapping)),
-                        lruCacheSize / 2);
+                                TypeUtils.project(projectedType, secKeyRow.indexMapping())),
+                        InternalSerializers.create(
+                                TypeUtils.project(projectedType, primaryKeyRow.indexMapping())),
+                        lruCacheSize);
+        bootstrap();
     }
 
     @Override
@@ -66,8 +74,7 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
     }
 
     @Override
-    public void refresh(Iterator<InternalRow> incremental, boolean orderByLastField)
-            throws IOException {
+    public void refresh(Iterator<InternalRow> incremental) throws IOException {
         Predicate predicate = projectedPredicate();
         while (incremental.hasNext()) {
             InternalRow row = incremental.next();
@@ -75,11 +82,10 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
 
             boolean previousFetched = false;
             InternalRow previous = null;
-            if (orderByLastField) {
+            if (userDefinedSeqComparator != null) {
                 previous = tableState.get(primaryKeyRow);
                 previousFetched = true;
-                int orderIndex = projectedType.getFieldCount() - 1;
-                if (previous != null && previous.getLong(orderIndex) > row.getLong(orderIndex)) {
+                if (previous != null && userDefinedSeqComparator.compare(previous, row) > 0) {
                     continue;
                 }
             }

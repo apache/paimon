@@ -80,7 +80,8 @@ public class StatsTableTest extends TableTestBase {
 
         // should not have record stats because of NONE mode
         ManifestFile manifestFile = store.manifestFileFactory().create();
-        DataFileMeta file = manifestFile.read(manifest.fileName()).get(0).file();
+        DataFileMeta file =
+                manifestFile.read(manifest.fileName(), manifest.fileSize()).get(0).file();
         BinaryTableStats recordStats = file.valueStats();
         assertThat(recordStats.minValues().isNullAt(0)).isTrue();
         assertThat(recordStats.minValues().isNullAt(1)).isTrue();

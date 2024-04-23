@@ -18,7 +18,6 @@
 
 package org.apache.paimon.format.orc.writer;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
@@ -37,12 +36,14 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 
+import static org.apache.paimon.format.OrcOptions.ORC_WRITE_BATCH_SIZE;
+
 class OrcBulkWriterTest {
 
     @Test
     void testRowBatch(@TempDir java.nio.file.Path tempDir) throws IOException {
         Options options = new Options();
-        options.set(CoreOptions.ORC_WRITE_BATCH_SIZE, 1);
+        options.set(ORC_WRITE_BATCH_SIZE, 1);
         FileFormat orc = FileFormat.getFileFormat(options, "orc");
         Assertions.assertThat(orc).isInstanceOf(OrcFileFormat.class);
 

@@ -24,22 +24,29 @@ under the License.
 
 # Apache Paimon
 
-Apache Paimon(incubating) is a streaming data lake platform that supports high-speed data ingestion, change data tracking and efficient real-time analytics.
+Apache Paimon is a lake format that enables building a Realtime Lakehouse Architecture with Flink and Spark 
+for both streaming and batch operations. Paimon innovatively combines lake format and LSM (Log-structured merge-tree) 
+structure, bringing realtime streaming updates into the lake architecture.
 
 Paimon offers the following core capabilities:
 
-- Unified Batch & Streaming: Paimon supports batch write and batch read, as well as streaming write changes and streaming read table changelogs.
-- Data Lake: As a data lake storage, Paimon has the following advantages: low cost, high reliability, and scalable metadata.
-- Merge Engines: Paimon supports rich Merge Engines. By default, the last entry of the primary key is reserved. You can also use the "partial-update" or "aggregation" engine.
-- Changelog producer: Paimon supports rich Changelog producers, such as "lookup" and "full-compaction". The correct changelog can simplify the construction of a streaming pipeline.
-- Append Only Tables: Paimon supports Append Only tables, automatically compact small files, and provides orderly stream reading. You can use this to replace message queues.
+- Realtime updates:
+  - Primary key table supports writing of large-scale updates, has very high update performance, typically through Flink Streaming.
+  - Support defining Merge Engines, update records however you like. Deduplicate to keep last row, or partial-update, or aggregate records, or first-row, you decide.
+  - Support defining changelog-producer, produce correct and complete changelog in updates for merge engines, simplifying your streaming analytics.
+- Huge Append Data Processing:
+  - Append table (no primary-key) provides large scale batch & streaming processing capability. Automatic Small File Merge.
+  - Supports Data Compaction with z-order sorting to optimize file layout, provides fast queries based on data skipping using indexes such as minmax.
+- Data Lake Capabilities: 
+  - Scalable metadata: supports storing Petabyte large-scale datasets and storing a large number of partitions.
+  - Supports ACID Transactions & Time Travel & Schema Evolution.
 
 {{< columns >}}
 
 ## Try Paimon
 
 If you’re interested in playing around with Paimon, check out our
-quick start guide with [Flink]({{< ref "engines/flink" >}}), [Spark]({{< ref "engines/spark" >}}) or [Hive]({{< ref "engines/hive" >}}). It provides a step by
+quick start guide with [Flink]({{< ref "flink/quick-start" >}}) or [Spark]({{< ref "spark/quick-start" >}}). It provides a step by
 step introduction to the APIs and guides you through real applications.
 
 <--->

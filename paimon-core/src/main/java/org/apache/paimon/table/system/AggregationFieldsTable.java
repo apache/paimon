@@ -120,7 +120,11 @@ public class AggregationFieldsTable implements ReadonlyTable {
 
         @Override
         public Plan innerPlan() {
-            return () -> Collections.singletonList(new AggregationSplit(fileIO, location));
+            return () ->
+                    Collections.singletonList(
+                            new AggregationSplit(
+                                    new SchemaManager(fileIO, location).listAllIds().size(),
+                                    location));
         }
     }
 
@@ -129,17 +133,17 @@ public class AggregationFieldsTable implements ReadonlyTable {
 
         private static final long serialVersionUID = 1L;
 
-        private final FileIO fileIO;
+        private final long rowCount;
         private final Path location;
 
-        private AggregationSplit(FileIO fileIO, Path location) {
-            this.fileIO = fileIO;
+        private AggregationSplit(long rowCount, Path location) {
+            this.rowCount = rowCount;
             this.location = location;
         }
 
         @Override
         public long rowCount() {
-            return new SchemaManager(fileIO, location).listAllIds().size();
+            return rowCount;
         }
 
         @Override

@@ -22,12 +22,13 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.ManifestCacheFilter;
-import org.apache.paimon.operation.AppendOnlyFileStoreRead;
 import org.apache.paimon.operation.AppendOnlyFileStoreScan;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
+import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.operation.ScanBucketFilter;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.types.RowType;
@@ -50,14 +51,14 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
     public AppendOnlyFileStore(
             FileIO fileIO,
             SchemaManager schemaManager,
-            long schemaId,
+            TableSchema schema,
             CoreOptions options,
             RowType partitionType,
             RowType bucketKeyType,
             RowType rowType,
             String tableName,
             CatalogEnvironment catalogEnvironment) {
-        super(fileIO, schemaManager, schemaId, options, partitionType, catalogEnvironment);
+        super(fileIO, schemaManager, schema, options, partitionType, catalogEnvironment);
         this.bucketKeyType = bucketKeyType;
         this.rowType = rowType;
         this.tableName = tableName;
@@ -78,14 +79,15 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
     }
 
     @Override
-    public AppendOnlyFileStoreRead newRead() {
-        return new AppendOnlyFileStoreRead(
+    public RawFileSplitRead newRead() {
+        return new RawFileSplitRead(
                 fileIO,
                 schemaManager,
-                schemaId,
+                schema,
                 rowType,
                 FileFormatDiscover.of(options),
-                pathFactory());
+                pathFactory(),
+                options.fileIndexReadEnabled());
     }
 
     @Override
@@ -99,7 +101,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
         return new AppendOnlyFileStoreWrite(
                 fileIO,
                 newRead(),
-                schemaId,
+                schema.id(),
                 commitUser,
                 rowType,
                 pathFactory(),
@@ -138,13 +140,14 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 bucketFilter,
                 snapshotManager(),
                 schemaManager,
-                schemaId,
+                schema,
                 manifestFileFactory(forWrite),
                 manifestListFactory(forWrite),
                 options.bucket(),
                 forWrite,
                 options.scanManifestParallelism(),
-                branchName);
+                branchName,
+                options.fileIndexReadEnabled());
     }
 
     @Override

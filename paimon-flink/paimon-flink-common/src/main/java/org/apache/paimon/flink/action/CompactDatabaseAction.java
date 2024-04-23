@@ -28,7 +28,6 @@ import org.apache.paimon.flink.sink.CompactorSinkBuilder;
 import org.apache.paimon.flink.sink.MultiTablesCompactorSink;
 import org.apache.paimon.flink.source.CompactorSourceBuilder;
 import org.apache.paimon.flink.source.MultiTablesCompactorSourceBuilder;
-import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -161,7 +160,7 @@ public class CompactDatabaseAction extends ActionBase {
                 !tableMap.isEmpty(),
                 "no tables to be compacted. possible cause is that there are no tables detected after pattern matching");
 
-        ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
+        ReadableConfig conf = env.getConfiguration();
         boolean isStreaming =
                 conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING;
         for (Map.Entry<String, FileStoreTable> entry : tableMap.entrySet()) {
@@ -186,7 +185,7 @@ public class CompactDatabaseAction extends ActionBase {
 
     private void buildForCombinedMode() {
 
-        ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
+        ReadableConfig conf = env.getConfiguration();
         boolean isStreaming =
                 conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING;
         // TODO: Currently, multi-tables compaction don't support tables which bucketmode is UNWARE.

@@ -22,11 +22,8 @@ import org.apache.paimon.flink.util.AbstractTestBase;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.flink.api.common.RuntimeExecutionMode;
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.Schema;
-import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
+import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.catalog.ObjectIdentifier;
@@ -59,7 +56,7 @@ public abstract class FlinkTestBase extends AbstractTestBase {
     protected ExpectedResult expectedResult;
     protected boolean ignoreException;
 
-    protected StreamTableEnvironment tEnv;
+    protected TableEnvironment tEnv;
     protected String rootPath;
 
     protected ResolvedCatalogTable resolvedTable =
@@ -79,14 +76,11 @@ public abstract class FlinkTestBase extends AbstractTestBase {
         this.ignoreException = ignoreException;
         this.expectedResult = expectedResult;
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.getConfig().setRestartStrategy(RestartStrategies.noRestart());
-        EnvironmentSettings.Builder builder = EnvironmentSettings.newInstance().inBatchMode();
         if (executionMode == RuntimeExecutionMode.STREAMING) {
-            env.enableCheckpointing(100);
-            builder.inStreamingMode();
+            tEnv = tableEnvironmentBuilder().streamingMode().checkpointIntervalMs(100).build();
+        } else {
+            tEnv = tableEnvironmentBuilder().batchMode().build();
         }
-        tEnv = StreamTableEnvironment.create(env, builder.build());
         rootPath = getTempDirPath();
 
         tEnv.executeSql(

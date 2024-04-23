@@ -23,7 +23,6 @@ import org.apache.paimon.table.system.AllTableOptionsTable;
 import org.apache.paimon.table.system.CatalogOptionsTable;
 import org.apache.paimon.table.system.SinkTableLineageTable;
 import org.apache.paimon.table.system.SourceTableLineageTable;
-import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.commons.lang3.StringUtils;
@@ -38,6 +37,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.api.config.TableConfigOptions.TABLE_DML_SYNC;
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -689,7 +689,9 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         paimonTable("T").createTag("tag1", 1);
         paimonTable("T").createTag("tag2", 2);
 
-        List<Row> result = sql("SELECT tag_name, snapshot_id, schema_id, record_count FROM T$tags");
+        List<Row> result =
+                sql(
+                        "SELECT tag_name, snapshot_id, schema_id, record_count FROM T$tags ORDER BY tag_name");
 
         assertThat(result).containsExactly(Row.of("tag1", 1L, 0L, 1L), Row.of("tag2", 2L, 0L, 2L));
     }
@@ -752,14 +754,14 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
         assertThatThrownBy(() -> sql(ddl, "full-compaction"))
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 UnsupportedOperationException.class,
                                 "Cannot set streaming-read-overwrite to true when changelog producer "
                                         + "is full-compaction or lookup because it will read duplicated changes."));
 
         assertThatThrownBy(() -> sql(ddl, "lookup"))
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 UnsupportedOperationException.class,
                                 "Cannot set streaming-read-overwrite to true when changelog producer "
                                         + "is full-compaction or lookup because it will read duplicated changes."));

@@ -34,6 +34,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.Arra
 
 import javax.annotation.Nullable;
 
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -199,7 +200,12 @@ public class DebeziumRecordParser extends RecordParser {
 
             String transformed =
                     DebeziumSchemaUtils.transformRawValue(
-                            rawValue, debeziumType, className, typeMapping, record.get(fieldName));
+                            rawValue,
+                            debeziumType,
+                            className,
+                            typeMapping,
+                            record.get(fieldName),
+                            ZoneOffset.UTC);
             resultMap.put(fieldName, transformed);
 
             paimonFieldTypes.put(

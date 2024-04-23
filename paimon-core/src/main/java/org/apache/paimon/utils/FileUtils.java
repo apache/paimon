@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,17 +19,18 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader;
 
+import javax.annotation.Nullable;
+
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.List;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.ForkJoinWorkerThread;
 import java.util.stream.Stream;
@@ -68,18 +69,6 @@ public class FileUtils {
             scanIoForkJoinPool = createForkJoinPool("paimon-scan-io", parallelism);
         }
         return scanIoForkJoinPool;
-    }
-
-    public static <T> List<T> readListFromFile(
-            FileIO fileIO,
-            Path path,
-            ObjectSerializer<T> serializer,
-            FormatReaderFactory readerFactory)
-            throws IOException {
-        List<T> result = new ArrayList<>();
-        createFormatReader(fileIO, readerFactory, path)
-                .forEachRemaining(row -> result.add(serializer.fromRow(row)));
-        return result;
     }
 
     /**
@@ -129,6 +118,30 @@ public class FileUtils {
                 .filter(status -> status.getPath().getName().startsWith(prefix));
     }
 
+    /**
+     * List versioned directories for the directory.
+     *
+     * @return file status stream
+     */
+    public static Stream<FileStatus> listVersionedDirectories(
+            FileIO fileIO, Path dir, String prefix) throws IOException {
+        if (!fileIO.exists(dir)) {
+            return Stream.empty();
+        }
+
+        FileStatus[] statuses = fileIO.listDirectories(dir);
+
+        if (statuses == null) {
+            throw new RuntimeException(
+                    String.format(
+                            "The return value is null of the listStatus for the '%s' directory.",
+                            dir));
+        }
+
+        return Arrays.stream(statuses)
+                .filter(status -> status.getPath().getName().startsWith(prefix));
+    }
+
     public static void checkExists(FileIO fileIO, Path file) throws IOException {
         if (!fileIO.exists(file)) {
             throw new FileNotFoundException(
@@ -143,8 +156,16 @@ public class FileUtils {
     }
 
     public static RecordReader<InternalRow> createFormatReader(
-            FileIO fileIO, FormatReaderFactory format, Path file) throws IOException {
-        checkExists(fileIO, file);
-        return format.createReader(fileIO, file);
+            FileIO fileIO, FormatReaderFactory format, Path file, @Nullable Long fileSize)
+            throws IOException {
+        try {
+            if (fileSize == null) {
+                fileSize = fileIO.getFileSize(file);
+            }
+            return format.createReader(new FormatReaderContext(fileIO, file, fileSize));
+        } catch (Exception e) {
+            checkExists(fileIO, file);
+            throw e;
+        }
     }
 }

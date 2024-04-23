@@ -20,6 +20,7 @@ package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
@@ -80,6 +81,16 @@ public class IndexManifestEntry {
         fields.add(new DataField(4, "_FILE_NAME", newStringType(false)));
         fields.add(new DataField(5, "_FILE_SIZE", new BigIntType(false)));
         fields.add(new DataField(6, "_ROW_COUNT", new BigIntType(false)));
+        fields.add(
+                new DataField(
+                        7,
+                        "_DELETIONS_VECTORS_RANGES",
+                        new ArrayType(
+                                true,
+                                RowType.of(
+                                        newStringType(false),
+                                        new IntType(false),
+                                        new IntType(false)))));
         return new RowType(fields);
     }
 

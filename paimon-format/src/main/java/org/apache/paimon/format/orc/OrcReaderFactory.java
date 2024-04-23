@@ -24,6 +24,7 @@ import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.data.columnar.ColumnarRowIterator;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.format.FormatReaderFactory;
+import org.apache.paimon.format.OrcFormatReaderContext;
 import org.apache.paimon.format.fs.HadoopReadOnlyFileSystem;
 import org.apache.paimon.format.orc.filter.OrcFilters;
 import org.apache.paimon.fs.FileIO;
@@ -88,23 +89,23 @@ public class OrcReaderFactory implements FormatReaderFactory {
     // ------------------------------------------------------------------------
 
     @Override
-    public OrcVectorizedReader createReader(FileIO fileIO, Path file) throws IOException {
-        return createReader(fileIO, file, 1);
-    }
-
-    @Override
-    public OrcVectorizedReader createReader(FileIO fileIO, Path file, int poolSize)
+    public OrcVectorizedReader createReader(FormatReaderFactory.Context context)
             throws IOException {
-        Pool<OrcReaderBatch> poolOfBatches = createPoolOfBatches(poolSize);
+        int poolSize =
+                context instanceof OrcFormatReaderContext
+                        ? ((OrcFormatReaderContext) context).poolSize()
+                        : 1;
+        Pool<OrcReaderBatch> poolOfBatches = createPoolOfBatches(context.filePath(), poolSize);
+
         RecordReader orcReader =
                 createRecordReader(
                         hadoopConfigWrapper.getHadoopConfig(),
                         schema,
                         conjunctPredicates,
-                        fileIO,
-                        file,
+                        context.fileIO(),
+                        context.filePath(),
                         0,
-                        fileIO.getFileSize(file));
+                        context.fileSize());
         return new OrcVectorizedReader(orcReader, poolOfBatches);
     }
 
@@ -114,7 +115,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
      * conversion from the ORC representation to the result format.
      */
     public OrcReaderBatch createReaderBatch(
-            VectorizedRowBatch orcBatch, Pool.Recycler<OrcReaderBatch> recycler) {
+            Path filePath, VectorizedRowBatch orcBatch, Pool.Recycler<OrcReaderBatch> recycler) {
         List<String> tableFieldNames = tableType.getFieldNames();
         List<DataType> tableFieldTypes = tableType.getFieldTypes();
 
@@ -125,17 +126,17 @@ public class OrcReaderFactory implements FormatReaderFactory {
             DataType type = tableFieldTypes.get(i);
             vectors[i] = createPaimonVector(orcBatch.cols[tableFieldNames.indexOf(name)], type);
         }
-        return new OrcReaderBatch(orcBatch, new VectorizedColumnBatch(vectors), recycler);
+        return new OrcReaderBatch(filePath, orcBatch, new VectorizedColumnBatch(vectors), recycler);
     }
 
     // ------------------------------------------------------------------------
 
-    private Pool<OrcReaderBatch> createPoolOfBatches(int numBatches) {
+    private Pool<OrcReaderBatch> createPoolOfBatches(Path filePath, int numBatches) {
         final Pool<OrcReaderBatch> pool = new Pool<>(numBatches);
 
         for (int i = 0; i < numBatches; i++) {
             final VectorizedRowBatch orcBatch = createBatchWrapper(schema, batchSize / numBatches);
-            final OrcReaderBatch batch = createReaderBatch(orcBatch, pool.recycler());
+            final OrcReaderBatch batch = createReaderBatch(filePath, orcBatch, pool.recycler());
             pool.add(batch);
         }
 
@@ -153,6 +154,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
         private final ColumnarRowIterator result;
 
         protected OrcReaderBatch(
+                final Path filePath,
                 final VectorizedRowBatch orcVectorizedRowBatch,
                 final VectorizedColumnBatch paimonColumnBatch,
                 final Pool.Recycler<OrcReaderBatch> recycler) {
@@ -160,7 +162,8 @@ public class OrcReaderFactory implements FormatReaderFactory {
             this.recycler = checkNotNull(recycler);
             this.paimonColumnBatch = paimonColumnBatch;
             this.result =
-                    new ColumnarRowIterator(new ColumnarRow(paimonColumnBatch), this::recycle);
+                    new ColumnarRowIterator(
+                            filePath, new ColumnarRow(paimonColumnBatch), this::recycle);
         }
 
         /**
@@ -176,12 +179,12 @@ public class OrcReaderFactory implements FormatReaderFactory {
             return orcVectorizedRowBatch;
         }
 
-        private RecordIterator<InternalRow> convertAndGetIterator(VectorizedRowBatch orcBatch) {
+        private RecordIterator<InternalRow> convertAndGetIterator(
+                VectorizedRowBatch orcBatch, long rowNumber) {
             // no copying from the ORC column vectors to the Paimon columns vectors necessary,
             // because they point to the same data arrays internally design
-            int batchSize = orcBatch.size;
-            paimonColumnBatch.setNumRows(batchSize);
-            result.set(batchSize);
+            paimonColumnBatch.setNumRows(orcBatch.size);
+            result.reset(rowNumber);
             return result;
         }
     }
@@ -218,12 +221,13 @@ public class OrcReaderFactory implements FormatReaderFactory {
             final OrcReaderBatch batch = getCachedEntry();
             final VectorizedRowBatch orcVectorBatch = batch.orcVectorizedRowBatch();
 
+            long rowNumber = orcReader.getRowNumber();
             if (!nextBatch(orcReader, orcVectorBatch)) {
                 batch.recycle();
                 return null;
             }
 
-            return batch.convertAndGetIterator(orcVectorBatch);
+            return batch.convertAndGetIterator(orcVectorBatch, rowNumber);
         }
 
         @Override
@@ -320,26 +324,6 @@ public class OrcReaderFactory implements FormatReaderFactory {
         } else {
             return Pair.of(0L, 0L);
         }
-    }
-
-    /**
-     * Computes the ORC projection mask of the fields to include from the selected
-     * fields.rowOrcInputFormat.nextRecord(null).
-     *
-     * @return The ORC projection mask.
-     */
-    private static boolean[] computeProjectionMask(TypeDescription schema, int[] selectedFields) {
-        // mask with all fields of the schema
-        boolean[] projectionMask = new boolean[schema.getMaximumId() + 1];
-        // for each selected field
-        for (int inIdx : selectedFields) {
-            // set all nested fields of a selected field to true
-            TypeDescription fieldSchema = schema.getChildren().get(inIdx);
-            for (int i = fieldSchema.getId(); i <= fieldSchema.getMaximumId(); i++) {
-                projectionMask[i] = true;
-            }
-        }
-        return projectionMask;
     }
 
     public static org.apache.orc.Reader createReader(

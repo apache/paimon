@@ -36,6 +36,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.Serialize
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.deser.std.StdDeserializer;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.module.SimpleModule;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ser.std.StdSerializer;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import javax.annotation.Nullable;
 
@@ -57,6 +58,7 @@ public class JsonSerdeUtil {
     static {
         OBJECT_MAPPER_INSTANCE = new ObjectMapper();
         OBJECT_MAPPER_INSTANCE.registerModule(createPaimonJacksonModule());
+        OBJECT_MAPPER_INSTANCE.registerModule(new JavaTimeModule());
     }
 
     public static <V> LinkedHashMap<String, V> parseJsonMap(String jsonString, Class<V> valueType) {
@@ -118,6 +120,14 @@ public class JsonSerdeUtil {
                 String.format(
                         "Expected node '%s' to be of type %s but was %s.",
                         fieldName, clazz.getName(), node.getClass().getName()));
+    }
+
+    public static <T> T fromJson(String json, TypeReference<T> typeReference) {
+        try {
+            return OBJECT_MAPPER_INSTANCE.readValue(json, typeReference);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     public static <T> T fromJson(String json, Class<T> clazz) {

@@ -34,6 +34,7 @@ import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -49,14 +50,10 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.stream.Collectors;
-import java.util.stream.LongStream;
 
 import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_CHECK_INTERVAL;
 import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_TIME;
@@ -177,7 +174,6 @@ public class PartitionExpireTest {
         int preparedCommits = random.nextInt(20, 30);
 
         List<List<CommitMessage>> commitMessages = new ArrayList<>();
-        Set<Long> notCommitted = new HashSet<>();
         for (int i = 0; i < preparedCommits; i++) {
             // ensure the partition will be expired
             String f0 =
@@ -187,7 +183,6 @@ public class PartitionExpireTest {
             StreamTableWrite write = table.newWrite(commitUser);
             write.write(GenericRow.of(BinaryString.fromString(f0), BinaryString.fromString(f1)));
             commitMessages.add(write.prepareCommit(false, i));
-            notCommitted.add((long) i);
         }
 
         // commit a part of data and trigger partition expire
@@ -195,7 +190,6 @@ public class PartitionExpireTest {
         StreamTableCommit commit = table.newCommit(commitUser);
         for (int i = 0; i < successCommits - 2; i++) {
             commit.commit(i, commitMessages.get(i));
-            notCommitted.remove((long) i);
         }
 
         // we need two commits to trigger partition expire
@@ -210,21 +204,27 @@ public class PartitionExpireTest {
         commit.close();
         commit = table.newCommit(commitUser);
         commit.commit(successCommits - 2, commitMessages.get(successCommits - 2));
-        notCommitted.remove((long) (successCommits - 2));
         Thread.sleep(5000);
         commit.commit(successCommits - 1, commitMessages.get(successCommits - 1));
-        notCommitted.remove((long) (successCommits - 1));
-        commit.close();
 
         // check whether partition expire is triggered
-        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        SnapshotManager snapshotManager = table.snapshotManager();
+        Snapshot snapshot = snapshotManager.latestSnapshot();
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
 
-        // check filter
-        Set<Long> toBeFiltered =
-                LongStream.range(0, preparedCommits).boxed().collect(Collectors.toSet());
-        assertThat(commit.filterCommitted(toBeFiltered))
-                .containsExactlyInAnyOrderElementsOf(notCommitted);
+        // filterAndCommit
+        Map<Long, List<CommitMessage>> allCommits = new HashMap<>();
+        for (int i = 0; i < preparedCommits; i++) {
+            allCommits.put((long) i, commitMessages.get(i));
+        }
+
+        // no exception here
+        commit.filterAndCommit(allCommits);
+        commit.close();
+
+        // check commit last
+        assertThat(snapshotManager.latestSnapshot().commitIdentifier())
+                .isEqualTo(allCommits.size() - 1);
     }
 
     private List<String> read() throws IOException {

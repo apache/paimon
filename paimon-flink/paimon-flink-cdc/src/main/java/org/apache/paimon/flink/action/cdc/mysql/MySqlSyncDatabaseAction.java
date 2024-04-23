@@ -156,10 +156,10 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                             true);
             try {
                 table = (FileStoreTable) catalog.getTable(identifier);
-                table = table.copy(tableConfig);
                 Supplier<String> errMsg =
                         incompatibleMessage(table.schema(), tableInfo, identifier);
                 if (shouldMonitorTable(table.schema(), fromMySql, errMsg)) {
+                    table = alterTableOptions(identifier, table);
                     tables.add(table);
                     monitoredTables.addAll(tableInfo.identifiers());
                 } else {

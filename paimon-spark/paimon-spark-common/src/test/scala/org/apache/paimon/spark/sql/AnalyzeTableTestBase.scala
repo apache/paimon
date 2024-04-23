@@ -15,6 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.data.Decimal
@@ -47,6 +48,26 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     Assertions.assertEquals(2L, stats.mergedRecordCount().getAsLong)
     Assertions.assertTrue(stats.mergedRecordSize().isPresent)
     Assertions.assertTrue(stats.colStats().isEmpty)
+  }
+
+  test("Paimon analyze: test statistic system table") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id STRING, name STRING, i INT, l LONG)
+                 |USING PAIMON
+                 |TBLPROPERTIES ('primary-key'='id')
+                 |""".stripMargin)
+
+    spark.sql(s"INSERT INTO T VALUES ('1', 'a', 1, 1)")
+    spark.sql(s"INSERT INTO T VALUES ('2', 'aaa', 1, 2)")
+
+    spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS")
+
+    val df =
+      spark.sql("select snapshot_id, schema_id, mergedRecordCount, colstat from `T$statistics`")
+    Assertions.assertEquals(df.collect().size, 1)
+    checkAnswer(
+      spark.sql("SELECT snapshot_id, schema_id, mergedRecordCount, colstat from `T$statistics`"),
+      Row(2, 0, 2, "{ }"))
   }
 
   test("Paimon analyze: analyze no scan") {

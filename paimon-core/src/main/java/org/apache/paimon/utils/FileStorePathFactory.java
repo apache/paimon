@@ -18,12 +18,10 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFilePathFactory;
-import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.concurrent.ThreadSafe;
@@ -33,19 +31,11 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.options.ConfigOptions.key;
-
 /** Factory which produces {@link Path}s for manifest files. */
 @ThreadSafe
 public class FileStorePathFactory {
 
-    public static final ConfigOption<String> PARTITION_DEFAULT_NAME =
-            key("partition.default-name")
-                    .stringType()
-                    .defaultValue("__DEFAULT_PARTITION__")
-                    .withDescription(
-                            "The default partition name in case the dynamic partition"
-                                    + " column value is null/empty string.");
+    public static final String BUCKET_PATH_PREFIX = "bucket-";
 
     private final Path root;
     private final String uuid;
@@ -58,15 +48,6 @@ public class FileStorePathFactory {
     private final AtomicInteger indexFileCount;
     private final AtomicInteger statsFileCount;
 
-    public FileStorePathFactory(Path root) {
-        this(
-                root,
-                RowType.builder().build(),
-                PARTITION_DEFAULT_NAME.defaultValue(),
-                CoreOptions.FILE_FORMAT.defaultValue().toString());
-    }
-
-    // for tables without partition, partitionType should be a row type with 0 columns (not null)
     public FileStorePathFactory(
             Path root, RowType partitionType, String defaultPartValue, String formatIdentifier) {
         this.root = root;
@@ -116,12 +97,20 @@ public class FileStorePathFactory {
     }
 
     public DataFilePathFactory createDataFilePathFactory(BinaryRow partition, int bucket) {
-        return new DataFilePathFactory(
-                root, getPartitionString(partition), bucket, formatIdentifier);
+        return new DataFilePathFactory(bucketPath(partition, bucket), formatIdentifier);
     }
 
     public Path bucketPath(BinaryRow partition, int bucket) {
-        return DataFilePathFactory.bucketPath(root, getPartitionString(partition), bucket);
+        return new Path(root + "/" + relativePartitionAndBucketPath(partition, bucket));
+    }
+
+    public Path relativePartitionAndBucketPath(BinaryRow partition, int bucket) {
+        String partitionPath = getPartitionString(partition);
+        if (partitionPath.isEmpty()) {
+            return new Path(BUCKET_PATH_PREFIX + bucket);
+        } else {
+            return new Path(getPartitionString(partition) + "/" + BUCKET_PATH_PREFIX + bucket);
+        }
     }
 
     /** IMPORTANT: This method is NOT THREAD SAFE. */

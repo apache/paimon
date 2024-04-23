@@ -22,4 +22,6 @@ package org.apache.paimon.migrate;
 public interface Migrator {
 
     void executeMigrate() throws Exception;
+
+    void renameTable(boolean ignoreIfNotExists) throws Exception;
 }

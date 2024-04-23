@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.append.AppendOnlyCompactManager.fileComparator;
 
@@ -44,21 +45,23 @@ public class AppendOnlySplitGenerator implements SplitGenerator {
     }
 
     @Override
-    public List<List<DataFileMeta>> splitForBatch(List<DataFileMeta> input) {
+    public List<SplitGroup> splitForBatch(List<DataFileMeta> input) {
         List<DataFileMeta> files = new ArrayList<>(input);
         files.sort(fileComparator(bucketMode == BucketMode.UNAWARE));
         Function<DataFileMeta, Long> weightFunc = file -> Math.max(file.fileSize(), openFileCost);
-        return BinPacking.packForOrdered(files, weightFunc, targetSplitSize);
+        return BinPacking.packForOrdered(files, weightFunc, targetSplitSize).stream()
+                .map(SplitGroup::rawConvertibleGroup)
+                .collect(Collectors.toList());
     }
 
     @Override
-    public List<List<DataFileMeta>> splitForStreaming(List<DataFileMeta> files) {
+    public List<SplitGroup> splitForStreaming(List<DataFileMeta> files) {
         // When the bucket mode is unaware, we spit the files as batch, because unaware-bucket table
         // only contains one bucket (bucket 0).
         if (bucketMode == BucketMode.UNAWARE) {
             return splitForBatch(files);
         } else {
-            return Collections.singletonList(files);
+            return Collections.singletonList(SplitGroup.rawConvertibleGroup(files));
         }
     }
 }

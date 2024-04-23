@@ -15,6 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.spark.SparkTable
@@ -31,7 +32,7 @@ import scala.collection.JavaConverters._
 
 case class PaimonTruncateTableCommand(v2Table: SparkTable, partitionSpec: TablePartitionSpec)
   extends PaimonLeafRunnableCommand
-  with PaimonCommand {
+  with WithFileStoreTable {
 
   override def table: FileStoreTable = v2Table.getTable.asInstanceOf[FileStoreTable]
 
@@ -39,7 +40,7 @@ case class PaimonTruncateTableCommand(v2Table: SparkTable, partitionSpec: TableP
     val commit = table.store.newCommit(UUID.randomUUID.toString)
 
     if (partitionSpec.isEmpty) {
-      commit.purgeTable(BatchWriteBuilder.COMMIT_IDENTIFIER)
+      commit.truncateTable(BatchWriteBuilder.COMMIT_IDENTIFIER)
     } else {
       commit.dropPartitions(
         Collections.singletonList(partitionSpec.asJava),

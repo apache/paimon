@@ -26,7 +26,7 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
 import org.apache.flink.types.Row;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -42,8 +42,9 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     @Override
     protected List<String> ddl() {
         return Arrays.asList(
-                "CREATE TABLE IF NOT EXISTS T1 (a STRING, b STRING, c STRING)",
-                "CREATE TABLE IF NOT EXISTS T2 (a STRING, b STRING, c STRING, PRIMARY KEY (a) NOT ENFORCED) WITH('changelog-producer'='input')");
+                "CREATE TABLE IF NOT EXISTS T1 (a STRING, b STRING, c STRING) WITH ('bucket' = '1')",
+                "CREATE TABLE IF NOT EXISTS T2 (a STRING, b STRING, c STRING, PRIMARY KEY (a) NOT ENFORCED)"
+                        + " WITH ('changelog-producer'='input', 'bucket' = '1')");
     }
 
     @Test
@@ -202,12 +203,12 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     @Test
     public void testConfigureStartupSnapshot() throws Exception {
         // Configure 'scan.snapshot-id' without 'scan.mode'.
+        batchSql("INSERT INTO T1 VALUES ('1', '2', '3'), ('4', '5', '6')");
+        batchSql("INSERT INTO T1 VALUES ('7', '8', '9'), ('10', '11', '12')");
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(
                         streamSqlIter(
                                 "SELECT * FROM T1 /*+ OPTIONS('scan.snapshot-id'='%s') */", 1));
-        batchSql("INSERT INTO T1 VALUES ('1', '2', '3'), ('4', '5', '6')");
-        batchSql("INSERT INTO T1 VALUES ('7', '8', '9'), ('10', '11', '12')");
         assertThat(iterator.collect(2))
                 .containsExactlyInAnyOrder(Row.of("1", "2", "3"), Row.of("4", "5", "6"));
         iterator.close();
@@ -221,13 +222,31 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                 .containsExactlyInAnyOrder(Row.of("1", "2", "3"), Row.of("4", "5", "6"));
         iterator.close();
 
+        iterator =
+                BlockingIterator.of(
+                        streamSqlIter(
+                                "SELECT * FROM T1 /*+ OPTIONS('scan.snapshot-id'='%s') */", 1));
+        assertThat(iterator.collect(2))
+                .containsExactlyInAnyOrder(Row.of("1", "2", "3"), Row.of("4", "5", "6"));
+        iterator.close();
+
+        iterator =
+                BlockingIterator.of(
+                        streamSqlIter(
+                                "SELECT * FROM T1 /*+ OPTIONS('scan.snapshot-id'='%s') */", 2));
+        assertThat(iterator.collect(2))
+                .containsExactlyInAnyOrder(Row.of("7", "8", "9"), (Row.of("10", "11", "12")));
+        iterator.close();
+
         // Configure 'scan.snapshot-id' with 'scan.mode=latest'.
         assertThatThrownBy(
                         () ->
                                 streamSqlIter(
                                         "SELECT * FROM T1 /*+ OPTIONS('scan.mode'='latest', 'scan.snapshot-id'='%s') */",
                                         0))
-                .hasMessageContaining("Unable to create a source for reading table");
+                .hasCauseInstanceOf(IllegalArgumentException.class)
+                .hasRootCauseMessage(
+                        "scan.snapshot-id must be null when you use latest for scan.mode");
     }
 
     @Test
@@ -309,5 +328,25 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                         streamSqlIter(
                                 "SELECT * FROM T1 /*+ OPTIONS('log.consistency'='eventual') */"),
                 "File store continuous reading does not support eventual consistency mode");
+    }
+
+    @Test
+    public void testFlinkMemoryPool() {
+        // Check if the configuration is effective
+        assertThatThrownBy(
+                        () ->
+                                batchSql(
+                                        "INSERT INTO %s /*+ OPTIONS('sink.use-managed-memory-allocator'='true', 'sink.managed.writer-buffer-memory'='0M') */ "
+                                                + "VALUES ('1', '2', '3'), ('4', '5', '6')",
+                                        "T1"))
+                .hasCauseInstanceOf(IllegalArgumentException.class)
+                .hasRootCauseMessage(
+                        "Weights for operator scope use cases must be greater than 0.");
+
+        batchSql(
+                "INSERT INTO %s /*+ OPTIONS('sink.use-managed-memory-allocator'='true', 'sink.managed.writer-buffer-memory'='1M') */ "
+                        + "VALUES ('1', '2', '3'), ('4', '5', '6')",
+                "T1");
+        assertThat(batchSql("SELECT * FROM T1").size()).isEqualTo(2);
     }
 }

@@ -19,18 +19,14 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.flink.log.LogStoreTableFactory;
-import org.apache.paimon.operation.FileStoreCommit;
-import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.BatchTableCommit;
 
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.sink.abilities.SupportsTruncate;
 import org.apache.flink.table.factories.DynamicTableFactory;
 
 import javax.annotation.Nullable;
-
-import java.util.UUID;
 
 /** Table sink to create sink. */
 public class FlinkTableSink extends SupportsRowLevelOperationFlinkTableSink
@@ -46,9 +42,10 @@ public class FlinkTableSink extends SupportsRowLevelOperationFlinkTableSink
 
     @Override
     public void executeTruncation() {
-        FileStoreCommit commit =
-                ((FileStoreTable) table).store().newCommit(UUID.randomUUID().toString());
-        long identifier = BatchWriteBuilder.COMMIT_IDENTIFIER;
-        commit.purgeTable(identifier);
+        try (BatchTableCommit batchTableCommit = table.newBatchWriteBuilder().newCommit()) {
+            batchTableCommit.truncateTable();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 }

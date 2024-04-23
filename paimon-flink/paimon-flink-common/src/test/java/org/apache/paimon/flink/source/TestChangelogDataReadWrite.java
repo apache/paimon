@@ -25,22 +25,23 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
-import org.apache.paimon.operation.KeyValueFileStoreRead;
 import org.apache.paimon.operation.KeyValueFileStoreWrite;
+import org.apache.paimon.operation.MergeFileSplitRead;
+import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.KeyValueTableRead;
 import org.apache.paimon.table.source.TableRead;
-import org.apache.paimon.table.source.ValueContentRowDataRecordIterator;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
@@ -59,7 +60,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.function.Function;
 
 import static java.util.Collections.singletonList;
 
@@ -109,40 +109,37 @@ public class TestChangelogDataReadWrite {
     }
 
     public TableRead createReadWithKey() {
-        return createRead(ValueContentRowDataRecordIterator::new);
-    }
-
-    private TableRead createRead(
-            Function<
-                            RecordReader.RecordIterator<KeyValue>,
-                            RecordReader.RecordIterator<InternalRow>>
-                    rowDataIteratorCreator) {
-        KeyValueFileStoreRead read =
-                new KeyValueFileStoreRead(
-                        LocalFileIO.create(),
-                        new SchemaManager(LocalFileIO.create(), tablePath),
-                        0,
+        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
+        CoreOptions options = new CoreOptions(new HashMap<>());
+        TableSchema schema = schemaManager.schema(0);
+        MergeFileSplitRead read =
+                new MergeFileSplitRead(
+                        options,
+                        schema,
                         KEY_TYPE,
                         VALUE_TYPE,
                         COMPARATOR,
                         DeduplicateMergeFunction.factory(),
-                        ignore -> avro,
+                        KeyValueFileReaderFactory.builder(
+                                LocalFileIO.create(),
+                                schemaManager,
+                                schema,
+                                KEY_TYPE,
+                                VALUE_TYPE,
+                                ignore -> avro,
+                                pathFactory,
+                                EXTRACTOR,
+                                options));
+        RawFileSplitRead rawFileRead =
+                new RawFileSplitRead(
+                        LocalFileIO.create(),
+                        schemaManager,
+                        schema,
+                        VALUE_TYPE,
+                        FileFormatDiscover.of(options),
                         pathFactory,
-                        EXTRACTOR,
-                        new CoreOptions(new HashMap<>()));
-        return new KeyValueTableRead(read, null) {
-
-            @Override
-            public void projection(int[][] projection) {
-                throw new UnsupportedOperationException();
-            }
-
-            @Override
-            protected RecordReader.RecordIterator<InternalRow> rowDataRecordIteratorFromKv(
-                    RecordReader.RecordIterator<KeyValue> kvRecordIterator) {
-                return rowDataIteratorCreator.apply(kvRecordIterator);
-            }
-        };
+                        options.fileIndexReadEnabled());
+        return new KeyValueTableRead(() -> read, () -> rawFileRead, null);
     }
 
     public List<DataFileMeta> writeFiles(
@@ -167,21 +164,24 @@ public class TestChangelogDataReadWrite {
 
         Map<String, FileStorePathFactory> pathFactoryMap = new HashMap<>();
         pathFactoryMap.put("avro", pathFactory);
+        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
         RecordWriter<KeyValue> writer =
                 new KeyValueFileStoreWrite(
                                 LocalFileIO.create(),
-                                new SchemaManager(LocalFileIO.create(), tablePath),
-                                0,
+                                schemaManager,
+                                schemaManager.schema(0),
                                 commitUser,
                                 KEY_TYPE,
                                 VALUE_TYPE,
                                 () -> COMPARATOR,
+                                () -> null,
                                 () -> EQUALISER,
                                 DeduplicateMergeFunction.factory(),
                                 pathFactory,
                                 pathFactoryMap,
                                 snapshotManager,
                                 null, // not used, we only create an empty writer
+                                null,
                                 null,
                                 options,
                                 EXTRACTOR,

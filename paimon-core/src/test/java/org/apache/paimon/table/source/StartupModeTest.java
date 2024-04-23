@@ -195,10 +195,10 @@ public class StartupModeTest extends ScannerTestBase {
     @Test
     public void testTimeTravelFromExpiredSnapshot() throws Exception {
         Map<String, String> properties = new HashMap<>();
-        // retaine 2 snapshots
+        // retain 2 snapshots
         properties.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "2");
         properties.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "2");
-        // specify consume from a expired snapshot
+        // specify consume from an expired snapshot
         properties.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1");
         initializeTable(StartupMode.FROM_SNAPSHOT, properties);
         initializeTestData(); // initialize 3 commits, expired snapshot 1

@@ -118,6 +118,13 @@ This file is based on the checkstyle file of Apache Beam.
 
 		-->
 
+		<!-- forbid use of org.jetbrains.annotations.Nullable validate -->
+		<module name="Regexp">
+			<property name="format" value="org\.jetbrains\.annotations\.Nullable"/>
+			<property name="illegalPattern" value="true"/>
+			<property name="message"
+					  value="Use javax.annotation.Nullable instead of org.jetbrains.annotations.Nullable."/>
+		</module>
 		<!-- forbid use of commons lang validate -->
 		<module name="Regexp">
 			<property name="format" value="org\.apache\.commons\.lang3\.Validate"/>

@@ -42,9 +42,12 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 
 /** Tests for {@link AppendOnlyFileStoreWrite}. */
 public class AppendOnlyFileStoreWriteTest {
+
+    private static final Random RANDOM = new Random();
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -99,6 +102,49 @@ public class AppendOnlyFileStoreWriteTest {
                                                 .sum())
                         .sum();
         Assertions.assertThat(records).isEqualTo(11);
+    }
+
+    @Test
+    public void testWritesInBatchWithNoExtraFiles() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        AppendOnlyFileStoreWrite write = (AppendOnlyFileStoreWrite) table.store().newWrite("ss");
+        write.withExecutionMode(false);
+
+        write.write(partition(0), 0, GenericRow.of(0, 0, 0));
+        write.write(partition(1), 1, GenericRow.of(1, 1, 0));
+        write.write(partition(2), 2, GenericRow.of(2, 2, 0));
+        write.write(partition(3), 3, GenericRow.of(3, 3, 0));
+        write.write(partition(4), 4, GenericRow.of(4, 4, 0));
+        write.write(partition(5), 5, GenericRow.of(5, 5, 0));
+        write.write(partition(6), 6, GenericRow.of(6, 6, 0));
+
+        for (int i = 0; i < 1000; i++) {
+            int number = RANDOM.nextInt(7);
+            write.write(partition(number), number, GenericRow.of(number, number, 0));
+        }
+
+        List<CommitMessage> commit = write.prepareCommit(true, Long.MAX_VALUE);
+
+        Assertions.assertThat(commit.size()).isEqualTo(7);
+
+        long files =
+                commit.stream()
+                        .map(s -> (CommitMessageImpl) s)
+                        .mapToLong(s -> s.newFilesIncrement().newFiles().size())
+                        .sum();
+        Assertions.assertThat(files).isEqualTo(7);
+
+        long records =
+                commit.stream()
+                        .map(s -> (CommitMessageImpl) s)
+                        .mapToLong(
+                                s ->
+                                        s.newFilesIncrement().newFiles().stream()
+                                                .mapToLong(DataFileMeta::rowCount)
+                                                .sum())
+                        .sum();
+        Assertions.assertThat(records).isEqualTo(1007);
     }
 
     protected FileStoreTable createFileStoreTable() throws Exception {

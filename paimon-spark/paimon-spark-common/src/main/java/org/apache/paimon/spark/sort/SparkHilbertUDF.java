@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.sort;
 
-import org.apache.paimon.spark.utils.ConvertBinaryUtil;
+import org.apache.paimon.utils.ConvertBinaryUtil;
 
 import org.apache.spark.sql.Column;
 import org.apache.spark.sql.expressions.UserDefinedFunction;

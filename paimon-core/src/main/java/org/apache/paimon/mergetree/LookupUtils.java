@@ -39,14 +39,15 @@ public class LookupUtils {
             BiFunctionWithIOE<InternalRow, SortedRun, T> lookup,
             BiFunctionWithIOE<InternalRow, TreeSet<DataFileMeta>, T> level0Lookup)
             throws IOException {
-        if (startLevel == 0) {
-            return level0Lookup.apply(key, levels.level0());
-        }
 
         T result = null;
         for (int i = startLevel; i < levels.numberOfLevels(); i++) {
-            SortedRun level = levels.runOfLevel(i);
-            result = lookup.apply(key, level);
+            if (i == 0) {
+                result = level0Lookup.apply(key, levels.level0());
+            } else {
+                SortedRun level = levels.runOfLevel(i);
+                result = lookup.apply(key, level);
+            }
             if (result != null) {
                 break;
             }

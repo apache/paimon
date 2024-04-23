@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -22,6 +22,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatDiscover;
+import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.orc.OrcFileFormat;
@@ -71,7 +72,12 @@ public class FileFormatTest {
 
         // read
         RecordReader<InternalRow> reader =
-                avro.createReaderFactory(rowType).createReader(LocalFileIO.create(), path);
+                avro.createReaderFactory(rowType)
+                        .createReader(
+                                new FormatReaderContext(
+                                        LocalFileIO.create(),
+                                        path,
+                                        LocalFileIO.create().getFileSize(path)));
         List<InternalRow> result = new ArrayList<>();
         reader.forEachRemaining(
                 rowData -> result.add(GenericRow.of(rowData.getInt(0), rowData.getInt(1))));

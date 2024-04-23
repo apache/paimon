@@ -15,6 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.CoreOptions
@@ -23,17 +24,146 @@ import org.apache.paimon.spark.catalyst.analysis.Delete
 
 import org.assertj.core.api.Assertions.{assertThat, assertThatThrownBy}
 
-class DeleteFromTableTest extends PaimonSparkTestBase {
+abstract class DeleteFromTableTestBase extends PaimonSparkTestBase {
 
-  test(s"test delete from append only table") {
+  import testImplicits._
+
+  test(s"Paimon Delete: append-only table") {
     spark.sql(s"""
                  |CREATE TABLE T (id INT, name STRING, dt STRING)
                  |""".stripMargin)
 
-    spark.sql("INSERT INTO T VALUES (1, 'a', '11'), (2, 'b', '22')")
+    spark.sql("""
+                |INSERT INTO T
+                |VALUES (1, 'a', '2024'), (2, 'b', '2024'), (3, 'c', '2025'), (4, 'd', '2025')
+                |""".stripMargin)
 
-    assertThatThrownBy(() => spark.sql("DELETE FROM T WHERE name = 'a'"))
-      .isInstanceOf(classOf[UnsupportedOperationException])
+    spark.sql("DELETE FROM T WHERE name = 'a'")
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Seq((2, "b", "2024"), (3, "c", "2025"), (4, "d", "2025")).toDF()
+    )
+
+    spark.sql("DELETE FROM T WHERE dt = '2025'")
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Seq((2, "b", "2024")).toDF()
+    )
+  }
+
+  test(s"Paimon Delete: append-only table with partition") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, name STRING, dt STRING) PARTITIONED BY (dt)
+                 |""".stripMargin)
+
+    spark.sql("""
+                |INSERT INTO T
+                |VALUES (1, 'a', '2024'), (2, 'b', '2024'), (3, 'c', '2025'), (4, 'd', '2025'),
+                |(5, 'a', '2026'), (6, 'b', '2026'), (7, 'c', '2027'), (8, 'd', '2027')
+                |""".stripMargin)
+
+    spark.sql("DELETE FROM T WHERE name = 'a'")
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Seq(
+        (2, "b", "2024"),
+        (3, "c", "2025"),
+        (4, "d", "2025"),
+        (6, "b", "2026"),
+        (7, "c", "2027"),
+        (8, "d", "2027")).toDF()
+    )
+
+    spark.sql("DELETE FROM T WHERE dt = '2025'")
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Seq((2, "b", "2024"), (6, "b", "2026"), (7, "c", "2027"), (8, "d", "2027")).toDF()
+    )
+
+    spark.sql("DELETE FROM T WHERE dt IN ('2026', '2027')")
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Seq((2, "b", "2024")).toDF()
+    )
+  }
+
+  test("Paimon Delete: append-only table, condition contains IN/NOT IN subquery") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, name STRING, dt STRING) PARTITIONED BY (dt)
+                 |""".stripMargin)
+
+    spark.sql("""
+                |INSERT INTO T
+                |VALUES (1, 'a', '2024'), (2, 'b', '2024'),
+                | (3, 'c', '2025'), (4, 'd', '2025'),
+                | (5, 'e', '2026'), (6, 'f', '2026')
+                |""".stripMargin)
+
+    Seq(2, 4, 6).toDF("key").createOrReplaceTempView("source")
+
+    spark.sql("""
+                |DELETE FROM T
+                |WHERE id >= (SELECT MAX(key) FROM source)""".stripMargin)
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Seq((1, "a", "2024"), (2, "b", "2024"), (3, "c", "2025"), (4, "d", "2025"), (5, "e", "2026"))
+        .toDF()
+    )
+
+    // IN
+    spark.sql("""
+                |DELETE FROM T
+                |WHERE id IN (SELECT key FROM source)""".stripMargin)
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Seq((1, "a", "2024"), (3, "c", "2025"), (5, "e", "2026")).toDF()
+    )
+
+    // NOT IN: (4, 5, 6)
+    spark.sql("""
+                |DELETE FROM T
+                |WHERE id NOT IN (SELECT key + key % 3 FROM source)""".stripMargin)
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Seq((5, "e", "2026")).toDF()
+    )
+  }
+
+  test("Paimon Delete: append-only table, condition contains EXISTS/NOT EXISTS subquery") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, name STRING, dt STRING) PARTITIONED BY (dt)
+                 |""".stripMargin)
+
+    spark.sql("""
+                |INSERT INTO T
+                |VALUES (1, 'a', '2024'), (2, 'b', '2024'), (3, 'c', '2025'), (4, 'd', '2025')
+                |""".stripMargin)
+
+    Seq(2, 4, 6).toDF("key").createOrReplaceTempView("source")
+
+    // EXISTS
+    spark.sql("""
+                |DELETE FROM T
+                |WHERE EXiSTS (SELECT * FROM source WHERE key > 7)""".stripMargin)
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Seq((1, "a", "2024"), (2, "b", "2024"), (3, "c", "2025"), (4, "d", "2025")).toDF())
+
+    // NOT EXISTS
+    spark.sql("""
+                |DELETE FROM T
+                |WHERE NOT EXiSTS (SELECT * FROM source WHERE key > 5)""".stripMargin)
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Seq((1, "a", "2024"), (2, "b", "2024"), (3, "c", "2025"), (4, "d", "2025")).toDF()
+    )
+    spark.sql("""
+                |DELETE FROM T
+                |WHERE NOT EXiSTS (SELECT * FROM source WHERE key > 7)""".stripMargin)
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      spark.emptyDataFrame
+    )
   }
 
   CoreOptions.MergeEngine.values().foreach {
@@ -183,3 +313,5 @@ class DeleteFromTableTest extends PaimonSparkTestBase {
     assertThat(rows4.toString).isEqualTo("[]")
   }
 }
+
+class DeleteFromTableTest extends DeleteFromTableTestBase {}

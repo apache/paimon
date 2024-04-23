@@ -22,14 +22,13 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.append.AppendOnlyCompactionTask;
 import org.apache.paimon.append.AppendOnlyTableCompactionCoordinator;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.spark.DynamicOverWrite$;
 import org.apache.paimon.spark.SparkUtils;
+import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionUtils;
 import org.apache.paimon.spark.commands.WriteIntoPaimonTable;
 import org.apache.paimon.spark.sort.TableSorter;
 import org.apache.paimon.table.BucketMode;
@@ -38,21 +37,26 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageSerializer;
 import org.apache.paimon.table.sink.CompactionTaskSerializer;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ParameterUtils;
-import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.SerializationUtils;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.api.java.function.FlatMapFunction;
 import org.apache.spark.sql.Dataset;
+import org.apache.spark.sql.PaimonUtils;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.catalyst.InternalRow;
+import org.apache.spark.sql.catalyst.expressions.Expression;
+import org.apache.spark.sql.catalyst.plans.logical.Filter;
+import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.types.DataTypes;
@@ -73,13 +77,14 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /**
  * Compact procedure. Usage:
  *
  * <pre><code>
- *  CALL sys.compact(table => 'tableId', [partitions => 'p1;p2'], [order_strategy => 'xxx'], [order_by => 'xxx'])
+ *  CALL sys.compact(table => 'tableId', [partitions => 'p1=0,p2=0;p1=0,p2=1'], [order_strategy => 'xxx'], [order_by => 'xxx'], [where => 'p1>0'])
  * </code></pre>
  */
 public class CompactProcedure extends BaseProcedure {
@@ -90,6 +95,7 @@ public class CompactProcedure extends BaseProcedure {
                 ProcedureParameter.optional("partitions", StringType),
                 ProcedureParameter.optional("order_strategy", StringType),
                 ProcedureParameter.optional("order_by", StringType),
+                ProcedureParameter.optional("where", StringType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -114,7 +120,6 @@ public class CompactProcedure extends BaseProcedure {
 
     @Override
     public InternalRow[] call(InternalRow args) {
-        Preconditions.checkArgument(args.numFields() >= 1);
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
         String partitions = blank(args, 1) ? null : args.getString(1);
         String sortType = blank(args, 2) ? TableSorter.OrderType.NONE.name() : args.getString(2);
@@ -122,22 +127,40 @@ public class CompactProcedure extends BaseProcedure {
                 blank(args, 3)
                         ? Collections.emptyList()
                         : Arrays.asList(args.getString(3).split(","));
+        String where = blank(args, 4) ? null : args.getString(4);
         if (TableSorter.OrderType.NONE.name().equals(sortType) && !sortColumns.isEmpty()) {
             throw new IllegalArgumentException(
                     "order_strategy \"none\" cannot work with order_by columns.");
         }
-
+        checkArgument(
+                partitions == null || where == null,
+                "partitions and where cannot be used together.");
+        String finalWhere = partitions != null ? toWhere(partitions) : where;
         return modifyPaimonTable(
                 tableIdent,
                 table -> {
-                    Preconditions.checkArgument(table instanceof FileStoreTable);
+                    checkArgument(table instanceof FileStoreTable);
+                    LogicalPlan relation = createRelation(tableIdent);
+                    Expression condition = null;
+                    if (!StringUtils.isBlank(finalWhere)) {
+                        condition = ExpressionUtils.resolveFilter(spark(), relation, finalWhere);
+                        checkArgument(
+                                ExpressionUtils.isValidPredicate(
+                                        spark(),
+                                        condition,
+                                        table.partitionKeys().toArray(new String[0])),
+                                "Only partition predicate is supported, your predicate is %s, but partition keys are %s",
+                                condition,
+                                table.partitionKeys());
+                    }
                     InternalRow internalRow =
                             newInternalRow(
                                     execute(
                                             (FileStoreTable) table,
                                             sortType,
                                             sortColumns,
-                                            partitions));
+                                            relation,
+                                            condition));
                     return new InternalRow[] {internalRow};
                 });
     }
@@ -155,18 +178,19 @@ public class CompactProcedure extends BaseProcedure {
             FileStoreTable table,
             String sortType,
             List<String> sortColumns,
-            @Nullable String partitions) {
+            LogicalPlan relation,
+            @Nullable Expression condition) {
         table = table.copy(Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "false"));
         BucketMode bucketMode = table.bucketMode();
         TableSorter.OrderType orderType = TableSorter.OrderType.of(sortType);
-
         if (orderType.equals(TableSorter.OrderType.NONE)) {
             JavaSparkContext javaSparkContext = new JavaSparkContext(spark().sparkContext());
             Predicate filter =
-                    StringUtils.isBlank(partitions)
+                    condition == null
                             ? null
-                            : PredicateBuilder.partitions(
-                                    ParameterUtils.getPartitions(partitions), table.rowType());
+                            : ExpressionUtils.convertConditionToPaimonPredicate(
+                                            condition, relation.output(), table.rowType(), false)
+                                    .getOrElse(null);
             switch (bucketMode) {
                 case FIXED:
                 case DYNAMIC:
@@ -182,7 +206,8 @@ public class CompactProcedure extends BaseProcedure {
         } else {
             switch (bucketMode) {
                 case UNAWARE:
-                    sortCompactUnAwareBucketTable(table, orderType, sortColumns, partitions);
+                    sortCompactUnAwareBucketTable(
+                            table, orderType, sortColumns, relation, condition);
                     break;
                 default:
                     throw new UnsupportedOperationException(
@@ -201,11 +226,16 @@ public class CompactProcedure extends BaseProcedure {
             scan.withFilter(filter);
         }
 
-        List<Pair<BinaryRow, Integer>> partitionBuckets =
+        List<Pair<byte[], Integer>> partitionBuckets =
                 scan.plan().splits().stream()
                         .map(split -> (DataSplit) split)
                         .map(dataSplit -> Pair.of(dataSplit.partition(), dataSplit.bucket()))
                         .distinct()
+                        .map(
+                                p ->
+                                        Pair.of(
+                                                SerializationUtils.serializeBinaryRow(p.getLeft()),
+                                                p.getRight()))
                         .collect(Collectors.toList());
 
         if (partitionBuckets.isEmpty()) {
@@ -213,23 +243,36 @@ public class CompactProcedure extends BaseProcedure {
         }
 
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
-        JavaRDD<CommitMessage> commitMessageJavaRDD =
+        JavaRDD<byte[]> commitMessageJavaRDD =
                 javaSparkContext
                         .parallelize(partitionBuckets)
                         .mapPartitions(
-                                (FlatMapFunction<Iterator<Pair<BinaryRow, Integer>>, CommitMessage>)
+                                (FlatMapFunction<Iterator<Pair<byte[], Integer>>, byte[]>)
                                         pairIterator -> {
                                             IOManager ioManager = SparkUtils.createIOManager();
                                             BatchTableWrite write = writeBuilder.newWrite();
                                             write.withIOManager(ioManager);
                                             try {
                                                 while (pairIterator.hasNext()) {
-                                                    Pair<BinaryRow, Integer> pair =
+                                                    Pair<byte[], Integer> pair =
                                                             pairIterator.next();
                                                     write.compact(
-                                                            pair.getLeft(), pair.getRight(), true);
+                                                            SerializationUtils.deserializeBinaryRow(
+                                                                    pair.getLeft()),
+                                                            pair.getRight(),
+                                                            true);
                                                 }
-                                                return write.prepareCommit().iterator();
+                                                CommitMessageSerializer serializer =
+                                                        new CommitMessageSerializer();
+                                                List<CommitMessage> messages =
+                                                        write.prepareCommit();
+                                                List<byte[]> serializedMessages =
+                                                        new ArrayList<>(messages.size());
+                                                for (CommitMessage commitMessage : messages) {
+                                                    serializedMessages.add(
+                                                            serializer.serialize(commitMessage));
+                                                }
+                                                return serializedMessages.iterator();
                                             } finally {
                                                 write.close();
                                                 ioManager.close();
@@ -237,7 +280,13 @@ public class CompactProcedure extends BaseProcedure {
                                         });
 
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
-            commit.commit(commitMessageJavaRDD.collect());
+            CommitMessageSerializer serializer = new CommitMessageSerializer();
+            List<byte[]> serializedMessages = commitMessageJavaRDD.collect();
+            List<CommitMessage> messages = new ArrayList<>(serializedMessages.size());
+            for (byte[] serializedMessage : serializedMessages) {
+                messages.add(serializer.deserialize(serializer.getVersion(), serializedMessage));
+            }
+            commit.commit(messages);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -262,25 +311,29 @@ public class CompactProcedure extends BaseProcedure {
         }
 
         String commitUser = UUID.randomUUID().toString();
-        JavaRDD<CommitMessage> commitMessageJavaRDD =
+        JavaRDD<byte[]> commitMessageJavaRDD =
                 javaSparkContext
                         .parallelize(serializedTasks)
                         .mapPartitions(
-                                (FlatMapFunction<Iterator<byte[]>, CommitMessage>)
+                                (FlatMapFunction<Iterator<byte[]>, byte[]>)
                                         taskIterator -> {
                                             AppendOnlyFileStoreWrite write =
                                                     (AppendOnlyFileStoreWrite)
                                                             table.store().newWrite(commitUser);
                                             CompactionTaskSerializer ser =
                                                     new CompactionTaskSerializer();
-                                            ArrayList<CommitMessage> messages = new ArrayList<>();
+                                            List<byte[]> messages = new ArrayList<>();
                                             try {
+                                                CommitMessageSerializer messageSer =
+                                                        new CommitMessageSerializer();
                                                 while (taskIterator.hasNext()) {
                                                     AppendOnlyCompactionTask task =
                                                             ser.deserialize(
                                                                     ser.getVersion(),
                                                                     taskIterator.next());
-                                                    messages.add(task.doCompact(write));
+                                                    messages.add(
+                                                            messageSer.serialize(
+                                                                    task.doCompact(write)));
                                                 }
                                                 return messages.iterator();
                                             } finally {
@@ -289,7 +342,15 @@ public class CompactProcedure extends BaseProcedure {
                                         });
 
         try (TableCommitImpl commit = table.newCommit(commitUser)) {
-            commit.commit(commitMessageJavaRDD.collect());
+            CommitMessageSerializer messageSerializerser = new CommitMessageSerializer();
+            List<byte[]> serializedMessages = commitMessageJavaRDD.collect();
+            List<CommitMessage> messages = new ArrayList<>(serializedMessages.size());
+            for (byte[] serializedMessage : serializedMessages) {
+                messages.add(
+                        messageSerializerser.deserialize(
+                                serializer.getVersion(), serializedMessage));
+            }
+            commit.commit(messages);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -299,10 +360,11 @@ public class CompactProcedure extends BaseProcedure {
             FileStoreTable table,
             TableSorter.OrderType orderType,
             List<String> sortColumns,
-            @Nullable String partitions) {
+            LogicalPlan relation,
+            @Nullable Expression condition) {
         Dataset<Row> row =
-                spark().read().format("paimon").load(table.coreOptions().path().toString());
-        row = StringUtils.isBlank(partitions) ? row : row.where(toWhere(partitions));
+                PaimonUtils.createDataset(
+                        spark(), condition == null ? relation : new Filter(condition, relation));
         new WriteIntoPaimonTable(
                         table,
                         DynamicOverWrite$.MODULE$,

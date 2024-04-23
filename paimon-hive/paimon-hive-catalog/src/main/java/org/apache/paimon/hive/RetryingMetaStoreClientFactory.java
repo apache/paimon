@@ -93,6 +93,33 @@ public class RetryingMetaStoreClientFactory {
                                                     new ConcurrentHashMap<>(),
                                                     clientClassName,
                                                     true))
+                    // for hive 3.x,
+                    // and some metastore client classes providing constructors only for 2.x
+                    .put(
+                            new Class<?>[] {
+                                Configuration.class,
+                                Class[].class,
+                                Object[].class,
+                                ConcurrentHashMap.class,
+                                String.class
+                            },
+                            (getProxyMethod, hiveConf, clientClassName) ->
+                                    (IMetaStoreClient)
+                                            getProxyMethod.invoke(
+                                                    null,
+                                                    hiveConf,
+                                                    new Class[] {
+                                                        HiveConf.class,
+                                                        HiveMetaHookLoader.class,
+                                                        Boolean.class
+                                                    },
+                                                    new Object[] {
+                                                        hiveConf,
+                                                        (HiveMetaHookLoader) (tbl -> null),
+                                                        true
+                                                    },
+                                                    new ConcurrentHashMap<>(),
+                                                    clientClassName))
                     .build();
 
     // If clientClassName is HiveMetaStoreClient,
@@ -116,38 +143,31 @@ public class RetryingMetaStoreClientFactory {
                     .build();
 
     public IMetaStoreClient createClient(HiveConf hiveConf, String clientClassName) {
-        Method getProxy = null;
-        HiveMetastoreProxySupplier supplier = null;
-        RuntimeException methodNotFound =
-                new RuntimeException(
-                        "Failed to find desired getProxy method from RetryingMetaStoreClient");
         Map<Class<?>[], HiveMetastoreProxySupplier> suppliers =
                 new LinkedHashMap<>(PROXY_SUPPLIERS);
         if (HiveMetaStoreClient.class.getName().equals(clientClassName)) {
             suppliers.putAll(PROXY_SUPPLIERS_SHADED);
         }
+
+        RuntimeException failToCreate =
+                new RuntimeException(
+                        "Failed to create the desired metastore client (class name: "
+                                + clientClassName
+                                + ")");
         for (Entry<Class<?>[], HiveMetastoreProxySupplier> entry : suppliers.entrySet()) {
             Class<?>[] classes = entry.getKey();
             try {
-                getProxy = RetryingMetaStoreClient.class.getMethod("getProxy", classes);
-                supplier = entry.getValue();
-            } catch (NoSuchMethodException e) {
-                methodNotFound.addSuppressed(e);
+                Method getProxy = RetryingMetaStoreClient.class.getMethod("getProxy", classes);
+                HiveMetastoreProxySupplier supplier = entry.getValue();
+                IMetaStoreClient client = supplier.get(getProxy, hiveConf, clientClassName);
+                return isNullOrWhitespaceOnly(hiveConf.get(HiveConf.ConfVars.METASTOREURIS.varname))
+                        ? client
+                        : HiveMetaStoreClient.newSynchronizedClient(client);
+            } catch (Exception e) {
+                failToCreate.addSuppressed(e);
             }
         }
-        if (getProxy == null) {
-            throw methodNotFound;
-        }
-
-        IMetaStoreClient client;
-        try {
-            client = supplier.get(getProxy, hiveConf, clientClassName);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-        return isNullOrWhitespaceOnly(hiveConf.get(HiveConf.ConfVars.METASTOREURIS.varname))
-                ? client
-                : HiveMetaStoreClient.newSynchronizedClient(client);
+        throw failToCreate;
     }
 
     /** Function interface for creating hive metastore proxy. */

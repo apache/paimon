@@ -15,6 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark.catalyst.analysis
 
 import org.apache.paimon.CoreOptions
@@ -45,7 +46,7 @@ trait PaimonMergeIntoBase
         val v2Table = relation.table.asInstanceOf[SparkTable]
         val targetOutput = relation.output
 
-        checkPaimonTable(v2Table)
+        checkPaimonTable(v2Table.getTable)
         checkCondition(merge.mergeCondition)
         merge.matchedActions.flatMap(_.condition).foreach(checkCondition)
         merge.notMatchedActions.flatMap(_.condition).foreach(checkCondition)

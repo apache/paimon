@@ -18,43 +18,20 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 
-/** {@link ChannelComputer} for {@link CdcRecord}. */
-public class CdcRecordChannelComputer implements ChannelComputer<CdcRecord> {
+/** {@link CdcFixedBucketChannelComputerBase} for {@link CdcRecord}. */
+public class CdcRecordChannelComputer extends CdcFixedBucketChannelComputerBase<CdcRecord> {
 
-    private static final long serialVersionUID = 1L;
-
-    private final TableSchema schema;
-
-    private transient int numChannels;
-    private transient KeyAndBucketExtractor<CdcRecord> extractor;
+    private static final long serialVersionUID = 2L;
 
     public CdcRecordChannelComputer(TableSchema schema) {
-        this.schema = schema;
+        super(schema);
     }
 
     @Override
-    public void setup(int numChannels) {
-        this.numChannels = numChannels;
-        this.extractor = new CdcRecordKeyAndBucketExtractor(schema);
-    }
-
-    @Override
-    public int channel(CdcRecord record) {
-        extractor.setRecord(record);
-        return channel(extractor.partition(), extractor.bucket());
-    }
-
-    public int channel(BinaryRow partition, int bucket) {
-        return ChannelComputer.select(partition, bucket, numChannels);
-    }
-
-    @Override
-    public String toString() {
-        return "shuffle by bucket";
+    protected KeyAndBucketExtractor<CdcRecord> createExtractor() {
+        return new CdcRecordKeyAndBucketExtractor(schema);
     }
 }

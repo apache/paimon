@@ -15,6 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.spark.PaimonSparkTestBase
@@ -617,7 +618,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase {
                      |THEN INSERT (a, b, c) values (a, b, c)
                      |""".stripMargin)
       }.getMessage
-      assert(error.contains("Only support to merge into table with primary keys."))
+      assert(error.contains("Only support to MergeInto table with primary keys."))
     }
   }
 }

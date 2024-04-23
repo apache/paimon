@@ -67,7 +67,8 @@ public class FixedBucketRowKeyExtractorTest {
 
     @Test
     public void testIllegalBucket() {
-        assertThatThrownBy(() -> extractor("", "", "a", -1))
+        GenericRow row = GenericRow.of(5, 6, 7);
+        assertThatThrownBy(() -> bucket(extractor("", "", "a", -1), row))
                 .hasMessageContaining("Num bucket is illegal");
     }
 

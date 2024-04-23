@@ -23,10 +23,10 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.VersionedSerializerWrapper;
-import org.apache.paimon.flink.utils.MetricUtils;
+import org.apache.paimon.flink.utils.TestingMetricUtils;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.CompactIncrement;
-import org.apache.paimon.io.NewFilesIncrement;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestCommittableSerializer;
 import org.apache.paimon.table.FileStoreTable;
@@ -48,6 +48,7 @@ import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.metrics.groups.OperatorMetricGroup;
 import org.apache.flink.metrics.groups.UnregisteredMetricsGroup;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
+import org.apache.flink.runtime.jobgraph.OperatorID;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.watermark.Watermark;
@@ -301,7 +302,8 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                                             new CommitMessageImpl(
                                                     BinaryRow.EMPTY_ROW,
                                                     0,
-                                                    new NewFilesIncrement(
+                                                    new DataIncrement(
+                                                            Collections.emptyList(),
                                                             Collections.emptyList(),
                                                             Collections.emptyList()),
                                                     new CompactIncrement(
@@ -317,7 +319,8 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                                             new CommitMessageImpl(
                                                     BinaryRow.EMPTY_ROW,
                                                     0,
-                                                    new NewFilesIncrement(
+                                                    new DataIncrement(
+                                                            Collections.emptyList(),
                                                             Collections.emptyList(),
                                                             Collections.emptyList()),
                                                     new CompactIncrement(
@@ -332,7 +335,8 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                                             new CommitMessageImpl(
                                                     BinaryRow.EMPTY_ROW,
                                                     0,
-                                                    new NewFilesIncrement(
+                                                    new DataIncrement(
+                                                            Collections.emptyList(),
                                                             Collections.emptyList(),
                                                             Collections.emptyList()),
                                                     new CompactIncrement(
@@ -366,7 +370,8 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                                             new CommitMessageImpl(
                                                     BinaryRow.EMPTY_ROW,
                                                     0,
-                                                    new NewFilesIncrement(
+                                                    new DataIncrement(
+                                                            Collections.emptyList(),
                                                             Collections.emptyList(),
                                                             Collections.emptyList()),
                                                     new CompactIncrement(
@@ -382,7 +387,8 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                                             new CommitMessageImpl(
                                                     BinaryRow.EMPTY_ROW,
                                                     0,
-                                                    new NewFilesIncrement(
+                                                    new DataIncrement(
+                                                            Collections.emptyList(),
                                                             Collections.emptyList(),
                                                             Collections.emptyList()),
                                                     new CompactIncrement(
@@ -397,7 +403,8 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                                             new CommitMessageImpl(
                                                     BinaryRow.EMPTY_ROW,
                                                     0,
-                                                    new NewFilesIncrement(
+                                                    new DataIncrement(
+                                                            Collections.emptyList(),
                                                             Collections.emptyList(),
                                                             Collections.emptyList()),
                                                     new CompactIncrement(
@@ -481,6 +488,24 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         testHarness.notifyOfCompletedCheckpoint(1);
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
         assertThat(snapshot).isNull();
+    }
+
+    @Test
+    public void testForceCreateSnapshotCommit() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        options ->
+                                options.set(
+                                        CoreOptions.COMMIT_FORCE_CREATE_SNAPSHOT.key(), "true"));
+
+        OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
+                createRecoverableTestHarness(table);
+        testHarness.open();
+
+        testHarness.snapshot(1, 1);
+        testHarness.notifyOfCompletedCheckpoint(1);
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        assertThat(snapshot).isNotNull();
     }
 
     @Test
@@ -577,14 +602,19 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                         .addGroup("paimon")
                         .addGroup("table", table.name())
                         .addGroup("commit");
-        assertThat(MetricUtils.getGauge(commitMetricGroup, "lastTableFilesAdded").getValue())
-                .isEqualTo(1L);
-        assertThat(MetricUtils.getGauge(commitMetricGroup, "lastTableFilesDeleted").getValue())
-                .isEqualTo(0L);
-        assertThat(MetricUtils.getGauge(commitMetricGroup, "lastTableFilesAppended").getValue())
+        assertThat(TestingMetricUtils.getGauge(commitMetricGroup, "lastTableFilesAdded").getValue())
                 .isEqualTo(1L);
         assertThat(
-                        MetricUtils.getGauge(commitMetricGroup, "lastTableFilesCommitCompacted")
+                        TestingMetricUtils.getGauge(commitMetricGroup, "lastTableFilesDeleted")
+                                .getValue())
+                .isEqualTo(0L);
+        assertThat(
+                        TestingMetricUtils.getGauge(commitMetricGroup, "lastTableFilesAppended")
+                                .getValue())
+                .isEqualTo(1L);
+        assertThat(
+                        TestingMetricUtils.getGauge(
+                                        commitMetricGroup, "lastTableFilesCommitCompacted")
                                 .getValue())
                 .isEqualTo(0L);
 
@@ -602,19 +632,37 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         testHarness.snapshot(cpId, timestamp++);
         testHarness.notifyOfCompletedCheckpoint(cpId);
 
-        assertThat(MetricUtils.getGauge(commitMetricGroup, "lastTableFilesAdded").getValue())
+        assertThat(TestingMetricUtils.getGauge(commitMetricGroup, "lastTableFilesAdded").getValue())
                 .isEqualTo(3L);
-        assertThat(MetricUtils.getGauge(commitMetricGroup, "lastTableFilesDeleted").getValue())
+        assertThat(
+                        TestingMetricUtils.getGauge(commitMetricGroup, "lastTableFilesDeleted")
+                                .getValue())
                 .isEqualTo(3L);
-        assertThat(MetricUtils.getGauge(commitMetricGroup, "lastTableFilesAppended").getValue())
+        assertThat(
+                        TestingMetricUtils.getGauge(commitMetricGroup, "lastTableFilesAppended")
+                                .getValue())
                 .isEqualTo(2L);
         assertThat(
-                        MetricUtils.getGauge(commitMetricGroup, "lastTableFilesCommitCompacted")
+                        TestingMetricUtils.getGauge(
+                                        commitMetricGroup, "lastTableFilesCommitCompacted")
                                 .getValue())
                 .isEqualTo(4L);
 
         testHarness.close();
         write.close();
+    }
+
+    @Test
+    public void testParallelism() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        String commitUser = UUID.randomUUID().toString();
+        OneInputStreamOperator<Committable, Committable> operator =
+                createCommitterOperator(table, commitUser, new NoopCommittableStateManager());
+        try (OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
+                createTestHarness(operator, 10, 10, 3)) {
+            Assertions.assertThatCode(testHarness::open)
+                    .hasMessage("Committer Operator parallelism in paimon MUST be one.");
+        }
     }
 
     // ------------------------------------------------------------------------
@@ -648,10 +696,25 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
 
     private OneInputStreamOperatorTestHarness<Committable, Committable> createTestHarness(
             OneInputStreamOperator<Committable, Committable> operator) throws Exception {
+        return createTestHarness(operator, 1, 1, 0);
+    }
+
+    private OneInputStreamOperatorTestHarness<Committable, Committable> createTestHarness(
+            OneInputStreamOperator<Committable, Committable> operator,
+            int maxParallelism,
+            int parallelism,
+            int subTaskIndex)
+            throws Exception {
         TypeSerializer<Committable> serializer =
                 new CommittableTypeInfo().createSerializer(new ExecutionConfig());
         OneInputStreamOperatorTestHarness<Committable, Committable> harness =
-                new OneInputStreamOperatorTestHarness<>(operator, serializer);
+                new OneInputStreamOperatorTestHarness<>(
+                        operator,
+                        maxParallelism,
+                        parallelism,
+                        subTaskIndex,
+                        serializer,
+                        new OperatorID());
         harness.setup(serializer);
         return harness;
     }
@@ -661,6 +724,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
             String commitUser,
             CommittableStateManager<ManifestCommittable> committableStateManager) {
         return new CommitterOperator<>(
+                true,
                 true,
                 commitUser == null ? initialCommitUser : commitUser,
                 (user, metricGroup) ->
@@ -676,6 +740,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
             CommittableStateManager<ManifestCommittable> committableStateManager,
             ThrowingConsumer<StateInitializationContext, Exception> initializeFunction) {
         return new CommitterOperator<Committable, ManifestCommittable>(
+                true,
                 true,
                 commitUser == null ? initialCommitUser : commitUser,
                 (user, metricGroup) ->

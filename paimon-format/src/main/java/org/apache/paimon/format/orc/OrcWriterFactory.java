@@ -42,6 +42,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
 
+import static org.apache.paimon.format.OrcOptions.ORC_WRITE_BATCH_SIZE;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
@@ -128,7 +129,7 @@ public class OrcWriterFactory implements FormatWriterFactory {
                 vectorizer,
                 new WriterImpl(null, unusedPath, opts),
                 out,
-                coreOptions.orcWriteBatch());
+                coreOptions.toConfiguration().get(ORC_WRITE_BATCH_SIZE));
     }
 
     @VisibleForTesting

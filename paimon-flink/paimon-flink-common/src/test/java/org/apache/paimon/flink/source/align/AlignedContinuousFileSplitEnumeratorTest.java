@@ -34,7 +34,6 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.source.StreamTableScan;
-import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -54,6 +53,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -149,8 +149,7 @@ public class AlignedContinuousFileSplitEnumeratorTest extends FileSplitEnumerato
                         .build();
         assertThatThrownBy(() -> enumerator.snapshotState(1L))
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
-                                "Timeout while waiting for snapshot from paimon source."));
+                        anyCauseMatches("Timeout while waiting for snapshot from paimon source."));
 
         List<FileStoreSourceSplit> splits = new ArrayList<>();
         for (int i = 1; i <= 2; i++) {

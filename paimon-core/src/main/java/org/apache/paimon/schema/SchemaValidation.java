@@ -20,6 +20,7 @@ package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
+import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryString;
@@ -41,11 +42,12 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
+import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MAX;
+import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
@@ -56,6 +58,7 @@ import static org.apache.paimon.CoreOptions.SCAN_MODE;
 import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
 import static org.apache.paimon.CoreOptions.SCAN_TAG_NAME;
 import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP_MILLIS;
+import static org.apache.paimon.CoreOptions.SCAN_WATERMARK;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.STREAMING_READ_OVERWRITE;
@@ -84,9 +87,15 @@ public class SchemaValidation {
 
         CoreOptions options = new CoreOptions(schema.options());
 
+        validateBucket(schema, options);
+
         validateDefaultValues(schema);
 
         validateStartupMode(options);
+
+        validateFieldsPrefix(schema, options);
+
+        validateSequenceField(schema, options);
 
         validateSequenceGroup(schema, options);
 
@@ -117,6 +126,15 @@ public class SchemaValidation {
                         + " should not be larger than "
                         + SNAPSHOT_NUM_RETAINED_MAX.key());
 
+        checkArgument(
+                options.changelogNumRetainMin() > 0,
+                CHANGELOG_NUM_RETAINED_MIN.key() + " should be at least 1");
+        checkArgument(
+                options.changelogNumRetainMin() <= options.changelogNumRetainMax(),
+                CHANGELOG_NUM_RETAINED_MIN.key()
+                        + " should not be larger than "
+                        + CHANGELOG_NUM_RETAINED_MAX.key());
+
         // Get the format type here which will try to convert string value to {@Code
         // FileFormatType}. If the string value is illegal, an exception will be thrown.
         CoreOptions.FileFormatType fileFormatType = options.formatType();
@@ -140,18 +158,6 @@ public class SchemaValidation {
                                             f, KEY_FIELD_PREFIX));
                         });
 
-        if (options.bucket() == -1 && options.toMap().get(BUCKET_KEY.key()) != null) {
-            throw new RuntimeException(
-                    "Cannot define 'bucket-key' in unaware or dynamic bucket mode.");
-        }
-
-        if (options.bucket() == -1
-                && schema.primaryKeys().isEmpty()
-                && options.toMap().get(FULL_COMPACTION_DELTA_COMMITS.key()) != null) {
-            throw new RuntimeException(
-                    "AppendOnlyTable of unware or dynamic bucket does not support 'full-compaction.delta-commits'");
-        }
-
         if (schema.primaryKeys().isEmpty() && options.streamingReadOverwrite()) {
             throw new RuntimeException(
                     "Doesn't support streaming read the changes from overwrite when the primary keys are not defined.");
@@ -164,58 +170,23 @@ public class SchemaValidation {
             }
         }
 
-        Optional<String> sequenceField = options.sequenceField();
-        sequenceField.ifPresent(
-                field ->
-                        checkArgument(
-                                schema.fieldNames().contains(field),
-                                "Nonexistent sequence field: '%s'",
-                                field));
-
-        Optional<String> rowkindField = options.rowkindField();
-        rowkindField.ifPresent(
-                field ->
-                        checkArgument(
-                                schema.fieldNames().contains(field),
-                                "Nonexistent rowkind field: '%s'",
-                                field));
-
-        sequenceField.ifPresent(
-                field ->
-                        checkArgument(
-                                options.fieldAggFunc(field) == null,
-                                "Should not define aggregation on sequence field: '%s'",
-                                field));
-
-        CoreOptions.MergeEngine mergeEngine = options.mergeEngine();
-        if (mergeEngine == CoreOptions.MergeEngine.FIRST_ROW) {
-            if (sequenceField.isPresent()) {
-                throw new IllegalArgumentException(
-                        "Do not support use sequence field on FIRST_MERGE merge engine");
-            }
-
-            if (changelogProducer != ChangelogProducer.LOOKUP) {
+        if (options.mergeEngine() == MergeEngine.FIRST_ROW) {
+            if (options.changelogProducer() != ChangelogProducer.LOOKUP) {
                 throw new IllegalArgumentException(
                         "Only support 'lookup' changelog-producer on FIRST_MERGE merge engine");
             }
         }
 
-        if (schema.crossPartitionUpdate()) {
-            if (options.bucket() != -1) {
-                throw new IllegalArgumentException(
-                        String.format(
-                                "You should use dynamic bucket (bucket = -1) mode in cross partition update case "
-                                        + "(Primary key constraint %s not include all partition fields %s).",
-                                schema.primaryKeys(), schema.partitionKeys()));
-            }
+        options.rowkindField()
+                .ifPresent(
+                        field ->
+                                checkArgument(
+                                        schema.fieldNames().contains(field),
+                                        "Rowkind field: '%s' can not be found in table schema.",
+                                        field));
 
-            if (sequenceField.isPresent()) {
-                throw new IllegalArgumentException(
-                        String.format(
-                                "You can not use sequence.field in cross partition update case "
-                                        + "(Primary key constraint %s not include all partition fields %s).",
-                                schema.primaryKeys(), schema.partitionKeys()));
-            }
+        if (options.deletionVectorsEnabled()) {
+            validateForDeletionVectors(schema, options);
         }
     }
 
@@ -257,7 +228,11 @@ public class SchemaValidation {
                     Collections.singletonList(SCAN_TIMESTAMP_MILLIS));
         } else if (options.startupMode() == CoreOptions.StartupMode.FROM_SNAPSHOT) {
             checkExactOneOptionExistInMode(
-                    options, options.startupMode(), SCAN_SNAPSHOT_ID, SCAN_TAG_NAME);
+                    options,
+                    options.startupMode(),
+                    SCAN_SNAPSHOT_ID,
+                    SCAN_TAG_NAME,
+                    SCAN_WATERMARK);
             checkOptionsConflict(
                     options,
                     Arrays.asList(
@@ -368,6 +343,23 @@ public class SchemaValidation {
         return configOptions.stream().map(ConfigOption::key).collect(Collectors.joining(","));
     }
 
+    private static void validateFieldsPrefix(TableSchema schema, CoreOptions options) {
+        List<String> fieldNames = schema.fieldNames();
+        options.toMap()
+                .keySet()
+                .forEach(
+                        k -> {
+                            if (k.startsWith(FIELDS_PREFIX)) {
+                                String fieldName = k.split("\\.")[1];
+                                checkArgument(
+                                        fieldNames.contains(fieldName),
+                                        String.format(
+                                                "Field %s can not be found in table schema.",
+                                                fieldName));
+                            }
+                        });
+    }
+
     private static void validateSequenceGroup(TableSchema schema, CoreOptions options) {
         Map<String, Set<String>> fields2Group = new HashMap<>();
         for (Map.Entry<String, String> entry : options.toMap().entrySet()) {
@@ -466,6 +458,87 @@ public class SchemaValidation {
                                     defaultValueStr, field.name(), field.type()),
                             e);
                 }
+            }
+        }
+    }
+
+    private static void validateForDeletionVectors(TableSchema schema, CoreOptions options) {
+        checkArgument(
+                !schema.primaryKeys().isEmpty(),
+                "Deletion vectors mode is only supported for tables with primary keys.");
+
+        checkArgument(
+                options.changelogProducer() == ChangelogProducer.NONE
+                        || options.changelogProducer() == ChangelogProducer.LOOKUP,
+                "Deletion vectors mode is only supported for none or lookup changelog producer now.");
+
+        checkArgument(
+                !options.mergeEngine().equals(MergeEngine.FIRST_ROW),
+                "First row merge engine does not need deletion vectors because there is no deletion of old data in this merge engine.");
+    }
+
+    private static void validateSequenceField(TableSchema schema, CoreOptions options) {
+        List<String> sequenceField = options.sequenceField();
+        if (sequenceField.size() > 0) {
+            Map<String, Integer> fieldCount =
+                    sequenceField.stream()
+                            .collect(Collectors.toMap(field -> field, field -> 1, Integer::sum));
+
+            sequenceField.forEach(
+                    field -> {
+                        checkArgument(
+                                schema.fieldNames().contains(field),
+                                "Sequence field: '%s' can not be found in table schema.",
+                                field);
+
+                        checkArgument(
+                                options.fieldAggFunc(field) == null,
+                                "Should not define aggregation on sequence field: '%s'.",
+                                field);
+
+                        checkArgument(
+                                fieldCount.get(field) == 1,
+                                "Sequence field '%s' is defined repeatedly.",
+                                field);
+                    });
+
+            if (options.mergeEngine() == MergeEngine.FIRST_ROW) {
+                throw new IllegalArgumentException(
+                        "Do not support use sequence field on FIRST_MERGE merge engine.");
+            }
+
+            if (schema.crossPartitionUpdate()) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "You can not use sequence.field in cross partition update case "
+                                        + "(Primary key constraint '%s' not include all partition fields '%s').",
+                                schema.primaryKeys(), schema.partitionKeys()));
+            }
+        }
+    }
+
+    private static void validateBucket(TableSchema schema, CoreOptions options) {
+        int bucket = options.bucket();
+        if (bucket == -1) {
+            if (options.toMap().get(BUCKET_KEY.key()) != null) {
+                throw new RuntimeException(
+                        "Cannot define 'bucket-key' in unaware or dynamic bucket mode.");
+            }
+
+            if (schema.primaryKeys().isEmpty()
+                    && options.toMap().get(FULL_COMPACTION_DELTA_COMMITS.key()) != null) {
+                throw new RuntimeException(
+                        "AppendOnlyTable of unware or dynamic bucket does not support 'full-compaction.delta-commits'");
+            }
+        } else if (bucket < 1) {
+            throw new RuntimeException("The number of buckets needs to be greater than 0.");
+        } else {
+            if (schema.crossPartitionUpdate()) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "You should use dynamic bucket (bucket = -1) mode in cross partition update case "
+                                        + "(Primary key constraint %s not include all partition fields %s).",
+                                schema.primaryKeys(), schema.partitionKeys()));
             }
         }
     }

@@ -15,11 +15,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark.statistics
 
 import org.apache.paimon.spark.PaimonColumnStats
 
-import org.apache.spark.sql.Utils
+import org.apache.spark.sql.PaimonUtils
 import org.apache.spark.sql.catalyst.{SQLConfHelper, StructFilters}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, BoundReference, Expression}
 import org.apache.spark.sql.catalyst.plans.logical
@@ -37,7 +38,7 @@ trait StatisticsHelperBase extends SQLConfHelper {
 
   val requiredSchema: StructType
 
-  def filterStatistics(v2Stats: Statistics, filters: Array[Filter]): Statistics = {
+  def filterStatistics(v2Stats: Statistics, filters: Seq[Filter]): Statistics = {
     val attrs: Seq[AttributeReference] =
       requiredSchema.map(f => AttributeReference(f.name, f.dataType, f.nullable, f.metadata)())
     val condition = filterToCondition(filters, attrs)
@@ -51,9 +52,7 @@ trait StatisticsHelperBase extends SQLConfHelper {
     }
   }
 
-  private def filterToCondition(
-      filters: Array[Filter],
-      attrs: Seq[Attribute]): Option[Expression] = {
+  private def filterToCondition(filters: Seq[Filter], attrs: Seq[Attribute]): Option[Expression] = {
     StructFilters.filterToExpression(filters.reduce(And), toRef).map {
       expression =>
         expression.transform {
@@ -85,7 +84,7 @@ trait StatisticsHelperBase extends SQLConfHelper {
         v1Stats.attributeStats.foreach {
           case (attr, v1ColStats) =>
             columnStatsMap.put(
-              Utils.fieldReference(attr.name),
+              PaimonUtils.fieldReference(attr.name),
               PaimonColumnStats(v1ColStats)
             )
         }

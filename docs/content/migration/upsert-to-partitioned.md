@@ -59,7 +59,7 @@ CREATE CATALOG my_hive WITH (
 
 USE CATALOG my_hive;
 
-CREATE TABLE mydb.T (
+CREATE TABLE mydb.t (
     pk INT,
     col1 STRING,
     col2 STRING
@@ -71,7 +71,7 @@ CREATE TABLE mydb.T (
 INSERT INTO t VALUES (1, '10', '100'), (2, '20', '200');
 
 -- create tag '2023-10-16' for snapshot 1
-CALL sys.create_tag('mydb.T', '2023-10-16', 1);
+CALL sys.create_tag('mydb.t', '2023-10-16', 1);
 ```
 
 {{< /tab >}}
@@ -82,13 +82,13 @@ CALL sys.create_tag('mydb.T', '2023-10-16', 1);
 {{< tabs "Query table in Hive with Partition Pruning 1" >}}
 {{< tab "Hive" >}}
 ```sql
-SHOW PARTITIONS T;
+SHOW PARTITIONS t;
 /*
 OK
 dt=2023-10-16
 */
 
-SELECT * FROM T WHERE dt='2023-10-16';
+SELECT * FROM t WHERE dt='2023-10-16';
 /*
 OK
 1 10 100 2023-10-16
@@ -120,7 +120,7 @@ CREATE CATALOG my_hive WITH (
 
 USE CATALOG my_hive;
 
-CREATE TABLE mydb.T (
+CREATE TABLE mydb.t (
     pk INT,
     col1 STRING,
     col2 STRING
@@ -135,7 +135,7 @@ CREATE TABLE mydb.T (
 INSERT INTO t VALUES (1, '10', '100'), (2, '20', '200');
 
 -- create tag '2023-10-16' for snapshot 1
-CALL sys.create_tag('mydb.T', '2023-10-16', 1);
+CALL sys.create_tag('mydb.t', '2023-10-16', 1);
 
 -- new data in '2023-10-17'
 INSERT INTO t VALUES (3, '30', '300'), (4, '40', '400');
@@ -152,14 +152,14 @@ INSERT INTO t VALUES (3, '30', '300'), (4, '40', '400');
 {{< tabs "Query table in Hive with Partition Pruning 2" >}}
 {{< tab "Hive" >}}
 ```sql
-SHOW PARTITIONS T;
+SHOW PARTITIONS t;
 /*
 OK
 dt=2023-10-16
 dt=2023-10-17
 */
 
-SELECT * FROM T WHERE dt='2023-10-17';
+SELECT * FROM t WHERE dt='2023-10-17';
 -- preview tag '2023-10-17'
 /*
 OK

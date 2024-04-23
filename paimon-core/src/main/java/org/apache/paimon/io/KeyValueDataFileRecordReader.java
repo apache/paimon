@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,19 +20,9 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueSerializer;
-import org.apache.paimon.PartitionSettedRow;
-import org.apache.paimon.casting.CastFieldGetter;
-import org.apache.paimon.casting.CastedRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.PartitionInfo;
-import org.apache.paimon.data.columnar.ColumnarRowIterator;
-import org.apache.paimon.format.FormatReaderFactory;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.FileUtils;
-import org.apache.paimon.utils.ProjectedRow;
 
 import javax.annotation.Nullable;
 
@@ -44,32 +34,18 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
     private final RecordReader<InternalRow> reader;
     private final KeyValueSerializer serializer;
     private final int level;
-    @Nullable private final int[] indexMapping;
-    @Nullable private final PartitionInfo partitionInfo;
-    @Nullable private final CastFieldGetter[] castMapping;
+    private final boolean ignoreDelete;
 
     public KeyValueDataFileRecordReader(
-            FileIO fileIO,
-            FormatReaderFactory readerFactory,
-            Path path,
+            RecordReader<InternalRow> reader,
             RowType keyType,
             RowType valueType,
             int level,
-            @Nullable Integer poolSize,
-            @Nullable int[] indexMapping,
-            @Nullable CastFieldGetter[] castMapping,
-            @Nullable PartitionInfo partitionInfo)
-            throws IOException {
-        FileUtils.checkExists(fileIO, path);
-        this.reader =
-                poolSize == null
-                        ? readerFactory.createReader(fileIO, path)
-                        : readerFactory.createReader(fileIO, path, poolSize);
+            boolean ignoreDelete) {
+        this.reader = reader;
         this.serializer = new KeyValueSerializer(keyType, valueType);
         this.level = level;
-        this.indexMapping = indexMapping;
-        this.partitionInfo = partitionInfo;
-        this.castMapping = castMapping;
+        this.ignoreDelete = ignoreDelete;
     }
 
     @Nullable
@@ -80,28 +56,15 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
             return null;
         }
 
-        if (iterator instanceof ColumnarRowIterator) {
-            iterator = ((ColumnarRowIterator) iterator).mapping(partitionInfo, indexMapping);
-        } else {
-            if (partitionInfo != null) {
-                final PartitionSettedRow partitionSettedRow =
-                        PartitionSettedRow.from(partitionInfo);
-                iterator = iterator.transform(partitionSettedRow::replaceRow);
-            }
-            if (indexMapping != null) {
-                final ProjectedRow projectedRow = ProjectedRow.from(indexMapping);
-                iterator = iterator.transform(projectedRow::replaceRow);
-            }
-        }
-        if (castMapping != null) {
-            final CastedRow castedRow = CastedRow.from(castMapping);
-            iterator = iterator.transform(castedRow::replaceRow);
-        }
-        return iterator.transform(
-                internalRow ->
-                        internalRow == null
-                                ? null
-                                : serializer.fromRow(internalRow).setLevel(level));
+        RecordIterator<KeyValue> transformed =
+                iterator.transform(
+                        internalRow ->
+                                internalRow == null
+                                        ? null
+                                        : serializer.fromRow(internalRow).setLevel(level));
+        // In 0.7- versions, the delete records might be written into data file even when
+        // ignore-delete configured, so the reader should also filter the delete records
+        return ignoreDelete ? transformed.filter(KeyValue::isAdd) : transformed;
     }
 
     @Override

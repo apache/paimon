@@ -110,7 +110,7 @@ public final class PaimonAssertions {
      *
      * <pre>{@code
      * assertThat(throwable)
-     *     .extracting(FlinkAssertions::chainOfCauses, FlinkAssertions.STREAM_THROWABLE)
+     *     .extracting(PaimonAssertions::chainOfCauses, PaimonAssertions.STREAM_THROWABLE)
      * }</pre>
      */
     public static ListAssert<Throwable> assertThatChainOfCauses(Throwable root) {

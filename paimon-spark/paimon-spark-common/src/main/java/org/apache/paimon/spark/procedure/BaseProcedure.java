@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -26,6 +26,7 @@ import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.catalyst.analysis.NoSuchTableException;
 import org.apache.spark.sql.catalyst.expressions.GenericInternalRow;
+import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan;
 import org.apache.spark.sql.connector.catalog.CatalogPlugin;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.Table;
@@ -106,6 +107,11 @@ abstract class BaseProcedure implements Procedure {
                             "Couldn't load table '%s' in catalog '%s'", ident, tableCatalog.name());
             throw new RuntimeException(errMsg, e);
         }
+    }
+
+    protected LogicalPlan createRelation(Identifier ident) {
+        return DataSourceV2Relation.create(
+                loadSparkTable(ident), Option.apply(tableCatalog), Option.apply(ident));
     }
 
     protected void refreshSparkCache(Identifier ident, Table table) {

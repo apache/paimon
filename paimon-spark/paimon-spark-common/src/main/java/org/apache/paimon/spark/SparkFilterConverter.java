@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -24,6 +24,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 
 import org.apache.spark.sql.sources.And;
+import org.apache.spark.sql.sources.EqualNullSafe;
 import org.apache.spark.sql.sources.EqualTo;
 import org.apache.spark.sql.sources.Filter;
 import org.apache.spark.sql.sources.GreaterThan;
@@ -49,6 +50,7 @@ public class SparkFilterConverter {
     public static final List<String> SUPPORT_FILTERS =
             Arrays.asList(
                     "EqualTo",
+                    "EqualNullSafe",
                     "GreaterThan",
                     "GreaterThanOrEqual",
                     "LessThan",
@@ -69,6 +71,14 @@ public class SparkFilterConverter {
         this.builder = new PredicateBuilder(rowType);
     }
 
+    public Predicate convertIgnoreFailure(Filter filter) {
+        try {
+            return convert(filter);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     public Predicate convert(Filter filter) {
         if (filter instanceof EqualTo) {
             EqualTo eq = (EqualTo) filter;
@@ -76,6 +86,15 @@ public class SparkFilterConverter {
             int index = fieldIndex(eq.attribute());
             Object literal = convertLiteral(index, eq.value());
             return builder.equal(index, literal);
+        } else if (filter instanceof EqualNullSafe) {
+            EqualNullSafe eq = (EqualNullSafe) filter;
+            if (eq.value() == null) {
+                return builder.isNull(fieldIndex(eq.attribute()));
+            } else {
+                int index = fieldIndex(eq.attribute());
+                Object literal = convertLiteral(index, eq.value());
+                return builder.equal(index, literal);
+            }
         } else if (filter instanceof GreaterThan) {
             GreaterThan gt = (GreaterThan) filter;
             int index = fieldIndex(gt.attribute());
@@ -124,15 +143,13 @@ public class SparkFilterConverter {
             return builder.startsWith(index, literal);
         }
 
-        // TODO: In, NotIn, AlwaysTrue, AlwaysFalse, EqualNullSafe
+        // TODO: AlwaysTrue, AlwaysFalse
         throw new UnsupportedOperationException(
                 filter + " is unsupported. Support Filters: " + SUPPORT_FILTERS);
     }
 
     public Object convertLiteral(String field, Object value) {
-        int index = fieldIndex(field);
-        DataType type = rowType.getTypeAt(index);
-        return convertJavaObject(type, value);
+        return convertLiteral(fieldIndex(field), value);
     }
 
     private int fieldIndex(String field) {

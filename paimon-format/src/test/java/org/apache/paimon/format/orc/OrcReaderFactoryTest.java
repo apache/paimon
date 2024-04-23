@@ -19,6 +19,8 @@
 package org.apache.paimon.format.orc;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FormatReaderContext;
+import org.apache.paimon.format.OrcFormatReaderContext;
 import org.apache.paimon.format.orc.filter.OrcFilters;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -31,7 +33,9 @@ import org.apache.paimon.utils.DecimalUtils;
 import org.apache.paimon.utils.Projection;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hive.ql.io.sarg.PredicateLeaf;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -40,6 +44,8 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
@@ -137,6 +143,98 @@ class OrcReaderFactoryTest {
     }
 
     @Test
+    void testReadRowPosition() throws IOException {
+        OrcReaderFactory format = createFormat(FLAT_FILE_TYPE, new int[] {2, 0, 1});
+
+        AtomicInteger cnt = new AtomicInteger(0);
+        AtomicLong totalF0 = new AtomicLong(0);
+
+        LocalFileIO fileIO = new LocalFileIO();
+        try (RecordReader<InternalRow> reader =
+                format.createReader(
+                        new FormatReaderContext(fileIO, flatFile, fileIO.getFileSize(flatFile)))) {
+            reader.forEachRemainingWithPosition(
+                    (rowPosition, row) -> {
+                        assertThat(row.isNullAt(0)).isFalse();
+                        assertThat(row.isNullAt(1)).isFalse();
+                        assertThat(row.isNullAt(2)).isFalse();
+                        assertThat(row.getString(0).toString()).isNotNull();
+                        totalF0.addAndGet(row.getInt(1));
+                        assertThat(row.getString(2).toString()).isNotNull();
+                        // check row position
+                        assertThat(rowPosition).isEqualTo(cnt.get());
+                        cnt.incrementAndGet();
+                    });
+        }
+        // check that all rows have been read
+        assertThat(cnt.get()).isEqualTo(1920800);
+        assertThat(totalF0.get()).isEqualTo(1844737280400L);
+    }
+
+    @RepeatedTest(10)
+    void testReadRowPositionWithRandomFilterAndPool() throws IOException {
+        ArrayList<OrcFilters.Predicate> predicates = new ArrayList<>();
+        int randomStart = new Random().nextInt(1920800);
+        int randomPooSize = new Random().nextInt(3) + 1;
+        predicates.add(
+                new OrcFilters.Not(
+                        new OrcFilters.LessThanEquals(
+                                "_col0", PredicateLeaf.Type.LONG, randomStart)));
+        OrcReaderFactory format = createFormat(FLAT_FILE_TYPE, new int[] {2, 0, 1}, predicates);
+
+        AtomicBoolean isFirst = new AtomicBoolean(true);
+
+        LocalFileIO localFileIO = new LocalFileIO();
+        try (RecordReader<InternalRow> reader =
+                format.createReader(
+                        new OrcFormatReaderContext(
+                                localFileIO,
+                                flatFile,
+                                localFileIO.getFileSize(flatFile),
+                                randomPooSize))) {
+            reader.forEachRemainingWithPosition(
+                    (rowPosition, row) -> {
+                        // check filter: _col0 > randomStart
+                        // Note: the accuracy of filter is within flatFile's strip size
+                        if (isFirst.get()) {
+                            assertThat(randomStart - row.getInt(1)).isLessThan(5000);
+                            isFirst.set(false);
+                        }
+                        // check row position
+                        // Note: in flatFile, field _col0's value is row position + 1, we can use it
+                        // to check row position
+                        assertThat(rowPosition + 1).isEqualTo(row.getInt(1));
+                    });
+        }
+    }
+
+    @Test
+    void testReadRowPositionWithTransformAndFilter() throws IOException {
+        int randomPooSize = new Random().nextInt(3) + 1;
+        OrcReaderFactory format = createFormat(FLAT_FILE_TYPE, new int[] {2, 0, 1});
+
+        LocalFileIO localFileIO = new LocalFileIO();
+        try (RecordReader<InternalRow> reader =
+                format.createReader(
+                        new OrcFormatReaderContext(
+                                localFileIO,
+                                flatFile,
+                                localFileIO.getFileSize(flatFile),
+                                randomPooSize))) {
+            reader.transform(row -> row)
+                    .filter(row -> row.getInt(1) % 123 == 0)
+                    .forEachRemainingWithPosition(
+                            (rowPosition, row) -> {
+                                // check row position
+                                // Note: in flatFile, field _col0's value is row position + 1, we
+                                // can use it
+                                // to check row position
+                                assertThat(rowPosition + 1).isEqualTo(row.getInt(1));
+                            });
+        }
+    }
+
+    @Test
     void testReadDecimalTypeFile() throws IOException {
         OrcReaderFactory format = createFormat(DECIMAL_FILE_TYPE, new int[] {0});
 
@@ -184,12 +282,17 @@ class OrcReaderFactoryTest {
 
     private RecordReader<InternalRow> createReader(OrcReaderFactory format, Path split)
             throws IOException {
-        return format.createReader(new LocalFileIO(), split);
+        LocalFileIO fileIO = new LocalFileIO();
+        return format.createReader(
+                new FormatReaderContext(fileIO, split, fileIO.getFileSize(split)));
     }
 
     private void forEach(OrcReaderFactory format, Path file, Consumer<InternalRow> action)
             throws IOException {
-        RecordReader<InternalRow> reader = format.createReader(new LocalFileIO(), file);
+        LocalFileIO fileIO = new LocalFileIO();
+        RecordReader<InternalRow> reader =
+                format.createReader(
+                        new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)));
         reader.forEachRemaining(action);
     }
 

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.stats;
 
-import org.apache.paimon.casting.CastExecutor;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.IndexCastMapping;
 import org.apache.paimon.schema.SchemaEvolutionUtil;
 import org.apache.paimon.types.DataField;
@@ -26,7 +26,9 @@ import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicReference;
@@ -65,17 +67,23 @@ public class FieldStatsConverters {
                     IndexCastMapping indexCastMapping =
                             createIndexCastMapping(schemaTableFields, dataFields);
                     @Nullable int[] indexMapping = indexCastMapping.getIndexMapping();
-                    CastExecutor<Object, Object>[] castExecutors =
-                            (CastExecutor<Object, Object>[])
-                                    SchemaEvolutionUtil.createConvertMapping(
-                                            schemaTableFields, dataFields, indexMapping);
                     // Create field stats array serializer with schema evolution
                     return new FieldStatsArraySerializer(
                             new RowType(dataFields),
                             indexMapping,
-                            castExecutors,
                             indexCastMapping.getCastMapping());
                 });
+    }
+
+    public Predicate convertFilter(long dataSchemaId, Predicate filter) {
+        return tableSchemaId == dataSchemaId
+                ? filter
+                : Objects.requireNonNull(
+                                SchemaEvolutionUtil.createDataFilters(
+                                        schemaFields.apply(tableSchemaId),
+                                        schemaFields.apply(dataSchemaId),
+                                        Collections.singletonList(filter)))
+                        .get(0);
     }
 
     public List<DataField> tableDataFields() {

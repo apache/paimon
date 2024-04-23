@@ -32,17 +32,17 @@ import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader.ReaderSupplier;
 import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
 import org.apache.paimon.mergetree.compact.SortMergeReader;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.sort.SortBuffer;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TinyIntType;
+import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.MutableObjectIterator;
 import org.apache.paimon.utils.OffsetRow;
@@ -53,6 +53,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.stream.IntStream;
 
 import static org.apache.paimon.schema.SystemColumns.SEQUENCE_NUMBER;
 import static org.apache.paimon.schema.SystemColumns.VALUE_KIND;
@@ -67,6 +68,7 @@ public class MergeSorter {
     private final int spillThreshold;
     private final int spillSortMaxNumFiles;
     private final String compression;
+    private final MemorySize maxDiskSize;
 
     private final MemorySegmentPool memoryPool;
 
@@ -86,6 +88,7 @@ public class MergeSorter {
         this.memoryPool =
                 new CachelessSegmentPool(options.sortSpillBufferSize(), options.pageSize());
         this.ioManager = ioManager;
+        this.maxDiskSize = options.writeBufferSpillDiskSize();
     }
 
     public MemorySegmentPool memoryPool() {
@@ -103,10 +106,12 @@ public class MergeSorter {
     public <T> RecordReader<T> mergeSort(
             List<ReaderSupplier<KeyValue>> lazyReaders,
             Comparator<InternalRow> keyComparator,
+            @Nullable FieldsComparator userDefinedSeqComparator,
             MergeFunctionWrapper<T> mergeFunction)
             throws IOException {
         if (ioManager != null && lazyReaders.size() > spillThreshold) {
-            return spillMergeSort(lazyReaders, keyComparator, mergeFunction);
+            return spillMergeSort(
+                    lazyReaders, keyComparator, userDefinedSeqComparator, mergeFunction);
         }
 
         List<RecordReader<KeyValue>> readers = new ArrayList<>(lazyReaders.size());
@@ -121,15 +126,16 @@ public class MergeSorter {
         }
 
         return SortMergeReader.createSortMergeReader(
-                readers, keyComparator, mergeFunction, sortEngine);
+                readers, keyComparator, userDefinedSeqComparator, mergeFunction, sortEngine);
     }
 
     private <T> RecordReader<T> spillMergeSort(
             List<ReaderSupplier<KeyValue>> readers,
             Comparator<InternalRow> keyComparator,
+            @Nullable FieldsComparator userDefinedSeqComparator,
             MergeFunctionWrapper<T> mergeFunction)
             throws IOException {
-        ExternalSorterWithLevel sorter = new ExternalSorterWithLevel();
+        ExternalSorterWithLevel sorter = new ExternalSorterWithLevel(userDefinedSeqComparator);
         ConcatRecordReader.create(readers).forIOEachRemaining(sorter::put);
         sorter.flushMemory();
 
@@ -176,15 +182,25 @@ public class MergeSorter {
 
         private final SortBuffer buffer;
 
-        public ExternalSorterWithLevel() {
+        public ExternalSorterWithLevel(@Nullable FieldsComparator userDefinedSeqComparator) {
             if (memoryPool.freePages() < 3) {
                 throw new IllegalArgumentException(
                         "Write buffer requires a minimum of 3 page memory, please increase write buffer memory size.");
             }
 
-            // user key + sequenceNumber
-            List<DataType> sortKeyTypes = new ArrayList<>(keyType.getFieldTypes());
-            sortKeyTypes.add(new BigIntType(false));
+            // key fields
+            IntStream sortFields = IntStream.range(0, keyType.getFieldCount());
+
+            // user define sequence fields
+            if (userDefinedSeqComparator != null) {
+                IntStream udsFields =
+                        IntStream.of(userDefinedSeqComparator.compareFields())
+                                .map(operand -> operand + keyType.getFieldCount() + 3);
+                sortFields = IntStream.concat(sortFields, udsFields);
+            }
+
+            // sequence field
+            sortFields = IntStream.concat(sortFields, IntStream.of(keyType.getFieldCount()));
 
             // row type
             List<DataField> fields = new ArrayList<>(keyType.getFields());
@@ -196,11 +212,12 @@ public class MergeSorter {
             this.buffer =
                     BinaryExternalSortBuffer.create(
                             ioManager,
-                            DataTypes.ROW(sortKeyTypes.toArray(new DataType[0])),
                             new RowType(fields),
+                            sortFields.toArray(),
                             memoryPool,
                             spillSortMaxNumFiles,
-                            compression);
+                            compression,
+                            maxDiskSize);
         }
 
         public boolean put(KeyValue keyValue) throws IOException {

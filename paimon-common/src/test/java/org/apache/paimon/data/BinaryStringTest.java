@@ -1,12 +1,13 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.	See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The ASF licenses this file to You under the Apache License, Version 2.0
- * (the "License"); you may not use this file except in compliance with
- * the License.	You may obtain a copy of the License at
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
  *
- *		http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -25,7 +26,6 @@ import org.apache.paimon.utils.SortUtil;
 import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.extension.ExtendWith;
 
-import java.io.UnsupportedEncodingException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.Random;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.apache.paimon.data.BinaryString.EMPTY_UTF8;
 import static org.apache.paimon.data.BinaryString.blankString;
 import static org.apache.paimon.data.BinaryString.fromBytes;
 import static org.apache.paimon.utils.DecimalUtils.castFrom;
@@ -46,14 +47,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 @ExtendWith(ParameterizedTestExtension.class)
 public class BinaryStringTest {
 
-    private BinaryString empty = fromString("");
-
     private final Mode mode;
 
     public BinaryStringTest(Mode mode) {
         this.mode = mode;
     }
 
+    @SuppressWarnings("unused")
     @Parameters(name = "{0}")
     public static List<Mode> getVarSeg() {
         return Arrays.asList(Mode.ONE_SEG, Mode.MULTI_SEGS, Mode.STRING, Mode.RANDOM);
@@ -77,7 +77,7 @@ public class BinaryStringTest {
                 mode = Mode.ONE_SEG;
             } else if (rnd == 1) {
                 mode = Mode.MULTI_SEGS;
-            } else if (rnd == 2) {
+            } else {
                 mode = Mode.STRING;
             }
         }
@@ -142,10 +142,10 @@ public class BinaryStringTest {
 
     @TestTemplate
     public void emptyStringTest() {
-        assertThat(fromString("")).isEqualTo(empty);
-        assertThat(fromBytes(new byte[0])).isEqualTo(empty);
-        assertThat(empty.numChars()).isEqualTo(0);
-        assertThat(empty.getSizeInBytes()).isEqualTo(0);
+        assertThat(fromString("")).isEqualTo(EMPTY_UTF8);
+        assertThat(fromBytes(new byte[0])).isEqualTo(EMPTY_UTF8);
+        assertThat(EMPTY_UTF8.numChars()).isEqualTo(0);
+        assertThat(EMPTY_UTF8.getSizeInBytes()).isEqualTo(0);
     }
 
     @TestTemplate
@@ -223,7 +223,7 @@ public class BinaryStringTest {
 
     @TestTemplate
     public void contains() {
-        assertThat(empty.contains(empty)).isTrue();
+        assertThat(EMPTY_UTF8.contains(EMPTY_UTF8)).isTrue();
         assertThat(fromString("hello").contains(fromString("ello"))).isTrue();
         assertThat(fromString("hello").contains(fromString("vello"))).isFalse();
         assertThat(fromString("hello").contains(fromString("hellooo"))).isFalse();
@@ -234,7 +234,7 @@ public class BinaryStringTest {
 
     @TestTemplate
     public void startsWith() {
-        assertThat(empty.startsWith(empty)).isTrue();
+        assertThat(EMPTY_UTF8.startsWith(EMPTY_UTF8)).isTrue();
         assertThat(fromString("hello").startsWith(fromString("hell"))).isTrue();
         assertThat(fromString("hello").startsWith(fromString("ell"))).isFalse();
         assertThat(fromString("hello").startsWith(fromString("hellooo"))).isFalse();
@@ -245,7 +245,7 @@ public class BinaryStringTest {
 
     @TestTemplate
     public void endsWith() {
-        assertThat(empty.endsWith(empty)).isTrue();
+        assertThat(EMPTY_UTF8.endsWith(EMPTY_UTF8)).isTrue();
         assertThat(fromString("hello").endsWith(fromString("ello"))).isTrue();
         assertThat(fromString("hello").endsWith(fromString("ellov"))).isFalse();
         assertThat(fromString("hello").endsWith(fromString("hhhello"))).isFalse();
@@ -256,7 +256,7 @@ public class BinaryStringTest {
 
     @TestTemplate
     public void substring() {
-        assertThat(fromString("hello").substring(0, 0)).isEqualTo(empty);
+        assertThat(fromString("hello").substring(0, 0)).isEqualTo(EMPTY_UTF8);
         assertThat(fromString("hello").substring(1, 3)).isEqualTo(fromString("el"));
         assertThat(fromString("数据砖头").substring(0, 1)).isEqualTo(fromString("数"));
         assertThat(fromString("数据砖头").substring(1, 3)).isEqualTo(fromString("据砖"));
@@ -266,9 +266,9 @@ public class BinaryStringTest {
 
     @TestTemplate
     public void indexOf() {
-        assertThat(empty.indexOf(empty, 0)).isEqualTo(0);
-        assertThat(empty.indexOf(fromString("l"), 0)).isEqualTo(-1);
-        assertThat(fromString("hello").indexOf(empty, 0)).isEqualTo(0);
+        assertThat(EMPTY_UTF8.indexOf(EMPTY_UTF8, 0)).isEqualTo(0);
+        assertThat(EMPTY_UTF8.indexOf(fromString("l"), 0)).isEqualTo(-1);
+        assertThat(fromString("hello").indexOf(EMPTY_UTF8, 0)).isEqualTo(0);
         assertThat(fromString("hello").indexOf(fromString("l"), 0)).isEqualTo(2);
         assertThat(fromString("hello").indexOf(fromString("l"), 3)).isEqualTo(3);
         assertThat(fromString("hello").indexOf(fromString("a"), 0)).isEqualTo(-1);
@@ -299,24 +299,21 @@ public class BinaryStringTest {
         writer.writeString(5, BinaryString.fromString("!@#$%^*"));
         writer.complete();
 
-        assertThat(((BinaryString) row.getString(0)).toUpperCase()).isEqualTo(fromString("A"));
-        assertThat(((BinaryString) row.getString(1)).toUpperCase()).isEqualTo(fromString("我是中国人"));
-        assertThat(((BinaryString) row.getString(1)).toLowerCase()).isEqualTo(fromString("我是中国人"));
-        assertThat(((BinaryString) row.getString(3)).toUpperCase())
-                .isEqualTo(fromString("ABCDEFG"));
-        assertThat(((BinaryString) row.getString(3)).toLowerCase())
-                .isEqualTo(fromString("abcdefg"));
-        assertThat(((BinaryString) row.getString(5)).toUpperCase())
-                .isEqualTo(fromString("!@#$%^*"));
-        assertThat(((BinaryString) row.getString(5)).toLowerCase())
-                .isEqualTo(fromString("!@#$%^*"));
+        assertThat(row.getString(0).toUpperCase()).isEqualTo(fromString("A"));
+        assertThat(row.getString(1).toUpperCase()).isEqualTo(fromString("我是中国人"));
+        assertThat(row.getString(1).toLowerCase()).isEqualTo(fromString("我是中国人"));
+        assertThat(row.getString(3).toUpperCase()).isEqualTo(fromString("ABCDEFG"));
+        assertThat(row.getString(3).toLowerCase()).isEqualTo(fromString("abcdefg"));
+        assertThat(row.getString(5).toUpperCase()).isEqualTo(fromString("!@#$%^*"));
+        assertThat(row.getString(5).toLowerCase()).isEqualTo(fromString("!@#$%^*"));
     }
 
     @TestTemplate
-    public void testcastFrom() {
+    public void testCastFrom() {
         class DecimalTestData {
-            private String str;
-            private int precision, scale;
+            private final String str;
+            private final int precision;
+            private final int scale;
 
             private DecimalTestData(String str, int precision, int scale) {
                 this.str = str;
@@ -390,7 +387,7 @@ public class BinaryStringTest {
         writer.complete();
         for (int i = 0; i < data.length; i++) {
             DecimalTestData d = data[i];
-            assertThat(castFrom((BinaryString) row.getString(i), d.precision, d.scale))
+            assertThat(castFrom(row.getString(i), d.precision, d.scale))
                     .isEqualTo(Decimal.fromBigDecimal(new BigDecimal(d.str), d.precision, d.scale));
         }
     }
@@ -406,21 +403,21 @@ public class BinaryStringTest {
             str3 = BinaryString.fromAddress(segments, 15, 0);
         }
 
-        assertThat(BinaryString.EMPTY_UTF8.compareTo(str2)).isLessThan(0);
-        assertThat(str2.compareTo(BinaryString.EMPTY_UTF8)).isGreaterThan(0);
+        assertThat(EMPTY_UTF8.compareTo(str2)).isLessThan(0);
+        assertThat(str2.compareTo(EMPTY_UTF8)).isGreaterThan(0);
 
-        assertThat(BinaryString.EMPTY_UTF8.compareTo(str3)).isEqualTo(0);
-        assertThat(str3.compareTo(BinaryString.EMPTY_UTF8)).isEqualTo(0);
+        assertThat(EMPTY_UTF8.compareTo(str3)).isEqualTo(0);
+        assertThat(str3.compareTo(EMPTY_UTF8)).isEqualTo(0);
 
-        assertThat(str2).isNotEqualTo(BinaryString.EMPTY_UTF8);
-        assertThat(BinaryString.EMPTY_UTF8).isNotEqualTo(str2);
+        assertThat(str2).isNotEqualTo(EMPTY_UTF8);
+        assertThat(EMPTY_UTF8).isNotEqualTo(str2);
 
-        assertThat(str3).isEqualTo(BinaryString.EMPTY_UTF8);
-        assertThat(BinaryString.EMPTY_UTF8).isEqualTo(str3);
+        assertThat(str3).isEqualTo(EMPTY_UTF8);
+        assertThat(EMPTY_UTF8).isEqualTo(str3);
     }
 
     @TestTemplate
-    public void testEncodeWithIllegalCharacter() throws UnsupportedEncodingException {
+    public void testEncodeWithIllegalCharacter() {
 
         // Tis char array has some illegal character, such as 55357
         // the jdk ignores theses character and cast them to '?'
@@ -433,11 +430,11 @@ public class BinaryStringTest {
 
         String str = new String(chars);
 
-        assertThat(BinaryString.encodeUTF8(str)).isEqualTo(str.getBytes("UTF-8"));
+        assertThat(BinaryString.encodeUTF8(str)).isEqualTo(str.getBytes(UTF_8));
     }
 
     @TestTemplate
-    public void testDecodeWithIllegalUtf8Bytes() throws UnsupportedEncodingException {
+    public void testDecodeWithIllegalUtf8Bytes() {
 
         // illegal utf-8 bytes
         byte[] bytes =

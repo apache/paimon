@@ -19,21 +19,25 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.branch.TableBranch;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.util.HashMap;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
+import java.util.PriorityQueue;
+import java.util.SortedMap;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.utils.FileUtils.listVersionedFileStatus;
+import static org.apache.paimon.utils.FileUtils.listVersionedDirectories;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Manager for {@code Branch}. */
@@ -146,23 +150,44 @@ public class BranchManager {
         return fileExists(branchPath);
     }
 
-    /** Get branch->tag pair. */
-    public Map<String, String> branches() {
-        Map<String, String> branchTags = new HashMap<>();
-
+    /** Get branch count for the table. */
+    public long branchCount() {
         try {
-            List<Path> paths =
-                    listVersionedFileStatus(fileIO, branchDirectory(), BRANCH_PREFIX)
-                            .map(FileStatus::getPath)
-                            .collect(Collectors.toList());
-            for (Path path : paths) {
-                String branchName = path.getName().substring(BRANCH_PREFIX.length());
-                branchTags.put(branchName, tagManager.branchTags(branchName).get(0));
-            }
+            return listVersionedDirectories(fileIO, branchDirectory(), BRANCH_PREFIX).count();
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+    }
 
-        return branchTags;
+    /** Get all branches for the table. */
+    public List<TableBranch> branches() {
+        try {
+            List<Pair<Path, Long>> paths =
+                    listVersionedDirectories(fileIO, branchDirectory(), BRANCH_PREFIX)
+                            .map(status -> Pair.of(status.getPath(), status.getModificationTime()))
+                            .collect(Collectors.toList());
+            PriorityQueue<TableBranch> pq =
+                    new PriorityQueue<>(Comparator.comparingLong(TableBranch::getCreateTime));
+            for (Pair<Path, Long> path : paths) {
+                String branchName = path.getLeft().getName().substring(BRANCH_PREFIX.length());
+                FileStoreTable branchTable =
+                        FileStoreTableFactory.create(
+                                fileIO, new Path(getBranchPath(tablePath, branchName)));
+                SortedMap<Snapshot, List<String>> snapshotTags = branchTable.tagManager().tags();
+                checkArgument(!snapshotTags.isEmpty());
+                Snapshot snapshot = snapshotTags.firstKey();
+                List<String> tags = snapshotTags.get(snapshot);
+                checkArgument(tags.size() == 1);
+                pq.add(new TableBranch(branchName, tags.get(0), snapshot.id(), path.getValue()));
+            }
+
+            List<TableBranch> branches = new ArrayList<>(pq.size());
+            while (!pq.isEmpty()) {
+                branches.add(pq.poll());
+            }
+            return branches;
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 }

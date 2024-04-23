@@ -92,6 +92,20 @@ public class HiveMetastoreClient implements MetastoreClient {
     }
 
     @Override
+    public void deletePartition(LinkedHashMap<String, String> partitionSpec) throws Exception {
+        List<String> partitionValues = new ArrayList<>(partitionSpec.values());
+        try {
+            client.dropPartition(
+                    identifier.getDatabaseName(),
+                    identifier.getObjectName(),
+                    partitionValues,
+                    false);
+        } catch (NoSuchObjectException e) {
+            // do nothing if the partition not exists
+        }
+    }
+
+    @Override
     public void close() throws Exception {
         client.close();
     }

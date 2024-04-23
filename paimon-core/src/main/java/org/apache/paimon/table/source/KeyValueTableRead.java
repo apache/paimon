@@ -21,63 +21,120 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.operation.KeyValueFileStoreRead;
+import org.apache.paimon.operation.MergeFileSplitRead;
+import org.apache.paimon.operation.RawFileSplitRead;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.utils.LazyField;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.function.Supplier;
 
 /**
- * An abstraction layer above {@link KeyValueFileStoreRead} to provide reading of {@link
- * InternalRow}.
+ * An abstraction layer above {@link MergeFileSplitRead} to provide reading of {@link InternalRow}.
  */
-public abstract class KeyValueTableRead extends AbstractDataTableRead<KeyValue> {
+public final class KeyValueTableRead extends AbstractDataTableRead<KeyValue> {
 
-    protected final KeyValueFileStoreRead read;
+    private final LazyField<MergeFileSplitRead> mergeRead;
+    private final LazyField<RawFileSplitRead> batchRawRead;
 
-    protected KeyValueTableRead(KeyValueFileStoreRead read, TableSchema schema) {
-        super(read, schema);
-        this.read = read;
+    private int[][] projection = null;
+    private boolean forceKeepDelete = false;
+    private Predicate predicate = null;
+    private IOManager ioManager = null;
+
+    public KeyValueTableRead(
+            Supplier<MergeFileSplitRead> mergeReadSupplier,
+            Supplier<RawFileSplitRead> batchRawReadSupplier,
+            TableSchema schema) {
+        super(schema);
+        this.mergeRead = new LazyField<>(() -> createMergeRead(mergeReadSupplier));
+        this.batchRawRead = new LazyField<>(() -> createBatchRawRead(batchRawReadSupplier));
+    }
+
+    private MergeFileSplitRead createMergeRead(Supplier<MergeFileSplitRead> readSupplier) {
+        MergeFileSplitRead read =
+                readSupplier
+                        .get()
+                        .withKeyProjection(new int[0][])
+                        .withValueProjection(projection)
+                        .withFilter(predicate)
+                        .withIOManager(ioManager);
+        if (forceKeepDelete) {
+            read = read.forceKeepDelete();
+        }
+        return read;
+    }
+
+    private RawFileSplitRead createBatchRawRead(Supplier<RawFileSplitRead> readSupplier) {
+        return readSupplier.get().withProjection(projection).withFilter(predicate);
     }
 
     @Override
-    public TableRead withIOManager(IOManager ioManager) {
-        read.withIOManager(ioManager);
+    public void projection(int[][] projection) {
+        if (mergeRead.initialized()) {
+            mergeRead.get().withValueProjection(projection);
+        }
+        if (batchRawRead.initialized()) {
+            batchRawRead.get().withProjection(projection);
+        }
+        this.projection = projection;
+    }
+
+    @Override
+    public InnerTableRead forceKeepDelete() {
+        if (mergeRead.initialized()) {
+            mergeRead.get().forceKeepDelete();
+        }
+        this.forceKeepDelete = true;
         return this;
     }
 
     @Override
-    public final RecordReader<InternalRow> reader(Split split) throws IOException {
-        return new RowDataRecordReader(read.createReader((DataSplit) split));
+    protected InnerTableRead innerWithFilter(Predicate predicate) {
+        if (mergeRead.initialized()) {
+            mergeRead.get().withFilter(predicate);
+        }
+        if (batchRawRead.initialized()) {
+            batchRawRead.get().withFilter(predicate);
+        }
+        this.predicate = predicate;
+        return this;
     }
 
-    public final RecordReader<KeyValue> kvReader(Split split) throws IOException {
-        return read.createReader((DataSplit) split);
+    @Override
+    public TableRead withIOManager(IOManager ioManager) {
+        if (mergeRead.initialized()) {
+            mergeRead.get().withIOManager(ioManager);
+        }
+        this.ioManager = ioManager;
+        return this;
     }
 
-    protected abstract RecordReader.RecordIterator<InternalRow> rowDataRecordIteratorFromKv(
-            RecordReader.RecordIterator<KeyValue> kvRecordIterator);
-
-    private class RowDataRecordReader implements RecordReader<InternalRow> {
-
-        private final RecordReader<KeyValue> wrapped;
-
-        private RowDataRecordReader(RecordReader<KeyValue> wrapped) {
-            this.wrapped = wrapped;
+    @Override
+    public RecordReader<InternalRow> reader(Split split) throws IOException {
+        DataSplit dataSplit = (DataSplit) split;
+        if (!forceKeepDelete && !dataSplit.isStreaming() && split.convertToRawFiles().isPresent()) {
+            return batchRawRead.get().createReader(dataSplit);
         }
 
-        @Nullable
-        @Override
-        public RecordIterator<InternalRow> readBatch() throws IOException {
-            RecordIterator<KeyValue> batch = wrapped.readBatch();
-            return batch == null ? null : rowDataRecordIteratorFromKv(batch);
-        }
+        RecordReader<KeyValue> reader = mergeRead.get().createReader(dataSplit);
+        return new RecordReader<InternalRow>() {
 
-        @Override
-        public void close() throws IOException {
-            wrapped.close();
-        }
+            @Nullable
+            @Override
+            public RecordIterator<InternalRow> readBatch() throws IOException {
+                RecordIterator<KeyValue> batch = reader.readBatch();
+                return batch == null ? null : new ValueContentRowDataRecordIterator(batch);
+            }
+
+            @Override
+            public void close() throws IOException {
+                reader.close();
+            }
+        };
     }
 }

@@ -43,6 +43,7 @@ import javax.annotation.Nullable;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.Map;
@@ -61,7 +62,8 @@ public class DebeziumSchemaUtils {
             String debeziumType,
             @Nullable String className,
             TypeMapping typeMapping,
-            JsonNode origin) {
+            JsonNode origin,
+            ZoneId serverTimeZone) {
         if (rawValue == null) {
             return null;
         }
@@ -138,9 +140,8 @@ public class DebeziumSchemaUtils {
             // https://dev.mysql.com/doc/refman/8.0/en/datetime.html for standard, and
             // RowDataDebeziumDeserializeSchema#convertToTimestamp in flink-cdc-connector
             // for implementation
-            // TODO currently we cannot get zone id
             LocalDateTime localDateTime =
-                    Instant.parse(rawValue).atZone(ZoneOffset.UTC).toLocalDateTime();
+                    Instant.parse(rawValue).atZone(serverTimeZone).toLocalDateTime();
             transformed = DateTimeUtils.formatLocalDateTime(localDateTime, 6);
         } else if (MicroTime.SCHEMA_NAME.equals(className)) {
             long microseconds = Long.parseLong(rawValue);

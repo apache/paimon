@@ -18,7 +18,6 @@
 
 package org.apache.paimon.mergetree.compact.aggregate;
 
-import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
@@ -38,6 +37,8 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.function.BiFunction;
+
+import static org.apache.paimon.codegen.CodeGenUtils.newRecordEqualiser;
 
 /** Collect elements into an ARRAY. */
 public class FieldCollectAgg extends FieldAggregator {
@@ -63,9 +64,7 @@ public class FieldCollectAgg extends FieldAggregator {
                     elementType instanceof RowType
                             ? ((RowType) elementType).getFieldTypes()
                             : Collections.singletonList(elementType);
-            RecordEqualiser elementEqualiser =
-                    CodeGenUtils.generateRecordEqualiser(fieldTypes, "elementEqualiser")
-                            .newInstance(FieldCollectAgg.class.getClassLoader());
+            RecordEqualiser elementEqualiser = newRecordEqualiser(fieldTypes);
             this.equaliser =
                     (o1, o2) -> {
                         InternalRow row1, row2;

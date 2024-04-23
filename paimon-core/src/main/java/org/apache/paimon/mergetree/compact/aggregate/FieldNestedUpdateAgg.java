@@ -18,8 +18,8 @@
 
 package org.apache.paimon.mergetree.compact.aggregate;
 
-import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.Projection;
+import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.InternalArray;
@@ -34,6 +34,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.codegen.CodeGenUtils.newProjection;
+import static org.apache.paimon.codegen.CodeGenUtils.newRecordEqualiser;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
+
 /**
  * Used to update a field which representing a nested table. The data type of nested table field is
  * {@code ARRAY<ROW>}.
@@ -45,13 +49,19 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
     private final int nestedFields;
 
     @Nullable private final Projection keyProjection;
+    @Nullable private final RecordEqualiser elementEqualiser;
 
     public FieldNestedUpdateAgg(ArrayType dataType, List<String> nestedKey) {
         super(dataType);
         RowType nestedType = (RowType) dataType.getElementType();
         this.nestedFields = nestedType.getFieldCount();
-        this.keyProjection =
-                nestedKey.isEmpty() ? null : CodeGenUtils.newProjection(nestedType, nestedKey);
+        if (nestedKey.isEmpty()) {
+            this.keyProjection = null;
+            this.elementEqualiser = newRecordEqualiser(nestedType.getFieldTypes());
+        } else {
+            this.keyProjection = newProjection(nestedType, nestedKey);
+            this.elementEqualiser = null;
+        }
     }
 
     @Override
@@ -87,5 +97,41 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
         }
 
         return new GenericArray(rows.toArray());
+    }
+
+    @Override
+    public Object retract(Object accumulator, Object retractField) {
+        if (accumulator == null || retractField == null) {
+            return accumulator;
+        }
+
+        InternalArray acc = (InternalArray) accumulator;
+        InternalArray retract = (InternalArray) retractField;
+
+        if (keyProjection == null) {
+            checkNotNull(elementEqualiser);
+            List<InternalRow> rows = new ArrayList<>();
+            for (int i = 0; i < acc.size(); i++) {
+                rows.add(acc.getRow(i, nestedFields));
+            }
+            for (int i = 0; i < retract.size(); i++) {
+                InternalRow retractRow = retract.getRow(i, nestedFields);
+                rows.removeIf(next -> elementEqualiser.equals(next, retractRow));
+            }
+            return new GenericArray(rows.toArray());
+        } else {
+            Map<BinaryRow, InternalRow> map = new HashMap<>();
+
+            for (int i = 0; i < acc.size(); i++) {
+                InternalRow row = acc.getRow(i, nestedFields);
+                map.put(keyProjection.apply(row).copy(), row);
+            }
+
+            for (int i = 0; i < retract.size(); i++) {
+                map.remove(keyProjection.apply(retract.getRow(i, nestedFields)));
+            }
+
+            return new GenericArray(new ArrayList<>(map.values()).toArray());
+        }
     }
 }

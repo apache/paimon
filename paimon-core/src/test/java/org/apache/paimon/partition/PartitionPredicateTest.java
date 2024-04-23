@@ -45,10 +45,7 @@ public class PartitionPredicateTest {
     public void testNoPartition() {
         PartitionPredicate predicate =
                 PartitionPredicate.fromMultiple(RowType.of(), Collections.singletonList(EMPTY_ROW));
-
-        assertThat(predicate.test(EMPTY_ROW)).isTrue();
-        assertThat(predicate.test(1, EMPTY_ROW, EMPTY_ROW, BinaryArray.fromLongArray(new Long[0])))
-                .isTrue();
+        assertThat(predicate).isNull();
     }
 
     @Test
@@ -60,7 +57,7 @@ public class PartitionPredicateTest {
                         and(builder.equal(0, 3), builder.equal(1, 5)),
                         and(builder.equal(0, 4), builder.equal(1, 6)));
 
-        PartitionPredicate p1 = PartitionPredicate.fromPredicate(predicate);
+        PartitionPredicate p1 = PartitionPredicate.fromPredicate(type, predicate);
         PartitionPredicate p2 =
                 PartitionPredicate.fromMultiple(
                         type, Arrays.asList(createPart(3, 5), createPart(4, 6)));

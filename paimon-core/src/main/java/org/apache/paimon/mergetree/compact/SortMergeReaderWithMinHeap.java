@@ -21,6 +21,7 @@ package org.apache.paimon.mergetree.compact;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
@@ -44,6 +45,7 @@ public class SortMergeReaderWithMinHeap<T> implements SortMergeReader<T> {
     public SortMergeReaderWithMinHeap(
             List<RecordReader<KeyValue>> readers,
             Comparator<InternalRow> userKeyComparator,
+            @Nullable FieldsComparator userDefinedSeqComparator,
             MergeFunctionWrapper<T> mergeFunctionWrapper) {
         this.nextBatchReaders = new ArrayList<>(readers);
         this.userKeyComparator = userKeyComparator;
@@ -55,6 +57,14 @@ public class SortMergeReaderWithMinHeap<T> implements SortMergeReader<T> {
                             int result = userKeyComparator.compare(e1.kv.key(), e2.kv.key());
                             if (result != 0) {
                                 return result;
+                            }
+                            if (userDefinedSeqComparator != null) {
+                                result =
+                                        userDefinedSeqComparator.compare(
+                                                e1.kv.value(), e2.kv.value());
+                                if (result != 0) {
+                                    return result;
+                                }
                             }
                             return Long.compare(e1.kv.sequenceNumber(), e2.kv.sequenceNumber());
                         });

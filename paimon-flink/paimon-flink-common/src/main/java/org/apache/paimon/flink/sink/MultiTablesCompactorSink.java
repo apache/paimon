@@ -18,9 +18,9 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.VersionedSerializerWrapper;
-import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.manifest.WrappedManifestCommittable;
 import org.apache.paimon.options.Options;
 
@@ -39,6 +39,7 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.table.data.RowData;
 
 import java.io.Serializable;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_MANAGED_WRITER_BUFFER_MEMORY;
@@ -87,8 +88,7 @@ public class MultiTablesCompactorSink implements Serializable {
             DataStream<RowData> input, String commitUser, Integer parallelism) {
         StreamExecutionEnvironment env = input.getExecutionEnvironment();
         boolean isStreaming =
-                StreamExecutionEnvironmentUtils.getConfiguration(env)
-                                .get(ExecutionOptions.RUNTIME_MODE)
+                env.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
                         == RuntimeExecutionMode.STREAMING;
 
         SingleOutputStreamOperator<MultiTableCommittable> written =
@@ -112,7 +112,7 @@ public class MultiTablesCompactorSink implements Serializable {
     protected DataStreamSink<?> doCommit(
             DataStream<MultiTableCommittable> written, String commitUser) {
         StreamExecutionEnvironment env = written.getExecutionEnvironment();
-        ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
+        ReadableConfig conf = env.getConfiguration();
         CheckpointConfig checkpointConfig = env.getCheckpointConfig();
         boolean isStreaming =
                 conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING;
@@ -128,6 +128,7 @@ public class MultiTablesCompactorSink implements Serializable {
                                 new MultiTableCommittableTypeInfo(),
                                 new CommitterOperator<>(
                                         streamingCheckpointEnabled,
+                                        false,
                                         commitUser,
                                         createCommitterFactory(),
                                         createCommittableStateManager()))
@@ -174,8 +175,10 @@ public class MultiTablesCompactorSink implements Serializable {
 
     protected Committer.Factory<MultiTableCommittable, WrappedManifestCommittable>
             createCommitterFactory() {
+        Map<String, String> dynamicOptions = options.toMap();
+        dynamicOptions.put(CoreOptions.WRITE_ONLY.key(), "false");
         return (user, metricGroup) ->
-                new StoreMultiCommitter(catalogLoader, user, metricGroup, true);
+                new StoreMultiCommitter(catalogLoader, user, metricGroup, true, dynamicOptions);
     }
 
     protected CommittableStateManager<WrappedManifestCommittable> createCommittableStateManager() {

@@ -130,6 +130,11 @@ For more usage of the compact action, see
 
 {{< /tabs >}}
 
+{{< hint info >}}
+Similarly, the default is synchronous compaction, which may cause checkpoint timeouts.
+You can configure `table_conf` to use [Asynchronous Compaction]({{< ref "maintenance/write-performance#asynchronous-compaction" >}}).
+{{< /hint >}}
+
 ## Database Compaction Job
 
 You can run the following command to submit a compaction job for multiple database.
@@ -223,8 +228,8 @@ For more usage of the compact_database action, see
 
 ## Sort Compact
 
-If your table is configured with [dynamic bucket primary key table]({{< ref "concepts/primary-key-table/data-distribution#dynamic-bucket" >}})
-or [unaware bucket append table]({{< ref "concepts/append-table/append-scalable-table" >}}) ,
+If your table is configured with [dynamic bucket primary key table]({{< ref "primary-key-table/data-distribution#dynamic-bucket" >}})
+or [unaware bucket append table]({{< ref "append-table/append-scalable-table" >}}) ,
 you can trigger a compact with specified column sort to speed up queries.
 
 ```bash  

@@ -36,7 +36,7 @@ public interface MemorySegmentPool extends MemorySegmentSource {
     /**
      * Get the page size of each page this pool holds.
      *
-     * @return the page size
+     * @return the page size, the bytes size in one page.
      */
     int pageSize();
 

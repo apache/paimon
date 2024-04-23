@@ -20,6 +20,7 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.FileStore;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.index.IndexMaintainer;
 import org.apache.paimon.io.DataFileMeta;
@@ -146,6 +147,7 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
         protected final long lastModifiedCommitIdentifier;
         protected final List<DataFileMeta> dataFiles;
         @Nullable protected final IndexMaintainer<T> indexMaintainer;
+        @Nullable protected final DeletionVectorsMaintainer deletionVectorsMaintainer;
         protected final CommitIncrement commitIncrement;
 
         protected State(
@@ -155,6 +157,7 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
                 long lastModifiedCommitIdentifier,
                 Collection<DataFileMeta> dataFiles,
                 @Nullable IndexMaintainer<T> indexMaintainer,
+                @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer,
                 CommitIncrement commitIncrement) {
             this.partition = partition;
             this.bucket = bucket;
@@ -162,19 +165,21 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
             this.lastModifiedCommitIdentifier = lastModifiedCommitIdentifier;
             this.dataFiles = new ArrayList<>(dataFiles);
             this.indexMaintainer = indexMaintainer;
+            this.deletionVectorsMaintainer = deletionVectorsMaintainer;
             this.commitIncrement = commitIncrement;
         }
 
         @Override
         public String toString() {
             return String.format(
-                    "{%s, %d, %d, %d, %s, %s, %s}",
+                    "{%s, %d, %d, %d, %s, %s,  %s, %s}",
                     partition,
                     bucket,
                     baseSnapshotId,
                     lastModifiedCommitIdentifier,
                     dataFiles,
                     indexMaintainer,
+                    deletionVectorsMaintainer,
                     commitIncrement);
         }
     }

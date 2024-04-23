@@ -19,17 +19,22 @@
 package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.flink.FlinkConnectorOptions.LookupCacheMode;
 import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.OutOfRangeException;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
+import org.apache.paimon.utils.InternalRowUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
 
@@ -51,6 +56,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.UUID;
@@ -73,6 +79,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     private static final Logger LOG = LoggerFactory.getLogger(FileStoreLookupFunction.class);
 
     private final Table table;
+    @Nullable private final DynamicPartitionLoader partitionLoader;
     private final List<String> projectFields;
     private final List<String> joinKeys;
     @Nullable private final Predicate predicate;
@@ -89,12 +96,17 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         TableScanUtils.streamingReadingValidate(table);
 
         this.table = table;
+        this.partitionLoader = DynamicPartitionLoader.of(table);
 
         // join keys are based on projection fields
         this.joinKeys =
                 Arrays.stream(joinKeyIndex)
                         .mapToObj(i -> table.rowType().getFieldNames().get(projection[i]))
                         .collect(Collectors.toList());
+
+        if (partitionLoader != null) {
+            partitionLoader.addJoinKeys(joinKeys);
+        }
 
         this.projectFields =
                 Arrays.stream(projection)
@@ -126,6 +138,10 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     }
 
     private void open() throws Exception {
+        if (partitionLoader != null) {
+            partitionLoader.open();
+        }
+
         this.nextLoadTime = -1;
 
         Options options = Options.fromMap(table.options());
@@ -165,6 +181,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             this.lookupTable = FullCacheLookupTable.create(context, options.get(LOOKUP_CACHE_ROWS));
         }
 
+        refreshDynamicPartition(false);
         lookupTable.open();
     }
 
@@ -187,7 +204,17 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     public Collection<RowData> lookup(RowData keyRow) {
         try {
             checkRefresh();
-            List<InternalRow> results = lookupTable.get(new FlinkRowWrapper(keyRow));
+
+            InternalRow key = new FlinkRowWrapper(keyRow);
+            if (partitionLoader != null) {
+                InternalRow partition = refreshDynamicPartition(true);
+                if (partition == null) {
+                    return Collections.emptyList();
+                }
+                key = JoinedRow.join(key, partition);
+            }
+
+            List<InternalRow> results = lookupTable.get(key);
             List<RowData> rows = new ArrayList<>(results.size());
             for (InternalRow matchedRow : results) {
                 rows.add(new FlinkRowData(matchedRow));
@@ -199,6 +226,43 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    @Nullable
+    private BinaryRow refreshDynamicPartition(boolean reopen) throws Exception {
+        if (partitionLoader == null) {
+            return null;
+        }
+
+        boolean partitionChanged = partitionLoader.checkRefresh();
+        BinaryRow partition = partitionLoader.partition();
+        if (partition == null) {
+            return null;
+        }
+
+        lookupTable.specificPartitionFilter(createSpecificPartFilter(partition));
+
+        if (partitionChanged && reopen) {
+            lookupTable.close();
+            lookupTable.open();
+        }
+
+        return partition;
+    }
+
+    private Predicate createSpecificPartFilter(BinaryRow partition) {
+        RowType rowType = table.rowType();
+        List<String> fieldNames = rowType.getFieldNames();
+        List<String> partitionKeys = table.partitionKeys();
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        List<Predicate> predicates = new ArrayList<>();
+        for (int i = 0; i < partitionKeys.size(); i++) {
+            int index = fieldNames.indexOf(partitionKeys.get(i));
+            predicates.add(
+                    builder.equal(
+                            index, InternalRowUtils.get(partition, i, rowType.getTypeAt(index))));
+        }
+        return PredicateBuilder.and(predicates);
     }
 
     private void reopen() {

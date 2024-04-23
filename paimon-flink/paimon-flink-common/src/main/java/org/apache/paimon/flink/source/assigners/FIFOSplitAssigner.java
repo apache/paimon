@@ -75,4 +75,9 @@ public class FIFOSplitAssigner implements SplitAssigner {
                 ? Optional.empty()
                 : getSnapshotId(pendingSplitAssignment.peekFirst());
     }
+
+    @Override
+    public int numberOfRemainingSplits() {
+        return pendingSplitAssignment.size();
+    }
 }

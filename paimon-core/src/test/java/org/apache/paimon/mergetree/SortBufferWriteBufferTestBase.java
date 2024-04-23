@@ -18,7 +18,6 @@
 
 package org.apache.paimon.mergetree;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
@@ -30,6 +29,7 @@ import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.MergeFunctionTestUtils;
 import org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction;
 import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.sort.BinaryInMemorySortBuffer;
 import org.apache.paimon.types.BigIntType;
@@ -66,8 +66,10 @@ public abstract class SortBufferWriteBufferTestBase {
                     new RowType(Collections.singletonList(new DataField(0, "key", new IntType()))),
                     new RowType(
                             Collections.singletonList(new DataField(1, "value", new BigIntType()))),
+                    null,
                     new HeapMemorySegmentPool(32 * 1024 * 3L, 32 * 1024),
                     false,
+                    MemorySize.MAX_VALUE,
                     128,
                     "lz4",
                     null);
@@ -165,7 +167,7 @@ public abstract class SortBufferWriteBufferTestBase {
 
         @Override
         protected boolean addOnly() {
-            return false;
+            return true;
         }
 
         @Override
@@ -176,7 +178,6 @@ public abstract class SortBufferWriteBufferTestBase {
         @Override
         protected MergeFunction<KeyValue> createMergeFunction() {
             Options options = new Options();
-            options.set(CoreOptions.PARTIAL_UPDATE_IGNORE_DELETE, true);
             return PartialUpdateMergeFunction.factory(
                             options, RowType.of(DataTypes.BIGINT()), ImmutableList.of("key"))
                     .create();
@@ -257,8 +258,7 @@ public abstract class SortBufferWriteBufferTestBase {
         protected MergeFunction<KeyValue> createMergeFunction() {
             return FirstRowMergeFunction.factory(
                             new RowType(Lists.list(new DataField(0, "f0", new IntType()))),
-                            new RowType(Lists.list(new DataField(1, "f1", new BigIntType()))),
-                            new Options())
+                            new RowType(Lists.list(new DataField(1, "f1", new BigIntType()))))
                     .create();
         }
     }

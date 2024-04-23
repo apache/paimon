@@ -43,7 +43,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -77,11 +76,7 @@ public class CompactActionITCase extends CompactActionITCaseBase {
 
         checkLatestSnapshot(table, 2, Snapshot.CommitKind.APPEND);
 
-        if (ThreadLocalRandom.current().nextBoolean()) {
-            runAction(false);
-        } else {
-            callProcedure(false);
-        }
+        runAction(false);
 
         checkLatestSnapshot(table, 3, Snapshot.CommitKind.COMPACT);
 
@@ -126,11 +121,7 @@ public class CompactActionITCase extends CompactActionITCaseBase {
         TableScan.Plan plan = scan.plan();
         assertThat(plan.splits()).isEmpty();
 
-        if (ThreadLocalRandom.current().nextBoolean()) {
-            runAction(true);
-        } else {
-            callProcedure(true);
-        }
+        runAction(true);
 
         // first full compaction
         validateResult(
@@ -193,11 +184,7 @@ public class CompactActionITCase extends CompactActionITCaseBase {
 
         checkLatestSnapshot(table, 2, Snapshot.CommitKind.APPEND);
 
-        if (ThreadLocalRandom.current().nextBoolean()) {
-            runAction(true);
-        } else {
-            callProcedure(true);
-        }
+        runAction(true);
 
         // first compaction, snapshot will be 3
         checkFileAndRowSize(table, 3L, 30_000L, 1, 6);
@@ -234,11 +221,7 @@ public class CompactActionITCase extends CompactActionITCaseBase {
 
         checkLatestSnapshot(table, 2, Snapshot.CommitKind.APPEND);
 
-        if (ThreadLocalRandom.current().nextBoolean()) {
-            runAction(false);
-        } else {
-            callProcedure(false);
-        }
+        runAction(false);
 
         // first compaction, snapshot will be 3.
         checkFileAndRowSize(table, 3L, 0L, 1, 6);
@@ -289,7 +272,12 @@ public class CompactActionITCase extends CompactActionITCaseBase {
     }
 
     private void runAction(boolean isStreaming) throws Exception {
-        StreamExecutionEnvironment env = buildDefaultEnv(isStreaming);
+        StreamExecutionEnvironment env;
+        if (isStreaming) {
+            env = streamExecutionEnvironmentBuilder().streamingMode().build();
+        } else {
+            env = streamExecutionEnvironmentBuilder().batchMode().build();
+        }
 
         CompactAction action =
                 createAction(
@@ -311,14 +299,5 @@ public class CompactActionITCase extends CompactActionITCaseBase {
         } else {
             env.execute();
         }
-    }
-
-    private void callProcedure(boolean isStreaming) {
-        callProcedure(
-                String.format(
-                        "CALL sys.compact('%s.%s', '%s')",
-                        database, tableName, "dt=20221208,hh=15;dt=20221209,hh=15"),
-                isStreaming,
-                !isStreaming);
     }
 }

@@ -15,8 +15,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.operation.FileStoreCommit
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.BatchWriteBuilder
@@ -53,7 +55,7 @@ trait PaimonPartitionManagement extends SupportsPartitionManagement {
       .apply(internalRow)
       .asInstanceOf[Row]
     val rowDataPartitionComputer = new RowDataPartitionComputer(
-      FileStorePathFactory.PARTITION_DEFAULT_NAME.defaultValue,
+      CoreOptions.PARTITION_DEFAULT_NAME.defaultValue,
       tableRowType,
       partitionKeys.asScala.toArray)
     val partitionMap = rowDataPartitionComputer.generatePartValues(new SparkRow(tableRowType, row))

@@ -21,7 +21,6 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.annotation.Public;
 
 import java.io.Closeable;
-import java.io.Serializable;
 import java.util.concurrent.Callable;
 
 /**
@@ -34,9 +33,4 @@ public interface CatalogLock extends Closeable {
 
     /** Run with catalog lock. The caller should tell catalog the database and table name. */
     <T> T runWithLock(String database, String table, Callable<T> callable) throws Exception;
-
-    /** Factory to create {@link CatalogLock}. */
-    interface Factory extends Serializable {
-        CatalogLock create();
-    }
 }

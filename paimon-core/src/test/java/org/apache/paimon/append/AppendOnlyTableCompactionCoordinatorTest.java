@@ -185,6 +185,8 @@ public class AppendOnlyTableCompactionCoordinatorTest {
                 0,
                 0,
                 0,
-                0);
+                0,
+                0L,
+                null);
     }
 }

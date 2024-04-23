@@ -24,6 +24,7 @@ import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.utils.FieldsComparator;
 
 import javax.annotation.Nullable;
 
@@ -43,6 +44,7 @@ public class DiffReader {
             RecordReader<KeyValue> beforeReader,
             RecordReader<KeyValue> afterReader,
             Comparator<InternalRow> keyComparator,
+            @Nullable FieldsComparator userDefinedSeqComparator,
             MergeSorter sorter,
             boolean keepDelete)
             throws IOException {
@@ -51,6 +53,7 @@ public class DiffReader {
                         () -> wrapLevelToReader(beforeReader, BEFORE_LEVEL),
                         () -> wrapLevelToReader(afterReader, AFTER_LEVEL)),
                 keyComparator,
+                userDefinedSeqComparator,
                 new DiffMerger(keepDelete));
     }
 

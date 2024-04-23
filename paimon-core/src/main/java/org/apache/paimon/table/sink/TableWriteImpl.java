@@ -32,6 +32,8 @@ import org.apache.paimon.operation.FileStoreWrite.State;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.utils.Restorable;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 
@@ -47,6 +49,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     private final FileStoreWrite<T> write;
     private final KeyAndBucketExtractor<InternalRow> keyAndBucketExtractor;
     private final RecordExtractor<T> recordExtractor;
+    private final boolean ignoreDelete;
 
     private boolean batchCommitted = false;
     private BucketMode bucketMode;
@@ -54,10 +57,12 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     public TableWriteImpl(
             FileStoreWrite<T> write,
             KeyAndBucketExtractor<InternalRow> keyAndBucketExtractor,
-            RecordExtractor<T> recordExtractor) {
+            RecordExtractor<T> recordExtractor,
+            boolean ignoreDelete) {
         this.write = write;
         this.keyAndBucketExtractor = keyAndBucketExtractor;
         this.recordExtractor = recordExtractor;
+        this.ignoreDelete = ignoreDelete;
     }
 
     @Override
@@ -121,24 +126,24 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         writeAndReturn(row, bucket);
     }
 
+    @Nullable
     public SinkRecord writeAndReturn(InternalRow row) throws Exception {
+        if (ignoreDelete && row.getRowKind().isRetract()) {
+            return null;
+        }
         SinkRecord record = toSinkRecord(row);
         write.write(record.partition(), record.bucket(), recordExtractor.extract(record));
         return record;
     }
 
+    @Nullable
     public SinkRecord writeAndReturn(InternalRow row, int bucket) throws Exception {
+        if (ignoreDelete && row.getRowKind().isRetract()) {
+            return null;
+        }
         SinkRecord record = toSinkRecord(row, bucket);
         write.write(record.partition(), bucket, recordExtractor.extract(record));
         return record;
-    }
-
-    @VisibleForTesting
-    public T writeAndReturnData(InternalRow row) throws Exception {
-        SinkRecord record = toSinkRecord(row);
-        T data = recordExtractor.extract(record);
-        write.write(record.partition(), record.bucket(), data);
-        return data;
     }
 
     private SinkRecord toSinkRecord(InternalRow row) {

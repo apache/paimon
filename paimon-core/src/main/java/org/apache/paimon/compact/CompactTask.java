@@ -20,14 +20,13 @@ package org.apache.paimon.compact;
 
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.operation.metrics.CompactionMetrics;
-import org.apache.paimon.operation.metrics.CompactionStats;
+import org.apache.paimon.operation.metrics.MetricUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Callable;
 
@@ -35,40 +34,37 @@ import java.util.concurrent.Callable;
 public abstract class CompactTask implements Callable<CompactResult> {
 
     private static final Logger LOG = LoggerFactory.getLogger(CompactTask.class);
-    @Nullable private final CompactionMetrics metrics;
 
-    public CompactTask(@Nullable CompactionMetrics metrics) {
-        this.metrics = metrics;
+    @Nullable private final CompactionMetrics.Reporter metricsReporter;
+
+    public CompactTask(@Nullable CompactionMetrics.Reporter metricsReporter) {
+        this.metricsReporter = metricsReporter;
     }
 
     @Override
     public CompactResult call() throws Exception {
-        long startMillis = System.currentTimeMillis();
-        CompactResult result = null;
+        MetricUtils.safeCall(this::startTimer, LOG);
         try {
-            result = doCompact();
-
+            long startMillis = System.currentTimeMillis();
+            CompactResult result = doCompact();
             if (LOG.isDebugEnabled()) {
                 logMetric(startMillis, result.before(), result.after());
             }
             return result;
         } finally {
-            if (metrics != null) {
-                long duration = System.currentTimeMillis() - startMillis;
-                CompactionStats compactionStats =
-                        result == null
-                                ? new CompactionStats(
-                                        duration,
-                                        Collections.emptyList(),
-                                        Collections.emptyList(),
-                                        Collections.emptyList())
-                                : new CompactionStats(
-                                        duration,
-                                        result.before(),
-                                        result.after(),
-                                        result.changelog());
-                metrics.reportCompaction(compactionStats);
-            }
+            MetricUtils.safeCall(this::stopTimer, LOG);
+        }
+    }
+
+    private void startTimer() {
+        if (metricsReporter != null) {
+            metricsReporter.getCompactTimer().start();
+        }
+    }
+
+    private void stopTimer() {
+        if (metricsReporter != null) {
+            metricsReporter.getCompactTimer().finish();
         }
     }
 

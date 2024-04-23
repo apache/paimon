@@ -97,7 +97,7 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     @Override
     public void commit(List<ManifestCommittable> committables)
             throws IOException, InterruptedException {
-        commit.commitMultiple(committables);
+        commit.commitMultiple(committables, false);
         calcNumBytesAndRecordsOut(committables);
     }
 

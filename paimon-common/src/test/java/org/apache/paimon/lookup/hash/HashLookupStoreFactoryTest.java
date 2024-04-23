@@ -16,10 +16,6 @@
  * limitations under the License.
  */
 
-/* This file is based on source code from the PalDB Project (https://github.com/linkedin/PalDB), licensed by the Apache
- * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
- * additional information regarding copyright ownership. */
-
 package org.apache.paimon.lookup.hash;
 
 import org.apache.paimon.io.DataOutputSerializer;
@@ -53,6 +49,10 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
+
+/* This file is based on source code from the PalDB Project (https://github.com/linkedin/PalDB), licensed by the Apache
+ * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership. */
 
 /** Test for {@link HashLookupStoreFactory}. */
 @ExtendWith(ParameterizedTestExtension.class)

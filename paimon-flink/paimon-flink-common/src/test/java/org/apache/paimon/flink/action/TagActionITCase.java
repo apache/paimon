@@ -153,7 +153,7 @@ public class TagActionITCase extends ActionITCaseBase {
                     .run();
         } else {
             callProcedure(
-                    String.format("CALL sys.create_tag('%s.%s', 'tag2', 2)", database, tableName));
+                    String.format("CALL sys.create_tag('%s.%s', 'tag2',  2)", database, tableName));
         }
         assertThat(tagManager.tagExists("tag2")).isTrue();
     }

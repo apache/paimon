@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.manifest.ManifestCommittable;
@@ -57,26 +56,29 @@ public class StoreMultiCommitter
     //    referenced by table id.
     private final Map<Identifier, StoreCommitter> tableCommitters;
 
-    // compact job needs set "write-only" of a table to false
-    private final boolean isCompactJob;
+    // Currently, only compact_database job needs to ignore empty commit and set dynamic options
+    private final boolean ignoreEmptyCommit;
+    private final Map<String, String> dynamicOptions;
 
     public StoreMultiCommitter(
             Catalog.Loader catalogLoader,
             String commitUser,
             @Nullable OperatorMetricGroup flinkMetricGroup) {
-        this(catalogLoader, commitUser, flinkMetricGroup, false);
+        this(catalogLoader, commitUser, flinkMetricGroup, false, Collections.emptyMap());
     }
 
     public StoreMultiCommitter(
             Catalog.Loader catalogLoader,
             String commitUser,
             @Nullable OperatorMetricGroup flinkMetricGroup,
-            boolean isCompactJob) {
+            boolean ignoreEmptyCommit,
+            Map<String, String> dynamicOptions) {
         this.catalog = catalogLoader.load();
         this.commitUser = commitUser;
         this.flinkMetricGroup = flinkMetricGroup;
+        this.ignoreEmptyCommit = ignoreEmptyCommit;
+        this.dynamicOptions = dynamicOptions;
         this.tableCommitters = new HashMap<>();
-        this.isCompactJob = isCompactJob;
     }
 
     @Override
@@ -191,13 +193,7 @@ public class StoreMultiCommitter
         if (committer == null) {
             FileStoreTable table;
             try {
-                table = (FileStoreTable) catalog.getTable(tableId);
-                if (isCompactJob) {
-                    table =
-                            table.copy(
-                                    Collections.singletonMap(
-                                            CoreOptions.WRITE_ONLY.key(), "false"));
-                }
+                table = (FileStoreTable) catalog.getTable(tableId).copy(dynamicOptions);
             } catch (Catalog.TableNotExistException e) {
                 throw new RuntimeException(
                         String.format(
@@ -206,7 +202,7 @@ public class StoreMultiCommitter
             }
             committer =
                     new StoreCommitter(
-                            table.newCommit(commitUser).ignoreEmptyCommit(isCompactJob),
+                            table.newCommit(commitUser).ignoreEmptyCommit(ignoreEmptyCommit),
                             flinkMetricGroup);
             tableCommitters.put(tableId, committer);
         }

@@ -80,6 +80,11 @@ public class InMemoryBuffer implements RowBuffer {
         }
     }
 
+    @Override
+    public boolean flushMemory() throws IOException {
+        return false;
+    }
+
     private void returnToSegmentPool() {
         pool.returnAll(this.recordBufferSegments);
         this.recordBufferSegments.clear();

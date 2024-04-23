@@ -22,8 +22,9 @@ import org.apache.paimon.data.serializer.IntSerializer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.utils.ParallelExecution.ParallelBatch;
 
-import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;

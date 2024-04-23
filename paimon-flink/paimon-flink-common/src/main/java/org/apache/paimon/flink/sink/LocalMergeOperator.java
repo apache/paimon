@@ -27,16 +27,17 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.mergetree.SortBufferWriteBuffer;
 import org.apache.paimon.mergetree.compact.MergeFunction;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.PrimaryKeyTableUtils;
 import org.apache.paimon.table.sink.RowKindGenerator;
-import org.apache.paimon.table.sink.SequenceGenerator;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.KeyComparatorSupplier;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.UserDefinedSeqComparator;
 
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.operators.BoundedOneInput;
@@ -56,13 +57,13 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
 
     private static final long serialVersionUID = 1L;
 
-    TableSchema schema;
+    private final TableSchema schema;
+    private final boolean ignoreDelete;
 
     private transient Projection keyProjection;
     private transient RecordComparator keyComparator;
 
     private transient long recordCount;
-    private transient SequenceGenerator sequenceGenerator;
     private transient RowKindGenerator rowKindGenerator;
     private transient MergeFunction<KeyValue> mergeFunction;
 
@@ -76,6 +77,7 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
                 schema.primaryKeys().size() > 0,
                 "LocalMergeOperator currently only support tables with primary keys");
         this.schema = schema;
+        this.ignoreDelete = CoreOptions.fromMap(schema.options()).ignoreDelete();
         setChainingStrategy(ChainingStrategy.ALWAYS);
     }
 
@@ -88,12 +90,10 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
         CoreOptions options = new CoreOptions(schema.options());
 
         keyProjection =
-                CodeGenUtils.newProjection(
-                        schema.logicalRowType(), schema.projection(schema.primaryKeys()));
+                CodeGenUtils.newProjection(valueType, schema.projection(schema.primaryKeys()));
         keyComparator = new KeyComparatorSupplier(keyType).get();
 
         recordCount = 0;
-        sequenceGenerator = SequenceGenerator.create(schema, options);
         rowKindGenerator = RowKindGenerator.create(schema, options);
         mergeFunction =
                 PrimaryKeyTableUtils.createMergeFunctionFactory(
@@ -119,9 +119,11 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
                 new SortBufferWriteBuffer(
                         keyType,
                         valueType,
+                        UserDefinedSeqComparator.create(valueType, options),
                         new HeapMemorySegmentPool(
                                 options.localMergeBufferSize(), options.pageSize()),
                         false,
+                        MemorySize.MAX_VALUE,
                         options.localSortMaxNumFileHandles(),
                         options.spillCompression(),
                         null);
@@ -137,15 +139,17 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
 
         RowKind rowKind =
                 rowKindGenerator == null ? row.getRowKind() : rowKindGenerator.generate(row);
+        if (ignoreDelete && rowKind.isRetract()) {
+            return;
+        }
+
         // row kind must be INSERT when it is divided into key and value
         row.setRowKind(RowKind.INSERT);
 
         InternalRow key = keyProjection.apply(row);
-        long sequenceNumber =
-                sequenceGenerator == null ? recordCount : sequenceGenerator.generate(row);
-        if (!buffer.put(sequenceNumber, rowKind, key, row)) {
+        if (!buffer.put(recordCount, rowKind, key, row)) {
             flushBuffer();
-            if (!buffer.put(sequenceNumber, rowKind, key, row)) {
+            if (!buffer.put(recordCount, rowKind, key, row)) {
                 // change row kind back
                 row.setRowKind(rowKind);
                 output.collect(record);

@@ -15,58 +15,35 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark.commands
 
-import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
-import org.apache.paimon.spark.SparkFilterConverter
-import org.apache.paimon.table.{BucketMode, FileStoreTable}
-import org.apache.paimon.table.sink.{CommitMessage, CommitMessageSerializer}
+import org.apache.paimon.index.IndexFileMeta
+import org.apache.paimon.io.{CompactIncrement, DataFileMeta, DataIncrement, IndexIncrement}
+import org.apache.paimon.spark.{PaimonSplitScan, SparkFilterConverter}
+import org.apache.paimon.spark.catalyst.Compatibility
+import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
+import org.apache.paimon.spark.commands.SparkDataFileMeta.convertToSparkDataFileMeta
+import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
+import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.types.RowType
 
-import org.apache.spark.sql.AnalysisException
-import org.apache.spark.sql.Utils.{normalizeExprs, translateFilter}
-import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression, PredicateHelper}
-import org.apache.spark.sql.execution.datasources.DataSourceStrategy
+import org.apache.spark.sql.PaimonUtils.createDataset
+import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
+import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
+import org.apache.spark.sql.catalyst.plans.logical.{Filter => FilterLogicalNode}
+import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2ScanRelation}
+import org.apache.spark.sql.functions.input_file_name
 import org.apache.spark.sql.sources.{AlwaysTrue, And, EqualNullSafe, Filter}
 
-import java.io.IOException
+import java.net.URI
+import java.util.Collections
+
+import scala.collection.JavaConverters._
 
 /** Helper trait for all paimon commands. */
-trait PaimonCommand extends WithFileStoreTable with PredicateHelper {
-
-  lazy val bucketMode: BucketMode = table match {
-    case fileStoreTable: FileStoreTable =>
-      fileStoreTable.bucketMode
-    case _ =>
-      BucketMode.FIXED
-  }
-
-  def deserializeCommitMessage(
-      serializer: CommitMessageSerializer,
-      bytes: Array[Byte]): CommitMessage = {
-    try {
-      serializer.deserialize(serializer.getVersion, bytes)
-    } catch {
-      case e: IOException =>
-        throw new RuntimeException("Failed to deserialize CommitMessage's object", e)
-    }
-  }
-
-  protected def convertConditionToPaimonPredicate(
-      condition: Expression,
-      output: Seq[Attribute]): Predicate = {
-    val converter = new SparkFilterConverter(table.rowType)
-    val filters = normalizeExprs(Seq(condition), output)
-      .flatMap(splitConjunctivePredicates(_).map {
-        f =>
-          translateFilter(f, supportNestedPredicatePushdown = true).getOrElse(
-            throw new RuntimeException("Exec update failed:" +
-              s" cannot translate expression to source filter: $f"))
-      })
-      .toArray
-    val predicates = filters.map(converter.convert)
-    PredicateBuilder.and(predicates: _*)
-  }
+trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
 
   /**
    * For the 'INSERT OVERWRITE' semantics of SQL, Spark DataSourceV2 will call the `truncate`
@@ -97,7 +74,7 @@ trait PaimonCommand extends WithFileStoreTable with PredicateHelper {
     }.toMap
   }
 
-  def splitConjunctiveFilters(filter: Filter): Seq[Filter] = {
+  private def splitConjunctiveFilters(filter: Filter): Seq[Filter] = {
     filter match {
       case And(filter1, filter2) =>
         splitConjunctiveFilters(filter1) ++ splitConjunctiveFilters(filter2)
@@ -105,8 +82,82 @@ trait PaimonCommand extends WithFileStoreTable with PredicateHelper {
     }
   }
 
-  def isNestedFilterInValue(value: Any): Boolean = {
+  private def isNestedFilterInValue(value: Any): Boolean = {
     value.isInstanceOf[Filter]
   }
 
+  /** Gets a relative path against the table path. */
+  protected def relativePath(absolutePath: String): String = {
+    val location = table.location().toUri
+    location.relativize(new URI(absolutePath)).toString
+  }
+
+  protected def findCandidateDataSplits(
+      condition: Expression,
+      output: Seq[Attribute]): Seq[DataSplit] = {
+    val snapshotReader = table.newSnapshotReader()
+    if (condition == TrueLiteral) {
+      val filter =
+        convertConditionToPaimonPredicate(condition, output, rowType, ignoreFailure = true)
+      filter.foreach(snapshotReader.withFilter)
+    }
+
+    snapshotReader.read().splits().asScala.collect { case s: DataSplit => s }
+  }
+
+  protected def findTouchedFiles(
+      candidateDataSplits: Seq[DataSplit],
+      condition: Expression,
+      relation: DataSourceV2Relation,
+      sparkSession: SparkSession): Array[String] = {
+    import sparkSession.implicits._
+
+    val scan = PaimonSplitScan(table, candidateDataSplits.toArray)
+    val filteredRelation =
+      FilterLogicalNode(
+        condition,
+        Compatibility.createDataSourceV2ScanRelation(relation, scan, relation.output))
+    createDataset(sparkSession, filteredRelation)
+      .select(input_file_name())
+      .distinct()
+      .as[String]
+      .collect()
+      .map(relativePath)
+  }
+
+  protected def candidateFileMap(
+      candidateDataSplits: Seq[DataSplit]): Map[String, SparkDataFileMeta] = {
+    val totalBuckets = table.coreOptions().bucket()
+    val candidateDataFiles = candidateDataSplits
+      .flatMap(dataSplit => convertToSparkDataFileMeta(dataSplit, totalBuckets))
+    val fileStorePathFactory = table.store().pathFactory()
+    candidateDataFiles
+      .map(file => (file.relativePath(fileStorePathFactory), file))
+      .toMap
+  }
+
+  protected def buildDeletedCommitMessage(
+      deletedFiles: Array[SparkDataFileMeta]): Seq[CommitMessage] = {
+    deletedFiles
+      .groupBy(f => (f.partition, f.bucket))
+      .map {
+        case ((partition, bucket), files) =>
+          val deletedDataFileMetas = files.map(_.dataFileMeta).toList.asJava
+
+          new CommitMessageImpl(
+            partition,
+            bucket,
+            new DataIncrement(
+              Collections.emptyList[DataFileMeta],
+              deletedDataFileMetas,
+              Collections.emptyList[DataFileMeta]),
+            new CompactIncrement(
+              Collections.emptyList[DataFileMeta],
+              Collections.emptyList[DataFileMeta],
+              Collections.emptyList[DataFileMeta]),
+            new IndexIncrement(Collections.emptyList[IndexFileMeta])
+          )
+      }
+      .toSeq
+  }
 }

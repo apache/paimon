@@ -15,6 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark
 
 import org.apache.paimon.data.{InternalRow => PaimonInternalRow}
@@ -39,7 +40,7 @@ case class PaimonPartitionReader(
 
   private lazy val iterator = {
     val reader = readFunc(split)
-    new RecordReaderIterator[PaimonInternalRow](reader)
+    PaimonRecordReaderIterator(reader)
   }
 
   override def next(): Boolean = {
