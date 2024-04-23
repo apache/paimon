@@ -76,6 +76,8 @@ public class BloomFilterFileIndex implements FileIndexer {
         private final BloomFilter64 filter;
         private final FastHash hashFunction;
 
+        private boolean empty = true;
+
         public Writer(DataType type, int items, double fpp) {
             this.filter = new BloomFilter64(items, fpp);
             this.hashFunction = FastHash.getHashFunction(type);
@@ -84,6 +86,7 @@ public class BloomFilterFileIndex implements FileIndexer {
         @Override
         public void write(Object key) {
             if (key != null) {
+                empty = false;
                 filter.addHash(hashFunction.hash(key));
             }
         }
@@ -99,6 +102,11 @@ public class BloomFilterFileIndex implements FileIndexer {
             serialized[3] = (byte) (numHashFunctions & 0xFF);
             filter.getBitSet().toByteArray(serialized, 4, serialized.length - 4);
             return serialized;
+        }
+
+        @Override
+        public boolean empty() {
+            return empty;
         }
     }
 

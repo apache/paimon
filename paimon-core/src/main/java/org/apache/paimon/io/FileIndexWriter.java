@@ -40,7 +40,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -57,8 +57,8 @@ public final class FileIndexWriter implements Closeable {
     // if the filter size greater than fileIndexInManifestThreshold, we put it in file
     private final long inManifestThreshold;
 
-    private final List<FileIndexMaintainer> fileIndexMaintainers = new ArrayList<>();
-    private final Map<String, MapFileIndexMaintainer> mapFileIndexMaintainers = new HashMap<>();
+    //    private final List<FileIndexMaintainer> fileIndexMaintainers = new ArrayList<>();
+    private final Map<String, IndexMaintainer> mapFileIndexMaintainers = new HashMap<>();
 
     private String resultFileName;
 
@@ -95,29 +95,33 @@ public final class FileIndexWriter implements Closeable {
                                         + " is nested column, but is not map type. Only should map type yet.");
                     }
                     MapType mapType = (MapType) field.type();
-                    mapFileIndexMaintainers
-                            .computeIfAbsent(
-                                    columnName,
-                                    name ->
-                                            new MapFileIndexMaintainer(
-                                                    columnName,
-                                                    indexType,
-                                                    mapType.getKeyType(),
-                                                    mapType.getValueType(),
-                                                    fileIndexOptions.get(
-                                                            columnName, typeEntry.getKey()),
-                                                    index.get(columnName)))
+                    ((MapFileIndexMaintainer)
+                                    mapFileIndexMaintainers.computeIfAbsent(
+                                            columnName,
+                                            name ->
+                                                    new MapFileIndexMaintainer(
+                                                            columnName,
+                                                            indexType,
+                                                            mapType.getKeyType(),
+                                                            mapType.getValueType(),
+                                                            fileIndexOptions.get(
+                                                                    columnName, typeEntry.getKey()),
+                                                            index.get(columnName))))
                             .add(entryColumn.getNestedColumnName(), typeEntry.getValue());
                 } else {
-                    fileIndexMaintainers.add(
-                            new FileIndexMaintainer(
-                                    columnName,
-                                    indexType,
-                                    FileIndexer.create(
-                                                    indexType, field.type(), typeEntry.getValue())
-                                            .createWriter(),
-                                    InternalRow.createFieldGetter(
-                                            field.type(), index.get(columnName))));
+                    mapFileIndexMaintainers.computeIfAbsent(
+                            columnName,
+                            name ->
+                                    new FileIndexMaintainer(
+                                            columnName,
+                                            indexType,
+                                            FileIndexer.create(
+                                                            indexType,
+                                                            field.type(),
+                                                            typeEntry.getValue())
+                                                    .createWriter(),
+                                            InternalRow.createFieldGetter(
+                                                    field.type(), index.get(columnName))));
                 }
             }
         }
@@ -125,7 +129,8 @@ public final class FileIndexWriter implements Closeable {
     }
 
     public void write(InternalRow row) {
-        fileIndexMaintainers.forEach(fileIndexMaintainer -> fileIndexMaintainer.write(row));
+        //        fileIndexMaintainers.forEach(fileIndexMaintainer ->
+        // fileIndexMaintainer.write(row));
         mapFileIndexMaintainers
                 .values()
                 .forEach(mapFileIndexMaintainer -> mapFileIndexMaintainer.write(row));
@@ -135,18 +140,12 @@ public final class FileIndexWriter implements Closeable {
     public void close() throws IOException {
         Map<String, Map<String, byte[]>> indexMaps = new HashMap<>();
 
-        for (FileIndexMaintainer fileIndexMaintainer : fileIndexMaintainers) {
-            indexMaps
-                    .computeIfAbsent(fileIndexMaintainer.getColumnName(), k -> new HashMap<>())
-                    .put(fileIndexMaintainer.getIndexType(), fileIndexMaintainer.serializedBytes());
-        }
-
-        for (MapFileIndexMaintainer mapFileIndexMaintainer : mapFileIndexMaintainers.values()) {
-            Map<String, byte[]> mapBytes = mapFileIndexMaintainer.serializedBytes();
+        for (IndexMaintainer indexMaintainer : mapFileIndexMaintainers.values()) {
+            Map<String, byte[]> mapBytes = indexMaintainer.serializedBytes();
             for (Map.Entry<String, byte[]> entry : mapBytes.entrySet()) {
                 indexMaps
                         .computeIfAbsent(entry.getKey(), k -> new HashMap<>())
-                        .put(mapFileIndexMaintainer.getIndexType(), entry.getValue());
+                        .put(indexMaintainer.getIndexType(), entry.getValue());
             }
         }
 
@@ -202,8 +201,17 @@ public final class FileIndexWriter implements Closeable {
         }
     }
 
+    interface IndexMaintainer {
+
+        void write(InternalRow row);
+
+        String getIndexType();
+
+        Map<String, byte[]> serializedBytes();
+    }
+
     /** One index maintainer for one column. */
-    private static class FileIndexMaintainer {
+    private static class FileIndexMaintainer implements IndexMaintainer {
 
         private final String columnName;
         private final String indexType;
@@ -229,17 +237,13 @@ public final class FileIndexWriter implements Closeable {
             return indexType;
         }
 
-        public String getColumnName() {
-            return columnName;
-        }
-
-        public byte[] serializedBytes() {
-            return fileIndexWriter.serializedBytes();
+        public Map<String, byte[]> serializedBytes() {
+            return Collections.singletonMap(columnName, fileIndexWriter.serializedBytes());
         }
     }
 
     /** File index writer for map data type. */
-    private static class MapFileIndexMaintainer {
+    private static class MapFileIndexMaintainer implements IndexMaintainer {
 
         private final String columnName;
         private final String indexType;
@@ -303,9 +307,12 @@ public final class FileIndexWriter implements Closeable {
         public Map<String, byte[]> serializedBytes() {
             Map<String, byte[]> result = new HashMap<>();
             indexWritersMap.forEach(
-                    (k, v) ->
+                    (k, v) -> {
+                        if (!v.empty()) {
                             result.put(
-                                    FileIndexCommon.toMapKey(columnName, k), v.serializedBytes()));
+                                    FileIndexCommon.toMapKey(columnName, k), v.serializedBytes());
+                        }
+                    });
             return result;
         }
     }

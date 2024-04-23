@@ -24,4 +24,6 @@ public interface FileIndexWriter {
     void write(Object key);
 
     byte[] serializedBytes();
+
+    boolean empty();
 }
