@@ -119,7 +119,7 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
             // ignore COMPACT and OVERWRITE
             return Collections.emptyList();
         }
-        return (List) reader.withSnapshot(s).withMode(ScanMode.DELTA).read().splits();
+        return (List) reader.withSnapshot(s).withMode(ScanMode.DELTA).readChanges().splits();
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})

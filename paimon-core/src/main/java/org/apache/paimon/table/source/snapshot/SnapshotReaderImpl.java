@@ -381,6 +381,8 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                 .withBeforeFiles(before)
                                 .withDataFiles(data)
                                 .isStreaming(isStreaming)
+                                // maybe append only file could set to true
+                                .rawConvertible(false)
                                 .withBucketPath(pathFactory.bucketPath(part, bucket).toString())
                                 .withDefaultFormat(
                                         options.fileFormat().getFormatIdentifier().toLowerCase());
