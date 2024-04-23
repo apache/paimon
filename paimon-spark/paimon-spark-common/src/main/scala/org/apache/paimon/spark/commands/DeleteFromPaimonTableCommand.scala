@@ -120,7 +120,11 @@ case class DeleteFromPaimonTableCommand(
     }
 
     // Step4: build a dataframe that contains the unchanged data, and write out them.
-    val touchedDataSplits = SparkDataFileMeta.convertToDataSplits(touchedFiles)
+    val touchedDataSplits = SparkDataFileMeta.convertToDataSplits(
+      touchedFiles,
+      rawConvertible = true,
+      table.store().pathFactory(),
+      table.coreOptions().fileFormat().getFormatIdentifier.toLowerCase())
     val toRewriteScanRelation = Filter(
       Not(condition),
       Compatibility.createDataSourceV2ScanRelation(

@@ -103,6 +103,8 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
                         .withPartition(entry.partition())
                         .withBucket(entry.bucket())
                         .withDataFiles(Collections.singletonList(entry.file()))
+                        .withBucketPath("not used")
+                        .withDefaultFormat("orc")
                         .build();
 
         final AtomicInteger i = new AtomicInteger(Integer.MIN_VALUE);
@@ -128,6 +130,8 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
                         .withPartition(entry.partition())
                         .withBucket(entry.bucket())
                         .withDataFiles(Collections.singletonList(entry.file()))
+                        .withBucketPath("not used")
+                        .withDefaultFormat("orc")
                         .build();
 
         i.set(Integer.MIN_VALUE);
