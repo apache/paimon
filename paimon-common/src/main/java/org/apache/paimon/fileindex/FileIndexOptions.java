@@ -20,6 +20,7 @@ package org.apache.paimon.fileindex;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.StringUtils;
 
 import java.util.Arrays;
 import java.util.HashMap;
@@ -35,21 +36,86 @@ public class FileIndexOptions {
 
     public static final Pattern IS_NESTED = Pattern.compile(".+\\[.+]");
 
+    public static final String FILE_INDEX = "file-index";
+
+    public static final String COLUMNS = "columns";
+
     // if the filter size greater than fileIndexInManifestThreshold, we put it in file
     private final long fileIndexInManifestThreshold;
 
     private final Map<Column, Map<String, Options>> indexTypeOptions;
 
     public FileIndexOptions() {
-        this(CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD.defaultValue().getBytes());
+        this(new CoreOptions(new Options()));
     }
 
-    public FileIndexOptions(long fileIndexInManifestThreshold) {
+    public FileIndexOptions(CoreOptions coreOptions) {
         this.indexTypeOptions = new HashMap<>();
-        this.fileIndexInManifestThreshold = fileIndexInManifestThreshold;
+        this.fileIndexInManifestThreshold = coreOptions.fileIndexInManifestThreshold();
+        setupOptions(coreOptions);
     }
 
-    public void computeIfAbsent(String column, String indexType) {
+    private void setupOptions(CoreOptions coreOptions) {
+        String fileIndexPrefix = FILE_INDEX + ".";
+        String fileIndexColumnSuffix = "." + COLUMNS;
+
+        Map<String, String> optionMap = new HashMap<>();
+        // find the column to be indexed.
+        for (Map.Entry<String, String> entry : coreOptions.toMap().entrySet()) {
+            String key = entry.getKey();
+            if (key.startsWith(fileIndexPrefix)) {
+                // start with file-index, decode this option
+                if (key.endsWith(fileIndexColumnSuffix)) {
+                    // if end with .column, set up indexes
+                    String indexType =
+                            key.substring(
+                                    fileIndexPrefix.length(),
+                                    key.length() - fileIndexColumnSuffix.length());
+                    String[] names = entry.getValue().split(",");
+                    for (String name : names) {
+                        if (StringUtils.isBlank(name)) {
+                            throw new IllegalArgumentException(
+                                    "Wrong option in " + key + ", should not have empty column");
+                        }
+                        computeIfAbsent(name.trim(), indexType);
+                    }
+                } else {
+                    optionMap.put(entry.getKey(), entry.getValue());
+                }
+            }
+        }
+
+        // fill out the options
+        for (Map.Entry<String, String> optionEntry : optionMap.entrySet()) {
+            String key = optionEntry.getKey();
+
+            String[] kv = key.substring(fileIndexPrefix.length()).split("\\.");
+            if (kv.length != 3) {
+                // just ignore options those are not expected
+                continue;
+            }
+            String indexType = kv[0];
+            String cname = kv[1];
+            String opkey = kv[2];
+
+            // if reaches here, must be an option.
+            if (get(cname, indexType) == null) {
+                throw new IllegalArgumentException(
+                        "Wrong option in \""
+                                + key
+                                + "\", can't found column \""
+                                + cname
+                                + "\" in \""
+                                + fileIndexPrefix
+                                + indexType
+                                + fileIndexColumnSuffix
+                                + "\"");
+            }
+            get(cname, indexType).set(opkey, optionEntry.getValue());
+        }
+    }
+
+    private void computeIfAbsent(String column, String indexType) {
         Optional<Integer> nestedColumnPosition = getNestedColumn(column);
         if (nestedColumnPosition.isPresent()) {
             int position = nestedColumnPosition.get();

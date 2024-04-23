@@ -102,15 +102,6 @@ public class Options implements Serializable {
         return data.get(key);
     }
 
-    public synchronized <X extends Throwable> String getOrThrow(String key, Supplier<X> supplier)
-            throws X {
-        String value = data.get(key);
-        if (value == null) {
-            throw supplier.get();
-        }
-        return value;
-    }
-
     public synchronized <T> Optional<T> getOptional(ConfigOption<T> option) {
         Optional<Object> rawValue = getRawValueFromOption(option);
         Class<?> clazz = option.getClazz();

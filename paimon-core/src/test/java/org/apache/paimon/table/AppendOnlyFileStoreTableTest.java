@@ -25,6 +25,7 @@ import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndex;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
@@ -66,6 +67,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD;
 import static org.apache.paimon.table.sink.KeyAndBucketExtractor.bucket;
 import static org.apache.paimon.table.sink.KeyAndBucketExtractor.bucketKeyHashCode;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -374,32 +376,32 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                         rowType,
                         options -> {
                             options.set(
-                                    CoreOptions.FILE_INDEX
+                                    FileIndexOptions.FILE_INDEX
                                             + "."
                                             + BloomFilterFileIndex.BLOOM_FILTER
                                             + "."
                                             + CoreOptions.COLUMNS,
                                     "index_column, index_column2, index_column3");
                             options.set(
-                                    CoreOptions.FILE_INDEX
+                                    FileIndexOptions.FILE_INDEX
                                             + "."
                                             + BloomFilterFileIndex.BLOOM_FILTER
                                             + ".index_column.items",
                                     "150");
                             options.set(
-                                    CoreOptions.FILE_INDEX
+                                    FileIndexOptions.FILE_INDEX
                                             + "."
                                             + BloomFilterFileIndex.BLOOM_FILTER
                                             + ".index_column2.items",
                                     "150");
                             options.set(
-                                    CoreOptions.FILE_INDEX
+                                    FileIndexOptions.FILE_INDEX
                                             + "."
                                             + BloomFilterFileIndex.BLOOM_FILTER
                                             + ".index_column3.items",
                                     "150");
                             options.set(
-                                    CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD.key(), "500 B");
+                                    FILE_INDEX_IN_MANIFEST_THRESHOLD.key(), "500 B");
                         });
 
         StreamTableWrite write = table.newWrite(commitUser);
@@ -441,13 +443,13 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                         rowType,
                         options -> {
                             options.set(
-                                    CoreOptions.FILE_INDEX
+                                    FileIndexOptions.FILE_INDEX
                                             + "."
                                             + BloomFilterFileIndex.BLOOM_FILTER
                                             + "."
                                             + CoreOptions.COLUMNS,
                                     "index_column, index_column2, index_column3");
-                            options.set(CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD.key(), "50 B");
+                            options.set(FILE_INDEX_IN_MANIFEST_THRESHOLD.key(), "50 B");
                         });
 
         StreamTableWrite write = table.newWrite(commitUser);
@@ -499,32 +501,32 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                         rowType,
                         options -> {
                             options.set(
-                                    CoreOptions.FILE_INDEX
+                                    FileIndexOptions.FILE_INDEX
                                             + "."
                                             + BloomFilterFileIndex.BLOOM_FILTER
                                             + "."
                                             + CoreOptions.COLUMNS,
                                     "index_column, index_column2, index_column3[a], index_column3[b], index_column3[c], index_column3[d]");
                             options.set(
-                                    CoreOptions.FILE_INDEX
+                                    FileIndexOptions.FILE_INDEX
                                             + "."
                                             + BloomFilterFileIndex.BLOOM_FILTER
                                             + ".index_column.items",
                                     "150");
                             options.set(
-                                    CoreOptions.FILE_INDEX
+                                    FileIndexOptions.FILE_INDEX
                                             + "."
                                             + BloomFilterFileIndex.BLOOM_FILTER
                                             + ".index_column2.items",
                                     "150");
                             options.set(
-                                    CoreOptions.FILE_INDEX
+                                    FileIndexOptions.FILE_INDEX
                                             + "."
                                             + BloomFilterFileIndex.BLOOM_FILTER
                                             + ".index_column3.items",
                                     "150");
                             options.set(
-                                    CoreOptions.FILE_INDEX
+                                    FileIndexOptions.FILE_INDEX
                                             + "."
                                             + BloomFilterFileIndex.BLOOM_FILTER
                                             + ".index_column3[a].items",

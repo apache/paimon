@@ -57,8 +57,7 @@ public final class FileIndexWriter implements Closeable {
     // if the filter size greater than fileIndexInManifestThreshold, we put it in file
     private final long inManifestThreshold;
 
-    //    private final List<FileIndexMaintainer> fileIndexMaintainers = new ArrayList<>();
-    private final Map<String, IndexMaintainer> mapFileIndexMaintainers = new HashMap<>();
+    private final Map<String, IndexMaintainer> indexMaintainers = new HashMap<>();
 
     private String resultFileName;
 
@@ -96,7 +95,7 @@ public final class FileIndexWriter implements Closeable {
                     }
                     MapType mapType = (MapType) field.type();
                     ((MapFileIndexMaintainer)
-                                    mapFileIndexMaintainers.computeIfAbsent(
+                                    indexMaintainers.computeIfAbsent(
                                             columnName,
                                             name ->
                                                     new MapFileIndexMaintainer(
@@ -109,7 +108,7 @@ public final class FileIndexWriter implements Closeable {
                                                             index.get(columnName))))
                             .add(entryColumn.getNestedColumnName(), typeEntry.getValue());
                 } else {
-                    mapFileIndexMaintainers.computeIfAbsent(
+                    indexMaintainers.computeIfAbsent(
                             columnName,
                             name ->
                                     new FileIndexMaintainer(
@@ -129,9 +128,7 @@ public final class FileIndexWriter implements Closeable {
     }
 
     public void write(InternalRow row) {
-        //        fileIndexMaintainers.forEach(fileIndexMaintainer ->
-        // fileIndexMaintainer.write(row));
-        mapFileIndexMaintainers
+        indexMaintainers
                 .values()
                 .forEach(mapFileIndexMaintainer -> mapFileIndexMaintainer.write(row));
     }
@@ -140,7 +137,7 @@ public final class FileIndexWriter implements Closeable {
     public void close() throws IOException {
         Map<String, Map<String, byte[]>> indexMaps = new HashMap<>();
 
-        for (IndexMaintainer indexMaintainer : mapFileIndexMaintainers.values()) {
+        for (IndexMaintainer indexMaintainer : indexMaintainers.values()) {
             Map<String, byte[]> mapBytes = indexMaintainer.serializedBytes();
             for (Map.Entry<String, byte[]> entry : mapBytes.entrySet()) {
                 indexMaps
