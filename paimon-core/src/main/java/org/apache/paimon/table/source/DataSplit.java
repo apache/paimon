@@ -96,6 +96,18 @@ public class DataSplit implements Split {
         return isStreaming;
     }
 
+    public boolean rawConvertible() {
+        return rawConvertible;
+    }
+
+    public String getBucketPath() {
+        return bucketPath;
+    }
+
+    public String getDefaultFormat() {
+        return defaultFormat;
+    }
+
     public OptionalLong getLatestFileCreationEpochMillis() {
         return this.dataFiles.stream().mapToLong(DataFileMeta::creationTimeEpochMillis).max();
     }

@@ -38,13 +38,10 @@ class ScanHelperTest extends PaimonSparkTestBase {
       val fileNum = 100
 
       val files = scala.collection.mutable.ListBuffer.empty[DataFileMeta]
-      val rawFiles = scala.collection.mutable.ListBuffer.empty[RawFile]
       0.until(fileNum).foreach {
         i =>
           val path = s"f$i.parquet"
           files += DataFileMeta.forAppend(path, 750000, 30000, null, 0, 29999, 1)
-
-          rawFiles += new RawFile(s"/a/b/$path", 0, 75000, "parquet", 0, 30000)
       }
 
       val dataSplits = mutable.ArrayBuffer.empty[Split]
@@ -56,7 +53,6 @@ class ScanHelperTest extends PaimonSparkTestBase {
             .withBucket(0)
             .withPartition(new BinaryRow(0))
             .withDataFiles(files.zipWithIndex.filter(_._2 % splitNum == i).map(_._1).toList.asJava)
-            .rawFiles(rawFiles.zipWithIndex.filter(_._2 % splitNum == i).map(_._1).toList.asJava)
             .build()
       }
 
