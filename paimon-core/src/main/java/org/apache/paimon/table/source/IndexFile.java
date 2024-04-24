@@ -18,6 +18,10 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.io.DataInputView;
+import org.apache.paimon.io.DataOutputView;
+
+import java.io.IOException;
 import java.util.Objects;
 
 /** Index file for data file. */
@@ -37,5 +41,14 @@ public class IndexFile {
 
         IndexFile other = (IndexFile) o;
         return Objects.equals(path, other.path);
+    }
+
+    public void serialize(DataOutputView out) throws IOException {
+        out.writeUTF(path);
+    }
+
+    public static IndexFile deserialize(DataInputView in) throws IOException {
+        String path = in.readUTF();
+        return new IndexFile(path);
     }
 }
