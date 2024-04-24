@@ -30,7 +30,6 @@ import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
 import java.util.function.BiFunction;
-import java.util.function.Supplier;
 
 import static org.apache.paimon.options.OptionsUtils.canBePrefixMap;
 import static org.apache.paimon.options.OptionsUtils.containsPrefixMap;

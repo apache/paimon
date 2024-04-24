@@ -28,13 +28,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 /** Options of file index column. */
 public class FileIndexOptions {
-
-    public static final Pattern IS_NESTED = Pattern.compile(".+\\[.+]");
 
     public static final String FILE_INDEX = "file-index";
 
@@ -44,6 +40,7 @@ public class FileIndexOptions {
     private final long fileIndexInManifestThreshold;
 
     private final Map<Column, Map<String, Options>> indexTypeOptions;
+    private final Map<Column, Map<String, Options>> topLevelMapColumnOptions;
 
     public FileIndexOptions() {
         this(new CoreOptions(new Options()));
@@ -51,6 +48,7 @@ public class FileIndexOptions {
 
     public FileIndexOptions(CoreOptions coreOptions) {
         this.indexTypeOptions = new HashMap<>();
+        this.topLevelMapColumnOptions = new HashMap<>();
         this.fileIndexInManifestThreshold = coreOptions.fileIndexInManifestThreshold();
         setupOptions(coreOptions);
     }
@@ -99,7 +97,11 @@ public class FileIndexOptions {
             String opkey = kv[2];
 
             // if reaches here, must be an option.
-            if (get(cname, indexType) == null) {
+            if (get(cname, indexType) != null) {
+                get(cname, indexType).set(opkey, optionEntry.getValue());
+            } else if (getMapTopLevelOptions(cname, indexType) != null) {
+                getMapTopLevelOptions(cname, indexType).set(opkey, optionEntry.getValue());
+            } else {
                 throw new IllegalArgumentException(
                         "Wrong option in \""
                                 + key
@@ -111,12 +113,11 @@ public class FileIndexOptions {
                                 + fileIndexColumnSuffix
                                 + "\"");
             }
-            get(cname, indexType).set(opkey, optionEntry.getValue());
         }
     }
 
     private void computeIfAbsent(String column, String indexType) {
-        Optional<Integer> nestedColumnPosition = getNestedColumn(column);
+        Optional<Integer> nestedColumnPosition = topLevelIndexOfNested(column);
         if (nestedColumnPosition.isPresent()) {
             int position = nestedColumnPosition.get();
             String columnName = column.substring(0, position);
@@ -125,8 +126,8 @@ public class FileIndexOptions {
             indexTypeOptions
                     .computeIfAbsent(new Column(columnName, nestedName), c -> new HashMap<>())
                     .computeIfAbsent(indexType, i -> new Options());
-            indexTypeOptions
-                    .computeIfAbsent(new Column(columnName, false), c -> new HashMap<>())
+            topLevelMapColumnOptions
+                    .computeIfAbsent(new Column(columnName), c -> new HashMap<>())
                     .computeIfAbsent(indexType, i -> new Options());
         } else {
             indexTypeOptions
@@ -135,8 +136,8 @@ public class FileIndexOptions {
         }
     }
 
-    public Options get(String column, String indexType) {
-        Optional<Integer> nestedColumnPosition = getNestedColumn(column);
+    private Options get(String column, String indexType) {
+        Optional<Integer> nestedColumnPosition = topLevelIndexOfNested(column);
 
         Column columnKey;
         if (nestedColumnPosition.isPresent()) {
@@ -154,6 +155,18 @@ public class FileIndexOptions {
                 .orElse(null);
     }
 
+    public Options getMapTopLevelOptions(String column, String indexType) {
+        return Optional.ofNullable(topLevelMapColumnOptions.getOrDefault(new Column(column), null))
+                .map(x -> x.get(indexType))
+                .orElseThrow(
+                        () ->
+                                new IllegalArgumentException(
+                                        "Can't find top level column options for map type: "
+                                                + column
+                                                + " "
+                                                + indexType));
+    }
+
     public boolean isEmpty() {
         return indexTypeOptions.isEmpty();
     }
@@ -163,16 +176,14 @@ public class FileIndexOptions {
     }
 
     public Set<Map.Entry<Column, Map<String, Options>>> entrySet() {
-        return indexTypeOptions.entrySet().stream()
-                .filter(entry -> entry.getKey().isExternallyPerceptible())
-                .collect(Collectors.toSet());
+        return indexTypeOptions.entrySet();
     }
 
-    public static Optional<Integer> getNestedColumn(String column) {
-        if (IS_NESTED.matcher(column).find()) {
-            return Optional.of(column.indexOf('['));
+    public static Optional<Integer> topLevelIndexOfNested(String column) {
+        int start = column.indexOf('[');
+        if (start != -1 && column.endsWith("]")) {
+            return Optional.of(start);
         }
-
         return Optional.empty();
     }
 
@@ -182,32 +193,21 @@ public class FileIndexOptions {
         private final String columnName;
         private final String nestedColumnName;
         private final boolean isNestedColumn;
-        private final boolean externallyPerceptible;
 
-        public Column(String columnName, boolean externallyPerceptible) {
+        public Column(String columnName) {
             this.columnName = columnName;
             this.nestedColumnName = null;
             this.isNestedColumn = false;
-            this.externallyPerceptible = externallyPerceptible;
-        }
-
-        public Column(String columnName) {
-            this(columnName, true);
         }
 
         public Column(String columnName, String nestedColumnName) {
             this.columnName = columnName;
             this.nestedColumnName = nestedColumnName;
             this.isNestedColumn = true;
-            this.externallyPerceptible = true;
         }
 
         public String getColumnName() {
             return columnName;
-        }
-
-        public boolean isExternallyPerceptible() {
-            return externallyPerceptible;
         }
 
         public String getNestedColumnName() {

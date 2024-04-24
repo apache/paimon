@@ -103,7 +103,7 @@ public final class FileIndexWriter implements Closeable {
                                                             indexType,
                                                             mapType.getKeyType(),
                                                             mapType.getValueType(),
-                                                            fileIndexOptions.get(
+                                                            fileIndexOptions.getMapTopLevelOptions(
                                                                     columnName, typeEntry.getKey()),
                                                             index.get(columnName))))
                             .add(entryColumn.getNestedColumnName(), typeEntry.getValue());

@@ -400,8 +400,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                                             + BloomFilterFileIndex.BLOOM_FILTER
                                             + ".index_column3.items",
                                     "150");
-                            options.set(
-                                    FILE_INDEX_IN_MANIFEST_THRESHOLD.key(), "500 B");
+                            options.set(FILE_INDEX_IN_MANIFEST_THRESHOLD.key(), "500 B");
                         });
 
         StreamTableWrite write = table.newWrite(commitUser);

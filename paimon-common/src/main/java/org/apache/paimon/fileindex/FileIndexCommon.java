@@ -33,9 +33,9 @@ public class FileIndexCommon {
     }
 
     public static DataType getFieldType(Map<String, DataField> fields, String columnsName) {
-        Optional<Integer> nestedIndex = FileIndexOptions.getNestedColumn(columnsName);
-        if (nestedIndex.isPresent()) {
-            return ((MapType) fields.get(columnsName.substring(0, nestedIndex.get())).type())
+        Optional<Integer> topLevelIndex = FileIndexOptions.topLevelIndexOfNested(columnsName);
+        if (topLevelIndex.isPresent()) {
+            return ((MapType) fields.get(columnsName.substring(0, topLevelIndex.get())).type())
                     .getValueType();
         } else {
             return fields.get(columnsName).type();
