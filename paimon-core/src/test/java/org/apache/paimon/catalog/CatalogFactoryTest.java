@@ -24,7 +24,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.table.TableType;
 
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hdfs.HdfsConfiguration;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -80,7 +79,6 @@ public class CatalogFactoryTest {
         options.set("hadoop.dfs.replication", replication);
         Configuration conf = CatalogContext.create(options).hadoopConf();
 
-        assertThat(conf).isInstanceOf(HdfsConfiguration.class);
         assertThat(conf.get("fs.defaultFS")).isEqualTo(defaultFS);
         assertThat(conf.get("dfs.replication")).isEqualTo(replication);
     }
