@@ -21,7 +21,7 @@ package org.apache.paimon.fileindex;
 /** To write file index. */
 public abstract class FileIndexWriter {
 
-    boolean empty = true;
+    private boolean empty = true;
 
     public void writeRecord(Object key) {
         if (key != null) {
