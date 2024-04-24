@@ -118,7 +118,6 @@ trait ScanHelper {
       .withDataFiles(dataFiles.toList.asJava)
       .rawConvertible(split.rawConvertible())
       .withBucketPath(split.getBucketPath)
-      .withDefaultFormat(split.getDefaultFormat)
     if (deletionVectors) {
       builder.withDataDeletionFiles(deletionFiles.toList.asJava)
     }

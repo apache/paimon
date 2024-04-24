@@ -124,7 +124,6 @@ public class FileStoreSourceSplitGeneratorTest {
                 .withDataFiles(metas)
                 .rawConvertible(false)
                 .withBucketPath("/") // not used
-                .withDefaultFormat("orc") // not used
                 .build();
     }
 }

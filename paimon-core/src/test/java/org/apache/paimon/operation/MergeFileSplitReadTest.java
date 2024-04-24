@@ -247,7 +247,6 @@ public class MergeFileSplitReadTest {
                                                     .map(ManifestEntry::file)
                                                     .collect(Collectors.toList()))
                                     .withBucketPath("not used")
-                                    .withDefaultFormat("orc")
                                     .build());
             RecordReaderIterator<KeyValue> actualIterator = new RecordReaderIterator<>(reader);
             while (actualIterator.hasNext()) {

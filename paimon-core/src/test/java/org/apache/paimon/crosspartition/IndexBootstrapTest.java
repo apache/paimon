@@ -118,7 +118,6 @@ public class IndexBootstrapTest extends TableTestBase {
                 .withBucket(0)
                 .withDataFiles(Arrays.asList(files))
                 .withBucketPath("") // not used
-                .withDefaultFormat("orc") // not used
                 .build();
     }
 

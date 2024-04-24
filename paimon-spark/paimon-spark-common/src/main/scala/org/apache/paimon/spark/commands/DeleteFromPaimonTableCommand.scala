@@ -123,8 +123,7 @@ case class DeleteFromPaimonTableCommand(
     val touchedDataSplits = SparkDataFileMeta.convertToDataSplits(
       touchedFiles,
       rawConvertible = true,
-      table.store().pathFactory(),
-      table.coreOptions().fileFormat().getFormatIdentifier.toLowerCase())
+      table.store().pathFactory())
     val toRewriteScanRelation = Filter(
       Not(condition),
       Compatibility.createDataSourceV2ScanRelation(

@@ -441,7 +441,6 @@ public class TestFileStore extends KeyValueFileStore {
                                                 .isStreaming(isStreaming)
                                                 .rawConvertible(false)
                                                 .withBucketPath("not used")
-                                                .withDefaultFormat("orc")
                                                 .build()));
                 while (iterator.hasNext()) {
                     kvs.add(iterator.next().copy(keySerializer, valueSerializer));

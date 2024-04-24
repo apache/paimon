@@ -839,7 +839,6 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
                 .isStreaming(true)
                 .rawConvertible(false)
                 .withBucketPath("") // not used
-                .withDefaultFormat("orc") // not used
                 .build();
     }
 

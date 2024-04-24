@@ -106,8 +106,7 @@ case class UpdatePaimonTableCommand(
       val touchedDataSplits = SparkDataFileMeta.convertToDataSplits(
         touchedFiles,
         rawConvertible = true,
-        table.store().pathFactory(),
-        table.coreOptions().fileFormat().getFormatIdentifier.toLowerCase())
+        table.store().pathFactory())
       val toUpdateScanRelation = DataSourceV2ScanRelation(
         relation,
         PaimonSplitScan(table, touchedDataSplits),

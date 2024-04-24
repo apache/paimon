@@ -59,7 +59,6 @@ public class DataSplit implements Split {
 
     private boolean rawConvertible;
     private String bucketPath;
-    private String defaultFormat;
 
     public DataSplit() {}
 
@@ -104,10 +103,6 @@ public class DataSplit implements Split {
         return bucketPath;
     }
 
-    public String getDefaultFormat() {
-        return defaultFormat;
-    }
-
     public OptionalLong getLatestFileCreationEpochMillis() {
         return this.dataFiles.stream().mapToLong(DataFileMeta::creationTimeEpochMillis).max();
     }
@@ -138,7 +133,15 @@ public class DataSplit implements Split {
                 bucketPath + "/" + meta.fileName(),
                 0,
                 meta.fileSize(),
-                meta.fileFormat().map(t -> t.toString().toLowerCase()).orElse(defaultFormat),
+                meta.fileFormat()
+                        .map(t -> t.toString().toLowerCase())
+                        .orElseThrow(
+                                () ->
+                                        new RuntimeException(
+                                                "Can't find format from file: "
+                                                        + bucketPath
+                                                        + "/"
+                                                        + meta.fileName())),
                 meta.schemaId(),
                 meta.rowCount());
     }
@@ -187,8 +190,7 @@ public class DataSplit implements Split {
                 && Objects.equals(dataDeletionFiles, split.dataDeletionFiles)
                 && isStreaming == split.isStreaming
                 && rawConvertible == split.rawConvertible
-                && Objects.equals(bucketPath, split.bucketPath)
-                && Objects.equals(defaultFormat, split.defaultFormat);
+                && Objects.equals(bucketPath, split.bucketPath);
     }
 
     @Override
@@ -202,8 +204,7 @@ public class DataSplit implements Split {
                 dataDeletionFiles,
                 isStreaming,
                 rawConvertible,
-                bucketPath,
-                defaultFormat);
+                bucketPath);
     }
 
     private void writeObject(ObjectOutputStream out) throws IOException {
@@ -225,7 +226,6 @@ public class DataSplit implements Split {
         this.isStreaming = other.isStreaming;
         this.rawConvertible = other.rawConvertible;
         this.bucketPath = other.bucketPath;
-        this.defaultFormat = other.defaultFormat;
     }
 
     public void serialize(DataOutputView out) throws IOException {
@@ -252,7 +252,6 @@ public class DataSplit implements Split {
 
         out.writeBoolean(rawConvertible);
         out.writeUTF(bucketPath);
-        out.writeUTF(defaultFormat);
     }
 
     public static DataSplit deserialize(DataInputView in) throws IOException {
@@ -280,7 +279,6 @@ public class DataSplit implements Split {
         boolean isStreaming = in.readBoolean();
         boolean rawConvertible = in.readBoolean();
         String bucketPath = in.readUTF();
-        String defaultFormat = in.readUTF();
 
         DataSplit.Builder builder =
                 builder()
@@ -291,8 +289,7 @@ public class DataSplit implements Split {
                         .withDataFiles(dataFiles)
                         .isStreaming(isStreaming)
                         .rawConvertible(rawConvertible)
-                        .withBucketPath(bucketPath)
-                        .withDefaultFormat(defaultFormat);
+                        .withBucketPath(bucketPath);
 
         if (beforeDeletionFiles != null) {
             builder.withBeforeDeletionFiles(beforeDeletionFiles);
@@ -362,17 +359,11 @@ public class DataSplit implements Split {
             return this;
         }
 
-        public Builder withDefaultFormat(String defaultFormat) {
-            this.split.defaultFormat = defaultFormat;
-            return this;
-        }
-
         public DataSplit build() {
             checkArgument(split.partition != null);
             checkArgument(split.bucket != -1);
             checkArgument(split.dataFiles != null);
             checkArgument(split.bucketPath != null);
-            checkArgument(split.defaultFormat != null);
 
             DataSplit split = new DataSplit();
             split.assign(this.split);

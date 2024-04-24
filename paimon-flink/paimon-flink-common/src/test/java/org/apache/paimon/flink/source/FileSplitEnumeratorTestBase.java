@@ -62,7 +62,6 @@ public abstract class FileSplitEnumeratorTestBase {
                         .withDataFiles(files)
                         .isStreaming(true)
                         .withBucketPath("/temp/xxx") // not used
-                        .withDefaultFormat("orc") // not used
                         .build(),
                 0);
     }

@@ -78,7 +78,6 @@ public class PaimonInputSplitTest {
                                         .collect(Collectors.toList()))
                         .rawConvertible(false)
                         .withBucketPath("not used")
-                        .withDefaultFormat("orc")
                         .build();
         PaimonInputSplit split = new PaimonInputSplit(tempDir.toString(), dataSplit, null);
 

@@ -128,7 +128,6 @@ public class FileStoreSourceSplitSerializerTest {
                         .isStreaming(isIncremental)
                         .rawConvertible(false)
                         .withBucketPath("/temp/" + bucket) // no used
-                        .withDefaultFormat("orc")
                         .build();
         return new FileStoreSourceSplit(id, split, recordsToSkip);
     }

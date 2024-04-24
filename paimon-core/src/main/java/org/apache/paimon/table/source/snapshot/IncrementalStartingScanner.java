@@ -69,7 +69,6 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
                                         // need merge for primary key table
                                         false,
                                         split.getBucketPath(),
-                                        split.getDefaultFormat(),
                                         split.deletionFiles().orElse(null)),
                                 k -> new ArrayList<>())
                         .addAll(split.dataFiles());
@@ -93,8 +92,7 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
                                 .withBucket(bucket)
                                 .withDataFiles(splitGroup.files)
                                 .rawConvertible(rawConvertible)
-                                .withBucketPath(bucketPath)
-                                .withDefaultFormat(defaultFormat);
+                                .withBucketPath(bucketPath);
                 if (deletionFiles != null) {
                     dataSplitBuilder.withDataDeletionFiles(deletionFiles);
                 }
@@ -141,7 +139,6 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
         private final int bucket;
         private final boolean rawConvertible;
         private final String bucketPath;
-        private final String defaultFormat;
         @Nullable private final List<DeletionFile> deletionFiles;
 
         private SplitInfo(
@@ -149,22 +146,18 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
                 int bucket,
                 boolean rawConvertible,
                 String bucketPath,
-                String defaultFormat,
                 @Nullable List<DeletionFile> deletionFiles) {
             this.partition = partition;
             this.bucket = bucket;
             this.rawConvertible = rawConvertible;
             this.bucketPath = bucketPath;
-            this.defaultFormat = defaultFormat;
             this.deletionFiles = deletionFiles;
         }
 
         @Override
         public int hashCode() {
             return Arrays.hashCode(
-                    new Object[] {
-                        partition, bucket, rawConvertible, bucketPath, defaultFormat, deletionFiles
-                    });
+                    new Object[] {partition, bucket, rawConvertible, bucketPath, deletionFiles});
         }
 
         @Override
@@ -180,7 +173,6 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
                     && bucket == that.bucket
                     && rawConvertible == that.rawConvertible
                     && Objects.equals(bucketPath, that.bucketPath)
-                    && Objects.equals(defaultFormat, that.defaultFormat)
                     && Objects.equals(deletionFiles, that.deletionFiles);
         }
     }

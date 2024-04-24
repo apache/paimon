@@ -51,7 +51,6 @@ public class SplitTest {
                         .withBucket(data.bucket)
                         .withDataFiles(files)
                         .withBucketPath("my path")
-                        .withDefaultFormat("orc")
                         .build();
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();

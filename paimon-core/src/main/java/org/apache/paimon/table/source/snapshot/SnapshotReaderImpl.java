@@ -292,12 +292,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                     String bucketPath = pathFactory.bucketPath(partition, bucket).toString();
                     builder.withDataFiles(dataFiles)
                             .rawConvertible(splitGroup.rawConvertible)
-                            .withBucketPath(bucketPath)
-                            .withDefaultFormat(
-                                    new CoreOptions(tableSchema.options())
-                                            .formatType()
-                                            .toString()
-                                            .toLowerCase());
+                            .withBucketPath(bucketPath);
                     if (deletionVectors) {
                         builder.withDataDeletionFiles(
                                 getDeletionFiles(dataFiles, deletionIndexFile));
@@ -380,9 +375,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                 .withBeforeFiles(before)
                                 .withDataFiles(data)
                                 .isStreaming(isStreaming)
-                                .withBucketPath(pathFactory.bucketPath(part, bucket).toString())
-                                .withDefaultFormat(
-                                        options.fileFormat().getFormatIdentifier().toLowerCase());
+                                .withBucketPath(pathFactory.bucketPath(part, bucket).toString());
                 if (deletionVectors) {
                     IndexFileMeta beforeDeletionIndex =
                             indexFileHandler
