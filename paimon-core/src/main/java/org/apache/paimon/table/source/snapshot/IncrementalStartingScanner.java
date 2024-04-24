@@ -81,7 +81,6 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
             int bucket = entry.getKey().bucket;
             boolean rawConvertible = entry.getKey().rawConvertible;
             String bucketPath = entry.getKey().bucketPath;
-            String defaultFormat = entry.getKey().defaultFormat;
             List<DeletionFile> deletionFiles = entry.getKey().deletionFiles;
             for (SplitGenerator.SplitGroup splitGroup :
                     reader.splitGenerator().splitForBatch(entry.getValue())) {
