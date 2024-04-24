@@ -80,4 +80,84 @@ class BranchActionITCase extends ActionITCaseBase {
                         "CALL sys.delete_branch('%s.%s', 'branch_name')", database, tableName));
         assertThat(branchManager.branchExists("branch_name")).isFalse();
     }
+
+    @Test
+    void testCreateAndDeleteBranchWithSnapshotId() throws Exception {
+
+        init(warehouse);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.BIGINT(), DataTypes.STRING()},
+                        new String[] {"k", "v"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        Collections.emptyMap());
+
+        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = writeBuilder.newWrite();
+        commit = writeBuilder.newCommit();
+
+        // 3 snapshots
+        writeData(rowData(1L, BinaryString.fromString("Hi")));
+        writeData(rowData(2L, BinaryString.fromString("Hello")));
+        writeData(rowData(3L, BinaryString.fromString("Paimon")));
+
+        BranchManager branchManager = table.branchManager();
+
+        callProcedure(
+                String.format(
+                        "CALL sys.create_branch('%s.%s', 'branch_name_with_snapshotId', 2)",
+                        database, tableName));
+        assertThat(branchManager.branchExists("branch_name_with_snapshotId")).isTrue();
+        branchManager.branches();
+
+        callProcedure(
+                String.format(
+                        "CALL sys.delete_branch('%s.%s', 'branch_name_with_snapshotId')",
+                        database, tableName));
+        assertThat(branchManager.branchExists("branch_name_with_snapshotId")).isFalse();
+    }
+
+    @Test
+    void testCreateAndDeleteEmptyBranch() throws Exception {
+
+        init(warehouse);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.BIGINT(), DataTypes.STRING()},
+                        new String[] {"k", "v"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        Collections.emptyMap());
+
+        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = writeBuilder.newWrite();
+        commit = writeBuilder.newCommit();
+
+        // 3 snapshots
+        writeData(rowData(1L, BinaryString.fromString("Hi")));
+        writeData(rowData(2L, BinaryString.fromString("Hello")));
+        writeData(rowData(3L, BinaryString.fromString("Paimon")));
+
+        BranchManager branchManager = table.branchManager();
+        callProcedure(
+                String.format(
+                        "CALL sys.create_branch('%s.%s', 'empty_branch_name')",
+                        database, tableName));
+        assertThat(branchManager.branchExists("empty_branch_name")).isTrue();
+
+        callProcedure(
+                String.format(
+                        "CALL sys.delete_branch('%s.%s', 'empty_branch_name')",
+                        database, tableName));
+        assertThat(branchManager.branchExists("empty_branch_name")).isFalse();
+    }
 }

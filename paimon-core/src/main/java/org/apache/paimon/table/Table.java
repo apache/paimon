@@ -95,6 +95,14 @@ public interface Table extends Serializable {
     @Experimental
     void rollbackTo(String tagName);
 
+    /** Create a empty branch. */
+    @Experimental
+    void createBranch(String branchName);
+
+    /** Create a branch from given snapshot. */
+    @Experimental
+    void createBranch(String branchName, long snapshotId);
+
     /** Create a branch from given tag. */
     @Experimental
     void createBranch(String branchName, String tagName);
