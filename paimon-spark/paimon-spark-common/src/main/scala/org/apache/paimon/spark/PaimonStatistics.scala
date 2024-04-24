@@ -48,7 +48,7 @@ case class PaimonStatistics[T <: PaimonBaseScan](scan: T) extends Statistics {
     if (paimonStats.isPresent) paimonStats.get().mergedRecordCount() else OptionalLong.of(rowCount)
 
   override def columnStats(): java.util.Map[NamedReference, ColumnStatistics] = {
-    val requiredFields = scan.readSchema().fieldNames.toList.asJava
+    val requiredFields = scan.requiredStatsSchema.fieldNames.toList.asJava
     val resultMap = new java.util.HashMap[NamedReference, ColumnStatistics]()
     if (paimonStats.isPresent) {
       val paimonColStats = paimonStats.get().colStats()
