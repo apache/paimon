@@ -353,6 +353,13 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
       getScanStatistic(sql).rowCount.get.longValue())
     checkAnswer(spark.sql(sql), Nil)
 
+    // partition push down hit and select without it
+    sql = "SELECT id FROM T WHERE pt < 1"
+    Assertions.assertEquals(
+      if (supportsColStats()) 0L else 4L,
+      getScanStatistic(sql).rowCount.get.longValue())
+    checkAnswer(spark.sql(sql), Nil)
+
     // partition push down not hit
     sql = "SELECT * FROM T WHERE id < 1"
     Assertions.assertEquals(4L, getScanStatistic(sql).rowCount.get.longValue())

@@ -59,6 +59,11 @@ abstract class PaimonBaseScan(
 
   lazy val statistics: Optional[stats.Statistics] = table.statistics()
 
+  lazy val requiredStatsSchema: StructType = {
+    val fieldNames = requiredSchema.fieldNames ++ reservedFilters.flatMap(_.references)
+    StructType(tableSchema.filter(field => fieldNames.contains(field.name)))
+  }
+
   lazy val readBuilder: ReadBuilder = {
     val _readBuilder = table.newReadBuilder()
 

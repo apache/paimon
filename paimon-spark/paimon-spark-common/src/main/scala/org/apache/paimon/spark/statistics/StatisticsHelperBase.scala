@@ -30,17 +30,17 @@ import org.apache.spark.sql.connector.expressions.NamedReference
 import org.apache.spark.sql.connector.read.Statistics
 import org.apache.spark.sql.connector.read.colstats.ColumnStatistics
 import org.apache.spark.sql.sources.{And, Filter}
-import org.apache.spark.sql.types.{StructField, StructType}
+import org.apache.spark.sql.types.StructType
 
 import java.util.OptionalLong
 
 trait StatisticsHelperBase extends SQLConfHelper {
 
-  val requiredSchema: StructType
+  val requiredStatsSchema: StructType
 
   def filterStatistics(v2Stats: Statistics, filters: Seq[Filter]): Statistics = {
     val attrs: Seq[AttributeReference] =
-      requiredSchema.map(f => AttributeReference(f.name, f.dataType, f.nullable, f.metadata)())
+      requiredStatsSchema.map(f => AttributeReference(f.name, f.dataType, f.nullable, f.metadata)())
     val condition = filterToCondition(filters, attrs)
 
     if (condition.isDefined && v2Stats.numRows().isPresent) {
@@ -56,14 +56,15 @@ trait StatisticsHelperBase extends SQLConfHelper {
     StructFilters.filterToExpression(filters.reduce(And), toRef).map {
       expression =>
         expression.transform {
-          case ref: BoundReference => attrs.find(_.name == requiredSchema(ref.ordinal).name).get
+          case ref: BoundReference =>
+            attrs.find(_.name == requiredStatsSchema(ref.ordinal).name).get
         }
     }
   }
 
   private def toRef(attr: String): Option[BoundReference] = {
-    val index = requiredSchema.fieldIndex(attr)
-    val field = requiredSchema(index)
+    val index = requiredStatsSchema.fieldIndex(attr)
+    val field = requiredStatsSchema(index)
     Option.apply(BoundReference(index, field.dataType, field.nullable))
   }
 
