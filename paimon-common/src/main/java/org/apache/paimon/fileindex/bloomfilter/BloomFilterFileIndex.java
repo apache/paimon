@@ -71,12 +71,10 @@ public class BloomFilterFileIndex implements FileIndexer {
         return new Reader(dataType, serializedBytes);
     }
 
-    private static class Writer implements FileIndexWriter {
+    private static class Writer extends FileIndexWriter {
 
         private final BloomFilter64 filter;
         private final FastHash hashFunction;
-
-        private boolean empty = true;
 
         public Writer(DataType type, int items, double fpp) {
             this.filter = new BloomFilter64(items, fpp);
@@ -85,10 +83,7 @@ public class BloomFilterFileIndex implements FileIndexer {
 
         @Override
         public void write(Object key) {
-            if (key != null) {
-                empty = false;
-                filter.addHash(hashFunction.hash(key));
-            }
+            filter.addHash(hashFunction.hash(key));
         }
 
         @Override
@@ -103,14 +98,9 @@ public class BloomFilterFileIndex implements FileIndexer {
             filter.getBitSet().toByteArray(serialized, 4, serialized.length - 4);
             return serialized;
         }
-
-        @Override
-        public boolean empty() {
-            return empty;
-        }
     }
 
-    private static class Reader implements FileIndexReader {
+    private static class Reader extends FileIndexReader {
 
         private final BloomFilter64 filter;
         private final FastHash hashFunction;

@@ -227,7 +227,7 @@ public final class FileIndexWriter implements Closeable {
         }
 
         public void write(InternalRow row) {
-            fileIndexWriter.write(getter.getFieldOrNull(row));
+            fileIndexWriter.writeRecord(getter.getFieldOrNull(row));
         }
 
         public String getIndexType() {
@@ -282,7 +282,7 @@ public final class FileIndexWriter implements Closeable {
                 org.apache.paimon.fileindex.FileIndexWriter writer =
                         indexWritersMap.getOrDefault(key, null);
                 if (writer != null) {
-                    writer.write(valueElementGetter.getElementOrNull(valueArray, i));
+                    writer.writeRecord(valueElementGetter.getElementOrNull(valueArray, i));
                 }
             }
         }

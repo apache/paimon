@@ -19,11 +19,22 @@
 package org.apache.paimon.fileindex;
 
 /** To write file index. */
-public interface FileIndexWriter {
+public abstract class FileIndexWriter {
 
-    void write(Object key);
+    boolean empty = true;
 
-    byte[] serializedBytes();
+    public void writeRecord(Object key) {
+        if (key != null) {
+            empty = false;
+            write(key);
+        }
+    }
 
-    boolean empty();
+    public abstract void write(Object key);
+
+    public abstract byte[] serializedBytes();
+
+    public boolean empty() {
+        return empty;
+    }
 }

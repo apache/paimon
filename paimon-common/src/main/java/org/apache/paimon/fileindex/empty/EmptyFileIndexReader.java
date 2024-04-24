@@ -24,7 +24,7 @@ import org.apache.paimon.predicate.FieldRef;
 import java.util.List;
 
 /** Empty file index which has no writer and no serialized bytes. */
-public class EmptyFileIndexReader implements FileIndexReader {
+public class EmptyFileIndexReader extends FileIndexReader {
 
     /** No data in the file index, which mean this file has no related records. */
     public static final EmptyFileIndexReader INSTANCE = new EmptyFileIndexReader();
