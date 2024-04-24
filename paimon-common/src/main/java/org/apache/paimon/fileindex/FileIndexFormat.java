@@ -19,6 +19,7 @@
 package org.apache.paimon.fileindex;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.fileindex.empty.EmptyFileIndexReader;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
@@ -145,9 +146,15 @@ public final class FileIndexFormat {
                 Map<String, byte[]> bytesMap = columnMap.getValue();
                 for (Map.Entry<String, byte[]> entry : bytesMap.entrySet()) {
                     int startPosition = baos.size();
-                    baos.write(entry.getValue());
-                    innerMap.put(
-                            entry.getKey(), Pair.of(startPosition, baos.size() - startPosition));
+                    byte[] v = entry.getValue();
+                    if (v == null) {
+                        innerMap.put(entry.getKey(), Pair.of(-1, -1));
+                    } else {
+                        baos.write(entry.getValue());
+                        innerMap.put(
+                                entry.getKey(),
+                                Pair.of(startPosition, baos.size() - startPosition));
+                    }
                 }
             }
             byte[] body = baos.toByteArray();
@@ -180,8 +187,14 @@ public final class FileIndexFormat {
                 for (Map.Entry<String, Pair<Integer, Integer>> indexEntry :
                         entry.getValue().entrySet()) {
                     dataOutputStream.writeUTF(indexEntry.getKey());
-                    dataOutputStream.writeInt(indexEntry.getValue().getLeft() + headLength);
-                    dataOutputStream.writeInt(indexEntry.getValue().getRight());
+                    int start = indexEntry.getValue().getLeft();
+                    if (start == -1) {
+                        dataOutputStream.writeInt(-1);
+                        dataOutputStream.writeInt(-1);
+                    } else {
+                        dataOutputStream.writeInt(indexEntry.getValue().getLeft() + headLength);
+                        dataOutputStream.writeInt(indexEntry.getValue().getRight());
+                    }
                 }
             }
             // writeRedundantLength
@@ -291,13 +304,21 @@ public final class FileIndexFormat {
             return readColumnInputStream(columnName, indexType)
                     .map(
                             serializedBytes ->
-                                    FileIndexer.create(
-                                                    indexType,
-                                                    FileIndexCommon.getFieldType(
-                                                            fields, columnName),
-                                                    new Options())
-                                            .createReader(serializedBytes))
+                                    createIndexReader(columnName, indexType, serializedBytes))
                     .orElse(null);
+        }
+
+        private FileIndexReader createIndexReader(
+                String columnName, String indexType, byte[] serializedBytes) {
+            if (serializedBytes == null) {
+                return EmptyFileIndexReader.INSTANCE;
+            } else {
+                return FileIndexer.create(
+                                indexType,
+                                FileIndexCommon.getFieldType(fields, columnName),
+                                new Options())
+                        .createReader(serializedBytes);
+            }
         }
 
         @VisibleForTesting
@@ -306,6 +327,9 @@ public final class FileIndexFormat {
                     .map(m -> m.getOrDefault(indexType, null))
                     .map(
                             startAndLength -> {
+                                if (startAndLength.getLeft() == -1) {
+                                    return null;
+                                }
                                 byte[] b = new byte[startAndLength.getRight()];
                                 try {
                                     seekableInputStream.seek(startAndLength.getLeft());

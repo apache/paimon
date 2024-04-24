@@ -308,6 +308,8 @@ public final class FileIndexWriter implements Closeable {
                         if (!v.empty()) {
                             result.put(
                                     FileIndexCommon.toMapKey(columnName, k), v.serializedBytes());
+                        } else {
+                            result.put(FileIndexCommon.toMapKey(columnName, k), null);
                         }
                     });
             return result;
