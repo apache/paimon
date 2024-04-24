@@ -24,7 +24,6 @@ import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.InlineElement;
 
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hdfs.HdfsConfiguration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -55,11 +54,7 @@ public class HadoopUtils {
     public static final String PATH_HADOOP_CONFIG = "hadoop-conf-dir";
 
     public static Configuration getHadoopConfiguration(Options options) {
-
-        // Instantiate an HdfsConfiguration to load the hdfs-site.xml and hdfs-default.xml
-        // from the classpath
-
-        Configuration result = new HdfsConfiguration();
+        Configuration result = new Configuration();
         boolean foundHadoopConfiguration = false;
 
         // We need to load both core-site.xml and hdfs-site.xml to determine the default fs path and
@@ -193,5 +188,11 @@ public class HadoopUtils {
         public InlineElement getDescription() {
             return text(description);
         }
+    }
+
+    static {
+        // load the hdfs-site.xml and hdfs-default.xml from the classpath
+        Configuration.addDefaultResource("hdfs-default.xml");
+        Configuration.addDefaultResource("hdfs-site.xml");
     }
 }
