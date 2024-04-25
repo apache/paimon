@@ -27,6 +27,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.operation.metrics.ScanMetrics;
 import org.apache.paimon.operation.metrics.ScanStats;
@@ -50,8 +51,11 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.ForkJoinTask;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -249,6 +253,31 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                 readAndMergeFileEntries(
                         manifests, this::readSimpleEntries, Filter.alwaysTrue(), new AtomicLong());
         return new ArrayList<>(mergedEntries);
+    }
+
+    @Override
+    public List<PartitionEntry> readPartitionEntries() {
+        List<ManifestFileMeta> manifests = readManifests().getRight();
+        Map<BinaryRow, PartitionEntry> partitions = new ConcurrentHashMap<>();
+        // Don't need to use parallelismBatchIterable here
+        // Can be executed in disorder
+        ForkJoinPool executePool = ScanParallelExecutor.getExecutePool(scanManifestParallelism);
+        List<ForkJoinTask<?>> tasks = new ArrayList<>();
+        for (ManifestFileMeta manifest : manifests) {
+            ForkJoinTask<?> task =
+                    executePool.submit(
+                            () ->
+                                    PartitionEntry.merge(
+                                            PartitionEntry.merge(readManifestFileMeta(manifest)),
+                                            partitions));
+            tasks.add(task);
+        }
+        for (ForkJoinTask<?> task : tasks) {
+            task.join();
+        }
+        return partitions.values().stream()
+                .filter(p -> p.fileCount() > 0)
+                .collect(Collectors.toList());
     }
 
     private Pair<Snapshot, List<ManifestEntry>> doPlan() {
