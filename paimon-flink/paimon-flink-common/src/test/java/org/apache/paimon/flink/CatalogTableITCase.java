@@ -439,16 +439,19 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("INSERT INTO PartitionTable select 2,2,'b','2020-01-02','11'");
         sql("INSERT INTO PartitionTable select 3,3,'c','2020-01-03','11'");
         List<Row> result = sql("SHOW PARTITIONS PartitionTable");
-        assertThat(result.toString())
-                .isEqualTo(
-                        "[+I[dt=2020-01-01/hh=10], +I[dt=2020-01-02/hh=11], +I[dt=2020-01-03/hh=11]]");
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of("dt=2020-01-01/hh=10"),
+                        Row.of("dt=2020-01-02/hh=11"),
+                        Row.of("dt=2020-01-03/hh=11"));
 
         result = sql("SHOW PARTITIONS PartitionTable partition (hh='11')");
-        assertThat(result.toString())
-                .isEqualTo("[+I[dt=2020-01-02/hh=11], +I[dt=2020-01-03/hh=11]]");
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of("dt=2020-01-02/hh=11"), Row.of("dt=2020-01-03/hh=11"));
 
         result = sql("SHOW PARTITIONS PartitionTable partition (dt='2020-01-02', hh='11')");
-        assertThat(result.toString()).isEqualTo("[+I[dt=2020-01-02/hh=11]]");
+        assertThat(result).containsExactlyInAnyOrder(Row.of("dt=2020-01-02/hh=11"));
     }
 
     @Test
