@@ -40,7 +40,6 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
 /** Base class for update data fields process function. */
 public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends ProcessFunction<I, O> {
@@ -194,7 +193,8 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
                 // nullable in source database, but they can't be null in Paimon
                 if (oldField.type().equalsIgnoreNullable(newField.type())) {
                     // update column comment
-                    if (!Objects.equals(newField.description(), oldField.description())) {
+                    if (newField.description() != null
+                            && !newField.description().equals(oldField.description())) {
                         result.add(
                                 SchemaChange.updateColumnComment(
                                         new String[] {newField.name()}, newField.description()));
