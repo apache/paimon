@@ -37,6 +37,7 @@ import javax.annotation.Nullable;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
@@ -354,7 +355,7 @@ public class DataFileMeta {
         return Objects.equals(fileName, that.fileName)
                 && fileSize == that.fileSize
                 && rowCount == that.rowCount
-                && Objects.equals(embeddedIndex, that.embeddedIndex)
+                && Arrays.equals(embeddedIndex, that.embeddedIndex)
                 && Objects.equals(minKey, that.minKey)
                 && Objects.equals(maxKey, that.maxKey)
                 && Objects.equals(keyStats, that.keyStats)
@@ -374,7 +375,7 @@ public class DataFileMeta {
                 fileName,
                 fileSize,
                 rowCount,
-                embeddedIndex,
+                Arrays.hashCode(embeddedIndex),
                 minKey,
                 maxKey,
                 keyStats,
@@ -391,14 +392,14 @@ public class DataFileMeta {
     @Override
     public String toString() {
         return String.format(
-                "{fileName: %s, fileSize: %d, rowCount: %d, "
+                "{fileName: %s, fileSize: %d, rowCount: %d, embeddedIndex: %s, "
                         + "minKey: %s, maxKey: %s, keyStats: %s, valueStats: %s, "
                         + "minSequenceNumber: %d, maxSequenceNumber: %d, "
                         + "schemaId: %d, level: %d, extraFiles: %s, creationTime: %s, deleteRowCount: %d}",
                 fileName,
                 fileSize,
                 rowCount,
-                embeddedIndex,
+                Arrays.toString(embeddedIndex),
                 minKey,
                 maxKey,
                 keyStats,
