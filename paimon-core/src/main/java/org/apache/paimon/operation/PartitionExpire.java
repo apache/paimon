@@ -28,6 +28,9 @@ import org.apache.paimon.partition.PartitionTimeExtractor;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -39,6 +42,8 @@ import java.util.stream.Collectors;
 
 /** Expire partitions. */
 public class PartitionExpire {
+
+    private static final Logger LOG = LoggerFactory.getLogger(PartitionExpire.class);
 
     private final List<String> partitionKeys;
     private final RowDataToObjectArrayConverter toObjectArrayConverter;
@@ -94,7 +99,9 @@ public class PartitionExpire {
         List<Map<String, String>> expired = new ArrayList<>();
         for (BinaryRow partition : readPartitions(expireDateTime)) {
             Object[] array = toObjectArrayConverter.convert(partition);
-            expired.add(toPartitionString(array));
+            Map<String, String> partString = toPartitionString(array);
+            expired.add(partString);
+            LOG.info("Expire Partition: " + partition);
         }
         if (expired.size() > 0) {
             commit.dropPartitions(expired, commitIdentifier);
