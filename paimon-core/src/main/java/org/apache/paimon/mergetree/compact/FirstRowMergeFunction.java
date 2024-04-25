@@ -34,6 +34,7 @@ public class FirstRowMergeFunction implements MergeFunction<KeyValue> {
     private final InternalRowSerializer keySerializer;
     private final InternalRowSerializer valueSerializer;
     private KeyValue first;
+    public boolean containsHighLevel;
 
     protected FirstRowMergeFunction(RowType keyType, RowType valueType) {
         this.keySerializer = new InternalRowSerializer(keyType);
@@ -43,6 +44,7 @@ public class FirstRowMergeFunction implements MergeFunction<KeyValue> {
     @Override
     public void reset() {
         this.first = null;
+        this.containsHighLevel = false;
     }
 
     @Override
@@ -53,6 +55,9 @@ public class FirstRowMergeFunction implements MergeFunction<KeyValue> {
                         + "You can config 'ignore-delete' to ignore the DELETE/UPDATE_BEFORE records.");
         if (first == null) {
             this.first = kv.copy(keySerializer, valueSerializer);
+        }
+        if (kv.level() > 0) {
+            containsHighLevel = true;
         }
     }
 
