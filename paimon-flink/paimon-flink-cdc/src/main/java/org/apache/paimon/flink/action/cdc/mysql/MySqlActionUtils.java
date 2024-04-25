@@ -19,11 +19,11 @@
 package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.action.cdc.CdcDebeziumDeserializationSchema;
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.schema.JdbcSchemaUtils;
 import org.apache.paimon.flink.action.cdc.schema.JdbcSchemasInfo;
+import org.apache.paimon.flink.action.cdc.serialization.CdcDebeziumDeserializationSchema;
 import org.apache.paimon.schema.Schema;
 
 import com.ververica.cdc.connectors.mysql.source.MySqlSource;

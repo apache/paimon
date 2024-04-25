@@ -18,15 +18,11 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
-import org.apache.paimon.flink.action.cdc.CdcDeserializationSchema;
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
+import org.apache.paimon.flink.action.cdc.serialization.CdcJsonDeserializationSchema;
 import org.apache.paimon.utils.StringUtils;
-
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.DeserializationFeature;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.kafka.source.KafkaSource;
@@ -89,7 +85,7 @@ public class KafkaActionUtils {
         }
 
         kafkaSourceBuilder
-                .setValueOnlyDeserializer(new CdcDeserializationSchema())
+                .setValueOnlyDeserializer(new CdcJsonDeserializationSchema())
                 .setGroupId(kafkaPropertiesGroupId(kafkaConfig));
 
         Properties properties = createKafkaProperties(kafkaConfig);
@@ -319,27 +315,23 @@ public class KafkaActionUtils {
 
         private final KafkaConsumer<byte[], byte[]> consumer;
         private final String topic;
-        private final ObjectMapper objectMapper = new ObjectMapper();
 
         KafkaConsumerWrapper(KafkaConsumer<byte[], byte[]> kafkaConsumer, String topic) {
             this.consumer = kafkaConsumer;
             this.topic = topic;
-            objectMapper
-                    .configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true)
-                    .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         }
 
         @Override
         public List<CdcSourceRecord> getRecords(int pollTimeOutMills) {
             ConsumerRecords<byte[], byte[]> consumerRecords =
                     consumer.poll(Duration.ofMillis(pollTimeOutMills));
+            CdcJsonDeserializationSchema deserializationSchema = new CdcJsonDeserializationSchema();
             return StreamSupport.stream(consumerRecords.records(topic).spliterator(), false)
                     .map(
                             consumerRecord -> {
                                 try {
-                                    return new CdcSourceRecord(
-                                            objectMapper.readValue(
-                                                    consumerRecord.value(), JsonNode.class));
+                                    return deserializationSchema.deserialize(
+                                            consumerRecord.value());
                                 } catch (IOException e) {
                                     throw new RuntimeException(e);
                                 }

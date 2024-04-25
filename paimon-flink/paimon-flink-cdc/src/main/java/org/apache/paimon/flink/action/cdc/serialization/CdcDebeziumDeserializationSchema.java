@@ -16,7 +16,9 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc;
+package org.apache.paimon.flink.action.cdc.serialization;
+
+import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 
 import com.ververica.cdc.debezium.DebeziumDeserializationSchema;
 import org.apache.flink.api.common.typeinfo.TypeInformation;

@@ -16,7 +16,9 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc;
+package org.apache.paimon.flink.action.cdc.serialization;
+
+import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.DeserializationFeature;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
@@ -30,13 +32,13 @@ import java.io.IOException;
 import static org.apache.flink.api.java.typeutils.TypeExtractor.getForClass;
 
 /** A simple deserialization schema for {@link CdcSourceRecord}. */
-public class CdcDeserializationSchema implements DeserializationSchema<CdcSourceRecord> {
+public class CdcJsonDeserializationSchema implements DeserializationSchema<CdcSourceRecord> {
 
     private static final long serialVersionUID = 1L;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public CdcDeserializationSchema() {
+    public CdcJsonDeserializationSchema() {
         objectMapper
                 .configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true)
                 .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);

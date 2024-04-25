@@ -35,6 +35,7 @@ public class CdcSourceRecord implements Serializable {
 
     @Nullable private final Object key;
 
+    // TODO Use generics to support more scenarios.
     private final Object value;
 
     public CdcSourceRecord(@Nullable String topic, @Nullable Object key, Object value) {

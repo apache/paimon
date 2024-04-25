@@ -18,14 +18,10 @@
 
 package org.apache.paimon.flink.action.cdc.pulsar;
 
-import org.apache.paimon.flink.action.cdc.CdcDeserializationSchema;
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
-
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.DeserializationFeature;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.paimon.flink.action.cdc.serialization.CdcJsonDeserializationSchema;
 
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
@@ -176,7 +172,7 @@ public class PulsarActionUtils {
                 .setServiceUrl(pulsarConfig.get(PULSAR_SERVICE_URL))
                 .setAdminUrl(pulsarConfig.get(PULSAR_ADMIN_URL))
                 .setSubscriptionName(pulsarConfig.get(PULSAR_SUBSCRIPTION_NAME))
-                .setDeserializationSchema(new CdcDeserializationSchema());
+                .setDeserializationSchema(new CdcJsonDeserializationSchema());
 
         pulsarConfig.getOptional(TOPIC).ifPresent(pulsarSourceBuilder::setTopics);
         pulsarConfig.getOptional(TOPIC_PATTERN).ifPresent(pulsarSourceBuilder::setTopicPattern);
@@ -381,26 +377,22 @@ public class PulsarActionUtils {
 
         private final Consumer<byte[]> consumer;
         private final String topic;
-        private final ObjectMapper objectMapper = new ObjectMapper();
 
         PulsarConsumerWrapper(Consumer<byte[]> consumer, String topic) {
             this.consumer = consumer;
             this.topic = topic;
-            objectMapper
-                    .configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true)
-                    .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         }
 
         @Override
         public List<CdcSourceRecord> getRecords(int pollTimeOutMills) {
             try {
                 Message<byte[]> message = consumer.receive(pollTimeOutMills, TimeUnit.MILLISECONDS);
+                CdcJsonDeserializationSchema deserializationSchema =
+                        new CdcJsonDeserializationSchema();
                 return message == null
                         ? Collections.emptyList()
                         : Collections.singletonList(
-                                new CdcSourceRecord(
-                                        objectMapper.readValue(
-                                                message.getValue(), JsonNode.class)));
+                                deserializationSchema.deserialize(message.getValue()));
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
