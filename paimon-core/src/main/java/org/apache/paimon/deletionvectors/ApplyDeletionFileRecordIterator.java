@@ -18,53 +18,59 @@
 
 package org.apache.paimon.deletionvectors;
 
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.FileRecordIterator;
-import org.apache.paimon.reader.RecordReader;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 
-import static org.apache.paimon.utils.Preconditions.checkArgument;
+/** A {@link FileRecordIterator} wraps a {@link FileRecordIterator} and {@link DeletionVector}. */
+public class ApplyDeletionFileRecordIterator<T> implements FileRecordIterator<T> {
 
-/** A {@link RecordReader} which apply {@link DeletionVector} to filter record. */
-public class ApplyDeletionVectorReader<T> implements RecordReader<T> {
-
-    private final RecordReader<T> reader;
-
+    private final FileRecordIterator<T> iterator;
     private final DeletionVector deletionVector;
 
-    public ApplyDeletionVectorReader(RecordReader<T> reader, DeletionVector deletionVector) {
-        this.reader = reader;
+    public ApplyDeletionFileRecordIterator(
+            FileRecordIterator<T> iterator, DeletionVector deletionVector) {
+        this.iterator = iterator;
         this.deletionVector = deletionVector;
     }
 
-    public RecordReader<T> reader() {
-        return reader;
+    public FileRecordIterator<T> iterator() {
+        return iterator;
     }
 
     public DeletionVector deletionVector() {
         return deletionVector;
     }
 
-    @Nullable
     @Override
-    public RecordIterator<T> readBatch() throws IOException {
-        RecordIterator<T> batch = reader.readBatch();
-
-        if (batch == null) {
-            return null;
-        }
-
-        checkArgument(
-                batch instanceof FileRecordIterator,
-                "There is a bug, RecordIterator in ApplyDeletionVectorReader must be RecordWithPositionIterator");
-
-        return new ApplyDeletionFileRecordIterator<>((FileRecordIterator<T>) batch, deletionVector);
+    public long returnedPosition() {
+        return iterator.returnedPosition();
     }
 
     @Override
-    public void close() throws IOException {
-        reader.close();
+    public Path filePath() {
+        return iterator.filePath();
+    }
+
+    @Nullable
+    @Override
+    public T next() throws IOException {
+        while (true) {
+            T next = iterator.next();
+            if (next == null) {
+                return null;
+            }
+            if (!deletionVector.isDeleted(returnedPosition())) {
+                return next;
+            }
+        }
+    }
+
+    @Override
+    public void releaseBatch() {
+        iterator.releaseBatch();
     }
 }
