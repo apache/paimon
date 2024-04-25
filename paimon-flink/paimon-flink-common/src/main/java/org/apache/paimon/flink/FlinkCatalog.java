@@ -87,6 +87,8 @@ import org.apache.flink.table.factories.Factory;
 import org.apache.flink.table.procedures.Procedure;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -127,6 +129,9 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Catalog for paimon. */
 public class FlinkCatalog extends AbstractCatalog {
+
+    private static final Logger LOG = LoggerFactory.getLogger(FlinkCatalog.class);
+
     private final ClassLoader classLoader;
 
     private final Catalog catalog;
@@ -824,6 +829,15 @@ public class FlinkCatalog extends AbstractCatalog {
     @Override
     public final List<CatalogPartitionSpec> listPartitions(ObjectPath tablePath)
             throws TableNotExistException, TableNotPartitionedException, CatalogException {
+        // The method is skipped if it is being called as part of FlinkRecomputeStatisticsProgram,
+        // since this program scans the entire table and all its partitions, which is a
+        // time-consuming operation. By returning an empty result, we can prompt the FlinkPlanner to
+        // use the FlinkTableSource#reportStatistics method to gather the necessary statistics.
+        if (isCalledFromFlinkRecomputeStatisticsProgram()) {
+            LOG.info(
+                    "Skipping listPartitions method due to detection of FlinkRecomputeStatisticsProgram call.");
+            return Collections.emptyList();
+        }
         return getPartitionSpecs(tablePath, null);
     }
 
@@ -1070,5 +1084,15 @@ public class FlinkCatalog extends AbstractCatalog {
             throws ProcedureNotExistException, CatalogException {
         return ProcedureUtil.getProcedure(catalog, procedurePath)
                 .orElseThrow(() -> new ProcedureNotExistException(name, procedurePath));
+    }
+
+    private boolean isCalledFromFlinkRecomputeStatisticsProgram() {
+        StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
+        for (StackTraceElement stackTraceElement : stackTrace) {
+            if (stackTraceElement.getClassName().contains("FlinkRecomputeStatisticsProgram")) {
+                return true;
+            }
+        }
+        return false;
     }
 }
