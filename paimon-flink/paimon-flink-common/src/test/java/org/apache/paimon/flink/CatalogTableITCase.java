@@ -483,21 +483,28 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                 .isEqualTo("[+I[OK]]");
 
         List<Row> result = sql("SHOW PARTITIONS PartitionTable");
-        assertThat(result.toString())
-                .isEqualTo(
-                        "[+I[dt=2020-01-01/hh=10], +I[dt=2020-01-02/hh=11], +I[dt=2020-01-03/hh=11], +I[dt=2020-01-04/hh=14], +I[dt=2020-01-05/hh=15]]");
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of("dt=2020-01-01/hh=10"),
+                        Row.of("dt=2020-01-02/hh=11"),
+                        Row.of("dt=2020-01-03/hh=11"),
+                        Row.of("dt=2020-01-04/hh=14"),
+                        Row.of("dt=2020-01-05/hh=15"));
 
         // drop a partition
         sql("ALTER TABLE PartitionTable DROP PARTITION (`dt` = '2020-01-01', `hh` = '10')");
         result = sql("SHOW PARTITIONS PartitionTable");
-        assertThat(result.toString())
-                .isEqualTo(
-                        "[+I[dt=2020-01-02/hh=11], +I[dt=2020-01-03/hh=11], +I[dt=2020-01-04/hh=14], +I[dt=2020-01-05/hh=15]]");
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of("dt=2020-01-02/hh=11"),
+                        Row.of("dt=2020-01-03/hh=11"),
+                        Row.of("dt=2020-01-04/hh=14"),
+                        Row.of("dt=2020-01-05/hh=15"));
 
         // drop two partitions
         sql("ALTER TABLE PartitionTable DROP PARTITION (dt ='2020-01-04'), PARTITION (hh='11')");
         result = sql("SHOW PARTITIONS PartitionTable");
-        assertThat(result.toString()).isEqualTo("[+I[dt=2020-01-05/hh=15]]");
+        assertThat(result).containsExactly(Row.of("dt=2020-01-05/hh=15"));
     }
 
     @Test
