@@ -39,12 +39,27 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
     private final LinkedList<KeyValue> candidates = new LinkedList<>();
     private final InternalRowSerializer keySerializer;
     private final InternalRowSerializer valueSerializer;
+    private final LevelOrder levelOrder;
 
     public LookupMergeFunction(
-            MergeFunction<KeyValue> mergeFunction, RowType keyType, RowType valueType) {
+            MergeFunction<KeyValue> mergeFunction,
+            RowType keyType,
+            RowType valueType,
+            LevelOrder levelOrder) {
         this.mergeFunction = mergeFunction;
         this.keySerializer = new InternalRowSerializer(keyType);
         this.valueSerializer = new InternalRowSerializer(valueType);
+        this.levelOrder = levelOrder;
+    }
+
+    /**
+     * The relationship between the high-level order and the sequence order.
+     * <li>For the first row, as the level increases, so does the sequence number.
+     * <li>For all other merge engine, as the level increases, the sequence number decreases.
+     */
+    enum LevelOrder {
+        DESCENDING,
+        ASCENDING
     }
 
     @Override
@@ -60,13 +75,16 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
     @Override
     public KeyValue getResult() {
         // 1. Find the latest high level record
-        Iterator<KeyValue> descending = candidates.descendingIterator();
+        Iterator<KeyValue> iterator =
+                levelOrder == LevelOrder.DESCENDING
+                        ? candidates.descendingIterator()
+                        : candidates().iterator();
         KeyValue highLevel = null;
-        while (descending.hasNext()) {
-            KeyValue kv = descending.next();
+        while (iterator.hasNext()) {
+            KeyValue kv = iterator.next();
             if (kv.level() > 0) {
                 if (highLevel != null) {
-                    descending.remove();
+                    iterator.remove();
                 } else {
                     highLevel = kv;
                 }
@@ -83,14 +101,23 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
         return candidates;
     }
 
+    LevelOrder getLevelOrder() {
+        return levelOrder;
+    }
+
     public static MergeFunctionFactory<KeyValue> wrap(
             MergeFunctionFactory<KeyValue> wrapped, RowType keyType, RowType valueType) {
-        if (wrapped.create() instanceof FirstRowMergeFunction) {
+        if (wrapped.create().getClass() == FirstRowMergeFunction.class) {
             // don't wrap first row, it is already OK
             return wrapped;
         }
-
-        return new Factory(wrapped, keyType, valueType);
+        return new Factory(
+                wrapped,
+                keyType,
+                valueType,
+                wrapped.create() instanceof UnOrderedFirstRowMergeFunction
+                        ? LevelOrder.ASCENDING
+                        : LevelOrder.DESCENDING);
     }
 
     private static class Factory implements MergeFunctionFactory<KeyValue> {
@@ -100,18 +127,25 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
         private final MergeFunctionFactory<KeyValue> wrapped;
         private final RowType keyType;
         private final RowType rowType;
+        private final LevelOrder levelOrder;
 
-        private Factory(MergeFunctionFactory<KeyValue> wrapped, RowType keyType, RowType rowType) {
+        private Factory(
+                MergeFunctionFactory<KeyValue> wrapped,
+                RowType keyType,
+                RowType rowType,
+                LevelOrder levelOrder) {
             this.wrapped = wrapped;
             this.keyType = keyType;
             this.rowType = rowType;
+            this.levelOrder = levelOrder;
         }
 
         @Override
         public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
             RowType valueType =
                     projection == null ? rowType : Projection.of(projection).project(rowType);
-            return new LookupMergeFunction(wrapped.create(projection), keyType, valueType);
+            return new LookupMergeFunction(
+                    wrapped.create(projection), keyType, valueType, levelOrder);
         }
 
         @Override

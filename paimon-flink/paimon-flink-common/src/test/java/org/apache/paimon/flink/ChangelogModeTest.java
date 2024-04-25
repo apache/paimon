@@ -33,6 +33,7 @@ import org.apache.paimon.types.RowType;
 
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
+import org.apache.flink.types.RowKind;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -91,5 +92,32 @@ public class ChangelogModeTest {
         Options options = new Options();
         options.set(CoreOptions.LOG_CHANGELOG_MODE, CoreOptions.LogChangelogMode.ALL);
         test(options, ChangelogMode.all(), ChangelogMode.all());
+    }
+
+    @Test
+    public void testFirstRowWithSeq() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.MERGE_ENGINE, CoreOptions.MergeEngine.FIRST_ROW);
+        options.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.LOOKUP);
+        options.set(CoreOptions.SEQUENCE_FIELD, "f0");
+        test(
+                options,
+                ChangelogMode.newBuilder()
+                        .addContainedKind(RowKind.UPDATE_BEFORE)
+                        .addContainedKind(RowKind.UPDATE_AFTER)
+                        .addContainedKind(RowKind.INSERT)
+                        .build(),
+                ChangelogMode.upsert());
+    }
+
+    @Test
+    public void testFirstRowWithoutSeq() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.MERGE_ENGINE, CoreOptions.MergeEngine.FIRST_ROW);
+        options.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.LOOKUP);
+        test(
+                options,
+                ChangelogMode.newBuilder().addContainedKind(RowKind.INSERT).build(),
+                ChangelogMode.upsert());
     }
 }

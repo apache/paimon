@@ -456,4 +456,115 @@ public class LookupChangelogMergeFunctionWrapperTest {
         kv = result.result();
         assertThat(kv).isNull();
     }
+
+    @Test
+    public void testUnOrderedFirstRowMergeFunctionWrapper() {
+        Map<InternalRow, KeyValue> highLevel = new HashMap<>();
+        UnOrderedFirstRowMergeFunctionWrapper function =
+                new UnOrderedFirstRowMergeFunctionWrapper(
+                        LookupMergeFunction.wrap(
+                                projection ->
+                                        new UnOrderedFirstRowMergeFunction(
+                                                RowType.of(DataTypes.INT()),
+                                                RowType.of(DataTypes.INT())),
+                                RowType.of(DataTypes.INT()),
+                                RowType.of(DataTypes.INT())),
+                        highLevel::get,
+                        EQUALISER,
+                        false,
+                        LookupStrategy.CHANGELOG_ONLY,
+                        null,
+                        UserDefinedSeqComparator.create(
+                                RowType.builder().field("f0", DataTypes.INT()).build(),
+                                CoreOptions.fromMap(ImmutableMap.of("sequence.field", "f0"))));
+
+        // Without level 0
+        function.reset();
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(2)).setLevel(1));
+        function.add(new KeyValue().replace(row(1), 1, INSERT, row(3)).setLevel(2));
+        ChangelogResult result = function.getResult();
+        assertThat(result).isNotNull();
+        List<KeyValue> changelogs = result.changelogs();
+        assertThat(changelogs).hasSize(0);
+        KeyValue kv = result.result();
+        assertThat(kv).isNotNull();
+        assertThat(kv.value().getInt(0)).isEqualTo(2);
+
+        // With level 0, with level-x, level 0 seq is lower
+        function.reset();
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(2)).setLevel(0));
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(3)).setLevel(0));
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(4)).setLevel(1));
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(5)).setLevel(2));
+        result = function.getResult();
+        assertThat(result).isNotNull();
+        changelogs = result.changelogs();
+        assertThat(changelogs).hasSize(2);
+        assertThat(changelogs.get(0).valueKind()).isEqualTo(UPDATE_BEFORE);
+        assertThat(changelogs.get(0).value().getInt(0)).isEqualTo(4);
+        assertThat(changelogs.get(1).valueKind()).isEqualTo(UPDATE_AFTER);
+        assertThat(changelogs.get(1).value().getInt(0)).isEqualTo(2);
+        kv = result.result();
+        assertThat(kv).isNotNull();
+        assertThat(kv.value().getInt(0)).isEqualTo(2);
+
+        // with level 0, with level-x, level 0 seq is higher
+        function.reset();
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(7)).setLevel(0));
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(4)).setLevel(1));
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(5)).setLevel(2));
+        result = function.getResult();
+        assertThat(result).isNotNull();
+        changelogs = result.changelogs();
+        assertThat(changelogs).hasSize(0);
+        kv = result.result();
+        assertThat(kv).isNotNull();
+        assertThat(kv.value().getInt(0)).isEqualTo(4);
+
+        // with level 0, no level-x, find in high level, high level seq is bigger (compare sequence
+        // number)
+        highLevel.put(row(1), new KeyValue().replace(row(1), 2, INSERT, row(2)).setLevel(3));
+        function.reset();
+        function.add(new KeyValue().replace(row(1), 1, INSERT, row(2)).setLevel(0));
+        result = function.getResult();
+        assertThat(result).isNotNull();
+        changelogs = result.changelogs();
+        assertThat(changelogs).hasSize(2);
+        assertThat(changelogs.get(0).valueKind()).isEqualTo(UPDATE_BEFORE);
+        assertThat(changelogs.get(0).sequenceNumber()).isEqualTo(2);
+        assertThat(changelogs.get(1).valueKind()).isEqualTo(UPDATE_AFTER);
+        assertThat(changelogs.get(1).sequenceNumber()).isEqualTo(1);
+        kv = result.result();
+        assertThat(kv).isNotNull();
+        assertThat(kv.value().getInt(0)).isEqualTo(2);
+        assertThat(kv.sequenceNumber()).isEqualTo(1);
+
+        // with level 0, no level-x, find in high level, high level seq is smaller (compare sequence
+        // number)
+        highLevel.put(row(1), new KeyValue().replace(row(1), 1, INSERT, row(2)).setLevel(3));
+        function.reset();
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(2)).setLevel(0));
+        result = function.getResult();
+        assertThat(result).isNotNull();
+        changelogs = result.changelogs();
+        assertThat(changelogs).hasSize(0);
+        kv = result.result();
+        assertThat(kv).isNotNull();
+        assertThat(kv.value().getInt(0)).isEqualTo(2);
+        assertThat(kv.sequenceNumber()).isEqualTo(1);
+
+        // with level 0, no level-x, no high level
+        highLevel.clear();
+        function.reset();
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(2)).setLevel(0));
+        result = function.getResult();
+        assertThat(result).isNotNull();
+        changelogs = result.changelogs();
+        assertThat(changelogs).hasSize(1);
+        assertThat(changelogs.get(0).valueKind()).isEqualTo(INSERT);
+        assertThat(changelogs.get(0).value().getInt(0)).isEqualTo(2);
+        kv = result.result();
+        assertThat(kv).isNotNull();
+        assertThat(kv.value().getInt(0)).isEqualTo(2);
+    }
 }

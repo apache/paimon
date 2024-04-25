@@ -208,4 +208,47 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
                     });
         }
     }
+
+    /** A {@link MergeFunctionWrapperFactory} for first row. */
+    public static class UnOrderedFirstRowMergeFunctionWrapperFactory<T>
+            implements MergeFunctionWrapperFactory<T> {
+
+        private final RecordEqualiser valueEqualiser;
+        private final boolean changelogRowDeduplicate;
+        private final LookupStrategy lookupStrategy;
+        @Nullable private final UserDefinedSeqComparator userDefinedSeqComparator;
+
+        public UnOrderedFirstRowMergeFunctionWrapperFactory(
+                RecordEqualiser valueEqualiser,
+                boolean changelogRowDeduplicate,
+                LookupStrategy lookupStrategy,
+                @Nullable UserDefinedSeqComparator userDefinedSeqComparator) {
+            this.valueEqualiser = valueEqualiser;
+            this.changelogRowDeduplicate = changelogRowDeduplicate;
+            this.lookupStrategy = lookupStrategy;
+            this.userDefinedSeqComparator = userDefinedSeqComparator;
+        }
+
+        @Override
+        public MergeFunctionWrapper<ChangelogResult> create(
+                MergeFunctionFactory<KeyValue> mfFactory,
+                int outputLevel,
+                LookupLevels<T> lookupLevels,
+                @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer) {
+            return new UnOrderedFirstRowMergeFunctionWrapper<>(
+                    mfFactory,
+                    key -> {
+                        try {
+                            return lookupLevels.lookup(key, outputLevel + 1);
+                        } catch (IOException e) {
+                            throw new UncheckedIOException(e);
+                        }
+                    },
+                    valueEqualiser,
+                    changelogRowDeduplicate,
+                    lookupStrategy,
+                    deletionVectorsMaintainer,
+                    userDefinedSeqComparator);
+        }
+    }
 }

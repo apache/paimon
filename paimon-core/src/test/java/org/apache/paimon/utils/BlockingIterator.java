@@ -28,6 +28,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /** Provides the ability to bring timeout to blocking iterators. */
 public class BlockingIterator<IN, OUT> implements AutoCloseable {
@@ -73,7 +74,8 @@ public class BlockingIterator<IN, OUT> implements AutoCloseable {
     }
 
     public List<OUT> collect(int limit, long timeout, TimeUnit unit) throws TimeoutException {
-        Future<List<OUT>> future = EXECUTOR.submit(() -> doCollect(limit));
+        List<OUT> result = new ArrayList<>();
+        Future<List<OUT>> future = EXECUTOR.submit(() -> doCollect(limit, result));
         try {
             return future.get(timeout, unit);
         } catch (InterruptedException | ExecutionException e) {
@@ -81,16 +83,22 @@ public class BlockingIterator<IN, OUT> implements AutoCloseable {
         } catch (TimeoutException e) {
             future.cancel(true);
             throw new TimeoutException(
-                    String.format("Cannot collect %s records in %s %s", limit, timeout, unit));
+                    String.format(
+                            "Cannot collect %s records in %s %s. Currently records: \n %s",
+                            limit,
+                            timeout,
+                            unit,
+                            result.stream()
+                                    .map(Object::toString)
+                                    .collect(Collectors.joining("\n"))));
         }
     }
 
-    private List<OUT> doCollect(int limit) {
+    private List<OUT> doCollect(int limit, List<OUT> result) {
         if (limit == 0) {
             throw new RuntimeException("Collect zero record is meaningless.");
         }
 
-        List<OUT> result = new ArrayList<>();
         while (iterator.hasNext()) {
             result.add(converter.apply(iterator.next()));
 
@@ -102,8 +110,12 @@ public class BlockingIterator<IN, OUT> implements AutoCloseable {
         if (limit != Integer.MAX_VALUE) {
             throw new IllegalArgumentException(
                     String.format(
-                            "The stream ended before reaching the requested %d records. Only %d records were received.",
-                            limit, result.size()));
+                            "The stream ended before reaching the requested %d records. Only %d records were received. Records list is: \n %s",
+                            limit,
+                            result.size(),
+                            result.stream()
+                                    .map(Object::toString)
+                                    .collect(Collectors.joining("\n"))));
         }
 
         return result;

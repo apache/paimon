@@ -150,12 +150,6 @@ public class TableSchemaTest {
         assertThatThrownBy(() -> validateTableSchema(schema))
                 .hasMessageContaining("Sequence field 'f3' is defined repeatedly.");
 
-        options.put(SEQUENCE_FIELD.key(), "f3");
-        options.put(MERGE_ENGINE.key(), CoreOptions.MergeEngine.FIRST_ROW.toString());
-        assertThatThrownBy(() -> validateTableSchema(schema))
-                .hasMessageContaining(
-                        "Do not support use sequence field on FIRST_MERGE merge engine.");
-
         options.put(FIELDS_PREFIX + ".f3." + AGG_FUNCTION, "max");
         assertThatThrownBy(() -> validateTableSchema(schema))
                 .hasMessageContaining("Should not define aggregation on sequence field: 'f3'.");

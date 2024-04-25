@@ -27,7 +27,7 @@ import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.junit.jupiter.api.Test;
 
-import java.util.Collections;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -38,10 +38,13 @@ public class FirstRowITCase extends CatalogITCaseBase {
 
     @Override
     protected List<String> ddl() {
-        return Collections.singletonList(
+        return Arrays.asList(
                 "CREATE TABLE IF NOT EXISTS T ("
                         + "a INT, b INT, c STRING, PRIMARY KEY (a) NOT ENFORCED)"
-                        + " WITH ('merge-engine'='first-row', 'file.format'='avro', 'changelog-producer' = 'lookup');");
+                        + " WITH ('merge-engine'='first-row', 'file.format'='avro', 'changelog-producer' = 'lookup');",
+                "CREATE TABLE IF NOT EXISTS T_seq ("
+                        + "a INT, b INT, c STRING, PRIMARY KEY (a) NOT ENFORCED)"
+                        + " WITH ('merge-engine'='first-row', 'changelog-producer' = 'lookup', 'sequence.field' = 'b');");
     }
 
     @Test
@@ -91,6 +94,35 @@ public class FirstRowITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testBatchQueryFirstRowWithSequenceFieldEnabled() {
+        batchSql("INSERT INTO T_seq VALUES (1, 2, '2'), (1, 1, '1')");
+        List<Row> result = batchSql("SELECT * FROM T_seq");
+        assertThat(result).containsExactlyInAnyOrder(Row.ofKind(RowKind.INSERT, 1, 1, "1"));
+
+        result = batchSql("SELECT c FROM T_seq");
+        assertThat(result).containsExactlyInAnyOrder(Row.ofKind(RowKind.INSERT, "1"));
+    }
+
+    @Test
+    public void testStreamingReadWithSequenceFieldEnabled() throws Exception {
+        BlockingIterator<Row, Row> iterator =
+                streamSqlBlockIter("SELECT * FROM T_seq /*+ OPTIONS('scan.snapshot-id'='1') */");
+
+        sql("INSERT INTO T_seq VALUES(1, 3, '3')");
+        sql("INSERT INTO T_seq VALUES(2, 2, '2')");
+        assertThat(iterator.collect(2))
+                .containsExactlyInAnyOrder(
+                        Row.ofKind(RowKind.INSERT, 1, 3, "3"),
+                        Row.ofKind(RowKind.INSERT, 2, 2, "2"));
+        sql("INSERT INTO T_seq VALUES(1, 1, '1')");
+        sql("INSERT INTO T_seq VALUES(2, 4, '4')");
+        assertThat(iterator.collect(2))
+                .containsExactlyInAnyOrder(
+                        Row.ofKind(RowKind.UPDATE_BEFORE, 1, 3, "3"),
+                        Row.ofKind(RowKind.UPDATE_AFTER, 1, 1, "1"));
+    }
+
+    @Test
     public void testLocalMerge() {
         sql(
                 "CREATE TABLE IF NOT EXISTS T1 ("
@@ -103,6 +135,27 @@ public class FirstRowITCase extends CatalogITCaseBase {
                 .containsExactlyInAnyOrder(
                         Row.ofKind(RowKind.INSERT, 1, 1, "1"),
                         Row.ofKind(RowKind.INSERT, 2, 3, "3"));
+    }
+
+    @Test
+    public void testLocalMergeWithSequenceFieldEnabled() {
+        sql(
+                "CREATE TABLE T_seq_local ("
+                        + "a INT, b INT, c STRING, PRIMARY KEY (a) NOT ENFORCED)"
+                        + " WITH ('merge-engine'='first-row', 'local-merge-buffer-size' = '1m',"
+                        + " 'sequence.field'= 'b', 'changelog-producer' = 'lookup');");
+        batchSql("INSERT INTO T_seq_local VALUES (1, 3, '1'), (1, 2, '2'), (2, 3, '3')");
+        List<Row> result = batchSql("SELECT * FROM T_seq_local");
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.ofKind(RowKind.INSERT, 1, 2, "2"),
+                        Row.ofKind(RowKind.INSERT, 2, 3, "3"));
+        batchSql("INSERT INTO T_seq_local VALUES (1, 1, '1'), (2, 2, '2')");
+        result = batchSql("SELECT * FROM T_seq_local");
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.ofKind(RowKind.INSERT, 1, 1, "1"),
+                        Row.ofKind(RowKind.INSERT, 2, 2, "2"));
     }
 
     @Test

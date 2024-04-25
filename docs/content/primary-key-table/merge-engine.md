@@ -322,13 +322,13 @@ is an empty map instead of `+I[1->A]`
 
 ## First Row
 
-By specifying `'merge-engine' = 'first-row'`, users can keep the first row of the same primary key. It differs from the
-`deduplicate` merge engine that in the `first-row` merge engine, it will generate insert only changelog.
+By specifying `'merge-engine' = 'first-row'`, users can keep the first row of the same primary key. You can use the first row merge engine with or without setting `sequence.field`.
+When the sequence field is set, it retains the first row in a user-defined order and may generate an UPDATE_BEFORE message to adjust the outcome.
+If the sequence field is not set, it keeps the first row in natural order, resulting in only an INSERT message being created.
 
 {{< hint info >}}
 1. `first-row` merge engine must be used together with `lookup` [changelog producer]({{< ref "primary-key-table/changelog-producer" >}}).
-2. You can not specify `sequence.field`.
-3. Not accept `DELETE` and `UPDATE_BEFORE` message. You can config `ignore-delete` to ignore these two kinds records.
+2. Not accept `DELETE` and `UPDATE_BEFORE` message. You can config `ignore-delete` to ignore these two kinds records.
    {{< /hint >}}
 
 This is of great help in replacing log deduplication in streaming computation.

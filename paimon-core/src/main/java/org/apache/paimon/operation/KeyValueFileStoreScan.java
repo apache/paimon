@@ -18,7 +18,6 @@
 
 package org.apache.paimon.operation;
 
-import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
@@ -37,8 +36,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
-
 /** {@link FileStoreScan} for {@link KeyValueFileStore}. */
 public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
@@ -48,7 +45,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     private Predicate keyFilter;
     private Predicate valueFilter;
     private final boolean deletionVectorsEnabled;
-    private final MergeEngine mergeEngine;
+    private final boolean noDupKeysOverLevel0;
 
     public KeyValueFileStoreScan(
             RowType partitionType,
@@ -64,7 +61,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             Integer scanManifestParallelism,
             String branchName,
             boolean deletionVectorsEnabled,
-            MergeEngine mergeEngine) {
+            boolean noDupKeysOverLevel0) {
         super(
                 partitionType,
                 bucketFilter,
@@ -86,7 +83,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                         sid -> keyValueFieldsExtractor.valueFields(scanTableSchema(sid)),
                         schema.id());
         this.deletionVectorsEnabled = deletionVectorsEnabled;
-        this.mergeEngine = mergeEngine;
+        this.noDupKeysOverLevel0 = noDupKeysOverLevel0;
     }
 
     public KeyValueFileStoreScan withKeyFilter(Predicate predicate) {
@@ -106,7 +103,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
         Predicate filter = null;
         FieldStatsArraySerializer serializer = null;
         BinaryTableStats stats = null;
-        if ((deletionVectorsEnabled || mergeEngine == FIRST_ROW)
+        if ((deletionVectorsEnabled || noDupKeysOverLevel0)
                 && entry.level() > 0
                 && valueFilter != null) {
             filter = valueFilter;

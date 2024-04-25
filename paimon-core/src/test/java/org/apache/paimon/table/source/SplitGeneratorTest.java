@@ -31,8 +31,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
-import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.io.DataFileTestUtils.fromMinMax;
 import static org.apache.paimon.io.DataFileTestUtils.newFile;
@@ -113,14 +111,14 @@ public class SplitGeneratorTest {
         Comparator<InternalRow> comparator = Comparator.comparingInt(o -> o.getInt(0));
         assertThat(
                         toNames(
-                                new MergeTreeSplitGenerator(comparator, 100, 2, false, DEDUPLICATE)
+                                new MergeTreeSplitGenerator(comparator, 100, 2, false, false)
                                         .splitForBatch(files)))
                 .containsExactlyInAnyOrder(
                         Arrays.asList("1", "2", "4", "3", "5"), Collections.singletonList("6"));
 
         assertThat(
                         toNames(
-                                new MergeTreeSplitGenerator(comparator, 100, 30, false, DEDUPLICATE)
+                                new MergeTreeSplitGenerator(comparator, 100, 30, false, false)
                                         .splitForBatch(files)))
                 .containsExactlyInAnyOrder(
                         Arrays.asList("1", "2", "4", "3"),
@@ -132,7 +130,7 @@ public class SplitGeneratorTest {
     public void testSplitRawConvertible() {
         Comparator<InternalRow> comparator = Comparator.comparingInt(o -> o.getInt(0));
         MergeTreeSplitGenerator mergeTreeSplitGenerator =
-                new MergeTreeSplitGenerator(comparator, 100, 2, false, DEDUPLICATE);
+                new MergeTreeSplitGenerator(comparator, 100, 2, false, false);
 
         // When level0 exists, should not be rawConvertible
         List<DataFileMeta> files1 =
@@ -161,13 +159,13 @@ public class SplitGeneratorTest {
 
         // Not all in one level but with deletion vectors enabled, should be rawConvertible
         MergeTreeSplitGenerator splitGeneratorWithDVEnabled =
-                new MergeTreeSplitGenerator(comparator, 100, 2, true, DEDUPLICATE);
+                new MergeTreeSplitGenerator(comparator, 100, 2, true, false);
         assertThat(toNamesAndRawConvertible(splitGeneratorWithDVEnabled.splitForBatch(files4)))
                 .containsExactlyInAnyOrder(Pair.of(Arrays.asList("1", "2"), true));
 
         // Not all in one level but with first row merge engine, should be rawConvertible
         MergeTreeSplitGenerator splitGeneratorWithFirstRow =
-                new MergeTreeSplitGenerator(comparator, 100, 2, false, FIRST_ROW);
+                new MergeTreeSplitGenerator(comparator, 100, 2, false, true);
         assertThat(toNamesAndRawConvertible(splitGeneratorWithFirstRow.splitForBatch(files4)))
                 .containsExactlyInAnyOrder(Pair.of(Arrays.asList("1", "2"), true));
 
@@ -190,7 +188,7 @@ public class SplitGeneratorTest {
     public void testMergeTreeSplitRawConvertible() {
         Comparator<InternalRow> comparator = Comparator.comparingInt(o -> o.getInt(0));
         MergeTreeSplitGenerator mergeTreeSplitGenerator =
-                new MergeTreeSplitGenerator(comparator, 100, 2, false, DEDUPLICATE);
+                new MergeTreeSplitGenerator(comparator, 100, 2, false, false);
 
         List<DataFileMeta> files =
                 Arrays.asList(

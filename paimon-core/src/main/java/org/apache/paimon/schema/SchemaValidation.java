@@ -473,8 +473,9 @@ public class SchemaValidation {
                 "Deletion vectors mode is only supported for none or lookup changelog producer now.");
 
         checkArgument(
-                !options.mergeEngine().equals(MergeEngine.FIRST_ROW),
-                "First row merge engine does not need deletion vectors because there is no deletion of old data in this merge engine.");
+                !options.mergeEngine().equals(MergeEngine.FIRST_ROW)
+                        || !options.sequenceField().isEmpty(),
+                "First row merge engine without sequence field does not need deletion vectors because there is no deletion of old data in this merge engine.");
     }
 
     private static void validateSequenceField(TableSchema schema, CoreOptions options) {
@@ -501,11 +502,6 @@ public class SchemaValidation {
                                 "Sequence field '%s' is defined repeatedly.",
                                 field);
                     });
-
-            if (options.mergeEngine() == MergeEngine.FIRST_ROW) {
-                throw new IllegalArgumentException(
-                        "Do not support use sequence field on FIRST_MERGE merge engine.");
-            }
 
             if (schema.crossPartitionUpdate()) {
                 throw new IllegalArgumentException(

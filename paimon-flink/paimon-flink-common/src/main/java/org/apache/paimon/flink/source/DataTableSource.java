@@ -43,6 +43,7 @@ import org.apache.flink.table.connector.source.ScanTableSource.ScanRuntimeProvid
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.plan.stats.TableStats;
+import org.apache.flink.types.RowKind;
 
 import javax.annotation.Nullable;
 
@@ -136,9 +137,18 @@ public class DataTableSource extends FlinkTableSource {
             return ChangelogMode.insertOnly();
         } else {
             Options options = Options.fromMap(table.options());
+            CoreOptions coreOptions = new CoreOptions(options);
 
-            if (new CoreOptions(options).mergeEngine() == CoreOptions.MergeEngine.FIRST_ROW) {
-                return ChangelogMode.insertOnly();
+            if (coreOptions.mergeEngine() == CoreOptions.MergeEngine.FIRST_ROW) {
+                if (coreOptions.sequenceField().isEmpty()) {
+                    return ChangelogMode.insertOnly();
+                } else {
+                    return ChangelogMode.newBuilder()
+                            .addContainedKind(RowKind.INSERT)
+                            .addContainedKind(RowKind.UPDATE_BEFORE)
+                            .addContainedKind(RowKind.UPDATE_AFTER)
+                            .build();
+                }
             }
 
             if (options.get(SCAN_REMOVE_NORMALIZE)) {

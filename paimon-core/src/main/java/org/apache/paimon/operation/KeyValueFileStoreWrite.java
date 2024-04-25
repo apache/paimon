@@ -53,6 +53,7 @@ import org.apache.paimon.mergetree.compact.FullChangelogMergeTreeCompactRewriter
 import org.apache.paimon.mergetree.compact.LookupMergeTreeCompactRewriter;
 import org.apache.paimon.mergetree.compact.LookupMergeTreeCompactRewriter.FirstRowMergeFunctionWrapperFactory;
 import org.apache.paimon.mergetree.compact.LookupMergeTreeCompactRewriter.LookupMergeFunctionWrapperFactory;
+import org.apache.paimon.mergetree.compact.LookupMergeTreeCompactRewriter.UnOrderedFirstRowMergeFunctionWrapperFactory;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.MergeTreeCompactManager;
 import org.apache.paimon.mergetree.compact.MergeTreeCompactRewriter;
@@ -284,17 +285,32 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             LookupMergeTreeCompactRewriter.MergeFunctionWrapperFactory<?> wrapperFactory;
             KeyValueFileReaderFactory lookupReaderFactory = readerFactory;
             if (mergeEngine == FIRST_ROW) {
-                if (options.deletionVectorsEnabled()) {
+                if (options.deletionVectorsEnabled() && options.sequenceField().isEmpty()) {
                     throw new UnsupportedOperationException(
-                            "First row merge engine does not need deletion vectors because there is no deletion of old data in this merge engine.");
+                            "First row merge engine without sequence field does not need deletion vectors because there is no deletion of old data in this merge engine.");
                 }
-                lookupReaderFactory =
-                        readerFactoryBuilder
-                                .copyWithoutProjection()
-                                .withValueProjection(new int[0][])
-                                .build(partition, bucket, dvFactory);
-                processor = new ContainsValueProcessor();
-                wrapperFactory = new FirstRowMergeFunctionWrapperFactory();
+
+                if (!options.sequenceField().isEmpty()) {
+                    processor =
+                            lookupStrategy.deletionVector
+                                    ? new PositionedKeyValueProcessor(
+                                            valueType, lookupStrategy.produceChangelog)
+                                    : new KeyValueProcessor(valueType);
+                    wrapperFactory =
+                            new UnOrderedFirstRowMergeFunctionWrapperFactory<>(
+                                    valueEqualiserSupplier.get(),
+                                    options.changelogRowDeduplicate(),
+                                    lookupStrategy,
+                                    UserDefinedSeqComparator.create(valueType, options));
+                } else {
+                    lookupReaderFactory =
+                            readerFactoryBuilder
+                                    .copyWithoutProjection()
+                                    .withValueProjection(new int[0][])
+                                    .build(partition, bucket, dvFactory);
+                    processor = new ContainsValueProcessor();
+                    wrapperFactory = new FirstRowMergeFunctionWrapperFactory();
+                }
             } else {
                 processor =
                         lookupStrategy.deletionVector

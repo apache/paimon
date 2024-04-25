@@ -120,7 +120,7 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                 options.splitTargetSize(),
                 options.splitOpenFileCost(),
                 options.deletionVectorsEnabled(),
-                options.mergeEngine());
+                options.noDupKeysOverLevel0());
     }
 
     @Override

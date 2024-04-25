@@ -22,6 +22,7 @@ import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -196,6 +197,44 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
                                 Row.ofKind(RowKind.UPDATE_BEFORE, 4, null, "4"),
                                 Row.ofKind(RowKind.UPDATE_AFTER, 4, "4", "4"));
             }
+        }
+    }
+
+    @Test
+    public void testDVTableWithFirstRowMergeEngine() throws Exception {
+        sql(
+                String.format(
+                        "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, v1 STRING, v2 STRING, seq int) "
+                                + "WITH ('deletion-vectors.enabled' = 'true', 'changelog-producer' = 'lookup', "
+                                + "'merge-engine'='first-row', 'sequence.field' = 'seq')"));
+
+        sql(
+                "INSERT INTO T VALUES (1, '111111111', '1', 1), (2, '2', '2', 2), (3, '3', '3', 3), (4, '4', '4', 4)");
+
+        sql("INSERT INTO T VALUES (2, '2_1', '2_1', 1), (3, '3_4', '3_4', 4)");
+
+        sql("INSERT INTO T VALUES (2, '2_3', '2_3', 3), (4, '4_1', '4_1', 1)");
+
+        // test batch read
+        assertThat(batchSql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, "111111111", "1", 1),
+                        Row.of(2, "2_1", "2_1", 1),
+                        Row.of(3, "3", "3", 3),
+                        Row.of(4, "4_1", "4_1", 1));
+
+        // test streaming read
+        try (BlockingIterator<Row, Row> iter =
+                streamSqlBlockIter(
+                        "SELECT * FROM T /*+ OPTIONS('scan.mode'='from-snapshot-full','scan.snapshot-id' = '4') */")) {
+            assertThat(iter.collect(6))
+                    .containsExactlyInAnyOrder(
+                            Row.ofKind(RowKind.INSERT, 1, "111111111", "1", 1),
+                            Row.ofKind(RowKind.INSERT, 2, "2_1", "2_1", 1),
+                            Row.ofKind(RowKind.INSERT, 3, "3", "3", 3),
+                            Row.ofKind(RowKind.INSERT, 4, "4", "4", 4),
+                            Row.ofKind(RowKind.UPDATE_BEFORE, 4, "4", "4", 4),
+                            Row.ofKind(RowKind.UPDATE_AFTER, 4, "4_1", "4_1", 1));
         }
     }
 }

@@ -242,7 +242,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 options.scanManifestParallelism(),
                 branchName,
                 options.deletionVectorsEnabled(),
-                options.mergeEngine());
+                options.noDupKeysOverLevel0());
     }
 
     @Override

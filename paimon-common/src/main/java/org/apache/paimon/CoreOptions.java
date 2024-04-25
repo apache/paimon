@@ -1314,6 +1314,10 @@ public class CoreOptions implements Serializable {
         return options.get(MERGE_ENGINE);
     }
 
+    public boolean noDupKeysOverLevel0() {
+        return mergeEngine() == MergeEngine.FIRST_ROW && sequenceField().isEmpty();
+    }
+
     public boolean ignoreDelete() {
         return options.get(IGNORE_DELETE);
     }

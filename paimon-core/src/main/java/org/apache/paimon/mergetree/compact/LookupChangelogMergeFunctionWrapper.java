@@ -111,13 +111,16 @@ public class LookupChangelogMergeFunctionWrapper<T>
     public ChangelogResult getResult() {
         // 1. Compute the latest high level record and containLevel0 of candidates
         LinkedList<KeyValue> candidates = mergeFunction.candidates();
-        Iterator<KeyValue> descending = candidates.descendingIterator();
+        Iterator<KeyValue> iterator =
+                mergeFunction.getLevelOrder() == LookupMergeFunction.LevelOrder.DESCENDING
+                        ? candidates.descendingIterator()
+                        : candidates.iterator();
         KeyValue highLevel = null;
         boolean containLevel0 = false;
-        while (descending.hasNext()) {
-            KeyValue kv = descending.next();
+        while (iterator.hasNext()) {
+            KeyValue kv = iterator.next();
             if (kv.level() > 0) {
-                descending.remove();
+                iterator.remove();
                 if (highLevel == null) {
                     highLevel = kv;
                 }
@@ -141,14 +144,13 @@ public class LookupChangelogMergeFunctionWrapper<T>
                 }
             }
         }
-
         // 3. Calculate result
         KeyValue result = calculateResult(candidates, highLevel);
 
         // 4. Set changelog when there's level-0 records
         reusedResult.reset();
         if (containLevel0 && lookupStrategy.produceChangelog) {
-            setChangelog(highLevel, result);
+            setChangelog(highLevel, result, reusedResult);
         }
 
         return reusedResult.setResult(result);
@@ -171,7 +173,8 @@ public class LookupChangelogMergeFunctionWrapper<T>
         return mergeFunction2.getResult();
     }
 
-    private void setChangelog(@Nullable KeyValue before, KeyValue after) {
+    protected void setChangelog(
+            @Nullable KeyValue before, KeyValue after, ChangelogResult reusedResult) {
         if (before == null || !before.isAdd()) {
             if (after.isAdd()) {
                 reusedResult.addChangelog(replaceAfter(RowKind.INSERT, after));
@@ -196,7 +199,7 @@ public class LookupChangelogMergeFunctionWrapper<T>
         return replace(reusedAfter, valueKind, from);
     }
 
-    private KeyValue replace(KeyValue reused, RowKind valueKind, KeyValue from) {
+    protected KeyValue replace(KeyValue reused, RowKind valueKind, KeyValue from) {
         return reused.replace(from.key(), from.sequenceNumber(), valueKind, from.value());
     }
 
