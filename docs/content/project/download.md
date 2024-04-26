@@ -54,7 +54,7 @@ This documentation is a guide for downloading Paimon Jars.
 | Presto 0.268     | [paimon-presto-0.268-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-presto-0.268/{{< version >}}/)                             |
 | Presto 0.273     | [paimon-presto-0.273-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-presto-0.273/{{< version >}}/)                             |
 | Presto SQL 332   | [paimon-prestosql-332-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-prestosql-332/{{< version >}}/)                           |
-| Trino 422        | [paimon-trino-422-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-422/{{< version >}}/)                                   |
+| Trino 420        | [paimon-trino-420-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-420/{{< version >}}/)                                   |
 | Trino 427        | [paimon-trino-427-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-427/{{< version >}}/)                                   |
 
 {{< /unstable >}}
