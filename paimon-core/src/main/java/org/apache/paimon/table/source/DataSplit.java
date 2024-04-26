@@ -45,7 +45,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Input splits. Needed by most batch computation engines. */
 public class DataSplit implements Split {
 
-    private static final long serialVersionUID = 6L;
+    private static final long serialVersionUID = 7L;
 
     private long snapshotId = 0;
     private BinaryRow partition;
