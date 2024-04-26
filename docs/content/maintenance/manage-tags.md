@@ -137,17 +137,17 @@ public class CreateTag {
 {{< tab "Spark" >}}
 Run the following sql:
 ```sql
-CALL create_tag(table => 'test.t', tag => 'test_tag', snapshot => 2);
+CALL sys.create_tag(table => 'test.t', tag => 'test_tag', snapshot => 2);
 ```
 
 To create a tag with retained 1 day, run the following sql:
 ```sql
-CALL create_tag(table => 'test.t', tag => 'test_tag', snapshot => 2, time_retained => '1 d');
+CALL sys.create_tag(table => 'test.t', tag => 'test_tag', snapshot => 2, time_retained => '1 d');
 ```
 
 To create a tag based on the latest snapshot id, run the following sql:
 ```sql
-CALL create_tag(table => 'test.t', tag => 'test_tag');
+CALL sys.create_tag(table => 'test.t', tag => 'test_tag');
 ```
 
 {{< /tab >}}
