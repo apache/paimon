@@ -33,6 +33,10 @@ public class IndexFile {
         this.path = path;
     }
 
+    public String path() {
+        return path;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (!(o instanceof IndexFile)) {
