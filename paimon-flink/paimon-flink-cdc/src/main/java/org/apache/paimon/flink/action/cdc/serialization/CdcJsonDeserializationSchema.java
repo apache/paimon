@@ -26,6 +26,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMap
 
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 
@@ -35,6 +37,8 @@ import static org.apache.flink.api.java.typeutils.TypeExtractor.getForClass;
 public class CdcJsonDeserializationSchema implements DeserializationSchema<CdcSourceRecord> {
 
     private static final long serialVersionUID = 1L;
+
+    private static final Logger LOG = LoggerFactory.getLogger(CdcJsonDeserializationSchema.class);
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -49,7 +53,13 @@ public class CdcJsonDeserializationSchema implements DeserializationSchema<CdcSo
         if (message == null) {
             return null;
         }
-        return new CdcSourceRecord(objectMapper.readValue(message, JsonNode.class));
+
+        try {
+            return new CdcSourceRecord(objectMapper.readValue(message, JsonNode.class));
+        } catch (Exception e) {
+            LOG.error("Invalid Json:\n{}", new String(message));
+            throw e;
+        }
     }
 
     @Override

@@ -18,15 +18,12 @@
 
 package org.apache.paimon.flink.action.cdc;
 
-import org.apache.paimon.annotation.Experimental;
-
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
 import java.util.Objects;
 
 /** A data change record from the CDC source. */
-@Experimental
 public class CdcSourceRecord implements Serializable {
 
     private static final long serialVersionUID = 1L;

@@ -90,20 +90,25 @@ public abstract class RecordParser
 
     @Nullable
     public Schema buildSchema(CdcSourceRecord record) {
-        setRoot(record);
-        if (isDDL()) {
-            return null;
-        }
+        try {
+            setRoot(record);
+            if (isDDL()) {
+                return null;
+            }
 
-        Optional<RichCdcMultiplexRecord> recordOpt = extractRecords().stream().findFirst();
-        if (!recordOpt.isPresent()) {
-            return null;
-        }
+            Optional<RichCdcMultiplexRecord> recordOpt = extractRecords().stream().findFirst();
+            if (!recordOpt.isPresent()) {
+                return null;
+            }
 
-        Schema.Builder builder = Schema.newBuilder();
-        recordOpt.get().fieldTypes().forEach(builder::column);
-        builder.primaryKey(extractPrimaryKeys());
-        return builder.build();
+            Schema.Builder builder = Schema.newBuilder();
+            recordOpt.get().fieldTypes().forEach(builder::column);
+            builder.primaryKey(extractPrimaryKeys());
+            return builder.build();
+        } catch (Exception e) {
+            logInvalidSourceRecord(record);
+            throw e;
+        }
     }
 
     protected abstract List<RichCdcMultiplexRecord> extractRecords();
@@ -125,8 +130,13 @@ public abstract class RecordParser
 
     @Override
     public void flatMap(CdcSourceRecord value, Collector<RichCdcMultiplexRecord> out) {
-        setRoot(value);
-        extractRecords().forEach(out::collect);
+        try {
+            setRoot(value);
+            extractRecords().forEach(out::collect);
+        } catch (Exception e) {
+            logInvalidSourceRecord(value);
+            throw e;
+        }
     }
 
     protected Map<String, String> extractRowData(
@@ -233,6 +243,10 @@ public abstract class RecordParser
     protected String getDatabaseName() {
         JsonNode node = root.get(FIELD_DATABASE);
         return isNull(node) ? null : node.asText();
+    }
+
+    private void logInvalidSourceRecord(CdcSourceRecord record) {
+        LOG.error("Invalid source record:\n{}", record.toString());
     }
 
     protected void checkNotNull(JsonNode node, String key) {
