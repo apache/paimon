@@ -439,6 +439,8 @@ public class TestFileStore extends KeyValueFileStore {
                                                 .withBucket(entryWithBucket.getKey())
                                                 .withDataFiles(entryWithBucket.getValue())
                                                 .isStreaming(isStreaming)
+                                                .rawConvertible(false)
+                                                .withBucketPath("not used")
                                                 .build()));
                 while (iterator.hasNext()) {
                     kvs.add(iterator.next().copy(keySerializer, valueSerializer));

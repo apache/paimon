@@ -76,6 +76,8 @@ public class PaimonInputSplitTest {
                                         .filter(d -> d.partition.equals(wantedPartition))
                                         .map(d -> d.meta)
                                         .collect(Collectors.toList()))
+                        .rawConvertible(false)
+                        .withBucketPath("not used")
                         .build();
         PaimonInputSplit split = new PaimonInputSplit(tempDir.toString(), dataSplit, null);
 

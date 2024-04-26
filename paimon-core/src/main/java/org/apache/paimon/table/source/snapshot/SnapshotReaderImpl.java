@@ -40,7 +40,6 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.PlanImpl;
-import org.apache.paimon.table.source.RawFile;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.types.RowType;
@@ -290,11 +289,10 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                 : null;
                 for (SplitGenerator.SplitGroup splitGroup : splitGroups) {
                     List<DataFileMeta> dataFiles = splitGroup.files;
-                    builder.withDataFiles(dataFiles);
-                    builder.rawFiles(
-                            splitGroup.rawConvertible
-                                    ? convertToRawFiles(partition, bucket, dataFiles)
-                                    : Collections.emptyList());
+                    String bucketPath = pathFactory.bucketPath(partition, bucket).toString();
+                    builder.withDataFiles(dataFiles)
+                            .rawConvertible(splitGroup.rawConvertible)
+                            .withBucketPath(bucketPath);
                     if (deletionVectors) {
                         builder.withDataDeletionFiles(
                                 getDeletionFiles(dataFiles, deletionIndexFile));
@@ -371,7 +369,8 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                 .withBucket(bucket)
                                 .withBeforeFiles(before)
                                 .withDataFiles(data)
-                                .isStreaming(isStreaming);
+                                .isStreaming(isStreaming)
+                                .withBucketPath(pathFactory.bucketPath(part, bucket).toString());
                 if (deletionVectors) {
                     IndexFileMeta beforeDeletionIndex =
                             indexFileHandler
@@ -432,29 +431,5 @@ public class SnapshotReaderImpl implements SnapshotReader {
         }
 
         return deletionFiles;
-    }
-
-    private List<RawFile> convertToRawFiles(
-            BinaryRow partition, int bucket, List<DataFileMeta> dataFiles) {
-        String bucketPath = pathFactory.bucketPath(partition, bucket).toString();
-        return dataFiles.stream()
-                .map(f -> makeRawTableFile(bucketPath, f))
-                .collect(Collectors.toList());
-    }
-
-    private RawFile makeRawTableFile(String bucketPath, DataFileMeta meta) {
-        return new RawFile(
-                bucketPath + "/" + meta.fileName(),
-                0,
-                meta.fileSize(),
-                meta.fileFormat()
-                        .map(t -> t.toString().toLowerCase())
-                        .orElse(
-                                new CoreOptions(tableSchema.options())
-                                        .formatType()
-                                        .toString()
-                                        .toLowerCase()),
-                meta.schemaId(),
-                meta.rowCount());
     }
 }

@@ -102,7 +102,11 @@ case class UpdatePaimonTableCommand(
           }
           new Column(updated).as(origin.name, origin.metadata)
       }
-      val touchedDataSplits = SparkDataFileMeta.convertToDataSplits(touchedFiles)
+      // append only file always set rawConvertible true.
+      val touchedDataSplits = SparkDataFileMeta.convertToDataSplits(
+        touchedFiles,
+        rawConvertible = true,
+        table.store().pathFactory())
       val toUpdateScanRelation = DataSourceV2ScanRelation(
         relation,
         PaimonSplitScan(table, touchedDataSplits),

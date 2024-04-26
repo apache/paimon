@@ -126,6 +126,8 @@ public class FileStoreSourceSplitSerializerTest {
                         .withBucket(bucket)
                         .withDataFiles(files)
                         .isStreaming(isIncremental)
+                        .rawConvertible(false)
+                        .withBucketPath("/temp/" + bucket) // no used
                         .build();
         return new FileStoreSourceSplit(id, split, recordsToSkip);
     }

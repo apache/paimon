@@ -48,7 +48,10 @@ object SparkDataFileMeta {
     }
   }
 
-  def convertToDataSplits(sparkDataFiles: Array[SparkDataFileMeta]): Array[DataSplit] = {
+  def convertToDataSplits(
+      sparkDataFiles: Array[SparkDataFileMeta],
+      rawConvertible: Boolean,
+      pathFactory: FileStorePathFactory): Array[DataSplit] = {
     sparkDataFiles
       .groupBy(file => (file.partition, file.bucket))
       .map {
@@ -57,6 +60,8 @@ object SparkDataFileMeta {
             .withPartition(partition)
             .withBucket(bucket)
             .withDataFiles(files.map(_.dataFileMeta).toList.asJava)
+            .rawConvertible(rawConvertible)
+            .withBucketPath(pathFactory.bucketPath(partition, bucket).toString)
             .build()
       }
       .toArray

@@ -33,12 +33,13 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.stream.Collectors;
 
+import static org.apache.paimon.io.DataFilePathFactory.INDEX_PATH_SUFFIX;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Input splits. Needed by most batch computation engines. */
@@ -56,7 +57,8 @@ public class DataSplit implements Split {
     private List<DataFileMeta> dataFiles;
     @Nullable private List<DeletionFile> dataDeletionFiles;
 
-    private List<RawFile> rawFiles = Collections.emptyList();
+    private boolean rawConvertible;
+    private String bucketPath;
 
     public DataSplit() {}
 
@@ -93,6 +95,14 @@ public class DataSplit implements Split {
         return isStreaming;
     }
 
+    public boolean rawConvertible() {
+        return rawConvertible;
+    }
+
+    public String getBucketPath() {
+        return bucketPath;
+    }
+
     public OptionalLong getLatestFileCreationEpochMillis() {
         return this.dataFiles.stream().mapToLong(DataFileMeta::creationTimeEpochMillis).max();
     }
@@ -108,11 +118,59 @@ public class DataSplit implements Split {
 
     @Override
     public Optional<List<RawFile>> convertToRawFiles() {
-        if (rawFiles.isEmpty()) {
-            return Optional.empty();
+        if (rawConvertible) {
+            return Optional.of(
+                    dataFiles.stream()
+                            .map(f -> makeRawTableFile(bucketPath, f))
+                            .collect(Collectors.toList()));
         } else {
-            return Optional.of(rawFiles);
+            return Optional.empty();
         }
+    }
+
+    private RawFile makeRawTableFile(String bucketPath, DataFileMeta meta) {
+        return new RawFile(
+                bucketPath + "/" + meta.fileName(),
+                0,
+                meta.fileSize(),
+                meta.fileFormat()
+                        .map(t -> t.toString().toLowerCase())
+                        .orElseThrow(
+                                () ->
+                                        new RuntimeException(
+                                                "Can't find format from file: "
+                                                        + bucketPath
+                                                        + "/"
+                                                        + meta.fileName())),
+                meta.schemaId(),
+                meta.rowCount());
+    }
+
+    @Override
+    @Nullable
+    public Optional<List<IndexFile>> indexFiles() {
+        List<IndexFile> indexFiles = new ArrayList<>();
+        boolean hasIndexFile = false;
+        for (DataFileMeta file : dataFiles) {
+            List<String> exFiles =
+                    file.extraFiles().stream()
+                            .filter(s -> s.endsWith(INDEX_PATH_SUFFIX))
+                            .collect(Collectors.toList());
+            if (exFiles.isEmpty()) {
+                indexFiles.add(null);
+            } else if (exFiles.size() == 1) {
+                hasIndexFile = true;
+                indexFiles.add(new IndexFile(bucketPath + "/" + exFiles.get(0)));
+            } else {
+                throw new RuntimeException(
+                        "Wrong number of file index for file "
+                                + file.fileName()
+                                + " index files: "
+                                + String.join(",", exFiles));
+            }
+        }
+
+        return hasIndexFile ? Optional.of(indexFiles) : Optional.empty();
     }
 
     @Override
@@ -131,7 +189,8 @@ public class DataSplit implements Split {
                 && Objects.equals(dataFiles, split.dataFiles)
                 && Objects.equals(dataDeletionFiles, split.dataDeletionFiles)
                 && isStreaming == split.isStreaming
-                && Objects.equals(rawFiles, split.rawFiles);
+                && rawConvertible == split.rawConvertible
+                && Objects.equals(bucketPath, split.bucketPath);
     }
 
     @Override
@@ -144,7 +203,8 @@ public class DataSplit implements Split {
                 dataFiles,
                 dataDeletionFiles,
                 isStreaming,
-                rawFiles);
+                rawConvertible,
+                bucketPath);
     }
 
     private void writeObject(ObjectOutputStream out) throws IOException {
@@ -164,7 +224,8 @@ public class DataSplit implements Split {
         this.dataFiles = other.dataFiles;
         this.dataDeletionFiles = other.dataDeletionFiles;
         this.isStreaming = other.isStreaming;
-        this.rawFiles = other.rawFiles;
+        this.rawConvertible = other.rawConvertible;
+        this.bucketPath = other.bucketPath;
     }
 
     public void serialize(DataOutputView out) throws IOException {
@@ -189,10 +250,8 @@ public class DataSplit implements Split {
 
         out.writeBoolean(isStreaming);
 
-        out.writeInt(rawFiles.size());
-        for (RawFile rawFile : rawFiles) {
-            rawFile.serialize(out);
-        }
+        out.writeBoolean(rawConvertible);
+        out.writeUTF(bucketPath);
     }
 
     public static DataSplit deserialize(DataInputView in) throws IOException {
@@ -218,12 +277,8 @@ public class DataSplit implements Split {
         List<DeletionFile> dataDeletionFiles = DeletionFile.deserializeList(in);
 
         boolean isStreaming = in.readBoolean();
-
-        int rawFileNum = in.readInt();
-        List<RawFile> rawFiles = new ArrayList<>();
-        for (int i = 0; i < rawFileNum; i++) {
-            rawFiles.add(RawFile.deserialize(in));
-        }
+        boolean rawConvertible = in.readBoolean();
+        String bucketPath = in.readUTF();
 
         DataSplit.Builder builder =
                 builder()
@@ -233,7 +288,9 @@ public class DataSplit implements Split {
                         .withBeforeFiles(beforeFiles)
                         .withDataFiles(dataFiles)
                         .isStreaming(isStreaming)
-                        .rawFiles(rawFiles);
+                        .rawConvertible(rawConvertible)
+                        .withBucketPath(bucketPath);
+
         if (beforeDeletionFiles != null) {
             builder.withBeforeDeletionFiles(beforeDeletionFiles);
         }
@@ -292,8 +349,13 @@ public class DataSplit implements Split {
             return this;
         }
 
-        public Builder rawFiles(List<RawFile> rawFiles) {
-            this.split.rawFiles = rawFiles;
+        public Builder rawConvertible(boolean rawConvertible) {
+            this.split.rawConvertible = rawConvertible;
+            return this;
+        }
+
+        public Builder withBucketPath(String bucketPath) {
+            this.split.bucketPath = bucketPath;
             return this;
         }
 
@@ -301,6 +363,7 @@ public class DataSplit implements Split {
             checkArgument(split.partition != null);
             checkArgument(split.bucket != -1);
             checkArgument(split.dataFiles != null);
+            checkArgument(split.bucketPath != null);
 
             DataSplit split = new DataSplit();
             split.assign(this.split);

@@ -23,17 +23,22 @@ import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.PlanImpl;
 import org.apache.paimon.table.source.ScanMode;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /** {@link StartingScanner} for incremental changes by snapshot. */
 public class IncrementalStartingScanner extends AbstractStartingScanner {
@@ -52,34 +57,49 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
 
     @Override
     public Result scan(SnapshotReader reader) {
-        Map<Pair<BinaryRow, Integer>, List<DataFileMeta>> grouped = new HashMap<>();
+        Map<SplitInfo, List<DataFileMeta>> grouped = new HashMap<>();
         for (long i = startingSnapshotId + 1; i < endingSnapshotId + 1; i++) {
             List<DataSplit> splits = readSplits(reader, snapshotManager.snapshot(i));
             for (DataSplit split : splits) {
                 grouped.computeIfAbsent(
-                                Pair.of(split.partition(), split.bucket()), k -> new ArrayList<>())
+                                new SplitInfo(
+                                        split.partition(),
+                                        split.bucket(),
+                                        // take it for false, because multiple snapshot read may
+                                        // need merge for primary key table
+                                        false,
+                                        split.getBucketPath(),
+                                        split.deletionFiles().orElse(null)),
+                                k -> new ArrayList<>())
                         .addAll(split.dataFiles());
             }
         }
 
-        List<DataSplit> result = new ArrayList<>();
-        for (Map.Entry<Pair<BinaryRow, Integer>, List<DataFileMeta>> entry : grouped.entrySet()) {
-            BinaryRow partition = entry.getKey().getLeft();
-            int bucket = entry.getKey().getRight();
+        List<Split> result = new ArrayList<>();
+        for (Map.Entry<SplitInfo, List<DataFileMeta>> entry : grouped.entrySet()) {
+            BinaryRow partition = entry.getKey().partition;
+            int bucket = entry.getKey().bucket;
+            boolean rawConvertible = entry.getKey().rawConvertible;
+            String bucketPath = entry.getKey().bucketPath;
+            List<DeletionFile> deletionFiles = entry.getKey().deletionFiles;
             for (SplitGenerator.SplitGroup splitGroup :
                     reader.splitGenerator().splitForBatch(entry.getValue())) {
-                // TODO pass deletion files
-                result.add(
+                DataSplit.Builder dataSplitBuilder =
                         DataSplit.builder()
                                 .withSnapshot(endingSnapshotId)
                                 .withPartition(partition)
                                 .withBucket(bucket)
                                 .withDataFiles(splitGroup.files)
-                                .build());
+                                .rawConvertible(rawConvertible)
+                                .withBucketPath(bucketPath);
+                if (deletionFiles != null) {
+                    dataSplitBuilder.withDataDeletionFiles(deletionFiles);
+                }
+                result.add(dataSplitBuilder.build());
             }
         }
 
-        return StartingScanner.fromPlan(new PlanImpl(null, endingSnapshotId, (List) result));
+        return StartingScanner.fromPlan(new PlanImpl(null, endingSnapshotId, result));
     }
 
     private List<DataSplit> readSplits(SnapshotReader reader, Snapshot s) {
@@ -109,5 +129,50 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
             return Collections.emptyList();
         }
         return (List) reader.withSnapshot(s).withMode(ScanMode.CHANGELOG).read().splits();
+    }
+
+    /** Split information to pass. */
+    private static class SplitInfo {
+
+        private final BinaryRow partition;
+        private final int bucket;
+        private final boolean rawConvertible;
+        private final String bucketPath;
+        @Nullable private final List<DeletionFile> deletionFiles;
+
+        private SplitInfo(
+                BinaryRow partition,
+                int bucket,
+                boolean rawConvertible,
+                String bucketPath,
+                @Nullable List<DeletionFile> deletionFiles) {
+            this.partition = partition;
+            this.bucket = bucket;
+            this.rawConvertible = rawConvertible;
+            this.bucketPath = bucketPath;
+            this.deletionFiles = deletionFiles;
+        }
+
+        @Override
+        public int hashCode() {
+            return Arrays.hashCode(
+                    new Object[] {partition, bucket, rawConvertible, bucketPath, deletionFiles});
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+
+            if (!(obj instanceof SplitInfo)) {
+                return false;
+            }
+
+            SplitInfo that = (SplitInfo) obj;
+
+            return Objects.equals(partition, that.partition)
+                    && bucket == that.bucket
+                    && rawConvertible == that.rawConvertible
+                    && Objects.equals(bucketPath, that.bucketPath)
+                    && Objects.equals(deletionFiles, that.deletionFiles);
+        }
     }
 }
