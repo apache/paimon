@@ -138,9 +138,8 @@ public class TypeUtils {
             case DOUBLE:
                 return Double.valueOf(s);
             case DATE:
-                return BinaryStringUtils.toDate(str);
             case TIME_WITHOUT_TIME_ZONE:
-                return BinaryStringUtils.toTime(str);
+                return BinaryStringUtils.toInt(str);
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 TimestampType timestampType = (TimestampType) type;
                 return BinaryStringUtils.toTimestamp(str, timestampType.getPrecision());
