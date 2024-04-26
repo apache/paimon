@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.Documentation;
 import org.apache.paimon.annotation.Documentation.ExcludeFromDocumentation;
 import org.apache.paimon.annotation.Documentation.Immutable;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.lookup.LookupStrategy;
@@ -70,11 +71,21 @@ public class CoreOptions implements Serializable {
 
     public static final String DISTINCT = "distinct";
 
+    public static final String FILE_INDEX = "file-index";
+
+    public static final String COLUMNS = "columns";
+
     public static final ConfigOption<Integer> BUCKET =
             key("bucket")
                     .intType()
                     .defaultValue(-1)
-                    .withDescription("Bucket number for file store.");
+                    .withDescription(
+                            Description.builder()
+                                    .text("Bucket number for file store.")
+                                    .linebreak()
+                                    .text(
+                                            "It should either be equal to -1 (dynamic bucket mode), or it must be greater than 0 (fixed bucket mode).")
+                                    .build());
 
     @Immutable
     public static final ConfigOption<String> BUCKET_KEY =
@@ -134,6 +145,18 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Default file compression format, orc is lz4 and parquet is snappy. It can be overridden by "
                                     + FILE_COMPRESSION_PER_LEVEL.key());
+
+    public static final ConfigOption<MemorySize> FILE_INDEX_IN_MANIFEST_THRESHOLD =
+            key("file-index.in-manifest-threshold")
+                    .memoryType()
+                    .defaultValue(MemorySize.parse("500 B"))
+                    .withDescription("The threshold to store file index bytes in manifest.");
+
+    public static final ConfigOption<Boolean> FILE_INDEX_READ_ENABLED =
+            key("file-index.read.enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription("Whether enabled read file index.");
 
     public static final ConfigOption<FileFormatType> MANIFEST_FORMAT =
             key("manifest.format")
@@ -398,7 +421,7 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription(
                             "The number of sorted runs that trigger the stopping of writes,"
-                                    + " the default value is 'num-sorted-run.compaction-trigger' + 1.");
+                                    + " the default value is 'num-sorted-run.compaction-trigger' + 3.");
 
     public static final ConfigOption<Integer> NUM_LEVELS =
             key("num-levels")
@@ -507,6 +530,14 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Optional timestamp used in case of \"from-timestamp\" scan mode. "
                                     + "If there is no snapshot earlier than this time, the earliest snapshot will be chosen.");
+
+    public static final ConfigOption<Long> SCAN_WATERMARK =
+            key("scan.watermark")
+                    .longType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Optional watermark used in case of \"from-snapshot\" scan mode. "
+                                    + "If there is no snapshot later than this watermark, will throw an exceptions.");
 
     public static final ConfigOption<Long> SCAN_FILE_CREATION_TIME_MILLIS =
             key("scan.file-creation-time-millis")
@@ -989,6 +1020,12 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("The maximum number of tags to retain.");
 
+    public static final ConfigOption<Duration> TAG_DEFAULT_TIME_RETAINED =
+            key("tag.default-time-retained")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription("The default maximum time retained for newly created tags.");
+
     public static final ConfigOption<Duration> SNAPSHOT_WATERMARK_IDLE_TIMEOUT =
             key("snapshot.watermark-idle-timeout")
                     .durationType()
@@ -1378,7 +1415,7 @@ public class CoreOptions implements Serializable {
     public int numSortedRunStopTrigger() {
         Integer stopTrigger = options.get(NUM_SORTED_RUNS_STOP_TRIGGER);
         if (stopTrigger == null) {
-            stopTrigger = MathUtils.incrementSafely(numSortedRunCompactionTrigger());
+            stopTrigger = MathUtils.addSafely(numSortedRunCompactionTrigger(), 3);
         }
         return Math.max(numSortedRunCompactionTrigger(), stopTrigger);
     }
@@ -1450,6 +1487,7 @@ public class CoreOptions implements Serializable {
                 return StartupMode.FROM_TIMESTAMP;
             } else if (options.getOptional(SCAN_SNAPSHOT_ID).isPresent()
                     || options.getOptional(SCAN_TAG_NAME).isPresent()
+                    || options.getOptional(SCAN_WATERMARK).isPresent()
                     || options.getOptional(SCAN_VERSION).isPresent()) {
                 return StartupMode.FROM_SNAPSHOT;
             } else if (options.getOptional(SCAN_FILE_CREATION_TIME_MILLIS).isPresent()) {
@@ -1469,6 +1507,10 @@ public class CoreOptions implements Serializable {
 
     public Long scanTimestampMills() {
         return options.get(SCAN_TIMESTAMP_MILLIS);
+    }
+
+    public Long scanWatermark() {
+        return options.get(SCAN_WATERMARK);
     }
 
     public Long scanFileCreationTimeMills() {
@@ -1613,8 +1655,13 @@ public class CoreOptions implements Serializable {
         return options.get(TAG_PERIOD_FORMATTER);
     }
 
+    @Nullable
     public Integer tagNumRetainedMax() {
         return options.get(TAG_NUM_RETAINED_MAX);
+    }
+
+    public Duration tagDefaultTimeRetained() {
+        return options.get(TAG_DEFAULT_TIME_RETAINED);
     }
 
     public Duration snapshotWatermarkIdleTimeout() {
@@ -1688,6 +1735,18 @@ public class CoreOptions implements Serializable {
 
     public boolean deletionVectorsEnabled() {
         return options.get(DELETION_VECTORS_ENABLED);
+    }
+
+    public FileIndexOptions indexColumnsOptions() {
+        return new FileIndexOptions(this);
+    }
+
+    public long fileIndexInManifestThreshold() {
+        return options.get(FILE_INDEX_IN_MANIFEST_THRESHOLD).getBytes();
+    }
+
+    public boolean fileIndexReadEnabled() {
+        return options.get(FILE_INDEX_READ_ENABLED);
     }
 
     /** Specifies the merge engine for table with primary key. */

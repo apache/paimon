@@ -50,6 +50,7 @@ import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.SnapshotReaderImpl;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
+import org.apache.paimon.table.source.snapshot.StaticFromWatermarkStartingScanner;
 import org.apache.paimon.tag.TagPreview;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.SnapshotManager;
@@ -59,6 +60,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -77,6 +79,7 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 abstract class AbstractFileStoreTable implements FileStoreTable {
 
     private static final long serialVersionUID = 1L;
+    private static final String WATERMARK_PREFIX = "watermark-";
 
     protected final FileIO fileIO;
     protected final Path path;
@@ -386,6 +389,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                     return travelToVersion(coreOptions.scanVersion(), options);
                 } else if (coreOptions.scanSnapshotId() != null) {
                     return travelToSnapshot(coreOptions.scanSnapshotId(), options);
+                } else if (coreOptions.scanWatermark() != null) {
+                    return travelToWatermark(coreOptions.scanWatermark(), options);
                 } else {
                     return travelToTag(coreOptions.scanTagName(), options);
                 }
@@ -405,6 +410,10 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         if (tagManager().tagExists(version)) {
             options.set(CoreOptions.SCAN_TAG_NAME, version);
             return travelToTag(version, options);
+        } else if (version.startsWith(WATERMARK_PREFIX)) {
+            long watermark = Long.parseLong(version.substring(WATERMARK_PREFIX.length()));
+            options.set(CoreOptions.SCAN_WATERMARK, watermark);
+            return travelToWatermark(watermark, options);
         } else if (version.chars().allMatch(Character::isDigit)) {
             options.set(CoreOptions.SCAN_SNAPSHOT_ID.key(), version);
             return travelToSnapshot(Long.parseLong(version), options);
@@ -421,6 +430,16 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         SnapshotManager snapshotManager = snapshotManager();
         if (snapshotManager.snapshotExists(snapshotId)) {
             return travelToSnapshot(snapshotManager.snapshot(snapshotId), options);
+        }
+        return Optional.empty();
+    }
+
+    private Optional<TableSchema> travelToWatermark(long watermark, Options options) {
+        Snapshot snapshot =
+                StaticFromWatermarkStartingScanner.timeTravelToWatermark(
+                        snapshotManager(), watermark);
+        if (snapshot != null) {
+            return Optional.of(schemaManager().schema(snapshot.schemaId()).copy(options.toMap()));
         }
         return Optional.empty();
     }
@@ -443,8 +462,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         rollbackHelper().cleanLargerThan(snapshotManager.snapshot(snapshotId));
     }
 
-    @Override
-    public void createTag(String tagName, long fromSnapshotId) {
+    public Snapshot createTagInternal(long fromSnapshotId) {
         SnapshotManager snapshotManager = snapshotManager();
         Snapshot snapshot = null;
         if (snapshotManager.snapshotExists(fromSnapshotId)) {
@@ -464,18 +482,36 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 snapshot != null,
                 "Cannot create tag because given snapshot #%s doesn't exist.",
                 fromSnapshotId);
-        createTag(tagName, snapshot);
+        return snapshot;
+    }
+
+    @Override
+    public void createTag(String tagName, long fromSnapshotId) {
+        createTag(
+                tagName, createTagInternal(fromSnapshotId), coreOptions().tagDefaultTimeRetained());
+    }
+
+    @Override
+    public void createTag(String tagName, long fromSnapshotId, Duration timeRetained) {
+        createTag(tagName, createTagInternal(fromSnapshotId), timeRetained);
     }
 
     @Override
     public void createTag(String tagName) {
         Snapshot latestSnapshot = snapshotManager().latestSnapshot();
         checkNotNull(latestSnapshot, "Cannot create tag because latest snapshot doesn't exist.");
-        createTag(tagName, latestSnapshot);
+        createTag(tagName, latestSnapshot, coreOptions().tagDefaultTimeRetained());
     }
 
-    private void createTag(String tagName, Snapshot fromSnapshot) {
-        tagManager().createTag(fromSnapshot, tagName, store().createTagCallbacks());
+    @Override
+    public void createTag(String tagName, Duration timeRetained) {
+        Snapshot latestSnapshot = snapshotManager().latestSnapshot();
+        checkNotNull(latestSnapshot, "Cannot create tag because latest snapshot doesn't exist.");
+        createTag(tagName, latestSnapshot, timeRetained);
+    }
+
+    private void createTag(String tagName, Snapshot fromSnapshot, @Nullable Duration timeRetained) {
+        tagManager().createTag(fromSnapshot, tagName, timeRetained, store().createTagCallbacks());
     }
 
     @Override
@@ -486,6 +522,16 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                         store().newTagDeletion(),
                         snapshotManager(),
                         store().createTagCallbacks());
+    }
+
+    @Override
+    public void createBranch(String branchName) {
+        branchManager().createBranch(branchName);
+    }
+
+    @Override
+    public void createBranch(String branchName, long snapshotId) {
+        branchManager().createBranch(branchName, snapshotId);
     }
 
     @Override

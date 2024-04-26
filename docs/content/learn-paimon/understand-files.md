@@ -41,7 +41,7 @@ following sections:
 
 1. [Basic Concepts]({{< ref "concepts/basic-concepts" >}}),
 2. [Primary Key Table]({{< ref "primary-key-table/overview" >}}) and
-3. How to use Paimon in [Flink]({{< ref "engines/flink" >}}).
+3. How to use Paimon in [Flink]({{< ref "flink" >}}).
 
 ## Understand File Operations
 

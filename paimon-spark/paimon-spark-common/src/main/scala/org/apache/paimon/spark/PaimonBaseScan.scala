@@ -39,8 +39,8 @@ import scala.collection.JavaConverters._
 abstract class PaimonBaseScan(
     table: Table,
     requiredSchema: StructType,
-    filters: Array[Predicate],
-    reservedFilters: Array[Filter],
+    filters: Seq[Predicate],
+    reservedFilters: Seq[Filter],
     pushDownLimit: Option[Int])
   extends Scan
   with SupportsReportStatistics
@@ -58,6 +58,11 @@ abstract class PaimonBaseScan(
   override val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
 
   lazy val statistics: Optional[stats.Statistics] = table.statistics()
+
+  lazy val requiredStatsSchema: StructType = {
+    val fieldNames = requiredSchema.fieldNames ++ reservedFilters.flatMap(_.references)
+    StructType(tableSchema.filter(field => fieldNames.contains(field.name)))
+  }
 
   lazy val readBuilder: ReadBuilder = {
     val _readBuilder = table.newReadBuilder()

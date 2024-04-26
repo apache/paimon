@@ -102,10 +102,56 @@ class UpdateTableTest extends PaimonSparkTestBase {
                 |VALUES (1, 'a', '2024'), (2, 'b', '2024'), (3, 'c', '2025'), (4, 'd', '2025')
                 |""".stripMargin)
 
-    Seq(1, 2).toDF("id").createOrReplaceTempView("updated_ids")
-    assertThatThrownBy(
-      () => spark.sql("UPDATE T set name = 'in_new' WHERE id IN (SELECT * FROM updated_ids)"))
-      .hasMessageContaining("Subqueries are not supported")
+    Seq(2, 4, 6).toDF("key").createOrReplaceTempView("source")
+
+    spark.sql("""
+                |UPDATE T
+                |SET name = concat(substring(name, 0, 1), '2')
+                |WHERE id < (SELECT MIN(key) FROM source)""".stripMargin)
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Seq((1, "a2", "2024"), (2, "b", "2024"), (3, "c", "2025"), (4, "d", "2025")).toDF()
+    )
+
+    // EXISTS
+    spark.sql("""
+                |UPDATE T
+                |SET name = concat(substring(name, 0, 1), '3')
+                |WHERE EXiSTS (SELECT * FROM source WHERE key > 5)""".stripMargin)
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Seq((1, "a3", "2024"), (2, "b3", "2024"), (3, "c3", "2025"), (4, "d3", "2025")).toDF()
+    )
+
+    // NOT EXISTS
+    spark.sql("""
+                |UPDATE T
+                |SET name = concat(substring(name, 0, 1), '4')
+                |WHERE NOT EXiSTS (SELECT * FROM source WHERE key > 5)""".stripMargin)
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Seq((1, "a3", "2024"), (2, "b3", "2024"), (3, "c3", "2025"), (4, "d3", "2025")).toDF()
+    )
+
+    // IN
+    spark.sql("""
+                |UPDATE T
+                |SET name = concat(substring(name, 0, 1), '5')
+                |WHERE id IN (SELECT key FROM source)""".stripMargin)
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Seq((1, "a3", "2024"), (2, "b5", "2024"), (3, "c3", "2025"), (4, "d5", "2025")).toDF()
+    )
+
+    // NOT IN
+    spark.sql("""
+                |UPDATE T
+                |SET name = concat(substring(name, 0, 1), '6')
+                |WHERE id NOT IN (SELECT key FROM source)""".stripMargin)
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Seq((1, "a6", "2024"), (2, "b5", "2024"), (3, "c6", "2025"), (4, "d5", "2025")).toDF()
+    )
   }
 
   CoreOptions.MergeEngine.values().foreach {

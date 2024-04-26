@@ -19,7 +19,9 @@
 package org.apache.paimon.fileindex;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.fileindex.empty.EmptyFileIndexReader;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
@@ -34,24 +36,37 @@ import java.io.DataOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * File index file format. Put all column and offset in the header.
  *
  * <pre>
- * _______________________________________    _____________________
+ *   _____________________________________    _____________________
  * ｜     magic    ｜version｜head length ｜
  * ｜-------------------------------------｜
- * ｜   index type        ｜body info size｜
+ * ｜            column number            ｜
  * ｜-------------------------------------｜
- * ｜ column name 1 ｜start pos ｜length  ｜
+ * ｜   column 1        ｜ index number   ｜
+ * ｜-------------------------------------｜
+ * ｜  index name 1 ｜start pos ｜length  ｜
+ * ｜-------------------------------------｜
+ * ｜  index name 2 ｜start pos ｜length  ｜
+ * ｜-------------------------------------｜
+ * ｜  index name 3 ｜start pos ｜length  ｜
  * ｜-------------------------------------｜            HEAD
- * ｜ column name 2 ｜start pos ｜length  ｜
+ * ｜   column 2        ｜ index number   ｜
  * ｜-------------------------------------｜
- * ｜ column name 3 ｜start pos ｜length  ｜
+ * ｜  index name 1 ｜start pos ｜length  ｜
+ * ｜-------------------------------------｜
+ * ｜  index name 2 ｜start pos ｜length  ｜
+ * ｜-------------------------------------｜
+ * ｜  index name 3 ｜start pos ｜length  ｜
  * ｜-------------------------------------｜
  * ｜                 ...                 ｜
  * ｜-------------------------------------｜
@@ -68,20 +83,22 @@ import java.util.Optional;
  * magic:                            8 bytes long
  * version:                          4 bytes int
  * head length:                      4 bytes int
- * index type:                       var bytes utf (length + bytes)
- * body info size:                   4 bytes int (how many column items below)
- * column name:                      var bytes utf
+ * column number:                    4 bytes int
+ * column x:                         var bytes utf (length + bytes)
+ * index number:                     4 bytes int (how many column items below)
+ * index name x:                     var bytes utf
  * start pos:                        4 bytes int
  * length:                           4 bytes int
  * redundant length:                 4 bytes int (for compatibility with later versions, in this version, content is zero)
  * redundant bytes:                  var bytes (for compatibility with later version, in this version, is empty)
- * BODY:                             column bytes + column bytes + column bytes + .......
+ * BODY:                             column index bytes + column index bytes + column index bytes + .......
  *
  * </pre>
  */
 public final class FileIndexFormat {
 
     private static final long MAGIC = 1493475289347502L;
+    private static final int EMPTY_INDEX_FLAG = -1;
 
     enum Version {
         V_1(1);
@@ -117,30 +134,41 @@ public final class FileIndexFormat {
             this.dataOutputStream = new DataOutputStream(outputStream);
         }
 
-        public void writeColumnIndex(String indexType, Map<String, byte[]> bytesMap)
+        public void writeColumnIndexes(Map<String, Map<String, byte[]>> indexes)
                 throws IOException {
 
-            Map<String, Pair<Integer, Integer>> bodyInfo = new HashMap<>();
+            Map<String, Map<String, Pair<Integer, Integer>>> bodyInfo = new HashMap<>();
 
             // construct body
             ByteArrayOutputStream baos = new ByteArrayOutputStream(256);
-            for (Map.Entry<String, byte[]> entry : bytesMap.entrySet()) {
-                int startPosition = baos.size();
-                baos.write(entry.getValue());
-                bodyInfo.put(entry.getKey(), Pair.of(startPosition, baos.size() - startPosition));
+            for (Map.Entry<String, Map<String, byte[]>> columnMap : indexes.entrySet()) {
+                Map<String, Pair<Integer, Integer>> innerMap =
+                        bodyInfo.computeIfAbsent(columnMap.getKey(), k -> new HashMap<>());
+                Map<String, byte[]> bytesMap = columnMap.getValue();
+                for (Map.Entry<String, byte[]> entry : bytesMap.entrySet()) {
+                    int startPosition = baos.size();
+                    byte[] v = entry.getValue();
+                    if (v == null) {
+                        innerMap.put(entry.getKey(), Pair.of(EMPTY_INDEX_FLAG, 0));
+                    } else {
+                        baos.write(entry.getValue());
+                        innerMap.put(
+                                entry.getKey(),
+                                Pair.of(startPosition, baos.size() - startPosition));
+                    }
+                }
             }
             byte[] body = baos.toByteArray();
-
-            writeHead(indexType, bodyInfo);
+            writeHead(bodyInfo);
 
             // writeBody
             dataOutputStream.write(body);
         }
 
-        private void writeHead(String indexType, Map<String, Pair<Integer, Integer>> bodyInfo)
+        private void writeHead(Map<String, Map<String, Pair<Integer, Integer>>> bodyInfo)
                 throws IOException {
 
-            int headLength = calculateHeadLength(indexType, bodyInfo);
+            int headLength = calculateHeadLength(bodyInfo);
 
             // writeMagic
             dataOutputStream.writeLong(MAGIC);
@@ -148,32 +176,50 @@ public final class FileIndexFormat {
             dataOutputStream.writeInt(Version.V_1.version());
             // writeHeadLength
             dataOutputStream.writeInt(headLength);
-            // writeIndexType
-            dataOutputStream.writeUTF(indexType);
             // writeColumnSize
             dataOutputStream.writeInt(bodyInfo.size());
-            // writeColumnInfo, offset = headLength
-            for (Map.Entry<String, Pair<Integer, Integer>> entry : bodyInfo.entrySet()) {
+            for (Map.Entry<String, Map<String, Pair<Integer, Integer>>> entry :
+                    bodyInfo.entrySet()) {
+                // writeColumnName
                 dataOutputStream.writeUTF(entry.getKey());
-                dataOutputStream.writeInt(entry.getValue().getLeft() + headLength);
-                dataOutputStream.writeInt(entry.getValue().getRight());
+                // writeIndexTypeSize
+                dataOutputStream.writeInt(entry.getValue().size());
+                // writeColumnInfo, offset = headLength
+                for (Map.Entry<String, Pair<Integer, Integer>> indexEntry :
+                        entry.getValue().entrySet()) {
+                    dataOutputStream.writeUTF(indexEntry.getKey());
+                    int start = indexEntry.getValue().getLeft();
+                    dataOutputStream.writeInt(
+                            start == EMPTY_INDEX_FLAG ? EMPTY_INDEX_FLAG : start + headLength);
+                    dataOutputStream.writeInt(indexEntry.getValue().getRight());
+                }
             }
             // writeRedundantLength
             dataOutputStream.writeInt(REDUNDANT_LENGTH);
         }
 
-        private int calculateHeadLength(
-                String indexType, Map<String, Pair<Integer, Integer>> bodyInfo) throws IOException {
+        private int calculateHeadLength(Map<String, Map<String, Pair<Integer, Integer>>> bodyInfo)
+                throws IOException {
             // magic 8 bytes, version 4 bytes, head length 4 bytes,
             // column size 4 bytes, body info start&end 8 bytes per
-            // item, redundant length 4 bytes;
-            int baseLength = 8 + 4 + 4 + 4 + bodyInfo.size() * 8 + 4;
+            // column-index, index type size 4 bytes per column, redundant length 4 bytes;
+            int baseLength =
+                    8
+                            + 4
+                            + 4
+                            + 4
+                            + bodyInfo.values().stream().mapToInt(Map::size).sum() * 8
+                            + bodyInfo.size() * 4
+                            + 4;
 
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             DataOutput dataOutput = new DataOutputStream(baos);
-            dataOutput.writeUTF(indexType);
-            for (String s : bodyInfo.keySet()) {
-                dataOutput.writeUTF(s);
+            for (Map.Entry<String, Map<String, Pair<Integer, Integer>>> entry :
+                    bodyInfo.entrySet()) {
+                dataOutput.writeUTF(entry.getKey());
+                for (String s : entry.getValue().keySet()) {
+                    dataOutput.writeUTF(s);
+                }
             }
 
             return baseLength + baos.size();
@@ -190,9 +236,8 @@ public final class FileIndexFormat {
 
         private final SeekableInputStream seekableInputStream;
         // get header and cache it.
-        private final Map<String, Pair<Integer, Integer>> header = new HashMap<>();
+        private final Map<String, Map<String, Pair<Integer, Integer>>> header = new HashMap<>();
         private final Map<String, DataField> fields = new HashMap<>();
-        private final String type;
 
         public Reader(SeekableInputStream seekableInputStream, RowType fileRowType) {
             this.seekableInputStream = seekableInputStream;
@@ -220,15 +265,19 @@ public final class FileIndexFormat {
 
                 try (DataInputStream dataInput =
                         new DataInputStream(new ByteArrayInputStream(head))) {
-                    this.type = dataInput.readUTF();
                     int columnSize = dataInput.readInt();
                     for (int i = 0; i < columnSize; i++) {
-                        this.header.put(
-                                dataInput.readUTF(),
-                                Pair.of(dataInput.readInt(), dataInput.readInt()));
+                        String columnName = dataInput.readUTF();
+                        int indexSize = dataInput.readInt();
+                        Map<String, Pair<Integer, Integer>> indexMap =
+                                this.header.computeIfAbsent(columnName, n -> new HashMap<>());
+                        for (int j = 0; j < indexSize; j++) {
+                            indexMap.put(
+                                    dataInput.readUTF(),
+                                    Pair.of(dataInput.readInt(), dataInput.readInt()));
+                        }
                     }
                 }
-
             } catch (IOException e) {
                 IOUtils.closeQuietly(seekableInputStream);
                 throw new RuntimeException(
@@ -236,40 +285,59 @@ public final class FileIndexFormat {
             }
         }
 
-        public FileIndexReader readColumnIndex(String columnName) {
-
-            return readColumnInputStream(columnName)
+        public Set<FileIndexReader> readColumnIndex(String columnName) {
+            return Optional.ofNullable(header.getOrDefault(columnName, null))
                     .map(
-                            serializedBytes ->
-                                    FileIndexer.create(type, fields.get(columnName).type())
-                                            .createReader()
-                                            .recoverFrom(serializedBytes))
-                    .orElse(null);
+                            f ->
+                                    f.entrySet().stream()
+                                            .map(
+                                                    entry ->
+                                                            getFileIndexReader(
+                                                                    columnName,
+                                                                    entry.getKey(),
+                                                                    entry.getValue()))
+                                            .collect(Collectors.toSet()))
+                    .orElse(Collections.emptySet());
+        }
+
+        private FileIndexReader getFileIndexReader(
+                String columnName, String indexType, Pair<Integer, Integer> startAndLength) {
+            if (startAndLength.getLeft() == EMPTY_INDEX_FLAG) {
+                return EmptyFileIndexReader.INSTANCE;
+            }
+            return FileIndexer.create(
+                            indexType,
+                            FileIndexCommon.getFieldType(fields, columnName),
+                            new Options())
+                    .createReader(getBytesWithStartAndLength(startAndLength));
+        }
+
+        private byte[] getBytesWithStartAndLength(Pair<Integer, Integer> startAndLength) {
+            byte[] b = new byte[startAndLength.getRight()];
+            try {
+                seekableInputStream.seek(startAndLength.getLeft());
+                int n = 0;
+                int len = b.length;
+                // read fully until b is full else throw.
+                while (n < len) {
+                    int count = seekableInputStream.read(b, n, len - n);
+                    if (count < 0) {
+                        throw new EOFException();
+                    }
+                    n += count;
+                }
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+            return b;
         }
 
         @VisibleForTesting
-        Optional<byte[]> readColumnInputStream(String columnName) {
+        // only for test yet
+        Optional<byte[]> getBytesWithNameAndType(String columnName, String indexType) {
             return Optional.ofNullable(header.getOrDefault(columnName, null))
-                    .map(
-                            startAndLength -> {
-                                byte[] b = new byte[startAndLength.getRight()];
-                                try {
-                                    seekableInputStream.seek(startAndLength.getLeft());
-                                    int n = 0;
-                                    int len = b.length;
-                                    // read fully until b is full else throw.
-                                    while (n < len) {
-                                        int count = seekableInputStream.read(b, n, len - n);
-                                        if (count < 0) {
-                                            throw new EOFException();
-                                        }
-                                        n += count;
-                                    }
-                                } catch (IOException e) {
-                                    throw new RuntimeException(e);
-                                }
-                                return b;
-                            });
+                    .map(i -> i.getOrDefault(indexType, null))
+                    .map(this::getBytesWithStartAndLength);
         }
 
         @Override

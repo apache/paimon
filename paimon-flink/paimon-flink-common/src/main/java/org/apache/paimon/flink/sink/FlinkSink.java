@@ -187,9 +187,7 @@ public abstract class FlinkSink<T> implements Serializable {
     public DataStream<Committable> doWrite(
             DataStream<T> input, String commitUser, @Nullable Integer parallelism) {
         StreamExecutionEnvironment env = input.getExecutionEnvironment();
-        boolean isStreaming =
-                env.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
-                        == RuntimeExecutionMode.STREAMING;
+        boolean isStreaming = isStreaming(input);
 
         boolean writeOnly = table.coreOptions().writeOnly();
         SingleOutputStreamOperator<Committable> written =
@@ -221,10 +219,8 @@ public abstract class FlinkSink<T> implements Serializable {
         StreamExecutionEnvironment env = written.getExecutionEnvironment();
         ReadableConfig conf = env.getConfiguration();
         CheckpointConfig checkpointConfig = env.getCheckpointConfig();
-        boolean isStreaming =
-                conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING;
         boolean streamingCheckpointEnabled =
-                isStreaming && checkpointConfig.isCheckpointingEnabled();
+                isStreaming(written) && checkpointConfig.isCheckpointingEnabled();
         if (streamingCheckpointEnabled) {
             assertStreamingConfiguration(env);
         }
@@ -232,6 +228,7 @@ public abstract class FlinkSink<T> implements Serializable {
         OneInputStreamOperator<Committable, Committable> committerOperator =
                 new CommitterOperator<>(
                         streamingCheckpointEnabled,
+                        true,
                         commitUser,
                         createCommitterFactory(streamingCheckpointEnabled),
                         createCommittableStateManager());
@@ -242,7 +239,8 @@ public abstract class FlinkSink<T> implements Serializable {
                             table::snapshotManager,
                             table::tagManager,
                             () -> table.store().newTagDeletion(),
-                            () -> table.store().createTagCallbacks());
+                            () -> table.store().createTagCallbacks(),
+                            table.coreOptions().tagDefaultTimeRetained());
         }
         if (conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.BATCH
                 && table.coreOptions().tagCreationMode() == TagCreationMode.BATCH) {
@@ -313,4 +311,13 @@ public abstract class FlinkSink<T> implements Serializable {
             boolean streamingCheckpointEnabled);
 
     protected abstract CommittableStateManager<ManifestCommittable> createCommittableStateManager();
+
+    public static boolean isStreaming(DataStream<?> input) {
+        return isStreaming(input.getExecutionEnvironment());
+    }
+
+    public static boolean isStreaming(StreamExecutionEnvironment env) {
+        return env.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
+                == RuntimeExecutionMode.STREAMING;
+    }
 }

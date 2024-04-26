@@ -56,6 +56,11 @@ public class FirstRowMergeFunctionWrapper implements MergeFunctionWrapper<Change
     public ChangelogResult getResult() {
         reusedResult.reset();
         KeyValue result = mergeFunction.getResult();
+        if (mergeFunction.containsHighLevel) {
+            reusedResult.setResult(result);
+            return reusedResult;
+        }
+
         if (contains.test(result.key())) {
             // empty
             return reusedResult;

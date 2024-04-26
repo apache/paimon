@@ -197,7 +197,7 @@ public abstract class FileDeletionBase {
             Snapshot snapshot, Set<String> skippingSet, boolean deleteChangelog) {
         cleanUnusedManifestList(snapshot.baseManifestList(), skippingSet);
         cleanUnusedManifestList(snapshot.deltaManifestList(), skippingSet);
-        if (deleteChangelog) {
+        if (deleteChangelog && snapshot.changelogManifestList() != null) {
             cleanUnusedManifestList(snapshot.changelogManifestList(), skippingSet);
         }
         cleanUnusedIndexManifests(snapshot, skippingSet);

@@ -47,9 +47,6 @@ public class OrcBulkWriter implements FormatWriter {
         this.writer = checkNotNull(writer);
 
         this.rowBatch = vectorizer.getSchema().createRowBatch(batchSize);
-        // Configure the vectorizer with the writer so that users can add
-        // metadata on the fly through the Vectorizer#vectorize(...) method.
-        this.vectorizer.setWriter(this.writer);
         this.underlyingStream = underlyingStream;
     }
 

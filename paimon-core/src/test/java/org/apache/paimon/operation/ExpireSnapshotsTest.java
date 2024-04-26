@@ -140,7 +140,11 @@ public class ExpireSnapshotsTest {
         // create tags for each snapshot
         for (int id = 1; id <= latestSnapshotId; id++) {
             Snapshot snapshot = snapshotManager.snapshot(id);
-            tagManager.createTag(snapshot, "tag" + id, Collections.emptyList());
+            tagManager.createTag(
+                    snapshot,
+                    "tag" + id,
+                    store.options().tagDefaultTimeRetained(),
+                    Collections.emptyList());
         }
 
         // randomly expire snapshots
@@ -200,7 +204,8 @@ public class ExpireSnapshotsTest {
                         0,
                         extraFiles,
                         Timestamp.now(),
-                        0L);
+                        0L,
+                        null);
         ManifestEntry add = new ManifestEntry(FileKind.ADD, partition, 0, 1, dataFile);
         ManifestEntry delete = new ManifestEntry(FileKind.DELETE, partition, 0, 1, dataFile);
 

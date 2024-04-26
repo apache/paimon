@@ -18,7 +18,9 @@
 
 package org.apache.paimon.fileindex;
 
+import org.apache.paimon.fileindex.empty.EmptyFileIndexReader;
 import org.apache.paimon.fs.ByteArraySeekableStream;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.assertj.core.api.Assertions;
@@ -26,6 +28,8 @@ import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Random;
@@ -43,13 +47,17 @@ public class FileIndexFormatFormatTest {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         FileIndexFormat.Writer writer = FileIndexFormat.createWriter(baos);
 
-        String type = randomString(RANDOM.nextInt(100));
-        Map<String, byte[]> indexes = new HashMap<>();
-        for (int i = 0; i < RANDOM.nextInt(1000); i++) {
-            indexes.put(randomString(RANDOM.nextInt(20)), randomBytes(RANDOM.nextInt(100000)));
+        Map<String, Map<String, byte[]>> indexes = new HashMap<>();
+        for (int j = 0; j < RANDOM.nextInt(1000); j++) {
+            String type = randomString(RANDOM.nextInt(100));
+            Map<String, byte[]> typeIndex = indexes.computeIfAbsent(type, t -> new HashMap<>());
+            for (int i = 0; i < RANDOM.nextInt(1000); i++) {
+                typeIndex.put(
+                        randomString(RANDOM.nextInt(20)), randomBytes(RANDOM.nextInt(100000)));
+            }
         }
 
-        writer.writeColumnIndex(type, indexes);
+        writer.writeColumnIndexes(indexes);
         writer.close();
 
         byte[] indexBytes = baos.toByteArray();
@@ -58,9 +66,43 @@ public class FileIndexFormatFormatTest {
                 FileIndexFormat.createReader(
                         new ByteArraySeekableStream(indexBytes), RowType.builder().build());
 
-        for (String s : indexes.keySet()) {
-            byte[] b = reader.readColumnInputStream(s).orElseThrow(RuntimeException::new);
-            Assertions.assertThat(b).containsExactly(indexes.get(s));
+        for (Map.Entry<String, Map<String, byte[]>> entry : indexes.entrySet()) {
+            String column = entry.getKey();
+            for (String type : entry.getValue().keySet()) {
+                byte[] b =
+                        reader.getBytesWithNameAndType(column, type)
+                                .orElseThrow(RuntimeException::new);
+                Assertions.assertThat(b).containsExactly(indexes.get(column).get(type));
+            }
         }
+    }
+
+    @Test
+    public void testEmptyFileIndex() throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        FileIndexFormat.Writer writer = FileIndexFormat.createWriter(baos);
+
+        Map<String, Map<String, byte[]>> indexes = new HashMap<>();
+
+        indexes.computeIfAbsent("a", a -> new HashMap<>()).put("b", null);
+        indexes.computeIfAbsent("a", a -> new HashMap<>()).put("c", null);
+
+        writer.writeColumnIndexes(indexes);
+        writer.close();
+
+        byte[] indexBytes = baos.toByteArray();
+
+        FileIndexFormat.Reader reader =
+                FileIndexFormat.createReader(
+                        new ByteArraySeekableStream(indexBytes),
+                        RowType.builder()
+                                .field("a", DataTypes.BYTES())
+                                .field("b", DataTypes.STRING())
+                                .build());
+
+        Collection<FileIndexReader> fileIndexFormatList = reader.readColumnIndex("a");
+        Assertions.assertThat(fileIndexFormatList.size()).isEqualTo(1);
+        Assertions.assertThat(new ArrayList<>(fileIndexFormatList).get(0))
+                .isEqualTo(EmptyFileIndexReader.INSTANCE);
     }
 }

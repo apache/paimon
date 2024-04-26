@@ -307,6 +307,63 @@ public class SnapshotManager implements Serializable {
         return finalSnapshot;
     }
 
+    public @Nullable Snapshot laterOrEqualWatermark(long watermark) {
+        Long earliest = earliestSnapshotId();
+        Long latest = latestSnapshotId();
+        if (earliest == null || latest == null) {
+            return null;
+        }
+        Long earliestWatermark = null;
+        // find the first snapshot with watermark
+        if ((earliestWatermark = snapshot(earliest).watermark()) == null) {
+            while (earliest < latest) {
+                earliest++;
+                earliestWatermark = snapshot(earliest).watermark();
+                if (earliestWatermark != null) {
+                    break;
+                }
+            }
+        }
+        if (earliestWatermark == null) {
+            return null;
+        }
+
+        if (earliestWatermark >= watermark) {
+            return snapshot(earliest);
+        }
+        Snapshot finalSnapshot = null;
+
+        while (earliest <= latest) {
+            long mid = earliest + (latest - earliest) / 2; // Avoid overflow
+            Snapshot snapshot = snapshot(mid);
+            Long commitWatermark = snapshot.watermark();
+            if (commitWatermark == null) {
+                // find the first snapshot with watermark
+                while (mid >= earliest) {
+                    mid--;
+                    commitWatermark = snapshot(mid).watermark();
+                    if (commitWatermark != null) {
+                        break;
+                    }
+                }
+            }
+            if (commitWatermark == null) {
+                earliest = mid + 1;
+            } else {
+                if (commitWatermark > watermark) {
+                    latest = mid - 1; // Search in the left half
+                    finalSnapshot = snapshot;
+                } else if (commitWatermark < watermark) {
+                    earliest = mid + 1; // Search in the right half
+                } else {
+                    finalSnapshot = snapshot; // Found the exact match
+                    break;
+                }
+            }
+        }
+        return finalSnapshot;
+    }
+
     public long snapshotCount() throws IOException {
         return listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX).count();
     }
@@ -315,6 +372,13 @@ public class SnapshotManager implements Serializable {
         return listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX)
                 .map(this::snapshot)
                 .sorted(Comparator.comparingLong(Snapshot::id))
+                .iterator();
+    }
+
+    public Iterator<Changelog> changelogs() throws IOException {
+        return listVersionedFiles(fileIO, changelogDirectory(), CHANGELOG_PREFIX)
+                .map(this::changelog)
+                .sorted(Comparator.comparingLong(Changelog::id))
                 .iterator();
     }
 
@@ -330,10 +394,31 @@ public class SnapshotManager implements Serializable {
 
         List<Snapshot> snapshots = new ArrayList<>();
         for (Path path : paths) {
-            Snapshot.safelyFromPath(fileIO, path).ifPresent(snapshots::add);
+            Snapshot snapshot = Snapshot.safelyFromPath(fileIO, path);
+            if (snapshot != null) {
+                snapshots.add(snapshot);
+            }
         }
 
         return snapshots;
+    }
+
+    public List<Changelog> safelyGetAllChangelogs() throws IOException {
+        List<Path> paths =
+                listVersionedFiles(fileIO, changelogDirectory(), CHANGELOG_PREFIX)
+                        .map(this::longLivedChangelogPath)
+                        .collect(Collectors.toList());
+
+        List<Changelog> changelogs = new ArrayList<>();
+        for (Path path : paths) {
+            try {
+                String json = fileIO.readFileUtf8(path);
+                changelogs.add(Changelog.fromJson(json));
+            } catch (FileNotFoundException ignored) {
+            }
+        }
+
+        return changelogs;
     }
 
     /**
@@ -341,8 +426,17 @@ public class SnapshotManager implements Serializable {
      * result.
      */
     public List<Path> tryGetNonSnapshotFiles(Predicate<FileStatus> fileStatusFilter) {
+        return listPathWithFilter(snapshotDirectory(), fileStatusFilter, nonSnapshotFileFilter());
+    }
+
+    public List<Path> tryGetNonChangelogFiles(Predicate<FileStatus> fileStatusFilter) {
+        return listPathWithFilter(changelogDirectory(), fileStatusFilter, nonChangelogFileFilter());
+    }
+
+    private List<Path> listPathWithFilter(
+            Path directory, Predicate<FileStatus> fileStatusFilter, Predicate<Path> fileFilter) {
         try {
-            FileStatus[] statuses = fileIO.listStatus(snapshotDirectory());
+            FileStatus[] statuses = fileIO.listStatus(directory);
             if (statuses == null) {
                 return Collections.emptyList();
             }
@@ -350,7 +444,7 @@ public class SnapshotManager implements Serializable {
             return Arrays.stream(statuses)
                     .filter(fileStatusFilter)
                     .map(FileStatus::getPath)
-                    .filter(nonSnapshotFileFilter())
+                    .filter(fileFilter)
                     .collect(Collectors.toList());
         } catch (IOException ignored) {
             return Collections.emptyList();
@@ -361,6 +455,15 @@ public class SnapshotManager implements Serializable {
         return path -> {
             String name = path.getName();
             return !name.startsWith(SNAPSHOT_PREFIX)
+                    && !name.equals(EARLIEST)
+                    && !name.equals(LATEST);
+        };
+    }
+
+    private Predicate<Path> nonChangelogFileFilter() {
+        return path -> {
+            String name = path.getName();
+            return !name.startsWith(CHANGELOG_PREFIX)
                     && !name.equals(EARLIEST)
                     && !name.equals(LATEST);
         };
@@ -472,7 +575,7 @@ public class SnapshotManager implements Serializable {
         }
 
         Long snapshotId = readHint(LATEST, dir);
-        if (snapshotId != null) {
+        if (snapshotId != null && snapshotId > 0) {
             long nextSnapshot = snapshotId + 1;
             // it is the latest only there is no next one
             if (!fileIO.exists(file.apply(nextSnapshot))) {

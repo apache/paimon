@@ -1,6 +1,6 @@
 ---
 title: "Write Performance"
-weight: 1
+weight: 2
 type: docs
 aliases:
 - /maintenance/write-performance.html
@@ -110,7 +110,7 @@ the threshold.
       <td>No</td>
       <td style="word-wrap: break-word;">(none)</td>
       <td>Integer</td>
-      <td>The number of sorted runs that trigger the stopping of writes, the default value is 'num-sorted-run.compaction-trigger' + 1.</td>
+      <td>The number of sorted runs that trigger the stopping of writes, the default value is 'num-sorted-run.compaction-trigger' + 3.</td>
     </tr>
     </tbody>
 </table>

@@ -179,6 +179,25 @@ public class TableSchemaTest {
                 .hasMessageContaining("Field fake_col can not be found in table schema.");
     }
 
+    @Test
+    public void testBucket() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.INT()),
+                        new DataField(2, "f2", DataTypes.INT()));
+        List<String> partitionKeys = Collections.singletonList("f0");
+        List<String> primaryKeys = Collections.singletonList("f1");
+        Map<String, String> options = new HashMap<>();
+
+        TableSchema schema =
+                new TableSchema(1, fields, 10, partitionKeys, primaryKeys, options, "");
+
+        options.put(BUCKET.key(), "-2");
+        assertThatThrownBy(() -> validateTableSchema(schema))
+                .hasMessageContaining("The number of buckets needs to be greater than 0.");
+    }
+
     static RowType newRowType(boolean isNullable, int fieldId) {
         return new RowType(
                 isNullable,

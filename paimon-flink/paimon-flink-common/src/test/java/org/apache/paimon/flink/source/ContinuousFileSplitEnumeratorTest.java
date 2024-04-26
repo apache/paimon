@@ -837,6 +837,8 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
                 .withBucket(bucket)
                 .withDataFiles(files)
                 .isStreaming(true)
+                .rawConvertible(false)
+                .withBucketPath("") // not used
                 .build();
     }
 

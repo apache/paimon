@@ -19,7 +19,6 @@
 package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.RecordComparator;
@@ -29,7 +28,7 @@ import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
-import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.operation.FileStoreScan;
@@ -40,7 +39,6 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.PlanImpl;
-import org.apache.paimon.table.source.RawFile;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.types.RowType;
@@ -74,7 +72,6 @@ public class SnapshotReaderImpl implements SnapshotReader {
     private final FileStoreScan scan;
     private final TableSchema tableSchema;
     private final CoreOptions options;
-    private final MergeEngine mergeEngine;
     private final boolean deletionVectors;
     private final SnapshotManager snapshotManager;
     private final ConsumerManager consumerManager;
@@ -102,7 +99,6 @@ public class SnapshotReaderImpl implements SnapshotReader {
         this.scan = scan;
         this.tableSchema = tableSchema;
         this.options = options;
-        this.mergeEngine = options.mergeEngine();
         this.deletionVectors = options.deletionVectorsEnabled();
         this.snapshotManager = snapshotManager;
         this.consumerManager =
@@ -164,6 +160,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
                             .collect(Collectors.toList());
             scan.withPartitionFilter(PredicateBuilder.and(partitionFilters));
         }
+        return this;
+    }
+
+    @Override
+    public SnapshotReader withPartitionFilter(Predicate predicate) {
+        scan.withPartitionFilter(predicate);
         return this;
     }
 
@@ -290,10 +292,10 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                 : null;
                 for (SplitGenerator.SplitGroup splitGroup : splitGroups) {
                     List<DataFileMeta> dataFiles = splitGroup.files;
-                    builder.withDataFiles(dataFiles);
-                    if (splitGroup.rawConvertible) {
-                        builder.rawFiles(convertToRawFiles(partition, bucket, dataFiles));
-                    }
+                    String bucketPath = pathFactory.bucketPath(partition, bucket).toString();
+                    builder.withDataFiles(dataFiles)
+                            .rawConvertible(splitGroup.rawConvertible)
+                            .withBucketPath(bucketPath);
                     if (deletionVectors) {
                         builder.withDataDeletionFiles(
                                 getDeletionFiles(dataFiles, deletionIndexFile));
@@ -308,19 +310,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
     @Override
     public List<BinaryRow> partitions() {
-        List<ManifestEntry> entryList = scan.plan().files();
+        return scan.listPartitions();
+    }
 
-        return entryList.stream()
-                .collect(
-                        Collectors.groupingBy(
-                                ManifestEntry::partition,
-                                LinkedHashMap::new,
-                                Collectors.reducing((a, b) -> b)))
-                .values()
-                .stream()
-                .map(Optional::get)
-                .map(ManifestEntry::partition)
-                .collect(Collectors.toList());
+    @Override
+    public List<PartitionEntry> partitionEntries() {
+        return scan.readPartitionEntries();
     }
 
     @Override
@@ -375,7 +370,8 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                 .withBucket(bucket)
                                 .withBeforeFiles(before)
                                 .withDataFiles(data)
-                                .isStreaming(isStreaming);
+                                .isStreaming(isStreaming)
+                                .withBucketPath(pathFactory.bucketPath(part, bucket).toString());
                 if (deletionVectors) {
                     IndexFileMeta beforeDeletionIndex =
                             indexFileHandler
@@ -436,29 +432,5 @@ public class SnapshotReaderImpl implements SnapshotReader {
         }
 
         return deletionFiles;
-    }
-
-    private List<RawFile> convertToRawFiles(
-            BinaryRow partition, int bucket, List<DataFileMeta> dataFiles) {
-        String bucketPath = pathFactory.bucketPath(partition, bucket).toString();
-        return dataFiles.stream()
-                .map(f -> makeRawTableFile(bucketPath, f))
-                .collect(Collectors.toList());
-    }
-
-    private RawFile makeRawTableFile(String bucketPath, DataFileMeta meta) {
-        return new RawFile(
-                bucketPath + "/" + meta.fileName(),
-                0,
-                meta.fileSize(),
-                meta.fileFormat()
-                        .map(t -> t.toString().toLowerCase())
-                        .orElse(
-                                new CoreOptions(tableSchema.options())
-                                        .formatType()
-                                        .toString()
-                                        .toLowerCase()),
-                meta.schemaId(),
-                meta.rowCount());
     }
 }

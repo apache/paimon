@@ -112,7 +112,7 @@ public class MergeIntoActionFactory implements ActionFactory {
                     params.get(NOT_MATCHED_INSERT_VALUES));
         }
 
-        validate(action);
+        action.validate();
 
         return Optional.of(action);
     }
@@ -201,37 +201,5 @@ public class MergeIntoActionFactory implements ActionFactory {
                         + "             --matched_upsert_set \"v = S.v\"");
         System.out.println(
                 "  It will find matched rows of target table that meet condition (T.k = S.k), then update T.v with S.v where (T.v <> S.v).");
-    }
-
-    public static void validate(MergeIntoAction action) {
-        if (!action.matchedUpsert
-                && !action.notMatchedUpsert
-                && !action.matchedDelete
-                && !action.notMatchedDelete
-                && !action.insert) {
-            throw new IllegalArgumentException(
-                    "Must specify at least one merge action. Run 'merge_into --help' for help.");
-        }
-
-        if ((action.matchedUpsert && action.matchedDelete)
-                && (action.matchedUpsertCondition == null
-                        || action.matchedDeleteCondition == null)) {
-            throw new IllegalArgumentException(
-                    "If both matched-upsert and matched-delete actions are present, their conditions must both be present too.");
-        }
-
-        if ((action.notMatchedUpsert && action.notMatchedDelete)
-                && (action.notMatchedBySourceUpsertCondition == null
-                        || action.notMatchedBySourceDeleteCondition == null)) {
-            throw new IllegalArgumentException(
-                    "If both not-matched-by-source-upsert and not-matched-by--source-delete actions are present, "
-                            + "their conditions must both be present too.\n");
-        }
-
-        if (action.notMatchedBySourceUpsertSet != null
-                && action.notMatchedBySourceUpsertSet.equals("*")) {
-            throw new IllegalArgumentException(
-                    "The '*' cannot be used in not_matched_by_source_upsert_set");
-        }
     }
 }

@@ -27,6 +27,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
@@ -245,6 +246,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public SnapshotReader withPartitionFilter(Predicate predicate) {
+            snapshotReader.withPartitionFilter(predicate);
+            return this;
+        }
+
+        @Override
         public SnapshotReader withMode(ScanMode scanMode) {
             snapshotReader.withMode(scanMode);
             return this;
@@ -297,6 +304,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public List<BinaryRow> partitions() {
             return snapshotReader.partitions();
+        }
+
+        @Override
+        public List<PartitionEntry> partitionEntries() {
+            return snapshotReader.partitionEntries();
         }
     }
 

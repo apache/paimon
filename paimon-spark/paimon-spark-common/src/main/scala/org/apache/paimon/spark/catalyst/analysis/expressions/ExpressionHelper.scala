@@ -22,8 +22,8 @@ import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
 import org.apache.paimon.spark.SparkFilterConverter
 import org.apache.paimon.types.RowType
 
+import org.apache.spark.sql.PaimonUtils.{normalizeExprs, translateFilter}
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.Utils.{normalizeExprs, translateFilter}
 import org.apache.spark.sql.catalyst.analysis.Resolver
 import org.apache.spark.sql.catalyst.expressions.{Alias, And, Attribute, Cast, Expression, GetStructField, Literal, PredicateHelper, SubqueryExpression}
 import org.apache.spark.sql.catalyst.plans.logical.{Filter, LogicalPlan}

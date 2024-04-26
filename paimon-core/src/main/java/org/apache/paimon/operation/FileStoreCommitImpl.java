@@ -1231,7 +1231,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return latestSnapshot -> false;
     }
 
-    static ConflictCheck mustConflictCheck() {
+    public static ConflictCheck mustConflictCheck() {
         return latestSnapshot -> true;
     }
 }

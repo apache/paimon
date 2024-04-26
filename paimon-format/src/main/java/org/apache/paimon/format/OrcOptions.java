@@ -22,7 +22,6 @@ import org.apache.paimon.options.ConfigOption;
 
 import org.apache.orc.OrcConf;
 
-import static org.apache.orc.OrcConf.COMPRESSION_ZSTD_LEVEL;
 import static org.apache.orc.OrcConf.DICTIONARY_KEY_SIZE_THRESHOLD;
 import static org.apache.orc.OrcConf.DIRECT_ENCODING_COLUMNS;
 import static org.apache.paimon.options.ConfigOptions.key;
@@ -43,7 +42,7 @@ public class OrcOptions {
                     .withDescription(
                             "Define the compression codec for ORC file, if a higher compression ratio is required, "
                                     + "it is recommended to configure it as 'zstd', and you can configure: "
-                                    + COMPRESSION_ZSTD_LEVEL.getAttribute());
+                                    + "orc.compression.zstd.level");
 
     public static final ConfigOption<Integer> ORC_COLUMN_ENCODING_DIRECT =
             key(DIRECT_ENCODING_COLUMNS.getAttribute())
@@ -62,10 +61,12 @@ public class OrcOptions {
                                     + "dictionary encoding in orc. Use 0 to always disable dictionary encoding. "
                                     + "Use 1 to always use dictionary encoding.");
 
+    // Do not use OrcConf.COMPRESSION_ZSTD_LEVEL, it may cause IDE testing to occur
+    // NoSuchMethodException
     public static final ConfigOption<Integer> ORC_COMPRESSION_ZSTD_LEVEL =
-            key(COMPRESSION_ZSTD_LEVEL.getAttribute())
+            key("orc.compression.zstd.level")
                     .intType()
-                    .defaultValue((Integer) COMPRESSION_ZSTD_LEVEL.getDefaultValue())
+                    .defaultValue(3)
                     .withDescription(
                             "Define the compression level to use with ZStandard codec while writing data. "
                                     + "The valid range is 1~22.");

@@ -108,12 +108,6 @@ under the License.
             <artifactId>paimon-shade-caffeine-2</artifactId>
             <version>${paimon.shade.caffeine.version}-${paimon.shade.version}</version>
         </dependency>
-
-        <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-shade-netty-4</artifactId>
-            <version>${paimon.shade.netty.version}-${paimon.shade.version}</version>
-        </dependency>
     </dependencies>
 
     <build>
@@ -135,7 +129,6 @@ under the License.
                                     <include>org.apache.paimon:paimon-shade-jackson-2</include>
                                     <include>org.apache.paimon:paimon-shade-guava-30</include>
                                     <include>org.apache.paimon:paimon-shade-caffeine-2</include>
-                                    <include>org.apache.paimon:paimon-shade-netty-4</include>
 
                                     <!-- Paimon -->
                                     <include>org.apache.paimon:paimon-common</include>

@@ -87,7 +87,49 @@ abstract class DeleteFromTableTestBase extends PaimonSparkTestBase {
     )
   }
 
-  test("Paimon Delete: append-only table, condition contains subquery") {
+  test("Paimon Delete: append-only table, condition contains IN/NOT IN subquery") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, name STRING, dt STRING) PARTITIONED BY (dt)
+                 |""".stripMargin)
+
+    spark.sql("""
+                |INSERT INTO T
+                |VALUES (1, 'a', '2024'), (2, 'b', '2024'),
+                | (3, 'c', '2025'), (4, 'd', '2025'),
+                | (5, 'e', '2026'), (6, 'f', '2026')
+                |""".stripMargin)
+
+    Seq(2, 4, 6).toDF("key").createOrReplaceTempView("source")
+
+    spark.sql("""
+                |DELETE FROM T
+                |WHERE id >= (SELECT MAX(key) FROM source)""".stripMargin)
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Seq((1, "a", "2024"), (2, "b", "2024"), (3, "c", "2025"), (4, "d", "2025"), (5, "e", "2026"))
+        .toDF()
+    )
+
+    // IN
+    spark.sql("""
+                |DELETE FROM T
+                |WHERE id IN (SELECT key FROM source)""".stripMargin)
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Seq((1, "a", "2024"), (3, "c", "2025"), (5, "e", "2026")).toDF()
+    )
+
+    // NOT IN: (4, 5, 6)
+    spark.sql("""
+                |DELETE FROM T
+                |WHERE id NOT IN (SELECT key + key % 3 FROM source)""".stripMargin)
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Seq((5, "e", "2026")).toDF()
+    )
+  }
+
+  test("Paimon Delete: append-only table, condition contains EXISTS/NOT EXISTS subquery") {
     spark.sql(s"""
                  |CREATE TABLE T (id INT, name STRING, dt STRING) PARTITIONED BY (dt)
                  |""".stripMargin)
@@ -97,9 +139,31 @@ abstract class DeleteFromTableTestBase extends PaimonSparkTestBase {
                 |VALUES (1, 'a', '2024'), (2, 'b', '2024'), (3, 'c', '2025'), (4, 'd', '2025')
                 |""".stripMargin)
 
-    Seq(1, 2).toDF("id").createOrReplaceTempView("updated_ids")
-    assertThatThrownBy(() => spark.sql("DELETE FROM T WHERE id IN (SELECT * FROM updated_ids)"))
-      .hasMessageContaining("Subqueries are not supported")
+    Seq(2, 4, 6).toDF("key").createOrReplaceTempView("source")
+
+    // EXISTS
+    spark.sql("""
+                |DELETE FROM T
+                |WHERE EXiSTS (SELECT * FROM source WHERE key > 7)""".stripMargin)
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Seq((1, "a", "2024"), (2, "b", "2024"), (3, "c", "2025"), (4, "d", "2025")).toDF())
+
+    // NOT EXISTS
+    spark.sql("""
+                |DELETE FROM T
+                |WHERE NOT EXiSTS (SELECT * FROM source WHERE key > 5)""".stripMargin)
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Seq((1, "a", "2024"), (2, "b", "2024"), (3, "c", "2025"), (4, "d", "2025")).toDF()
+    )
+    spark.sql("""
+                |DELETE FROM T
+                |WHERE NOT EXiSTS (SELECT * FROM source WHERE key > 7)""".stripMargin)
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      spark.emptyDataFrame
+    )
   }
 
   CoreOptions.MergeEngine.values().foreach {

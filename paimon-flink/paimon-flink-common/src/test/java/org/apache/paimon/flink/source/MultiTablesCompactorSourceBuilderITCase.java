@@ -41,7 +41,6 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
-import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
@@ -156,9 +155,11 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
             }
         }
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setRuntimeMode(RuntimeExecutionMode.BATCH);
-        env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
+        StreamExecutionEnvironment env =
+                streamExecutionEnvironmentBuilder()
+                        .batchMode()
+                        .parallelism(ThreadLocalRandom.current().nextInt(2) + 1)
+                        .build();
         DataStream<RowData> source =
                 new MultiTablesCompactorSourceBuilder(
                                 catalogLoader(),
@@ -254,7 +255,8 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
             }
         }
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        StreamExecutionEnvironment env =
+                streamExecutionEnvironmentBuilder().streamingMode().build();
         DataStream<RowData> compactorSource =
                 new MultiTablesCompactorSourceBuilder(
                                 catalogLoader(),
@@ -423,7 +425,8 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
             }
         }
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        StreamExecutionEnvironment env =
+                streamExecutionEnvironmentBuilder().streamingMode().build();
         DataStream<RowData> compactorSource =
                 new MultiTablesCompactorSourceBuilder(
                                 catalogLoader(),

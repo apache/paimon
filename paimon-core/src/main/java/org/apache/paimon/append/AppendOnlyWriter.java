@@ -24,6 +24,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.RowBuffer;
+import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.CompactIncrement;
@@ -33,7 +34,9 @@ import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.io.RowDataRollingFileWriter;
 import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.memory.MemorySegmentPool;
+import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
@@ -64,6 +67,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     private final RowType writeSchema;
     private final DataFilePathFactory pathFactory;
     private final CompactManager compactManager;
+    private final AppendOnlyFileStoreWrite.BucketFileRead bucketFileRead;
     private final boolean forceCompact;
     private final List<DataFileMeta> newFiles;
     private final List<DataFileMeta> deletedFiles;
@@ -75,6 +79,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     private SinkWriter sinkWriter;
     private final FieldStatsCollector.Factory[] statsCollectors;
     private final IOManager ioManager;
+    private final FileIndexOptions fileIndexOptions;
 
     private MemorySegmentPool memorySegmentPool;
     private MemorySize maxDiskSize;
@@ -88,6 +93,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             RowType writeSchema,
             long maxSequenceNumber,
             CompactManager compactManager,
+            AppendOnlyFileStoreWrite.BucketFileRead bucketFileRead,
             boolean forceCompact,
             DataFilePathFactory pathFactory,
             @Nullable CommitIncrement increment,
@@ -96,7 +102,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             String fileCompression,
             String spillCompression,
             FieldStatsCollector.Factory[] statsCollectors,
-            MemorySize maxDiskSize) {
+            MemorySize maxDiskSize,
+            FileIndexOptions fileIndexOptions) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
@@ -104,6 +111,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         this.writeSchema = writeSchema;
         this.pathFactory = pathFactory;
         this.compactManager = compactManager;
+        this.bucketFileRead = bucketFileRead;
         this.forceCompact = forceCompact;
         this.newFiles = new ArrayList<>();
         this.deletedFiles = new ArrayList<>();
@@ -115,6 +123,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         this.ioManager = ioManager;
         this.statsCollectors = statsCollectors;
         this.maxDiskSize = maxDiskSize;
+        this.fileIndexOptions = fileIndexOptions;
 
         this.sinkWriter =
                 useWriteBuffer
@@ -209,13 +218,25 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     }
 
     public void toBufferedWriter() throws Exception {
-        if (sinkWriter != null && !sinkWriter.bufferSpillableWriter()) {
-            flush(false, false);
-            trySyncLatestCompaction(true);
+        if (sinkWriter != null && !sinkWriter.bufferSpillableWriter() && bucketFileRead != null) {
+            // fetch the written results
+            List<DataFileMeta> files = sinkWriter.flush();
 
             sinkWriter.close();
             sinkWriter = new BufferedSinkWriter(true, maxDiskSize, spillCompression);
             sinkWriter.setMemoryPool(memorySegmentPool);
+
+            // rewrite small files
+            try (RecordReaderIterator<InternalRow> reader = bucketFileRead.read(files)) {
+                while (reader.hasNext()) {
+                    sinkWriter.write(reader.next());
+                }
+            } finally {
+                // remove small files
+                for (DataFileMeta file : files) {
+                    fileIO.deleteQuietly(pathFactory.toPath(file.fileName()));
+                }
+            }
         }
     }
 
@@ -229,7 +250,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
                 pathFactory,
                 seqNumCounter,
                 fileCompression,
-                statsCollectors);
+                statsCollectors,
+                fileIndexOptions);
     }
 
     private void trySyncLatestCompaction(boolean blocking)

@@ -184,12 +184,6 @@ under the License.
         </dependency>
 
         <dependency>
-            <groupId>com.github.davidmoten</groupId>
-            <artifactId>hilbert-curve</artifactId>
-            <version>0.2.2</version>
-        </dependency>
-
-        <dependency>
             <groupId>org.xerial</groupId>
             <artifactId>sqlite-jdbc</artifactId>
             <version>3.44.0.0</version>

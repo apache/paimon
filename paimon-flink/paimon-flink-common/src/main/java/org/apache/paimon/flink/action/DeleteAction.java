@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.CoreOptions;
+
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.table.api.Table;
 import org.apache.flink.table.data.GenericRowData;
@@ -31,6 +33,8 @@ import org.slf4j.LoggerFactory;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+
+import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 
 /** Delete from table action for Flink. */
 public class DeleteAction extends TableActionBase {
@@ -51,6 +55,14 @@ public class DeleteAction extends TableActionBase {
 
     @Override
     public void run() throws Exception {
+        CoreOptions.MergeEngine mergeEngine = CoreOptions.fromMap(table.options()).mergeEngine();
+        if (mergeEngine != DEDUPLICATE) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Delete is executed in batch mode, but merge engine %s can not support batch delete.",
+                            mergeEngine));
+        }
+
         LOG.debug("Run delete action with filter '{}'.", filter);
 
         Table queriedTable =

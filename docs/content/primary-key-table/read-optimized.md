@@ -41,7 +41,7 @@ older data, you can also:
    be performed periodically; For batch jobs, optimized compaction will be carried out when the job ends. (Or configure
    `'full-compaction.delta-commits'`, its disadvantage is that it can only perform compaction synchronously, which will
    affect writing efficiency)
-2. Query from [read-optimized system table]({{< ref "how-to/system-tables#read-optimized-table" >}}). Reading from
+2. Query from [read-optimized system table]({{< ref "maintenance/system-tables#read-optimized-table" >}}). Reading from
    results of optimized files avoids merging records with the same key, thus improving reading performance.
 
 You can flexibly balance query performance and data latency when reading.
