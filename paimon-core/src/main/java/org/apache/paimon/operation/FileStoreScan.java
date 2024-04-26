@@ -83,6 +83,12 @@ public interface FileStoreScan {
 
     List<PartitionEntry> readPartitionEntries();
 
+    default List<BinaryRow> listPartitions() {
+        return readPartitionEntries().stream()
+                .map(PartitionEntry::partition)
+                .collect(Collectors.toList());
+    }
+
     /** Result plan of this scan. */
     interface Plan {
 

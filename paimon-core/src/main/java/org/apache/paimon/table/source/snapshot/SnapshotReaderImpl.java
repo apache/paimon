@@ -19,7 +19,6 @@
 package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.RecordComparator;
@@ -73,7 +72,6 @@ public class SnapshotReaderImpl implements SnapshotReader {
     private final FileStoreScan scan;
     private final TableSchema tableSchema;
     private final CoreOptions options;
-    private final MergeEngine mergeEngine;
     private final boolean deletionVectors;
     private final SnapshotManager snapshotManager;
     private final ConsumerManager consumerManager;
@@ -101,7 +99,6 @@ public class SnapshotReaderImpl implements SnapshotReader {
         this.scan = scan;
         this.tableSchema = tableSchema;
         this.options = options;
-        this.mergeEngine = options.mergeEngine();
         this.deletionVectors = options.deletionVectorsEnabled();
         this.snapshotManager = snapshotManager;
         this.consumerManager =
@@ -163,6 +160,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
                             .collect(Collectors.toList());
             scan.withPartitionFilter(PredicateBuilder.and(partitionFilters));
         }
+        return this;
+    }
+
+    @Override
+    public SnapshotReader withPartitionFilter(Predicate predicate) {
+        scan.withPartitionFilter(predicate);
         return this;
     }
 
@@ -307,9 +310,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
     @Override
     public List<BinaryRow> partitions() {
-        return scan.readPartitionEntries().stream()
-                .map(PartitionEntry::partition)
-                .collect(Collectors.toList());
+        return scan.listPartitions();
     }
 
     @Override

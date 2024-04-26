@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.CoreOptions
+import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.spark.PaimonSplitScan
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
@@ -74,8 +75,8 @@ case class DeleteFromPaimonTableCommand(
       }
 
       if (otherCondition.isEmpty && partitionPredicate.nonEmpty) {
-        val allPartitions = table.newReadBuilder.newScan.listPartitions.asScala
-        val matchedPartitions = allPartitions.filter(partitionPredicate.get.test)
+        val matchedPartitions =
+          table.newSnapshotReader().withPartitionFilter(partitionPredicate.get).partitions().asScala
         val rowDataPartitionComputer = new RowDataPartitionComputer(
           CoreOptions.PARTITION_DEFAULT_NAME.defaultValue,
           table.schema().logicalPartitionType(),
