@@ -33,7 +33,7 @@ public class IndexFile {
         this.path = path;
     }
 
-    public String getPath() {
+    public String path() {
         return path;
     }
 
