@@ -64,25 +64,22 @@ trait ScanHelper {
     var currentSplit: Option[DataSplit] = None
     val currentDataFiles = new ArrayBuffer[DataFileMeta]
     val currentDeletionFiles = new ArrayBuffer[DeletionFile]
-    val currentRawFiles = new ArrayBuffer[RawFile]
     var currentSize = 0L
 
     def closeDataSplit(): Unit = {
       if (currentSplit.nonEmpty && currentDataFiles.nonEmpty) {
         val newSplit =
-          copyDataSplit(currentSplit.get, currentDataFiles, currentDeletionFiles, currentRawFiles)
+          copyDataSplit(currentSplit.get, currentDataFiles, currentDeletionFiles)
         newSplits += newSplit
       }
       currentDataFiles.clear()
       currentDeletionFiles.clear()
-      currentRawFiles.clear()
       currentSize = 0
     }
 
     splits.foreach {
       split =>
         currentSplit = Some(split)
-        val hasRawFiles = split.convertToRawFiles().isPresent
 
         split.dataFiles().asScala.zipWithIndex.foreach {
           case (file, idx) =>
@@ -93,9 +90,6 @@ trait ScanHelper {
             currentDataFiles += file
             if (deletionVectors) {
               currentDeletionFiles += split.deletionFiles().get().get(idx)
-            }
-            if (hasRawFiles) {
-              currentRawFiles += split.convertToRawFiles().get().get(idx)
             }
         }
         closeDataSplit()
@@ -115,15 +109,15 @@ trait ScanHelper {
   private def copyDataSplit(
       split: DataSplit,
       dataFiles: Seq[DataFileMeta],
-      deletionFiles: Seq[DeletionFile],
-      rawFiles: Seq[RawFile]): DataSplit = {
+      deletionFiles: Seq[DeletionFile]): DataSplit = {
     val builder = DataSplit
       .builder()
       .withSnapshot(split.snapshotId())
       .withPartition(split.partition())
       .withBucket(split.bucket())
       .withDataFiles(dataFiles.toList.asJava)
-      .rawFiles(rawFiles.toList.asJava)
+      .rawConvertible(split.rawConvertible())
+      .withBucketPath(split.bucketPath)
     if (deletionVectors) {
       builder.withDataDeletionFiles(deletionFiles.toList.asJava)
     }

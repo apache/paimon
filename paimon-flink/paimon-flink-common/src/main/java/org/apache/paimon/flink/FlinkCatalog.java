@@ -30,9 +30,7 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
-import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.RowDataPartitionComputer;
@@ -87,6 +85,8 @@ import org.apache.flink.table.factories.Factory;
 import org.apache.flink.table.procedures.Procedure;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -127,6 +127,9 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Catalog for paimon. */
 public class FlinkCatalog extends AbstractCatalog {
+
+    private static final Logger LOG = LoggerFactory.getLogger(FlinkCatalog.class);
+
     private final ClassLoader classLoader;
 
     private final Catalog catalog;
@@ -824,6 +827,15 @@ public class FlinkCatalog extends AbstractCatalog {
     @Override
     public final List<CatalogPartitionSpec> listPartitions(ObjectPath tablePath)
             throws TableNotExistException, TableNotPartitionedException, CatalogException {
+        // The method is skipped if it is being called as part of FlinkRecomputeStatisticsProgram,
+        // since this program scans the entire table and all its partitions, which is a
+        // time-consuming operation. By returning an empty result, we can prompt the FlinkPlanner to
+        // use the FlinkTableSource#reportStatistics method to gather the necessary statistics.
+        if (isCalledFromFlinkRecomputeStatisticsProgram()) {
+            LOG.info(
+                    "Skipping listPartitions method due to detection of FlinkRecomputeStatisticsProgram call.");
+            return Collections.emptyList();
+        }
         return getPartitionSpecs(tablePath, null);
     }
 
@@ -841,22 +853,10 @@ public class FlinkCatalog extends AbstractCatalog {
             }
 
             ReadBuilder readBuilder = table.newReadBuilder();
-            List<Split> splits;
             if (partitionSpec != null && partitionSpec.getPartitionSpec() != null) {
-                splits =
-                        readBuilder
-                                .withPartitionFilter(partitionSpec.getPartitionSpec())
-                                .newScan()
-                                .plan()
-                                .splits();
-            } else {
-                splits = readBuilder.newScan().plan().splits();
+                readBuilder.withPartitionFilter(partitionSpec.getPartitionSpec());
             }
-
-            List<BinaryRow> partitions =
-                    splits.stream()
-                            .map(m -> ((DataSplit) m).partition())
-                            .collect(Collectors.toList());
+            List<BinaryRow> partitions = readBuilder.newScan().listPartitions();
             org.apache.paimon.types.RowType partitionRowType =
                     fileStoreTable.schema().logicalPartitionType();
 
@@ -1070,5 +1070,15 @@ public class FlinkCatalog extends AbstractCatalog {
             throws ProcedureNotExistException, CatalogException {
         return ProcedureUtil.getProcedure(catalog, procedurePath)
                 .orElseThrow(() -> new ProcedureNotExistException(name, procedurePath));
+    }
+
+    private boolean isCalledFromFlinkRecomputeStatisticsProgram() {
+        StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
+        for (StackTraceElement stackTraceElement : stackTrace) {
+            if (stackTraceElement.getClassName().contains("FlinkRecomputeStatisticsProgram")) {
+                return true;
+            }
+        }
+        return false;
     }
 }

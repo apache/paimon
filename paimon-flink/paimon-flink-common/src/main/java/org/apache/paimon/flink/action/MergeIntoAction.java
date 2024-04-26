@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
@@ -44,6 +45,8 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
+import static org.apache.paimon.CoreOptions.MergeEngine.PARTIAL_UPDATE;
 import static org.apache.paimon.utils.ParameterUtils.parseCommaSeparatedKeyValues;
 
 /**
@@ -96,11 +99,11 @@ public class MergeIntoAction extends TableActionBase {
     private String mergeCondition;
 
     // actions to be taken
-    boolean matchedUpsert;
-    boolean notMatchedUpsert;
-    boolean matchedDelete;
-    boolean notMatchedDelete;
-    boolean insert;
+    private boolean matchedUpsert;
+    private boolean notMatchedUpsert;
+    private boolean matchedDelete;
+    private boolean notMatchedDelete;
+    private boolean insert;
 
     // upsert
     @Nullable String matchedUpsertCondition;
@@ -213,6 +216,39 @@ public class MergeIntoAction extends TableActionBase {
         this.notMatchedInsertCondition = notMatchedInsertCondition;
         this.notMatchedInsertValues = notMatchedInsertValues;
         return this;
+    }
+
+    public void validate() {
+        if (!matchedUpsert && !notMatchedUpsert && !matchedDelete && !notMatchedDelete && !insert) {
+            throw new IllegalArgumentException(
+                    "Must specify at least one merge action. Run 'merge_into --help' for help.");
+        }
+
+        CoreOptions.MergeEngine mergeEngine = CoreOptions.fromMap(table.options()).mergeEngine();
+        boolean supportMergeInto = mergeEngine == DEDUPLICATE || mergeEngine == PARTIAL_UPDATE;
+        if (!supportMergeInto) {
+            throw new UnsupportedOperationException(
+                    String.format("Merge engine %s can not support merge-into.", mergeEngine));
+        }
+
+        if ((matchedUpsert && matchedDelete)
+                && (matchedUpsertCondition == null || matchedDeleteCondition == null)) {
+            throw new IllegalArgumentException(
+                    "If both matched-upsert and matched-delete actions are present, their conditions must both be present too.");
+        }
+
+        if ((notMatchedUpsert && notMatchedDelete)
+                && (notMatchedBySourceUpsertCondition == null
+                        || notMatchedBySourceDeleteCondition == null)) {
+            throw new IllegalArgumentException(
+                    "If both not-matched-by-source-upsert and not-matched-by--source-delete actions are present, "
+                            + "their conditions must both be present too.\n");
+        }
+
+        if (notMatchedBySourceUpsertSet != null && notMatchedBySourceUpsertSet.equals("*")) {
+            throw new IllegalArgumentException(
+                    "The '*' cannot be used in not_matched_by_source_upsert_set");
+        }
     }
 
     @Override

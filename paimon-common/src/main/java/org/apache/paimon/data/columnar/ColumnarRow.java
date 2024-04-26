@@ -25,7 +25,6 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
-import org.apache.paimon.data.columnar.BytesColumnVector.Bytes;
 import org.apache.paimon.types.RowKind;
 
 import java.io.Serializable;
@@ -56,6 +55,10 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
     public void setVectorizedColumnBatch(VectorizedColumnBatch vectorizedColumnBatch) {
         this.vectorizedColumnBatch = vectorizedColumnBatch;
         this.rowId = 0;
+    }
+
+    public VectorizedColumnBatch batch() {
+        return vectorizedColumnBatch;
     }
 
     public void setRowId(int rowId) {
@@ -119,8 +122,7 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
 
     @Override
     public BinaryString getString(int pos) {
-        Bytes byteArray = vectorizedColumnBatch.getByteArray(rowId, pos);
-        return BinaryString.fromBytes(byteArray.data, byteArray.offset, byteArray.len);
+        return vectorizedColumnBatch.getString(rowId, pos);
     }
 
     @Override
@@ -135,14 +137,7 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
 
     @Override
     public byte[] getBinary(int pos) {
-        Bytes byteArray = vectorizedColumnBatch.getByteArray(rowId, pos);
-        if (byteArray.len == byteArray.data.length) {
-            return byteArray.data;
-        } else {
-            byte[] ret = new byte[byteArray.len];
-            System.arraycopy(byteArray.data, byteArray.offset, ret, 0, byteArray.len);
-            return ret;
-        }
+        return vectorizedColumnBatch.getBinary(rowId, pos);
     }
 
     @Override
@@ -220,10 +215,6 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
     public int hashCode() {
         throw new UnsupportedOperationException(
                 "ColumnarRowData do not support hashCode, please hash fields one by one!");
-    }
-
-    VectorizedColumnBatch vectorizedColumnBatch() {
-        return vectorizedColumnBatch;
     }
 
     public ColumnarRow copy(ColumnVector[] vectors) {

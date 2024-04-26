@@ -27,57 +27,55 @@ import java.util.List;
  * Read file index from serialized bytes. Return true, means we need to search this file, else means
  * needn't.
  */
-public interface FileIndexReader extends FunctionVisitor<Boolean> {
-
-    FileIndexReader recoverFrom(byte[] serializedBytes);
+public abstract class FileIndexReader implements FunctionVisitor<Boolean> {
 
     @Override
-    default Boolean visitIsNotNull(FieldRef fieldRef) {
+    public Boolean visitIsNotNull(FieldRef fieldRef) {
         return true;
     }
 
     @Override
-    default Boolean visitIsNull(FieldRef fieldRef) {
+    public Boolean visitIsNull(FieldRef fieldRef) {
         return true;
     }
 
     @Override
-    default Boolean visitStartsWith(FieldRef fieldRef, Object literal) {
+    public Boolean visitStartsWith(FieldRef fieldRef, Object literal) {
         return true;
     }
 
     @Override
-    default Boolean visitLessThan(FieldRef fieldRef, Object literal) {
+    public Boolean visitLessThan(FieldRef fieldRef, Object literal) {
         return true;
     }
 
     @Override
-    default Boolean visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
+    public Boolean visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
         return true;
     }
 
     @Override
-    default Boolean visitNotEqual(FieldRef fieldRef, Object literal) {
+    public Boolean visitNotEqual(FieldRef fieldRef, Object literal) {
         return true;
     }
 
     @Override
-    default Boolean visitLessOrEqual(FieldRef fieldRef, Object literal) {
+    public Boolean visitLessOrEqual(FieldRef fieldRef, Object literal) {
         return true;
     }
 
     @Override
-    default Boolean visitEqual(FieldRef fieldRef, Object literal) {
+    public Boolean visitEqual(FieldRef fieldRef, Object literal) {
         return true;
     }
 
     @Override
-    default Boolean visitGreaterThan(FieldRef fieldRef, Object literal) {
+    public Boolean visitGreaterThan(FieldRef fieldRef, Object literal) {
         return true;
     }
 
     @Override
-    default Boolean visitIn(FieldRef fieldRef, List<Object> literals) {
+    public Boolean visitIn(FieldRef fieldRef, List<Object> literals) {
         for (Object key : literals) {
             if (visitEqual(fieldRef, key)) {
                 return true;
@@ -87,7 +85,7 @@ public interface FileIndexReader extends FunctionVisitor<Boolean> {
     }
 
     @Override
-    default Boolean visitNotIn(FieldRef fieldRef, List<Object> literals) {
+    public Boolean visitNotIn(FieldRef fieldRef, List<Object> literals) {
         for (Object key : literals) {
             if (visitNotEqual(fieldRef, key)) {
                 return true;
@@ -97,12 +95,12 @@ public interface FileIndexReader extends FunctionVisitor<Boolean> {
     }
 
     @Override
-    default Boolean visitAnd(List<Boolean> children) {
+    public Boolean visitAnd(List<Boolean> children) {
         throw new UnsupportedOperationException("Should not invoke this");
     }
 
     @Override
-    default Boolean visitOr(List<Boolean> children) {
+    public Boolean visitOr(List<Boolean> children) {
         throw new UnsupportedOperationException("Should not invoke this");
     }
 }

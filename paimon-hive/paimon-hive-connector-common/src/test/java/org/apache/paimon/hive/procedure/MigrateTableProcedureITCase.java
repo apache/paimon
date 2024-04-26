@@ -25,11 +25,8 @@ import org.apache.paimon.hive.TestHiveMetastore;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.SqlDialect;
 import org.apache.flink.table.api.TableEnvironment;
-import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.types.Row;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.assertj.core.api.Assertions;
@@ -89,10 +86,7 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
     }
 
     public void testUpgradePartitionTable(String format) throws Exception {
-        StreamExecutionEnvironment env = buildDefaultEnv(false);
-
-        TableEnvironment tEnv =
-                StreamTableEnvironment.create(env, EnvironmentSettings.inBatchMode());
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
         tEnv.useCatalog("HIVE");
         tEnv.getConfig().setSqlDialect(SqlDialect.HIVE);
@@ -125,10 +119,7 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
     }
 
     public void testUpgradeNonPartitionTable(String format) throws Exception {
-        StreamExecutionEnvironment env = buildDefaultEnv(false);
-
-        TableEnvironment tEnv =
-                StreamTableEnvironment.create(env, EnvironmentSettings.inBatchMode());
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
         tEnv.useCatalog("HIVE");
         tEnv.getConfig().setSqlDialect(SqlDialect.HIVE);
@@ -161,10 +152,7 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
     @ParameterizedTest
     @ValueSource(strings = {"orc", "parquet", "avro"})
     public void testMigrateAction(String format) throws Exception {
-        StreamExecutionEnvironment env = buildDefaultEnv(false);
-
-        TableEnvironment tEnv =
-                StreamTableEnvironment.create(env, EnvironmentSettings.inBatchMode());
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
         tEnv.useCatalog("HIVE");
         tEnv.getConfig().setSqlDialect(SqlDialect.HIVE);

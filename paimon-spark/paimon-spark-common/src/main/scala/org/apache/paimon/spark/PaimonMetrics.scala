@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark
 
-import org.apache.spark.sql.Utils
+import org.apache.spark.sql.PaimonUtils
 import org.apache.spark.sql.connector.metric.{CustomAvgMetric, CustomSumMetric, CustomTaskMetric}
 
 import java.text.DecimalFormat
@@ -85,7 +85,7 @@ case class PaimonSplitSizeMetric() extends PaimonSumMetric {
   override def description(): String = "size of splits read"
 
   override def aggregateTaskMetrics(taskMetrics: Array[Long]): String = {
-    Utils.bytesToString(aggregateTaskMetrics0(taskMetrics))
+    PaimonUtils.bytesToString(aggregateTaskMetrics0(taskMetrics))
   }
 }
 
@@ -119,7 +119,7 @@ case class PaimonAvgSplitSizeMetric() extends PaimonAvgMetric {
 
   override def aggregateTaskMetrics(taskMetrics: Array[Long]): String = {
     val average = aggregateTaskMetrics0(taskMetrics).round
-    Utils.bytesToString(average)
+    PaimonUtils.bytesToString(average)
   }
 
 }

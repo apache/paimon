@@ -16,23 +16,13 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.operation;
+package org.apache.paimon.reader;
 
-import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 
-import java.io.IOException;
+/** Wrap {@link RecordReader.RecordIterator} to support returning batch directly. */
+public interface VectorizedRecordIterator extends RecordReader.RecordIterator<InternalRow> {
 
-/**
- * Read operation which provides {@link RecordReader} creation.
- *
- * @param <T> type of record to read.
- */
-public interface FileStoreRead<T> {
-
-    FileStoreRead<T> withFilter(Predicate predicate);
-
-    /** Create a {@link RecordReader} from split. */
-    RecordReader<T> createReader(DataSplit split) throws IOException;
+    VectorizedColumnBatch batch();
 }

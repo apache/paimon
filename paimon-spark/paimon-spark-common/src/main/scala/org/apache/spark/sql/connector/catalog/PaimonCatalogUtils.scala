@@ -28,7 +28,7 @@ import org.apache.spark.util.Utils
 import scala.reflect.ClassTag
 import scala.util.control.NonFatal
 
-object CatalogUtils {
+object PaimonCatalogUtils {
 
   def buildExternalCatalog(conf: SparkConf, hadoopConf: Configuration): ExternalCatalog = {
     val externalCatalogClassName =

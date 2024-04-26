@@ -51,6 +51,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -262,7 +263,7 @@ public class FileDeletionTest {
 
         // step 2: commit -A (by clean bucket 0) and create tag1
         cleanBucket(store, gen.getPartition(gen.next()), 0);
-        createTag(snapshotManager.snapshot(2), "tag1");
+        createTag(snapshotManager.snapshot(2), "tag1", store.options().tagDefaultTimeRetained());
         assertThat(tagManager.tagExists("tag1")).isTrue();
 
         // step 3: commit C to bucket 2
@@ -273,7 +274,7 @@ public class FileDeletionTest {
 
         // step 4: commit -B (by clean bucket 1) and create tag2
         cleanBucket(store, partition, 1);
-        createTag(snapshotManager.snapshot(4), "tag2");
+        createTag(snapshotManager.snapshot(4), "tag2", store.options().tagDefaultTimeRetained());
         assertThat(tagManager.tagExists("tag2")).isTrue();
 
         // step 5: commit D to bucket 3
@@ -353,7 +354,7 @@ public class FileDeletionTest {
         // snapshot 3: commit -A (by clean bucket 0)
         cleanBucket(store, gen.getPartition(gen.next()), 0);
 
-        createTag(snapshotManager.snapshot(1), "tag1");
+        createTag(snapshotManager.snapshot(1), "tag1", store.options().tagDefaultTimeRetained());
         store.newExpire(1, 1, Long.MAX_VALUE).expire();
 
         // check data file and manifests
@@ -410,7 +411,7 @@ public class FileDeletionTest {
                 Arrays.asList(snapshot1.baseManifestList(), snapshot1.deltaManifestList());
 
         // create tag1
-        createTag(snapshot1, "tag1");
+        createTag(snapshot1, "tag1", store.options().tagDefaultTimeRetained());
 
         // expire snapshot 1, 2
         store.newExpire(1, 1, Long.MAX_VALUE).expire();
@@ -485,9 +486,9 @@ public class FileDeletionTest {
                 Arrays.asList(snapshot2.baseManifestList(), snapshot2.deltaManifestList());
 
         // create tags
-        createTag(snapshotManager.snapshot(1), "tag1");
-        createTag(snapshotManager.snapshot(2), "tag2");
-        createTag(snapshotManager.snapshot(4), "tag3");
+        createTag(snapshotManager.snapshot(1), "tag1", store.options().tagDefaultTimeRetained());
+        createTag(snapshotManager.snapshot(2), "tag2", store.options().tagDefaultTimeRetained());
+        createTag(snapshotManager.snapshot(4), "tag3", store.options().tagDefaultTimeRetained());
 
         // expire snapshot 1, 2, 3, 4
         store.newExpire(1, 1, Long.MAX_VALUE).expire();
@@ -735,7 +736,7 @@ public class FileDeletionTest {
                         null);
     }
 
-    private void createTag(Snapshot snapshot, String tagName) {
-        tagManager.createTag(snapshot, tagName, Collections.emptyList());
+    private void createTag(Snapshot snapshot, String tagName, Duration timeRetained) {
+        tagManager.createTag(snapshot, tagName, timeRetained, Collections.emptyList());
     }
 }

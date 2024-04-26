@@ -48,6 +48,7 @@ import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.metrics.groups.OperatorMetricGroup;
 import org.apache.flink.metrics.groups.UnregisteredMetricsGroup;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
+import org.apache.flink.runtime.jobgraph.OperatorID;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.watermark.Watermark;
@@ -651,6 +652,19 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         write.close();
     }
 
+    @Test
+    public void testParallelism() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        String commitUser = UUID.randomUUID().toString();
+        OneInputStreamOperator<Committable, Committable> operator =
+                createCommitterOperator(table, commitUser, new NoopCommittableStateManager());
+        try (OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
+                createTestHarness(operator, 10, 10, 3)) {
+            Assertions.assertThatCode(testHarness::open)
+                    .hasMessage("Committer Operator parallelism in paimon MUST be one.");
+        }
+    }
+
     // ------------------------------------------------------------------------
     //  Test utils
     // ------------------------------------------------------------------------
@@ -682,10 +696,25 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
 
     private OneInputStreamOperatorTestHarness<Committable, Committable> createTestHarness(
             OneInputStreamOperator<Committable, Committable> operator) throws Exception {
+        return createTestHarness(operator, 1, 1, 0);
+    }
+
+    private OneInputStreamOperatorTestHarness<Committable, Committable> createTestHarness(
+            OneInputStreamOperator<Committable, Committable> operator,
+            int maxParallelism,
+            int parallelism,
+            int subTaskIndex)
+            throws Exception {
         TypeSerializer<Committable> serializer =
                 new CommittableTypeInfo().createSerializer(new ExecutionConfig());
         OneInputStreamOperatorTestHarness<Committable, Committable> harness =
-                new OneInputStreamOperatorTestHarness<>(operator, serializer);
+                new OneInputStreamOperatorTestHarness<>(
+                        operator,
+                        maxParallelism,
+                        parallelism,
+                        subTaskIndex,
+                        serializer,
+                        new OperatorID());
         harness.setup(serializer);
         return harness;
     }
@@ -695,6 +724,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
             String commitUser,
             CommittableStateManager<ManifestCommittable> committableStateManager) {
         return new CommitterOperator<>(
+                true,
                 true,
                 commitUser == null ? initialCommitUser : commitUser,
                 (user, metricGroup) ->
@@ -710,6 +740,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
             CommittableStateManager<ManifestCommittable> committableStateManager,
             ThrowingConsumer<StateInitializationContext, Exception> initializeFunction) {
         return new CommitterOperator<Committable, ManifestCommittable>(
+                true,
                 true,
                 commitUser == null ? initialCommitUser : commitUser,
                 (user, metricGroup) ->

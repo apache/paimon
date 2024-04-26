@@ -272,7 +272,12 @@ public class CompactActionITCase extends CompactActionITCaseBase {
     }
 
     private void runAction(boolean isStreaming) throws Exception {
-        StreamExecutionEnvironment env = buildDefaultEnv(isStreaming);
+        StreamExecutionEnvironment env;
+        if (isStreaming) {
+            env = streamExecutionEnvironmentBuilder().streamingMode().build();
+        } else {
+            env = streamExecutionEnvironmentBuilder().batchMode().build();
+        }
 
         CompactAction action =
                 createAction(

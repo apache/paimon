@@ -18,6 +18,7 @@
 
 package org.apache.paimon.data.columnar;
 
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -26,7 +27,6 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.columnar.BytesColumnVector.Bytes;
 
 import java.io.Serializable;
-import java.nio.charset.StandardCharsets;
 
 /**
  * A VectorizedColumnBatch is a set of rows, organized with each column as a vector. It is the unit
@@ -35,6 +35,7 @@ import java.nio.charset.StandardCharsets;
  * <p>{@code VectorizedColumnBatch}s are influenced by Apache Hive VectorizedRowBatch.
  */
 public class VectorizedColumnBatch implements Serializable {
+
     private static final long serialVersionUID = 8180323238728166155L;
 
     /**
@@ -44,7 +45,8 @@ public class VectorizedColumnBatch implements Serializable {
     public static final int DEFAULT_SIZE = 2048;
 
     private int numRows;
-    public final org.apache.paimon.data.columnar.ColumnVector[] columns;
+
+    public final ColumnVector[] columns;
 
     public VectorizedColumnBatch(ColumnVector[] vectors) {
         this.columns = vectors;
@@ -94,22 +96,24 @@ public class VectorizedColumnBatch implements Serializable {
         return ((DoubleColumnVector) columns[colId]).getDouble(rowId);
     }
 
-    public Bytes getByteArray(int rowId, int colId) {
-        return ((BytesColumnVector) columns[colId]).getBytes(rowId);
+    public BinaryString getString(int rowId, int pos) {
+        Bytes byteArray = getByteArray(rowId, pos);
+        return BinaryString.fromBytes(byteArray.data, byteArray.offset, byteArray.len);
     }
 
-    private byte[] getBytes(int rowId, int colId) {
-        Bytes byteArray = getByteArray(rowId, colId);
+    public byte[] getBinary(int rowId, int pos) {
+        Bytes byteArray = getByteArray(rowId, pos);
         if (byteArray.len == byteArray.data.length) {
             return byteArray.data;
         } else {
-            return byteArray.getBytes();
+            byte[] ret = new byte[byteArray.len];
+            System.arraycopy(byteArray.data, byteArray.offset, ret, 0, byteArray.len);
+            return ret;
         }
     }
 
-    public String getString(int rowId, int colId) {
-        Bytes byteArray = getByteArray(rowId, colId);
-        return new String(byteArray.data, byteArray.offset, byteArray.len, StandardCharsets.UTF_8);
+    public Bytes getByteArray(int rowId, int colId) {
+        return ((BytesColumnVector) columns[colId]).getBytes(rowId);
     }
 
     public Decimal getDecimal(int rowId, int colId, int precision, int scale) {

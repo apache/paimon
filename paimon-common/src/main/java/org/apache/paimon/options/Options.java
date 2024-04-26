@@ -62,6 +62,13 @@ public class Options implements Serializable {
         map.forEach(this::setString);
     }
 
+    /** Creates a new configuration that is initialized with the options of the given two maps. */
+    public Options(Map<String, String> map1, Map<String, String> map2) {
+        this();
+        map1.forEach(this::setString);
+        map2.forEach(this::setString);
+    }
+
     public static Options fromMap(Map<String, String> map) {
         return new Options(map);
     }
@@ -165,6 +172,10 @@ public class Options implements Serializable {
 
     public synchronized int getInteger(String key, int defaultValue) {
         return getRawValue(key).map(OptionsUtils::convertToInt).orElse(defaultValue);
+    }
+
+    public synchronized double getDouble(String key, double defaultValue) {
+        return getRawValue(key).map(OptionsUtils::convertToDouble).orElse(defaultValue);
     }
 
     public synchronized String getString(String key, String defaultValue) {

@@ -54,7 +54,8 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 meta.level(),
                 toStringArrayData(meta.extraFiles()),
                 meta.creationTime(),
-                meta.deleteRowCount().orElse(null));
+                meta.deleteRowCount().orElse(null),
+                meta.embeddedIndex());
     }
 
     @Override
@@ -73,6 +74,7 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 row.getInt(10),
                 fromStringArrayData(row.getArray(11)),
                 row.getTimestamp(12, 3),
-                row.isNullAt(13) ? null : row.getLong(13));
+                row.isNullAt(13) ? null : row.getLong(13),
+                row.isNullAt(14) ? null : row.getBinary(14));
     }
 }

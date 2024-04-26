@@ -22,7 +22,7 @@ import org.apache.paimon.stats
 import org.apache.paimon.stats.ColStats
 import org.apache.paimon.types.DataType
 
-import org.apache.spark.sql.Utils
+import org.apache.spark.sql.PaimonUtils
 import org.apache.spark.sql.catalyst.plans.logical.ColumnStat
 import org.apache.spark.sql.connector.expressions.NamedReference
 import org.apache.spark.sql.connector.read.Statistics
@@ -48,7 +48,7 @@ case class PaimonStatistics[T <: PaimonBaseScan](scan: T) extends Statistics {
     if (paimonStats.isPresent) paimonStats.get().mergedRecordCount() else OptionalLong.of(rowCount)
 
   override def columnStats(): java.util.Map[NamedReference, ColumnStatistics] = {
-    val requiredFields = scan.readSchema().fieldNames.toList.asJava
+    val requiredFields = scan.requiredStatsSchema.fieldNames.toList.asJava
     val resultMap = new java.util.HashMap[NamedReference, ColumnStatistics]()
     if (paimonStats.isPresent) {
       val paimonColStats = paimonStats.get().colStats()
@@ -59,7 +59,7 @@ case class PaimonStatistics[T <: PaimonBaseScan](scan: T) extends Statistics {
         .forEach(
           f =>
             resultMap.put(
-              Utils.fieldReference(f.name()),
+              PaimonUtils.fieldReference(f.name()),
               PaimonColumnStats(f.`type`(), paimonColStats.get(f.name()))))
     }
     resultMap

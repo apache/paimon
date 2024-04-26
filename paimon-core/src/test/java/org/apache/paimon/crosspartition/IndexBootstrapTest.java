@@ -117,6 +117,7 @@ public class IndexBootstrapTest extends TableTestBase {
                 .withPartition(EMPTY_ROW)
                 .withBucket(0)
                 .withDataFiles(Arrays.asList(files))
+                .withBucketPath("") // not used
                 .build();
     }
 
@@ -138,7 +139,8 @@ public class IndexBootstrapTest extends TableTestBase {
                         Instant.ofEpochMilli(timeMillis)
                                 .atZone(ZoneId.systemDefault())
                                 .toLocalDateTime()),
-                0L);
+                0L,
+                null);
     }
 
     private Pair<InternalRow, Integer> row(int pt, int col, int pk, int bucket) {

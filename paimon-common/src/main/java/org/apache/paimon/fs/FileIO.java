@@ -104,6 +104,22 @@ public interface FileIO extends Serializable {
     FileStatus[] listStatus(Path path) throws IOException;
 
     /**
+     * List the statuses of the directories in the given path if the path is a directory.
+     *
+     * <p>{@link FileIO} implementation may have optimization for list directories.
+     *
+     * @param path given path
+     * @return the statuses of the directories in the given path
+     */
+    default FileStatus[] listDirectories(Path path) throws IOException {
+        FileStatus[] statuses = listStatus(path);
+        if (statuses != null) {
+            statuses = Arrays.stream(statuses).filter(FileStatus::isDir).toArray(FileStatus[]::new);
+        }
+        return statuses;
+    }
+
+    /**
      * Check if exists.
      *
      * @param path source file
@@ -341,9 +357,9 @@ public interface FileIO extends Serializable {
         List<IOException> ioExceptionList = new ArrayList<>();
 
         // load preferIO
-        FileIOLoader perferIOLoader = config.preferIO();
+        FileIOLoader preferIOLoader = config.preferIO();
         try {
-            loader = checkAccess(perferIOLoader, path, config);
+            loader = checkAccess(preferIOLoader, path, config);
         } catch (IOException ioException) {
             ioExceptionList.add(ioException);
         }
@@ -407,10 +423,10 @@ public interface FileIO extends Serializable {
         if (loader == null) {
             String fallbackMsg = "";
             String preferMsg = "";
-            if (perferIOLoader != null) {
+            if (preferIOLoader != null) {
                 preferMsg =
                         " "
-                                + perferIOLoader.getClass().getSimpleName()
+                                + preferIOLoader.getClass().getSimpleName()
                                 + " also cannot access this path.";
             }
             if (fallbackIO != null) {

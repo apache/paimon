@@ -22,9 +22,9 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.ManifestCacheFilter;
-import org.apache.paimon.operation.AppendOnlyFileStoreRead;
 import org.apache.paimon.operation.AppendOnlyFileStoreScan;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
+import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.operation.ScanBucketFilter;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
@@ -79,14 +79,15 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
     }
 
     @Override
-    public AppendOnlyFileStoreRead newRead() {
-        return new AppendOnlyFileStoreRead(
+    public RawFileSplitRead newRead() {
+        return new RawFileSplitRead(
                 fileIO,
                 schemaManager,
                 schema,
                 rowType,
                 FileFormatDiscover.of(options),
-                pathFactory());
+                pathFactory(),
+                options.fileIndexReadEnabled());
     }
 
     @Override
@@ -145,7 +146,8 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 options.bucket(),
                 forWrite,
                 options.scanManifestParallelism(),
-                branchName);
+                branchName,
+                options.fileIndexReadEnabled());
     }
 
     @Override

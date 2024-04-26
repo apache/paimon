@@ -50,12 +50,17 @@ public class AsyncLookupFunctionWrapper extends AsyncLookupFunction {
     }
 
     private Collection<RowData> lookup(RowData keyRow) {
+        ClassLoader cl = Thread.currentThread().getContextClassLoader();
+        Thread.currentThread()
+                .setContextClassLoader(AsyncLookupFunctionWrapper.class.getClassLoader());
         try {
             synchronized (function) {
                 return function.lookup(keyRow);
             }
         } catch (IOException e) {
             throw new UncheckedIOException(e);
+        } finally {
+            Thread.currentThread().setContextClassLoader(cl);
         }
     }
 

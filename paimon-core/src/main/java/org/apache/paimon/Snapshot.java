@@ -29,6 +29,7 @@ import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -41,7 +42,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 
 /**
  * This file is the entrance to all data committed at some specific time point.
@@ -64,6 +64,7 @@ import java.util.Optional;
  *       there is no compatibility issue.
  * </ul>
  */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class Snapshot {
 
     public static final long FIRST_SNAPSHOT_ID = 1;
@@ -93,37 +94,37 @@ public class Snapshot {
     // null for paimon <= 0.2
     @JsonProperty(FIELD_VERSION)
     @Nullable
-    private final Integer version;
+    protected final Integer version;
 
     @JsonProperty(FIELD_ID)
-    private final long id;
+    protected final long id;
 
     @JsonProperty(FIELD_SCHEMA_ID)
-    private final long schemaId;
+    protected final long schemaId;
 
     // a manifest list recording all changes from the previous snapshots
     @JsonProperty(FIELD_BASE_MANIFEST_LIST)
-    private final String baseManifestList;
+    protected final String baseManifestList;
 
     // a manifest list recording all new changes occurred in this snapshot
     // for faster expire and streaming reads
     @JsonProperty(FIELD_DELTA_MANIFEST_LIST)
-    private final String deltaManifestList;
+    protected final String deltaManifestList;
 
     // a manifest list recording all changelog produced in this snapshot
     // null if no changelog is produced, or for paimon <= 0.2
     @JsonProperty(FIELD_CHANGELOG_MANIFEST_LIST)
     @Nullable
-    private final String changelogManifestList;
+    protected final String changelogManifestList;
 
     // a manifest recording all index files of this table
     // null if no index file
     @JsonProperty(FIELD_INDEX_MANIFEST)
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    private final String indexManifest;
+    protected final String indexManifest;
 
     @JsonProperty(FIELD_COMMIT_USER)
-    private final String commitUser;
+    protected final String commitUser;
 
     // Mainly for snapshot deduplication.
     //
@@ -133,49 +134,53 @@ public class Snapshot {
     // If snapshot A has a smaller commitIdentifier than snapshot B, then snapshot A must be
     // committed before snapshot B, and thus snapshot A must contain older records than snapshot B.
     @JsonProperty(FIELD_COMMIT_IDENTIFIER)
-    private final long commitIdentifier;
+    protected final long commitIdentifier;
 
     @JsonProperty(FIELD_COMMIT_KIND)
-    private final CommitKind commitKind;
+    protected final CommitKind commitKind;
 
     @JsonProperty(FIELD_TIME_MILLIS)
-    private final long timeMillis;
+    protected final long timeMillis;
 
     @JsonProperty(FIELD_LOG_OFFSETS)
-    private final Map<Integer, Long> logOffsets;
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @Nullable
+    protected final Map<Integer, Long> logOffsets;
 
     // record count of all changes occurred in this snapshot
     // null for paimon <= 0.3
     @JsonProperty(FIELD_TOTAL_RECORD_COUNT)
     @Nullable
-    private final Long totalRecordCount;
+    protected final Long totalRecordCount;
 
     // record count of all new changes occurred in this snapshot
     // null for paimon <= 0.3
     @JsonProperty(FIELD_DELTA_RECORD_COUNT)
     @Nullable
-    private final Long deltaRecordCount;
+    protected final Long deltaRecordCount;
 
     // record count of all changelog produced in this snapshot
     // null for paimon <= 0.3
     @JsonProperty(FIELD_CHANGELOG_RECORD_COUNT)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     @Nullable
-    private final Long changelogRecordCount;
+    protected final Long changelogRecordCount;
 
     // watermark for input records
     // null for paimon <= 0.3
     // null if there is no watermark in new committing, and the previous snapshot does not have a
     // watermark
     @JsonProperty(FIELD_WATERMARK)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     @Nullable
-    private final Long watermark;
+    protected final Long watermark;
 
     // stats file name for statistics of this table
     // null if no stats file
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonProperty(FIELD_STATISTICS)
     @Nullable
-    private final String statistics;
+    protected final String statistics;
 
     public Snapshot(
             long id,
@@ -441,12 +446,13 @@ public class Snapshot {
         }
     }
 
-    public static Optional<Snapshot> safelyFromPath(FileIO fileIO, Path path) throws IOException {
+    @Nullable
+    public static Snapshot safelyFromPath(FileIO fileIO, Path path) throws IOException {
         try {
             String json = fileIO.readFileUtf8(path);
-            return Optional.of(Snapshot.fromJson(json));
+            return Snapshot.fromJson(json);
         } catch (FileNotFoundException e) {
-            return Optional.empty();
+            return null;
         }
     }
 

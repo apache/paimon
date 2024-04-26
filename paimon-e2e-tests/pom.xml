@@ -33,7 +33,7 @@ under the License.
 
     <properties>
         <flink.shaded.hadoop.version>2.8.3-10.0</flink.shaded.hadoop.version>
-        <flink.cdc.version>2.3.0</flink.cdc.version>
+        <flink.cdc.version>2.4.2</flink.cdc.version>
         <flink.sql.connector.hive>flink-sql-connector-hive-2.3.9_${scala.binary.version}</flink.sql.connector.hive>
     </properties>
 

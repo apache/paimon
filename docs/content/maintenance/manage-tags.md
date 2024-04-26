@@ -109,6 +109,7 @@ You can create a tag with given name and snapshot ID.
     --table <table-name> \
     --tag_name <tag-name> \
     [--snapshot <snapshot_id>] \
+    [--time_retained <time-retained>] \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
 ```
 
@@ -126,6 +127,7 @@ public class CreateTag {
     public static void main(String[] args) {
         Table table = ...;
         table.createTag("my-tag", 1);
+        table.createTag("my-tag-retained-12-hours", 1, Duration.ofHours(12));
     }
 }
 ```
@@ -136,6 +138,11 @@ public class CreateTag {
 Run the following sql:
 ```sql
 CALL create_tag(table => 'test.t', tag => 'test_tag', snapshot => 2);
+```
+
+To create a tag with retained 1 day, run the following sql:
+```sql
+CALL create_tag(table => 'test.t', tag => 'test_tag', snapshot => 2, time_retained => '1 d');
 ```
 
 To create a tag based on the latest snapshot id, run the following sql:

@@ -476,8 +476,10 @@ public class OrphanFilesClean {
                     .forEach(
                             p -> {
                                 deleteFileOrDirQuietly(p);
-                                deleteFiles.add(p);
-                                deletedFilesNum++;
+                                synchronized (deleteFiles) {
+                                    deleteFiles.add(p);
+                                    deletedFilesNum++;
+                                }
                             });
         }
 

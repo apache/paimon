@@ -36,7 +36,7 @@ under the License.
             <td><h5>bucket</h5></td>
             <td style="word-wrap: break-word;">-1</td>
             <td>Integer</td>
-            <td>Bucket number for file store.</td>
+            <td>Bucket number for file store.<br />It should either be equal to -1 (dynamic bucket mode), or it must be greater than 0 (fixed bucket mode).</td>
         </tr>
         <tr>
             <td><h5>bucket-key</h5></td>
@@ -205,6 +205,18 @@ under the License.
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
             <td>Whether only overwrite dynamic partition when overwriting a partitioned table with dynamic partition columns. Works only when the table has partition keys.</td>
+        </tr>
+        <tr>
+            <td><h5>file-index.in-manifest-threshold</h5></td>
+            <td style="word-wrap: break-word;">500 bytes</td>
+            <td>MemorySize</td>
+            <td>The threshold to store file index bytes in manifest.</td>
+        </tr>
+        <tr>
+            <td><h5>file-index.read.enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether enabled read file index.</td>
         </tr>
         <tr>
             <td><h5>file-reader-async-threshold</h5></td>
@@ -393,7 +405,7 @@ This config option does not affect the default filesystem metastore.</td>
             <td><h5>num-sorted-run.stop-trigger</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
-            <td>The number of sorted runs that trigger the stopping of writes, the default value is 'num-sorted-run.compaction-trigger' + 1.</td>
+            <td>The number of sorted runs that trigger the stopping of writes, the default value is 'num-sorted-run.compaction-trigger' + 3.</td>
         </tr>
         <tr>
             <td><h5>page-size</h5></td>
@@ -514,6 +526,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Long</td>
             <td>Optional timestamp used in case of "from-timestamp" scan mode. If there is no snapshot earlier than this time, the earliest snapshot will be chosen.</td>
+        </tr>
+        <tr>
+            <td><h5>scan.watermark</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Long</td>
+            <td>Optional watermark used in case of "from-snapshot" scan mode. If there is no snapshot later than this watermark, will throw an exceptions.</td>
         </tr>
         <tr>
             <td><h5>sequence.field</h5></td>
@@ -659,6 +677,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td style="word-wrap: break-word;">daily</td>
             <td><p>Enum</p></td>
             <td>What frequency is used to generate tags.<br /><br />Possible values:<ul><li>"daily": Generate a tag every day.</li><li>"hourly": Generate a tag every hour.</li><li>"two-hours": Generate a tag every two hours.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>tag.default-time-retained</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>The default maximum time retained for newly created tags.</td>
         </tr>
         <tr>
             <td><h5>tag.num-retained-max</h5></td>

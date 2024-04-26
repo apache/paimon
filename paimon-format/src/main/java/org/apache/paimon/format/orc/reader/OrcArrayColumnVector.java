@@ -44,4 +44,9 @@ public class OrcArrayColumnVector extends AbstractOrcColumnVector
         long length = hiveVector.lengths[i];
         return new ColumnarArray(paimonVector, (int) offset, (int) length);
     }
+
+    @Override
+    public ColumnVector getColumnVector() {
+        return paimonVector;
+    }
 }

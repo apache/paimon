@@ -27,6 +27,7 @@ import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.BlockingIterator;
+import org.apache.paimon.utils.CommonTestUtils;
 
 import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
@@ -35,18 +36,17 @@ import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
 import org.assertj.core.api.Assertions;
-import org.awaitility.Awaitility;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
@@ -126,25 +126,21 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
 
         batchSql("INSERT INTO ods_orders VALUES (1, 2, 3)");
         batchSql("INSERT INTO dim_persons VALUES (3, 'snow', 'jon', 23)");
-        Awaitility.await()
-                .pollInSameThread()
-                .atMost(5, TimeUnit.SECONDS)
-                .untilAsserted(
-                        () ->
-                                assertThat(rowsToList(batchSql("SELECT * FROM dwd_orders")))
-                                        .containsExactly(
-                                                Arrays.asList(1, 2, 3, "snow", "jon", 23)));
+        CommonTestUtils.waitUtil(
+                () ->
+                        rowsToList(batchSql("SELECT * FROM dwd_orders"))
+                                .contains(Arrays.asList(1, 2, 3, "snow", "jon", 23)),
+                Duration.ofSeconds(5),
+                Duration.ofMillis(200));
 
         batchSql("INSERT INTO ods_orders VALUES (1, 4, 3)");
         batchSql("INSERT INTO dim_persons VALUES (3, 'snow', 'targaryen', 23)");
-        Awaitility.await()
-                .pollInSameThread()
-                .atMost(5, TimeUnit.SECONDS)
-                .untilAsserted(
-                        () ->
-                                assertThat(rowsToList(batchSql("SELECT * FROM dwd_orders")))
-                                        .containsExactly(
-                                                Arrays.asList(1, 4, 3, "snow", "targaryen", 23)));
+        CommonTestUtils.waitUtil(
+                () ->
+                        rowsToList(batchSql("SELECT * FROM dwd_orders"))
+                                .contains(Arrays.asList(1, 4, 3, "snow", "targaryen", 23)),
+                Duration.ofSeconds(5),
+                Duration.ofMillis(200));
 
         iter.close();
     }

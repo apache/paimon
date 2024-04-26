@@ -1458,7 +1458,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
 
     @Test
     public void testRollbackToTagWithChangelogDecoupled() throws Exception {
-        int commitTimes = ThreadLocalRandom.current().nextInt(100) + 5;
+        int commitTimes = ThreadLocalRandom.current().nextInt(100) + 6;
         FileStoreTable table =
                 createFileStoreTable(
                         options ->

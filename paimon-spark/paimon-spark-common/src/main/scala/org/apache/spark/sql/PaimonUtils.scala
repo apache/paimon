@@ -31,7 +31,7 @@ import org.apache.spark.util.{Utils => SparkUtils}
  * [[org.apache.spark.sql]] package, Hence, use this class to adapt then so that we can use them
  * indirectly.
  */
-object Utils {
+object PaimonUtils {
 
   /**
    * In the streaming write case, An "Queries with streaming sources must be executed with

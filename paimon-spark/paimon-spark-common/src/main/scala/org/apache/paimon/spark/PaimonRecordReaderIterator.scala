@@ -23,7 +23,7 @@ import org.apache.paimon.fs.Path
 import org.apache.paimon.reader.{FileRecordIterator, RecordReader}
 import org.apache.paimon.utils.CloseableIterator
 
-import org.apache.spark.sql.Utils
+import org.apache.spark.sql.PaimonUtils
 
 import java.io.IOException
 
@@ -61,7 +61,7 @@ case class PaimonRecordReaderIterator(reader: RecordReader[PaimonInternalRow])
       }
     } finally {
       reader.close()
-      Utils.unsetInputFileName()
+      PaimonUtils.unsetInputFileName()
     }
   }
 
@@ -70,7 +70,7 @@ case class PaimonRecordReaderIterator(reader: RecordReader[PaimonInternalRow])
     iter match {
       case fileRecordIterator: FileRecordIterator[_] =>
         if (lastFilePath != fileRecordIterator.filePath()) {
-          Utils.setInputFileName(fileRecordIterator.filePath().toUri.toString)
+          PaimonUtils.setInputFileName(fileRecordIterator.filePath().toUri.toString)
           lastFilePath = fileRecordIterator.filePath()
         }
       case _ =>

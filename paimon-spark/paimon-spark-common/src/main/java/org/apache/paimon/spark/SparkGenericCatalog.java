@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.hive.HiveCatalogOptions;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.spark.catalog.SparkBaseCatalog;
+import org.apache.paimon.spark.util.SQLConfUtils;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.hadoop.conf.Configuration;
@@ -38,10 +39,10 @@ import org.apache.spark.sql.catalyst.catalog.InMemoryCatalog;
 import org.apache.spark.sql.catalyst.catalog.SessionCatalog;
 import org.apache.spark.sql.connector.catalog.CatalogExtension;
 import org.apache.spark.sql.connector.catalog.CatalogPlugin;
-import org.apache.spark.sql.connector.catalog.CatalogUtils;
 import org.apache.spark.sql.connector.catalog.FunctionCatalog;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.NamespaceChange;
+import org.apache.spark.sql.connector.catalog.PaimonCatalogUtils;
 import org.apache.spark.sql.connector.catalog.SupportsNamespaces;
 import org.apache.spark.sql.connector.catalog.Table;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
@@ -63,6 +64,8 @@ import java.util.concurrent.Callable;
 
 import static org.apache.paimon.options.CatalogOptions.METASTORE;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
+import static org.apache.paimon.spark.SparkCatalogOptions.CREATE_UNDERLYING_SESSION_CATALOG;
+import static org.apache.paimon.spark.SparkCatalogOptions.DEFAULT_DATABASE;
 
 /* This file is based on source code from the Iceberg Project (http://iceberg.apache.org/), licensed by the Apache
  * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
@@ -77,8 +80,6 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
 
     private static final Logger LOG = LoggerFactory.getLogger(SparkGenericCatalog.class);
 
-    private static final String[] DEFAULT_NAMESPACE = new String[] {"default"};
-
     private SparkCatalog sparkCatalog = null;
 
     private boolean underlyingSessionCatalogEnabled = false;
@@ -92,7 +93,7 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
 
     @Override
     public String[] defaultNamespace() {
-        return DEFAULT_NAMESPACE;
+        return asNamespaceCatalog().defaultNamespace();
     }
 
     @Override
@@ -253,14 +254,15 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
         sparkCatalog.initialize(name, newOptions);
 
         if (options.getBoolean(
-                SparkConnectorOptions.CREATE_UNDERLYING_SESSION_CATALOG.key(), false)) {
+                CREATE_UNDERLYING_SESSION_CATALOG.key(),
+                CREATE_UNDERLYING_SESSION_CATALOG.defaultValue())) {
             this.underlyingSessionCatalogEnabled = true;
             for (Map.Entry<String, String> entry : options.entrySet()) {
                 sparkConf.set("spark.hadoop." + entry.getKey(), entry.getValue());
                 hadoopConf.set(entry.getKey(), entry.getValue());
             }
             ExternalCatalog externalCatalog =
-                    CatalogUtils.buildExternalCatalog(sparkConf, hadoopConf);
+                    PaimonCatalogUtils.buildExternalCatalog(sparkConf, hadoopConf);
             this.sessionCatalog = new V2SessionCatalog(new SessionCatalog(externalCatalog));
         }
     }
@@ -295,10 +297,22 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
                 options.put(METASTORE.key(), metastore);
             }
         }
+        String sessionCatalogDefaultDatabase = SQLConfUtils.defaultDatabase(sqlConf);
+        if (options.containsKey(DEFAULT_DATABASE.key())) {
+            String userDefineDefaultDatabase = options.get(DEFAULT_DATABASE.key());
+            if (!userDefineDefaultDatabase.equals(sessionCatalogDefaultDatabase)) {
+                LOG.warn(
+                        String.format(
+                                "The current spark version does not support configuring default database, switch database to %s",
+                                sessionCatalogDefaultDatabase));
+                options.put(DEFAULT_DATABASE.key(), sessionCatalogDefaultDatabase);
+            }
+        } else {
+            options.put(DEFAULT_DATABASE.key(), sessionCatalogDefaultDatabase);
+        }
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public void setDelegateCatalog(CatalogPlugin delegate) {
         if (!underlyingSessionCatalogEnabled) {
             this.sessionCatalog = delegate;

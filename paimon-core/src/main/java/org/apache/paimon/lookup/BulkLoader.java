@@ -71,6 +71,7 @@ public class BulkLoader {
             recordNum++;
             if (recordNum % 1000 == 0 && writer.fileSize() >= options.targetFileSizeBase()) {
                 writer.finish();
+                writer.close();
                 writer = null;
                 recordNum = 0;
             }
@@ -83,6 +84,7 @@ public class BulkLoader {
         try {
             if (writer != null) {
                 writer.finish();
+                writer.close();
             }
 
             if (files.size() > 0) {

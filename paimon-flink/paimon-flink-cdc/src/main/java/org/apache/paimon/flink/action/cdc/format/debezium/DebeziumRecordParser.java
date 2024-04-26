@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.format.debezium;
 
+import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.format.RecordParser;
@@ -119,8 +120,8 @@ public class DebeziumRecordParser extends RecordParser {
     }
 
     @Override
-    protected void setRoot(String record) {
-        JsonNode node = JsonSerdeUtil.fromJson(record, JsonNode.class);
+    protected void setRoot(CdcSourceRecord record) {
+        JsonNode node = (JsonNode) record.getValue();
 
         hasSchema = false;
         if (node.has(FIELD_SCHEMA)) {

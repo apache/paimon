@@ -56,6 +56,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -126,14 +127,28 @@ public class SchemaManager implements Serializable {
 
     /** Create a new schema from {@link Schema}. */
     public TableSchema createTable(Schema schema) throws Exception {
+        return createTable(schema, false);
+    }
+
+    public TableSchema createTable(Schema schema, boolean ignoreIfExistsSame) throws Exception {
         while (true) {
-            latest().ifPresent(
-                            latest -> {
-                                throw new IllegalStateException(
-                                        "Schema in filesystem exists, please use updating,"
-                                                + " latest schema is: "
-                                                + latest());
-                            });
+            Optional<TableSchema> latest = latest();
+            if (latest.isPresent()) {
+                TableSchema oldSchema = latest.get();
+                boolean isSame =
+                        Objects.equals(oldSchema.fields(), schema.fields())
+                                && Objects.equals(oldSchema.partitionKeys(), schema.partitionKeys())
+                                && Objects.equals(oldSchema.primaryKeys(), schema.primaryKeys())
+                                && Objects.equals(oldSchema.options(), schema.options());
+                if (ignoreIfExistsSame && isSame) {
+                    return oldSchema;
+                }
+
+                throw new IllegalStateException(
+                        "Schema in filesystem exists, please use updating,"
+                                + " latest schema is: "
+                                + oldSchema);
+            }
 
             List<DataField> fields = schema.fields();
             List<String> partitionKeys = schema.partitionKeys();

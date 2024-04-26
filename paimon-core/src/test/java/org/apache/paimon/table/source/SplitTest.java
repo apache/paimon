@@ -50,6 +50,7 @@ public class SplitTest {
                         .withPartition(data.partition)
                         .withBucket(data.bucket)
                         .withDataFiles(files)
+                        .withBucketPath("my path")
                         .build();
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();

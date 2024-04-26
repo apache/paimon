@@ -41,7 +41,7 @@ import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.sink.CallbackUtils;
 import org.apache.paimon.table.sink.TagCallback;
-import org.apache.paimon.tag.TagAutoCreation;
+import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SegmentsCache;
@@ -248,9 +248,8 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
     }
 
     @Override
-    @Nullable
-    public TagAutoCreation newTagCreationManager() {
-        return TagAutoCreation.create(
+    public TagAutoManager newTagCreationManager() {
+        return TagAutoManager.create(
                 options,
                 snapshotManager(),
                 newTagManager(),

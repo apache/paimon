@@ -20,6 +20,7 @@ package org.apache.paimon.flink.action.cdc.postgres;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.Action;
+import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.SyncJobHandler;
 import org.apache.paimon.flink.action.cdc.SyncTableActionBase;
 import org.apache.paimon.flink.action.cdc.schema.JdbcSchemasInfo;
@@ -101,7 +102,7 @@ public class PostgresSyncTableAction extends SyncTableActionBase {
     }
 
     @Override
-    protected JdbcIncrementalSource<String> buildSource() {
+    protected JdbcIncrementalSource<CdcSourceRecord> buildSource() {
         List<JdbcSchemasInfo.JdbcSchemaInfo> pkTables = postgresSchemasInfo.pkTables();
         Set<String> schemaList = new HashSet<>();
         String[] tableList = new String[pkTables.size()];

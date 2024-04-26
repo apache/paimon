@@ -18,17 +18,23 @@
 
 package org.apache.paimon.fileindex;
 
+import org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndex;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
+
+import static org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndex.BLOOM_FILTER;
 
 /** File index interface. To build a file index. */
 public interface FileIndexer {
 
     FileIndexWriter createWriter();
 
-    FileIndexReader createReader();
+    FileIndexReader createReader(byte[] serializedBytes);
 
-    static FileIndexer create(String type, DataType dataType) {
+    static FileIndexer create(String type, DataType dataType, Options options) {
         switch (type) {
+            case BLOOM_FILTER:
+                return new BloomFilterFileIndex(dataType, options);
             default:
                 throw new RuntimeException("Doesn't support filter type: " + type);
         }

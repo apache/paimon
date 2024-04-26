@@ -22,7 +22,7 @@ import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
-import org.apache.paimon.operation.FileStoreRead;
+import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.reader.RecordReader;
 
 import java.io.IOException;
@@ -30,7 +30,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * An abstraction layer above {@link FileStoreRead} to provide reading of {@link InternalRow}.
+ * An abstraction layer above {@link SplitRead} to provide reading of {@link InternalRow}.
  *
  * @since 0.4.0
  */

@@ -167,7 +167,7 @@ public abstract class SortBufferWriteBufferTestBase {
 
         @Override
         protected boolean addOnly() {
-            return false;
+            return true;
         }
 
         @Override

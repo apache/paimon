@@ -55,7 +55,8 @@ public class SplitGeneratorTest {
                 maxSequence,
                 0,
                 0,
-                0L);
+                0L,
+                null);
     }
 
     @Test

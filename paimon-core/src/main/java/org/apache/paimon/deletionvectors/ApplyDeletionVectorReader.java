@@ -24,7 +24,6 @@ import org.apache.paimon.reader.RecordReader;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.Optional;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -40,16 +39,12 @@ public class ApplyDeletionVectorReader<T> implements RecordReader<T> {
         this.deletionVector = deletionVector;
     }
 
-    public static <T> RecordReader<T> create(RecordReader<T> reader, Optional<DeletionVector> dv) {
-        return create(reader, dv.orElse(null));
+    public RecordReader<T> reader() {
+        return reader;
     }
 
-    public static <T> RecordReader<T> create(RecordReader<T> reader, @Nullable DeletionVector dv) {
-        if (dv == null) {
-            return reader;
-        }
-
-        return new ApplyDeletionVectorReader<>(reader, dv);
+    public DeletionVector deletionVector() {
+        return deletionVector;
     }
 
     @Nullable
@@ -65,10 +60,7 @@ public class ApplyDeletionVectorReader<T> implements RecordReader<T> {
                 batch instanceof FileRecordIterator,
                 "There is a bug, RecordIterator in ApplyDeletionVectorReader must be RecordWithPositionIterator");
 
-        FileRecordIterator<T> batchWithPosition = (FileRecordIterator<T>) batch;
-
-        return batchWithPosition.filter(
-                a -> !deletionVector.isDeleted(batchWithPosition.returnedPosition()));
+        return new ApplyDeletionFileRecordIterator<>((FileRecordIterator<T>) batch, deletionVector);
     }
 
     @Override

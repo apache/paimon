@@ -32,7 +32,6 @@ import org.apache.paimon.operation.KeyValueFileStoreScan;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.query.LocalTableQuery;
@@ -42,7 +41,6 @@ import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.KeyValueTableRead;
 import org.apache.paimon.table.source.MergeTreeSplitGenerator;
 import org.apache.paimon.table.source.SplitGenerator;
-import org.apache.paimon.table.source.ValueContentRowDataRecordIterator;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 
@@ -157,25 +155,8 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public InnerTableRead newRead() {
-        return new KeyValueTableRead(store().newRead(), schema()) {
-
-            @Override
-            public void projection(int[][] projection) {
-                read.withValueProjection(projection);
-            }
-
-            @Override
-            protected RecordReader.RecordIterator<InternalRow> rowDataRecordIteratorFromKv(
-                    RecordReader.RecordIterator<KeyValue> kvRecordIterator) {
-                return new ValueContentRowDataRecordIterator(kvRecordIterator);
-            }
-
-            @Override
-            public InnerTableRead forceKeepDelete() {
-                read.forceKeepDelete();
-                return this;
-            }
-        };
+        return new KeyValueTableRead(
+                () -> store().newRead(), () -> store().newBatchRawFileRead(), schema());
     }
 
     @Override

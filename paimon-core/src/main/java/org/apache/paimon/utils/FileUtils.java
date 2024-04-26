@@ -118,6 +118,30 @@ public class FileUtils {
                 .filter(status -> status.getPath().getName().startsWith(prefix));
     }
 
+    /**
+     * List versioned directories for the directory.
+     *
+     * @return file status stream
+     */
+    public static Stream<FileStatus> listVersionedDirectories(
+            FileIO fileIO, Path dir, String prefix) throws IOException {
+        if (!fileIO.exists(dir)) {
+            return Stream.empty();
+        }
+
+        FileStatus[] statuses = fileIO.listDirectories(dir);
+
+        if (statuses == null) {
+            throw new RuntimeException(
+                    String.format(
+                            "The return value is null of the listStatus for the '%s' directory.",
+                            dir));
+        }
+
+        return Arrays.stream(statuses)
+                .filter(status -> status.getPath().getName().startsWith(prefix));
+    }
+
     public static void checkExists(FileIO fileIO, Path file) throws IOException {
         if (!fileIO.exists(file)) {
             throw new FileNotFoundException(

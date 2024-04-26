@@ -82,7 +82,8 @@ public abstract class ManifestFileMetaTestBase {
                         0, // not used
                         Collections.emptyList(),
                         Timestamp.fromEpochMillis(200000),
-                        0L // not used
+                        0L, // not used
+                        null // not used
                         ));
     }
 
@@ -243,6 +244,7 @@ public abstract class ManifestFileMetaTestBase {
                         0, // not used
                         0, // not used
                         0, // not used
-                        0L));
+                        0L,
+                        null));
     }
 }

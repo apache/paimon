@@ -14,3 +14,6 @@ You find them under licenses/LICENSE.antlr-runtime and licenses/LICENSE.janino.
 - org.codehaus.janino:janino:3.0.11
 - org.codehaus.janino:commons-compiler:3.0.11
 - it.unimi.dsi:fastutil:8.5.12
+- net.openhft:zero-allocation-hashing:0.16
+- com.github.davidmoten:hilbert-curve:0.2.2
+- com.github.davidmoten:guava-mini:0.1.3

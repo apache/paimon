@@ -26,11 +26,16 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.sink.TagCallback;
+import org.apache.paimon.tag.Tag;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -80,7 +85,11 @@ public class TagManager {
     }
 
     /** Create a tag from given snapshot and save it in the storage. */
-    public void createTag(Snapshot snapshot, String tagName, List<TagCallback> callbacks) {
+    public void createTag(
+            Snapshot snapshot,
+            String tagName,
+            @Nullable Duration timeRetained,
+            List<TagCallback> callbacks) {
         checkArgument(!StringUtils.isBlank(tagName), "Tag name '%s' is blank.", tagName);
 
         // skip create tag for the same snapshot of the same name.
@@ -91,7 +100,13 @@ public class TagManager {
         } else {
             Path newTagPath = tagPath(tagName);
             try {
-                fileIO.writeFileUtf8(newTagPath, snapshot.toJson());
+                fileIO.writeFileUtf8(
+                        newTagPath,
+                        timeRetained != null
+                                ? Tag.fromSnapshotAndTagTtl(
+                                                snapshot, timeRetained, LocalDateTime.now())
+                                        .toJson()
+                                : snapshot.toJson());
             } catch (IOException e) {
                 throw new RuntimeException(
                         String.format(
@@ -232,7 +247,8 @@ public class TagManager {
     /** Get the tagged snapshot by name. */
     public Snapshot taggedSnapshot(String tagName) {
         checkArgument(tagExists(tagName), "Tag '%s' doesn't exist.", tagName);
-        return Snapshot.fromPath(fileIO, tagPath(tagName));
+        // Trim to snapshot to avoid equals and compare snapshot.
+        return Tag.fromPath(fileIO, tagPath(tagName)).trimToSnapshot();
     }
 
     public long tagCount() {
@@ -248,7 +264,7 @@ public class TagManager {
         return new ArrayList<>(tags().keySet());
     }
 
-    /** Get all tagged snapshots with names sorted by snapshot id. */
+    /** Get all tagged snapshots with tag names sorted by snapshot id. */
     public SortedMap<Snapshot, List<String>> tags() {
         return tags(tagName -> true);
     }
@@ -281,16 +297,36 @@ public class TagManager {
                 }
                 // If the tag file is not found, it might be deleted by
                 // other processes, so just skip this tag
-                Snapshot.safelyFromPath(fileIO, path)
-                        .ifPresent(
-                                snapshot ->
-                                        tags.computeIfAbsent(snapshot, s -> new ArrayList<>())
-                                                .add(tagName));
+                Snapshot snapshot = Snapshot.safelyFromPath(fileIO, path);
+                if (snapshot != null) {
+                    tags.computeIfAbsent(snapshot, s -> new ArrayList<>()).add(tagName);
+                }
             }
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
         return tags;
+    }
+
+    /** Get all {@link Tag}s. */
+    public List<Pair<Tag, String>> tagObjects() {
+        try {
+            List<Path> paths =
+                    listVersionedFileStatus(fileIO, tagDirectory(), TAG_PREFIX)
+                            .map(FileStatus::getPath)
+                            .collect(Collectors.toList());
+            List<Pair<Tag, String>> tags = new ArrayList<>();
+            for (Path path : paths) {
+                String tagName = path.getName().substring(TAG_PREFIX.length());
+                Tag tag = Tag.safelyFromPath(fileIO, path);
+                if (tag != null) {
+                    tags.add(Pair.of(tag, tagName));
+                }
+            }
+            return tags;
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     public List<String> sortTagsOfOneSnapshot(List<String> tagNames) {

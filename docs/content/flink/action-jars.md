@@ -26,7 +26,7 @@ under the License.
 
 # Action Jars
 
-After the Flink Local Cluster has been started, you can execute the action jar by using the following command
+After the Flink Local Cluster has been started, you can execute the action jar by using the following command.
 
 ```
 <FLINK_HOME>/bin/flink run \
@@ -35,7 +35,7 @@ After the Flink Local Cluster has been started, you can execute the action jar b
  <args>
 ``` 
 
-The following command will used to compact a table
+The following command is used to compact a table.
 
 ```
 <FLINK_HOME>/bin/flink run \

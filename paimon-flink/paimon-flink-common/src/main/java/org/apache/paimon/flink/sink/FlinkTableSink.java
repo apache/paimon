@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.sink.BatchTableCommit;
 
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.sink.abilities.SupportsTruncate;
@@ -41,6 +42,10 @@ public class FlinkTableSink extends SupportsRowLevelOperationFlinkTableSink
 
     @Override
     public void executeTruncation() {
-        table.newBatchWriteBuilder().newCommit().truncateTable();
+        try (BatchTableCommit batchTableCommit = table.newBatchWriteBuilder().newCommit()) {
+            batchTableCommit.truncateTable();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 }

@@ -93,7 +93,7 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
         // update metric when reading a new split
         long eventTime =
                 ((DataSplit) split)
-                        .getLatestFileCreationEpochMillis()
+                        .latestFileCreationEpochMillis()
                         .orElse(FileStoreSourceReaderMetrics.UNDEFINED);
         sourceReaderMetrics.recordSnapshotUpdate(eventTime);
 

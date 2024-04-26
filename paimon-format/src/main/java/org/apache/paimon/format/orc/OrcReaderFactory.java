@@ -183,9 +183,8 @@ public class OrcReaderFactory implements FormatReaderFactory {
                 VectorizedRowBatch orcBatch, long rowNumber) {
             // no copying from the ORC column vectors to the Paimon columns vectors necessary,
             // because they point to the same data arrays internally design
-            int batchSize = orcBatch.size;
-            paimonColumnBatch.setNumRows(batchSize);
-            result.reset(batchSize, rowNumber);
+            paimonColumnBatch.setNumRows(orcBatch.size);
+            result.reset(rowNumber);
             return result;
         }
     }
@@ -325,26 +324,6 @@ public class OrcReaderFactory implements FormatReaderFactory {
         } else {
             return Pair.of(0L, 0L);
         }
-    }
-
-    /**
-     * Computes the ORC projection mask of the fields to include from the selected
-     * fields.rowOrcInputFormat.nextRecord(null).
-     *
-     * @return The ORC projection mask.
-     */
-    private static boolean[] computeProjectionMask(TypeDescription schema, int[] selectedFields) {
-        // mask with all fields of the schema
-        boolean[] projectionMask = new boolean[schema.getMaximumId() + 1];
-        // for each selected field
-        for (int inIdx : selectedFields) {
-            // set all nested fields of a selected field to true
-            TypeDescription fieldSchema = schema.getChildren().get(inIdx);
-            for (int i = fieldSchema.getId(); i <= fieldSchema.getMaximumId(); i++) {
-                projectionMask[i] = true;
-            }
-        }
-        return projectionMask;
     }
 
     public static org.apache.orc.Reader createReader(

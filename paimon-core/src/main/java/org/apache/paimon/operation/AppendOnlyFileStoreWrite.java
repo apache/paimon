@@ -27,6 +27,7 @@ import org.apache.paimon.compact.NoopCompactManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
+import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
@@ -59,7 +60,7 @@ import static org.apache.paimon.io.DataFileMeta.getMaxSequenceNumber;
 public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> {
 
     private final FileIO fileIO;
-    private final AppendOnlyFileStoreRead read;
+    private final RawFileSplitRead read;
     private final long schemaId;
     private final RowType rowType;
     private final FileFormat fileFormat;
@@ -74,6 +75,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
     private final boolean spillable;
     private final MemorySize maxDiskSize;
     private final FieldStatsCollector.Factory[] statsCollectors;
+    private final FileIndexOptions fileIndexOptions;
 
     private boolean forceBufferSpill = false;
     private boolean skipCompaction;
@@ -81,7 +83,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
 
     public AppendOnlyFileStoreWrite(
             FileIO fileIO,
-            AppendOnlyFileStoreRead read,
+            RawFileSplitRead read,
             long schemaId,
             String commitUser,
             RowType rowType,
@@ -109,6 +111,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
         this.maxDiskSize = options.writeBufferSpillDiskSize();
         this.statsCollectors =
                 StatsCollectorFactories.createStatsFactories(options, rowType.getFieldNames());
+        this.fileIndexOptions = options.indexColumnsOptions();
     }
 
     @Override
@@ -155,7 +158,8 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                 fileCompression,
                 spillCompression,
                 statsCollectors,
-                maxDiskSize);
+                maxDiskSize,
+                fileIndexOptions);
     }
 
     public AppendOnlyCompactManager.CompactRewriter compactRewriter(
@@ -174,7 +178,8 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                             pathFactory.createDataFilePathFactory(partition, bucket),
                             new LongCounter(toCompact.get(0).minSequenceNumber()),
                             fileCompression,
-                            statsCollectors);
+                            statsCollectors,
+                            fileIndexOptions);
             try {
                 rewriter.write(bucketReader(partition, bucket).read(toCompact));
             } finally {
@@ -192,6 +197,11 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                                         .withPartition(partition)
                                         .withBucket(bucket)
                                         .withDataFiles(files)
+                                        .rawConvertible(true)
+                                        .withBucketPath(
+                                                pathFactory
+                                                        .bucketPath(partition, bucket)
+                                                        .toString())
                                         .build()));
     }
 

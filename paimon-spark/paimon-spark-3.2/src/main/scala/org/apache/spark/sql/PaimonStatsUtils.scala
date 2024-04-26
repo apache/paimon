@@ -23,12 +23,11 @@ import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.plans.logical.{ColumnStat, LogicalPlan}
 import org.apache.spark.sql.execution.command.CommandUtils
 import org.apache.spark.sql.internal.SessionState
-import org.apache.spark.sql.types.{BinaryType, BooleanType, DataType, DateType, DecimalType, DoubleType, FloatType, IntegralType, StringType, TimestampType}
+import org.apache.spark.sql.types.{BinaryType, BooleanType, DataType, DateType, DecimalType, DoubleType, FloatType, IntegralType, StringType, TimestampNTZType, TimestampType}
 
 import java.net.URI
 
-object StatsUtils {
-
+object PaimonStatsUtils {
   def calculateTotalSize(
       sessionState: SessionState,
       tableName: String,
@@ -54,6 +53,7 @@ object StatsUtils {
     case BooleanType => true
     case DateType => true
     case TimestampType => true
+    case TimestampNTZType => true
     case BinaryType | StringType => true
     case _ => false
   }
@@ -66,6 +66,7 @@ object StatsUtils {
     case BooleanType => true
     case DateType => true
     case TimestampType => true
+    case TimestampNTZType => true
     case _ => false
   }
 }

@@ -41,24 +41,6 @@ public class FileRecordReader implements RecordReader<InternalRow> {
     @Nullable private final PartitionInfo partitionInfo;
     @Nullable private final CastFieldGetter[] castMapping;
 
-    public FileRecordReader(
-            FormatReaderFactory readerFactory,
-            FormatReaderFactory.Context context,
-            @Nullable int[] indexMapping,
-            @Nullable CastFieldGetter[] castMapping,
-            @Nullable PartitionInfo partitionInfo)
-            throws IOException {
-        try {
-            this.reader = readerFactory.createReader(context);
-        } catch (Exception e) {
-            FileUtils.checkExists(context.fileIO(), context.filePath());
-            throw e;
-        }
-        this.indexMapping = indexMapping;
-        this.partitionInfo = partitionInfo;
-        this.castMapping = castMapping;
-    }
-
     @Nullable
     @Override
     public RecordReader.RecordIterator<InternalRow> readBatch() throws IOException {
@@ -87,6 +69,24 @@ public class FileRecordReader implements RecordReader<InternalRow> {
         }
 
         return iterator;
+    }
+
+    public FileRecordReader(
+            FormatReaderFactory readerFactory,
+            FormatReaderFactory.Context context,
+            @Nullable int[] indexMapping,
+            @Nullable CastFieldGetter[] castMapping,
+            @Nullable PartitionInfo partitionInfo)
+            throws IOException {
+        try {
+            this.reader = readerFactory.createReader(context);
+        } catch (Exception e) {
+            FileUtils.checkExists(context.fileIO(), context.filePath());
+            throw e;
+        }
+        this.indexMapping = indexMapping;
+        this.partitionInfo = partitionInfo;
+        this.castMapping = castMapping;
     }
 
     @Override

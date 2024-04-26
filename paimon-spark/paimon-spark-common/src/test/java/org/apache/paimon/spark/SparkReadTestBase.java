@@ -22,12 +22,15 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 
@@ -184,6 +187,28 @@ public abstract class SparkReadTestBase {
         }
         long commitIdentifier = COMMIT_IDENTIFIER.getAndIncrement();
         commit.commit(commitIdentifier, writer.prepareCommit(true, commitIdentifier));
+        writer.close();
+        commit.close();
+    }
+
+    protected static void writeTableWithWatermark(
+            String tableName, Long watermark, GenericRow... rows) throws Exception {
+        FileStoreTable fileStoreTable = getTable(tableName);
+        StreamWriteBuilder streamWriteBuilder = fileStoreTable.newStreamWriteBuilder();
+        StreamTableWrite writer = streamWriteBuilder.newWrite();
+        TableCommitImpl commit = (TableCommitImpl) streamWriteBuilder.newCommit();
+
+        for (GenericRow row : rows) {
+            writer.write(row);
+        }
+        long commitIdentifier = COMMIT_IDENTIFIER.getAndIncrement();
+        ManifestCommittable manifestCommittable =
+                new ManifestCommittable(commitIdentifier, watermark);
+        List<CommitMessage> commitMessages = writer.prepareCommit(true, commitIdentifier);
+        for (CommitMessage commitMessage : commitMessages) {
+            manifestCommittable.addFileCommittable(commitMessage);
+        }
+        commit.commit(manifestCommittable);
         writer.close();
         commit.close();
     }
