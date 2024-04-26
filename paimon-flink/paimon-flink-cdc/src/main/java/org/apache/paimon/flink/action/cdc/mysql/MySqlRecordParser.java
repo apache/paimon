@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
+import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils;
@@ -69,7 +70,7 @@ import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
  * A parser for MySql Debezium JSON strings, converting them into a list of {@link
  * RichCdcMultiplexRecord}s.
  */
-public class MySqlRecordParser implements FlatMapFunction<String, RichCdcMultiplexRecord> {
+public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichCdcMultiplexRecord> {
 
     private static final Logger LOG = LoggerFactory.getLogger(MySqlRecordParser.class);
 
@@ -109,8 +110,9 @@ public class MySqlRecordParser implements FlatMapFunction<String, RichCdcMultipl
     }
 
     @Override
-    public void flatMap(String rawEvent, Collector<RichCdcMultiplexRecord> out) throws Exception {
-        root = objectMapper.readValue(rawEvent, DebeziumEvent.class);
+    public void flatMap(CdcSourceRecord rawEvent, Collector<RichCdcMultiplexRecord> out)
+            throws Exception {
+        root = objectMapper.readValue((String) rawEvent.getValue(), DebeziumEvent.class);
         currentTable = root.payload().source().get(AbstractSourceInfo.TABLE_NAME_KEY).asText();
         databaseName = root.payload().source().get(AbstractSourceInfo.DATABASE_NAME_KEY).asText();
 

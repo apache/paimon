@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.format;
 
+import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
@@ -26,7 +27,6 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
-import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
@@ -55,8 +55,10 @@ import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDupl
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.listCaseConvert;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.recordKeyDuplicateErrMsg;
+import static org.apache.paimon.utils.JsonSerdeUtil.convertValue;
 import static org.apache.paimon.utils.JsonSerdeUtil.getNodeAs;
 import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
+import static org.apache.paimon.utils.JsonSerdeUtil.writeValueAsString;
 
 /**
  * Provides a base implementation for parsing messages of various formats into {@link
@@ -66,7 +68,8 @@ import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
  * Subclasses are expected to provide specific implementations for extracting records, validating
  * message formats, and other format-specific operations.
  */
-public abstract class RecordParser implements FlatMapFunction<String, RichCdcMultiplexRecord> {
+public abstract class RecordParser
+        implements FlatMapFunction<CdcSourceRecord, RichCdcMultiplexRecord> {
 
     private static final Logger LOG = LoggerFactory.getLogger(RecordParser.class);
 
@@ -86,7 +89,7 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
     }
 
     @Nullable
-    public Schema buildSchema(String record) {
+    public Schema buildSchema(CdcSourceRecord record) {
         try {
             setRoot(record);
             if (isDDL()) {
@@ -103,7 +106,7 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
             builder.primaryKey(extractPrimaryKeys());
             return builder.build();
         } catch (Exception e) {
-            logInvalidJsonString(record);
+            logInvalidSourceRecord(record);
             throw e;
         }
     }
@@ -126,12 +129,12 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
     }
 
     @Override
-    public void flatMap(String value, Collector<RichCdcMultiplexRecord> out) {
+    public void flatMap(CdcSourceRecord value, Collector<RichCdcMultiplexRecord> out) {
         try {
             setRoot(value);
             extractRecords().forEach(out::collect);
         } catch (Exception e) {
-            logInvalidJsonString(value);
+            logInvalidSourceRecord(value);
             throw e;
         }
     }
@@ -140,7 +143,7 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
             JsonNode record, LinkedHashMap<String, DataType> paimonFieldTypes) {
         paimonFieldTypes.putAll(fillDefaultTypes(record));
         Map<String, Object> recordMap =
-                JsonSerdeUtil.convertValue(record, new TypeReference<Map<String, Object>>() {});
+                convertValue(record, new TypeReference<Map<String, Object>>() {});
         Map<String, String> rowData =
                 recordMap.entrySet().stream()
                         .filter(entry -> Objects.nonNull(entry.getKey()))
@@ -151,8 +154,7 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
                                             if (Objects.nonNull(entry.getValue())
                                                     && !TypeUtils.isBasicType(entry.getValue())) {
                                                 try {
-                                                    return JsonSerdeUtil.writeValueAsString(
-                                                            entry.getValue());
+                                                    return writeValueAsString(entry.getValue());
                                                 } catch (JsonProcessingException e) {
                                                     LOG.error("Failed to deserialize record.", e);
                                                     return Objects.toString(entry.getValue());
@@ -217,8 +219,8 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
                 new CdcRecord(rowKind, data));
     }
 
-    protected void setRoot(String record) {
-        root = JsonSerdeUtil.fromJson(record, JsonNode.class);
+    protected void setRoot(CdcSourceRecord record) {
+        root = (JsonNode) record.getValue();
     }
 
     protected JsonNode mergeOldRecord(JsonNode data, JsonNode oldNode) {
@@ -243,8 +245,8 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
         return isNull(node) ? null : node.asText();
     }
 
-    private void logInvalidJsonString(String json) {
-        LOG.info("Invalid Json:\n{}", json);
+    private void logInvalidSourceRecord(CdcSourceRecord record) {
+        LOG.error("Invalid source record:\n{}", record.toString());
     }
 
     protected void checkNotNull(JsonNode node, String key) {

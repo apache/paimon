@@ -219,24 +219,22 @@ public class JsonSerdeUtil {
     }
 
     /** Parses a JSON string and extracts a value of the specified type from the given path keys. */
-    public static <T> T extractValue(String json, Class<T> valueType, String... path)
+    public static <T> T extractValue(JsonNode jsonNode, Class<T> valueType, String... path)
             throws JsonProcessingException {
-        JsonNode currentNode = OBJECT_MAPPER_INSTANCE.readTree(json);
         for (String key : path) {
-            currentNode = currentNode.get(key);
-            if (currentNode == null) {
+            jsonNode = jsonNode.get(key);
+            if (jsonNode == null) {
                 throw new IllegalArgumentException("Invalid path or key not found: " + key);
             }
         }
-        return OBJECT_MAPPER_INSTANCE.treeToValue(currentNode, valueType);
+        return OBJECT_MAPPER_INSTANCE.treeToValue(jsonNode, valueType);
     }
 
     /** Checks if a specified node exists in a JSON string. */
-    public static boolean isNodeExists(String json, String... path) throws JsonProcessingException {
-        JsonNode currentNode = OBJECT_MAPPER_INSTANCE.readTree(json);
+    public static boolean isNodeExists(JsonNode jsonNode, String... path) {
         for (String key : path) {
-            currentNode = currentNode.get(key);
-            if (currentNode == null) {
+            jsonNode = jsonNode.get(key);
+            if (jsonNode == null) {
                 return false;
             }
         }
