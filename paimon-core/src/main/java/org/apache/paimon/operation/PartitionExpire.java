@@ -22,7 +22,6 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.partition.PartitionTimeExtractor;
 import org.apache.paimon.types.RowType;
@@ -38,7 +37,6 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 /** Expire partitions. */
 public class PartitionExpire {
@@ -117,11 +115,8 @@ public class PartitionExpire {
     }
 
     private List<BinaryRow> readPartitions(LocalDateTime expireDateTime) {
-        return scan.withPartitionFilter(new PartitionTimePredicate(expireDateTime)).plan().files()
-                .stream()
-                .map(ManifestEntry::partition)
-                .distinct()
-                .collect(Collectors.toList());
+        return scan.withPartitionFilter(new PartitionTimePredicate(expireDateTime))
+                .listPartitions();
     }
 
     private class PartitionTimePredicate implements PartitionPredicate {
