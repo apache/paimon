@@ -18,23 +18,27 @@
 
 package org.apache.paimon.fileindex;
 
-/** To write file index. */
-public abstract class FileIndexWriter {
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.MapType;
 
-    private boolean empty = true;
+import java.util.Map;
+import java.util.Optional;
 
-    public void writeRecord(Object key) {
-        if (key != null) {
-            empty = false;
-            write(key);
-        }
+/** Common function of file index put here. */
+public class FileIndexCommon {
+
+    public static String toMapKey(String mapColumnName, String keyName) {
+        return mapColumnName + "[" + keyName + "]";
     }
 
-    public abstract void write(Object key);
-
-    public abstract byte[] serializedBytes();
-
-    public boolean empty() {
-        return empty;
+    public static DataType getFieldType(Map<String, DataField> fields, String columnsName) {
+        Optional<Integer> topLevelIndex = FileIndexOptions.topLevelIndexOfNested(columnsName);
+        if (topLevelIndex.isPresent()) {
+            return ((MapType) fields.get(columnsName.substring(0, topLevelIndex.get())).type())
+                    .getValueType();
+        } else {
+            return fields.get(columnsName).type();
+        }
     }
 }

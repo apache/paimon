@@ -19,6 +19,7 @@
 package org.apache.paimon.fileindex;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.fileindex.empty.EmptyFileIndexReader;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
@@ -37,9 +38,9 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -97,6 +98,7 @@ import java.util.stream.Collectors;
 public final class FileIndexFormat {
 
     private static final long MAGIC = 1493475289347502L;
+    private static final int EMPTY_INDEX_FLAG = -1;
 
     enum Version {
         V_1(1);
@@ -145,9 +147,15 @@ public final class FileIndexFormat {
                 Map<String, byte[]> bytesMap = columnMap.getValue();
                 for (Map.Entry<String, byte[]> entry : bytesMap.entrySet()) {
                     int startPosition = baos.size();
-                    baos.write(entry.getValue());
-                    innerMap.put(
-                            entry.getKey(), Pair.of(startPosition, baos.size() - startPosition));
+                    byte[] v = entry.getValue();
+                    if (v == null) {
+                        innerMap.put(entry.getKey(), Pair.of(EMPTY_INDEX_FLAG, 0));
+                    } else {
+                        baos.write(entry.getValue());
+                        innerMap.put(
+                                entry.getKey(),
+                                Pair.of(startPosition, baos.size() - startPosition));
+                    }
                 }
             }
             byte[] body = baos.toByteArray();
@@ -180,7 +188,9 @@ public final class FileIndexFormat {
                 for (Map.Entry<String, Pair<Integer, Integer>> indexEntry :
                         entry.getValue().entrySet()) {
                     dataOutputStream.writeUTF(indexEntry.getKey());
-                    dataOutputStream.writeInt(indexEntry.getValue().getLeft() + headLength);
+                    int start = indexEntry.getValue().getLeft();
+                    dataOutputStream.writeInt(
+                            start == EMPTY_INDEX_FLAG ? EMPTY_INDEX_FLAG : start + headLength);
                     dataOutputStream.writeInt(indexEntry.getValue().getRight());
                 }
             }
@@ -275,55 +285,59 @@ public final class FileIndexFormat {
             }
         }
 
-        public List<FileIndexReader> readColumnIndex(String columnName) {
+        public Set<FileIndexReader> readColumnIndex(String columnName) {
             return Optional.ofNullable(header.getOrDefault(columnName, null))
                     .map(
                             f ->
-                                    f.keySet().stream()
+                                    f.entrySet().stream()
                                             .map(
-                                                    indexType ->
-                                                            readColumnIndex(columnName, indexType))
-                                            .collect(Collectors.toList()))
-                    .orElse(Collections.emptyList());
+                                                    entry ->
+                                                            getFileIndexReader(
+                                                                    columnName,
+                                                                    entry.getKey(),
+                                                                    entry.getValue()))
+                                            .collect(Collectors.toSet()))
+                    .orElse(Collections.emptySet());
         }
 
-        public FileIndexReader readColumnIndex(String columnName, String indexType) {
+        private FileIndexReader getFileIndexReader(
+                String columnName, String indexType, Pair<Integer, Integer> startAndLength) {
+            if (startAndLength.getLeft() == EMPTY_INDEX_FLAG) {
+                return EmptyFileIndexReader.INSTANCE;
+            }
+            return FileIndexer.create(
+                            indexType,
+                            FileIndexCommon.getFieldType(fields, columnName),
+                            new Options())
+                    .createReader(getBytesWithStartAndLength(startAndLength));
+        }
 
-            return readColumnInputStream(columnName, indexType)
-                    .map(
-                            serializedBytes ->
-                                    FileIndexer.create(
-                                                    indexType,
-                                                    fields.get(columnName).type(),
-                                                    new Options())
-                                            .createReader(serializedBytes))
-                    .orElse(null);
+        private byte[] getBytesWithStartAndLength(Pair<Integer, Integer> startAndLength) {
+            byte[] b = new byte[startAndLength.getRight()];
+            try {
+                seekableInputStream.seek(startAndLength.getLeft());
+                int n = 0;
+                int len = b.length;
+                // read fully until b is full else throw.
+                while (n < len) {
+                    int count = seekableInputStream.read(b, n, len - n);
+                    if (count < 0) {
+                        throw new EOFException();
+                    }
+                    n += count;
+                }
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+            return b;
         }
 
         @VisibleForTesting
-        Optional<byte[]> readColumnInputStream(String columnName, String indexType) {
+        // only for test yet
+        Optional<byte[]> getBytesWithNameAndType(String columnName, String indexType) {
             return Optional.ofNullable(header.getOrDefault(columnName, null))
-                    .map(m -> m.getOrDefault(indexType, null))
-                    .map(
-                            startAndLength -> {
-                                byte[] b = new byte[startAndLength.getRight()];
-                                try {
-                                    seekableInputStream.seek(startAndLength.getLeft());
-                                    int n = 0;
-                                    int len = b.length;
-                                    // read fully until b is full else throw.
-                                    while (n < len) {
-                                        int count = seekableInputStream.read(b, n, len - n);
-                                        if (count < 0) {
-                                            throw new EOFException();
-                                        }
-                                        n += count;
-                                    }
-                                } catch (IOException e) {
-                                    throw new RuntimeException(e);
-                                }
-                                return b;
-                            });
+                    .map(i -> i.getOrDefault(indexType, null))
+                    .map(this::getBytesWithStartAndLength);
         }
 
         @Override

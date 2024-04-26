@@ -71,7 +71,7 @@ public class BloomFilterFileIndex implements FileIndexer {
         return new Reader(dataType, serializedBytes);
     }
 
-    private static class Writer implements FileIndexWriter {
+    private static class Writer extends FileIndexWriter {
 
         private final BloomFilter64 filter;
         private final FastHash hashFunction;
@@ -83,9 +83,7 @@ public class BloomFilterFileIndex implements FileIndexer {
 
         @Override
         public void write(Object key) {
-            if (key != null) {
-                filter.addHash(hashFunction.hash(key));
-            }
+            filter.addHash(hashFunction.hash(key));
         }
 
         @Override
@@ -102,7 +100,7 @@ public class BloomFilterFileIndex implements FileIndexer {
         }
     }
 
-    private static class Reader implements FileIndexReader {
+    private static class Reader extends FileIndexReader {
 
         private final BloomFilter64 filter;
         private final FastHash hashFunction;

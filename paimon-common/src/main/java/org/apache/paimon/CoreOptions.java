@@ -1738,75 +1738,7 @@ public class CoreOptions implements Serializable {
     }
 
     public FileIndexOptions indexColumnsOptions() {
-        String fileIndexPrefix = FILE_INDEX + ".";
-        String fileIndexColumnSuffix = "." + COLUMNS;
-
-        FileIndexOptions fileIndexOptions = new FileIndexOptions(fileIndexInManifestThreshold());
-        for (Map.Entry<String, String> entry : options.toMap().entrySet()) {
-            String key = entry.getKey();
-            if (key.startsWith(fileIndexPrefix)) {
-                // start with file-index, decode this option
-                if (key.endsWith(fileIndexColumnSuffix)) {
-                    // if end with .column, set up indexes
-                    String indexType =
-                            key.substring(
-                                    fileIndexPrefix.length(),
-                                    key.length() - fileIndexColumnSuffix.length());
-                    String[] names = entry.getValue().split(",");
-                    for (String name : names) {
-                        if (StringUtils.isBlank(name)) {
-                            throw new IllegalArgumentException(
-                                    "Wrong option in " + key + ", should not have empty column");
-                        }
-                        fileIndexOptions.computeIfAbsent(name.trim(), indexType);
-                    }
-                } else {
-                    // else, it must be an option
-                    String[] kv = key.substring(fileIndexPrefix.length()).split("\\.");
-                    if (kv.length != 3) {
-                        continue;
-                    }
-                    String indexType = kv[0];
-                    String cname = kv[1];
-                    String opkey = kv[2];
-
-                    if (fileIndexOptions.get(cname, indexType) == null) {
-                        // if indexes have not set, find .column in options, then set them
-                        String columns =
-                                options.get(fileIndexPrefix + indexType + fileIndexColumnSuffix);
-                        if (columns == null) {
-                            continue;
-                        }
-                        String[] names = columns.split(",");
-                        boolean foundTarget = false;
-                        for (String name : names) {
-                            if (StringUtils.isBlank(name)) {
-                                throw new IllegalArgumentException(
-                                        "Wrong option in "
-                                                + key
-                                                + ", should not have empty column");
-                            }
-                            String tname = name.trim();
-                            if (cname.equals(tname)) {
-                                foundTarget = true;
-                            }
-                            fileIndexOptions.computeIfAbsent(name.trim(), indexType);
-                        }
-                        if (!foundTarget) {
-                            throw new IllegalArgumentException(
-                                    "Wrong option in "
-                                            + key
-                                            + ", can't found column "
-                                            + cname
-                                            + " in "
-                                            + columns);
-                        }
-                    }
-                    fileIndexOptions.get(cname, indexType).set(opkey, entry.getValue());
-                }
-            }
-        }
-        return fileIndexOptions;
+        return new FileIndexOptions(this);
     }
 
     public long fileIndexInManifestThreshold() {
