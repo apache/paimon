@@ -117,7 +117,7 @@ trait ScanHelper {
       .withBucket(split.bucket())
       .withDataFiles(dataFiles.toList.asJava)
       .rawConvertible(split.rawConvertible())
-      .withBucketPath(split.getBucketPath)
+      .withBucketPath(split.bucketPath)
     if (deletionVectors) {
       builder.withDataDeletionFiles(deletionFiles.toList.asJava)
     }

@@ -68,7 +68,7 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
                                         // take it for false, because multiple snapshot read may
                                         // need merge for primary key table
                                         false,
-                                        split.getBucketPath(),
+                                        split.bucketPath(),
                                         split.deletionFiles().orElse(null)),
                                 k -> new ArrayList<>())
                         .addAll(split.dataFiles());

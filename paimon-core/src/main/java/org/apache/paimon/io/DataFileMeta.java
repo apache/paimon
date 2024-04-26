@@ -287,14 +287,12 @@ public class DataFileMeta {
                 .toEpochMilli();
     }
 
-    public Optional<CoreOptions.FileFormatType> fileFormat() {
+    public String fileFormat() {
         String[] split = fileName.split("\\.");
-        try {
-            return Optional.of(
-                    CoreOptions.FileFormatType.valueOf(split[split.length - 1].toUpperCase()));
-        } catch (IllegalArgumentException e) {
-            return Optional.empty();
+        if (split.length == 1) {
+            throw new RuntimeException("Can't find format from file: " + fileName());
         }
+        return split[split.length - 1];
     }
 
     public DataFileMeta upgrade(int newLevel) {
