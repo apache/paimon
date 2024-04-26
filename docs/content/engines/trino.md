@@ -30,7 +30,7 @@ This documentation is a guide for using Paimon in Trino.
 
 ## Version
 
-Paimon currently supports Trino 422 and above.
+Paimon currently supports Trino 420 and above.
 
 ## Filesystem
 
@@ -51,7 +51,7 @@ https://paimon.apache.org/docs/master/project/download/
 
 | Version       | Package                                                                                                                                       |
 |---------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
-| [420, 426]    | [paimon-trino-422-{{< version >}}-plugin.tar.gz](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-422/{{< version >}}/) |
+| [420, 426]    | [paimon-trino-420-{{< version >}}-plugin.tar.gz](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-420/{{< version >}}/) |
 | [427, latest] | [paimon-trino-427-{{< version >}}-plugin.tar.gz](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-427/{{< version >}}/) |
 
 {{< /unstable >}}
@@ -96,7 +96,7 @@ Let Paimon use a secure temporary directory.
 ```bash
 tar -zxf paimon-trino-<trino-version>-{{< version >}}-plugin.tar.gz -C ${TRINO_HOME}/plugin
 ```
-the variable `trino-version` is module name, must be one of 422, 427.
+the variable `trino-version` is module name, must be one of 420, 427.
 > NOTE: For JDK 17, when Deploying Trino, should add jvm options: `--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED`
 
 ### Configure
@@ -188,7 +188,7 @@ SELECT * FROM paimon.test_db.orders
 ## Query with Time Traveling
 {{< tabs "time-travel-example" >}}
 
-{{< tab "version >=422" >}}
+{{< tab "version >=420" >}}
 
 ```sql
 -- read the snapshot from specified timestamp
