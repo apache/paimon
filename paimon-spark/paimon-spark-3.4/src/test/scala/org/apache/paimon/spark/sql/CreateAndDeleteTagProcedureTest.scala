@@ -91,6 +91,36 @@ class CreateAndDeleteTagProcedureTest extends PaimonSparkTestBase with StreamTes
                 "CALL paimon.sys.delete_tag(table => 'test.T', tag => 'test_latestSnapshot_tag')"),
               Row(true) :: Nil)
             checkAnswer(spark.sql("SELECT tag_name FROM paimon.test.`T$tags`"), Nil)
+
+            // snapshot-4
+            inputData.addData((2, "c1"))
+            stream.processAllAvailable()
+            checkAnswer(query(), Row(2, "c1") :: Nil)
+
+            checkAnswer(
+              spark.sql(
+                "CALL paimon.sys.create_tag(table => 'test.T', tag => 's4')"),
+              Row(true) :: Nil)
+
+            // snapshot-5
+            inputData.addData((3, "c2"))
+            stream.processAllAvailable()
+            checkAnswer(query(), Row(2, "c1") :: Row(3, "c2") :: Nil)
+
+            checkAnswer(
+              spark.sql(
+                "CALL paimon.sys.create_tag(table => 'test.T', tag => 's5')"),
+              Row(true) :: Nil)
+
+            checkAnswer(
+              spark.sql("SELECT tag_name FROM paimon.test.`T$tags`"),
+              Row("s4") :: Row("s5") :: Nil)
+
+            checkAnswer(
+              spark.sql("CALL paimon.sys.delete_tag(table => 'test.T', tag => 's4,s5')"),
+              Row(true) :: Nil)
+
+            checkAnswer(spark.sql("SELECT tag_name FROM paimon.test.`T$tags`"), Nil)
           } finally {
             stream.stop()
           }
