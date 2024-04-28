@@ -34,6 +34,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -171,7 +172,8 @@ public class IndexFileHandler {
             throw new IllegalArgumentException(
                     "Input file is not deletion vectors index " + fileMeta.indexType());
         }
-        Map<String, Pair<Integer, Integer>> deleteIndexRange = fileMeta.deletionVectorsRanges();
+        LinkedHashMap<String, Pair<Integer, Integer>> deleteIndexRange =
+                fileMeta.deletionVectorsRanges();
         if (deleteIndexRange == null || deleteIndexRange.isEmpty()) {
             return Collections.emptyMap();
         }
@@ -193,7 +195,7 @@ public class IndexFileHandler {
     }
 
     public IndexFileMeta writeDeletionVectorsIndex(Map<String, DeletionVector> deletionVectors) {
-        Pair<String, Map<String, Pair<Integer, Integer>>> pair =
+        Pair<String, LinkedHashMap<String, Pair<Integer, Integer>>> pair =
                 deletionVectorsIndex.write(deletionVectors);
         return new IndexFileMeta(
                 DELETION_VECTORS_INDEX,
