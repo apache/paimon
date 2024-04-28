@@ -138,7 +138,7 @@ public class MySqlTypeUtils {
     private static final String COMMA = ",";
 
     private static final List<String> HAVE_SCALE_LIST =
-            Arrays.asList(DECIMAL, NUMERIC, DOUBLE, REAL, FIXED);
+            Arrays.asList(DECIMAL, NUMERIC, DOUBLE, REAL, FIXED, FLOAT);
     private static final List<String> MAP_TO_DECIMAL_TYPES =
             Arrays.asList(
                     NUMERIC,
