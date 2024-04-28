@@ -85,7 +85,11 @@ case class DeleteFromPaimonTableCommand(
         val dropPartitions = matchedPartitions.map {
           partition => rowDataPartitionComputer.generatePartValues(partition).asScala.asJava
         }
-        commit.dropPartitions(dropPartitions.asJava, BatchWriteBuilder.COMMIT_IDENTIFIER)
+        if (dropPartitions.nonEmpty) {
+          commit.dropPartitions(dropPartitions.asJava, BatchWriteBuilder.COMMIT_IDENTIFIER)
+        } else {
+          writer.commit(Seq.empty)
+        }
       } else {
         val commitMessages = if (withPrimaryKeys) {
           performDeleteForPkTable(sparkSession)
