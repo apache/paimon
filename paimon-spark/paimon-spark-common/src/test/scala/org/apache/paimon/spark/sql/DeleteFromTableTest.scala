@@ -85,6 +85,12 @@ abstract class DeleteFromTableTestBase extends PaimonSparkTestBase {
       spark.sql("SELECT * FROM T ORDER BY id"),
       Seq((2, "b", "2024")).toDF()
     )
+
+    spark.sql("DELETE FROM T WHERE dt < '2023' OR  dt > '2025'")
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Seq((2, "b", "2024")).toDF()
+    )
   }
 
   test("Paimon Delete: append-only table, condition contains IN/NOT IN subquery") {
