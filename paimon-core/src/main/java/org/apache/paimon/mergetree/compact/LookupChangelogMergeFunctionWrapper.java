@@ -125,7 +125,6 @@ public class LookupChangelogMergeFunctionWrapper<T>
                 containLevel0 = true;
             }
         }
-        reusedResult.reset();
 
         // 2. Lookup if latest high level record is absent
         if (highLevel == null) {
@@ -147,6 +146,7 @@ public class LookupChangelogMergeFunctionWrapper<T>
         KeyValue result = calculateResult(candidates, highLevel);
 
         // 4. Set changelog when there's level-0 records
+        reusedResult.reset();
         if (containLevel0 && lookupStrategy.produceChangelog) {
             setChangelog(highLevel, result);
         }
