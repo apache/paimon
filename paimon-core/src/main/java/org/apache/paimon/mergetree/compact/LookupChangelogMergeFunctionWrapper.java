@@ -30,6 +30,7 @@ import javax.annotation.Nullable;
 
 import java.util.Iterator;
 import java.util.LinkedList;
+import java.util.List;
 import java.util.function.Function;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -118,6 +119,11 @@ public class LookupChangelogMergeFunctionWrapper<T>
                 containLevel0 = true;
             }
         }
+        reusedResult.reset();
+
+        if (!containLevel0) {
+            return reusedResult.setResult(calculateResult(candidates, highLevel));
+        }
 
         // 2. Lookup if latest high level record is absent
         if (highLevel == null) {
@@ -136,20 +142,23 @@ public class LookupChangelogMergeFunctionWrapper<T>
         }
 
         // 3. Calculate result
+        KeyValue result = calculateResult(candidates, highLevel);
+
+        // 4. Set changelog when there's level-0 records
+        if (lookupStrategy.produceChangelog) {
+            setChangelog(highLevel, result);
+        }
+
+        return reusedResult.setResult(result);
+    }
+
+    private KeyValue calculateResult(List<KeyValue> candidates, @Nullable KeyValue highLevel) {
         mergeFunction2.reset();
         if (highLevel != null) {
             mergeFunction2.add(highLevel);
         }
         candidates.forEach(mergeFunction2::add);
-        KeyValue result = mergeFunction2.getResult();
-
-        // 4. Set changelog when there's level-0 records
-        reusedResult.reset();
-        if (containLevel0 && lookupStrategy.produceChangelog) {
-            setChangelog(highLevel, result);
-        }
-
-        return reusedResult.setResult(result);
+        return mergeFunction2.getResult();
     }
 
     private void setChangelog(@Nullable KeyValue before, KeyValue after) {
