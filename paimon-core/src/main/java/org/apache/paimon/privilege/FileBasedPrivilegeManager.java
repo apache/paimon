@@ -19,8 +19,6 @@
 package org.apache.paimon.privilege;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -61,7 +59,8 @@ import java.util.Set;
 
 /**
  * A {@link PrivilegeManager} based on user and privilege system tables. The directories of these
- * system tables are created at the root of warehouse.
+ * system tables are created at the root of warehouse (table-root/user.sys and
+ * table-root/privilege.sys).
  *
  * <p>User table is the table which stores all user information. The schema of user table is:
  *
@@ -112,17 +111,6 @@ public class FileBasedPrivilegeManager implements PrivilegeManager {
         this.fileIO = fileIO;
         this.user = user;
         this.sha256 = getSha256(password);
-    }
-
-    public static void assertSupported(Catalog catalog) {
-        if (catalog instanceof PrivilegedCatalog) {
-            throw new IllegalArgumentException("Catalog is already a PrivilegedCatalog");
-        } else if (catalog instanceof FileSystemCatalog) {
-            // supported
-        } else {
-            throw new IllegalArgumentException(
-                    "File based privilege system does not support " + catalog.getClass().getName());
-        }
     }
 
     @Override

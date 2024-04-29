@@ -187,6 +187,18 @@ public class PrivilegedFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public void createBranch(String branchName) {
+        privilegeChecker.assertCanInsert(identifier);
+        wrapped.createBranch(branchName);
+    }
+
+    @Override
+    public void createBranch(String branchName, long snapshotId) {
+        privilegeChecker.assertCanInsert(identifier);
+        wrapped.createBranch(branchName, snapshotId);
+    }
+
+    @Override
     public void createBranch(String branchName, String tagName) {
         privilegeChecker.assertCanInsert(identifier);
         wrapped.createBranch(branchName, tagName);

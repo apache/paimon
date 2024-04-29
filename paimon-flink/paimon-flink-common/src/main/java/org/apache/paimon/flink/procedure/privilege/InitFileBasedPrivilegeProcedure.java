@@ -26,6 +26,9 @@ import org.apache.paimon.privilege.PrivilegedCatalog;
 
 import org.apache.flink.table.procedure.ProcedureContext;
 
+import java.util.Arrays;
+import java.util.List;
+
 /**
  * Procedure to initialize file-based privilege system in warehouse. This procedure will
  * automatically create a root user with the provided password. Usage:
@@ -38,8 +41,19 @@ public class InitFileBasedPrivilegeProcedure extends ProcedureBase {
 
     public static final String IDENTIFIER = "init_file_based_privilege";
 
+    private static final List<String> SUPPORTED_CATALOGS =
+            Arrays.asList(
+                    "org.apache.paimon.catalog.FileSystemCatalog",
+                    "org.apache.paimon.hive.HiveCatalog");
+
     public String[] call(ProcedureContext procedureContext, String rootPassword) {
-        FileBasedPrivilegeManager.assertSupported(catalog);
+        if (catalog instanceof PrivilegedCatalog) {
+            throw new IllegalArgumentException("Catalog is already a PrivilegedCatalog");
+        } else if (!SUPPORTED_CATALOGS.contains(catalog.getClass().getName())) {
+            throw new IllegalArgumentException(
+                    "File based privilege system does not support " + catalog.getClass().getName());
+        }
+
         Options options = new Options(catalog.options());
         PrivilegeManager privilegeManager =
                 new FileBasedPrivilegeManager(

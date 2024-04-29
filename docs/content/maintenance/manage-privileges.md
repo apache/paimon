@@ -94,9 +94,9 @@ This is the default user if no username and password is provided when creating t
 ## Enable Privileges
 
 Paimon currently only supports file-based privilege system.
-Only catalogs with `'metastore' = 'filesystem'` (the default value) support such privilege system.
+Only catalogs with `'metastore' = 'filesystem'` (the default value) or `'metastore' = 'hive'` support such privilege system.
 
-To enable the privilege system on a filesystem catalog, do the following steps.
+To enable the privilege system on a filesystem / Hive catalog, do the following steps.
 
 {{< tabs "enable-privileges" >}}
 
