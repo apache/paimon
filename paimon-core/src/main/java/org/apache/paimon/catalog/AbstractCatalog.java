@@ -86,6 +86,16 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
+    public Map<String, String> options() {
+        return catalogOptions.toMap();
+    }
+
+    @Override
+    public FileIO fileIO() {
+        return fileIO;
+    }
+
+    @Override
     public Optional<CatalogLockFactory> lockFactory() {
         if (!lockEnabled()) {
             return Optional.empty();
@@ -369,17 +379,6 @@ public abstract class AbstractCatalog implements Catalog {
         }
     }
 
-    /**
-     * Get the warehouse path for the catalog if exists.
-     *
-     * @return The catalog warehouse path.
-     */
-    public abstract String warehouse();
-
-    public Map<String, String> options() {
-        return catalogOptions.toMap();
-    }
-
     protected abstract TableSchema getDataTableSchema(Identifier identifier)
             throws TableNotExistException;
 
@@ -407,10 +406,6 @@ public abstract class AbstractCatalog implements Catalog {
 
     public void copyTableDefaultOptions(Map<String, String> options) {
         tableDefaultOptions.forEach(options::putIfAbsent);
-    }
-
-    public FileIO fileIO() {
-        return fileIO;
     }
 
     private String[] tableAndSystemName(Identifier identifier) {
