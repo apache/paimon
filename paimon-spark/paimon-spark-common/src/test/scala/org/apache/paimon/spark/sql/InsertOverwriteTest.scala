@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.spark.PaimonSparkTestBase
+
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.types._
 
