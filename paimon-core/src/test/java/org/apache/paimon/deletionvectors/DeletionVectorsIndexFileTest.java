@@ -113,7 +113,7 @@ public class DeletionVectorsIndexFileTest {
     public void testReadDvIndexWithEnormousDv() {
         PathFactory pathFactory = getPathFactory();
         DeletionVectorsIndexFile deletionVectorsIndexFile =
-            new DeletionVectorsIndexFile(LocalFileIO.create(), pathFactory);
+                new DeletionVectorsIndexFile(LocalFileIO.create(), pathFactory);
 
         // write
         Random random = new Random();
@@ -125,11 +125,11 @@ public class DeletionVectorsIndexFileTest {
         }
         deleteMap.put("largeFile.parquet", index);
         Pair<String, LinkedHashMap<String, Pair<Integer, Integer>>> pair =
-            deletionVectorsIndexFile.write(deleteMap);
+                deletionVectorsIndexFile.write(deleteMap);
 
         // read
         Map<String, DeletionVector> dvs =
-            deletionVectorsIndexFile.readAllDeletionVectors(pair.getLeft(), pair.getRight());
+                deletionVectorsIndexFile.readAllDeletionVectors(pair.getLeft(), pair.getRight());
         assertThat(dvs.size()).isEqualTo(1);
     }
 
