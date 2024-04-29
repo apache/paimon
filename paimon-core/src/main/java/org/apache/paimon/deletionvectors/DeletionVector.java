@@ -115,7 +115,9 @@ public interface DeletionVector {
                         "Size not match, actual size: "
                                 + actualLength
                                 + ", expert size: "
-                                + deletionFile.length());
+                                + deletionFile.length()
+                                + ", file path: "
+                                + path);
             }
             int magicNum = dis.readInt();
             if (magicNum == BitmapDeletionVector.MAGIC_NUMBER) {

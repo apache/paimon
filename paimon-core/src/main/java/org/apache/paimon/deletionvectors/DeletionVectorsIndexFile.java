@@ -57,10 +57,10 @@ public class DeletionVectorsIndexFile extends IndexFile {
      * @throws UncheckedIOException If an I/O error occurs while reading from the file.
      */
     public Map<String, DeletionVector> readAllDeletionVectors(
-            String fileName, Map<String, Pair<Integer, Integer>> deletionVectorRanges) {
+            String fileName, LinkedHashMap<String, Pair<Integer, Integer>> deletionVectorRanges) {
         Map<String, DeletionVector> deletionVectors = new HashMap<>();
-        try (SeekableInputStream inputStream =
-                fileIO.newInputStream(pathFactory.toPath(fileName))) {
+        Path filePath = pathFactory.toPath(fileName);
+        try (SeekableInputStream inputStream = fileIO.newInputStream(filePath)) {
             checkVersion(inputStream);
             DataInputStream dataInputStream = new DataInputStream(inputStream);
             for (Map.Entry<String, Pair<Integer, Integer>> entry :
@@ -69,9 +69,13 @@ public class DeletionVectorsIndexFile extends IndexFile {
                         entry.getKey(),
                         readDeletionVector(dataInputStream, entry.getValue().getRight()));
             }
-        } catch (IOException e) {
-            throw new UncheckedIOException(
-                    "Unable to read deletion vectors from file: " + fileName, e);
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    "Unable to read deletion vectors from file: "
+                            + filePath
+                            + ", deletionVectorRanges: "
+                            + deletionVectorRanges,
+                    e);
         }
         return deletionVectors;
     }
@@ -87,15 +91,19 @@ public class DeletionVectorsIndexFile extends IndexFile {
      */
     public DeletionVector readDeletionVector(
             String fileName, Pair<Integer, Integer> deletionVectorRange) {
-        try (SeekableInputStream inputStream =
-                fileIO.newInputStream(pathFactory.toPath(fileName))) {
+        Path filePath = pathFactory.toPath(fileName);
+        try (SeekableInputStream inputStream = fileIO.newInputStream(filePath)) {
             checkVersion(inputStream);
             inputStream.seek(deletionVectorRange.getLeft());
             DataInputStream dataInputStream = new DataInputStream(inputStream);
             return readDeletionVector(dataInputStream, deletionVectorRange.getRight());
-        } catch (IOException e) {
-            throw new UncheckedIOException(
-                    "Unable to read deletion vector from file: " + fileName, e);
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    "Unable to read deletion vector from file: "
+                            + filePath
+                            + ", deletionVectorRange: "
+                            + deletionVectorRange,
+                    e);
         }
     }
 
@@ -111,12 +119,11 @@ public class DeletionVectorsIndexFile extends IndexFile {
      *     data is located.
      * @throws UncheckedIOException If an I/O error occurs while writing to the file.
      */
-    public Pair<String, Map<String, Pair<Integer, Integer>>> write(
+    public Pair<String, LinkedHashMap<String, Pair<Integer, Integer>>> write(
             Map<String, DeletionVector> input) {
         int size = input.size();
-        // use LinkedHashMap to ensure that the order of DeletionVectorRanges and the written
-        // DeletionVectors is consistent.
-        Map<String, Pair<Integer, Integer>> deletionVectorRanges = new LinkedHashMap<>(size);
+        LinkedHashMap<String, Pair<Integer, Integer>> deletionVectorRanges =
+                new LinkedHashMap<>(size);
         Path path = pathFactory.newPath();
         try (DataOutputStream dataOutputStream =
                 new DataOutputStream(fileIO.newOutputStream(path, true))) {
@@ -158,11 +165,7 @@ public class DeletionVectorsIndexFile extends IndexFile {
 
             // read DeletionVector bytes
             byte[] bytes = new byte[size];
-            int readSize = inputStream.read(bytes);
-            if (readSize != size) {
-                throw new RuntimeException(
-                        "Size not match, actual size: " + readSize + ", expert size: " + size);
-            }
+            inputStream.readFully(bytes);
 
             // check checksum
             int checkSum = calculateChecksum(bytes);
