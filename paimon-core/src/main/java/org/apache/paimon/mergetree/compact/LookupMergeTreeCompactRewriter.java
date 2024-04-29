@@ -31,6 +31,7 @@ import org.apache.paimon.mergetree.LookupLevels;
 import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.SortedRun;
 import org.apache.paimon.utils.FieldsComparator;
+import org.apache.paimon.utils.UserDefinedSeqComparator;
 
 import javax.annotation.Nullable;
 
@@ -150,14 +151,17 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
         private final RecordEqualiser valueEqualiser;
         private final boolean changelogRowDeduplicate;
         private final LookupStrategy lookupStrategy;
+        @Nullable private final UserDefinedSeqComparator userDefinedSeqComparator;
 
         public LookupMergeFunctionWrapperFactory(
                 RecordEqualiser valueEqualiser,
                 boolean changelogRowDeduplicate,
-                LookupStrategy lookupStrategy) {
+                LookupStrategy lookupStrategy,
+                @Nullable UserDefinedSeqComparator userDefinedSeqComparator) {
             this.valueEqualiser = valueEqualiser;
             this.changelogRowDeduplicate = changelogRowDeduplicate;
             this.lookupStrategy = lookupStrategy;
+            this.userDefinedSeqComparator = userDefinedSeqComparator;
         }
 
         @Override
@@ -178,7 +182,8 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
                     valueEqualiser,
                     changelogRowDeduplicate,
                     lookupStrategy,
-                    deletionVectorsMaintainer);
+                    deletionVectorsMaintainer,
+                    userDefinedSeqComparator);
         }
     }
 

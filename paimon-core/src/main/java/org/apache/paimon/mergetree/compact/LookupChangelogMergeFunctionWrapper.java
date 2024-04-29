@@ -25,11 +25,15 @@ import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.mergetree.LookupLevels.PositionedKeyValue;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.utils.FieldsComparator;
+import org.apache.paimon.utils.UserDefinedSeqComparator;
 
 import javax.annotation.Nullable;
 
+import java.util.Comparator;
 import java.util.Iterator;
 import java.util.LinkedList;
+import java.util.List;
 import java.util.function.Function;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -63,6 +67,7 @@ public class LookupChangelogMergeFunctionWrapper<T>
     private final boolean changelogRowDeduplicate;
     private final LookupStrategy lookupStrategy;
     private final @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer;
+    private final Comparator<KeyValue> comparator;
 
     public LookupChangelogMergeFunctionWrapper(
             MergeFunctionFactory<KeyValue> mergeFunctionFactory,
@@ -70,7 +75,8 @@ public class LookupChangelogMergeFunctionWrapper<T>
             RecordEqualiser valueEqualiser,
             boolean changelogRowDeduplicate,
             LookupStrategy lookupStrategy,
-            @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer) {
+            @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer,
+            UserDefinedSeqComparator userDefinedSeqComparator) {
         MergeFunction<KeyValue> mergeFunction = mergeFunctionFactory.create();
         checkArgument(
                 mergeFunction instanceof LookupMergeFunction,
@@ -88,6 +94,7 @@ public class LookupChangelogMergeFunctionWrapper<T>
         this.changelogRowDeduplicate = changelogRowDeduplicate;
         this.lookupStrategy = lookupStrategy;
         this.deletionVectorsMaintainer = deletionVectorsMaintainer;
+        this.comparator = createSequenceComparator(userDefinedSeqComparator);
     }
 
     @Override
@@ -118,6 +125,7 @@ public class LookupChangelogMergeFunctionWrapper<T>
                 containLevel0 = true;
             }
         }
+        reusedResult.reset();
 
         // 2. Lookup if latest high level record is absent
         if (highLevel == null) {
@@ -136,20 +144,31 @@ public class LookupChangelogMergeFunctionWrapper<T>
         }
 
         // 3. Calculate result
-        mergeFunction2.reset();
-        if (highLevel != null) {
-            mergeFunction2.add(highLevel);
-        }
-        candidates.forEach(mergeFunction2::add);
-        KeyValue result = mergeFunction2.getResult();
+        KeyValue result = calculateResult(candidates, highLevel);
 
         // 4. Set changelog when there's level-0 records
-        reusedResult.reset();
         if (containLevel0 && lookupStrategy.produceChangelog) {
             setChangelog(highLevel, result);
         }
 
         return reusedResult.setResult(result);
+    }
+
+    private KeyValue calculateResult(List<KeyValue> candidates, @Nullable KeyValue highLevel) {
+        mergeFunction2.reset();
+        for (KeyValue candidate : candidates) {
+            if (highLevel != null && comparator.compare(highLevel, candidate) < 0) {
+                mergeFunction2.add(highLevel);
+                mergeFunction2.add(candidate);
+                highLevel = null;
+            } else {
+                mergeFunction2.add(candidate);
+            }
+        }
+        if (highLevel != null) {
+            mergeFunction2.add(highLevel);
+        }
+        return mergeFunction2.getResult();
     }
 
     private void setChangelog(@Nullable KeyValue before, KeyValue after) {
@@ -179,5 +198,20 @@ public class LookupChangelogMergeFunctionWrapper<T>
 
     private KeyValue replace(KeyValue reused, RowKind valueKind, KeyValue from) {
         return reused.replace(from.key(), from.sequenceNumber(), valueKind, from.value());
+    }
+
+    private Comparator<KeyValue> createSequenceComparator(
+            @Nullable FieldsComparator userDefinedSeqComparator) {
+        if (userDefinedSeqComparator == null) {
+            return Comparator.comparingLong(KeyValue::sequenceNumber);
+        }
+
+        return (o1, o2) -> {
+            int result = userDefinedSeqComparator.compare(o1.value(), o2.value());
+            if (result != 0) {
+                return result;
+            }
+            return Long.compare(o1.sequenceNumber(), o2.sequenceNumber());
+        };
     }
 }

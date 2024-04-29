@@ -18,6 +18,7 @@
 
 package org.apache.paimon.mergetree.compact;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
@@ -25,11 +26,15 @@ import org.apache.paimon.data.InternalRow.FieldGetter;
 import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
+import org.apache.paimon.mergetree.compact.aggregate.FieldLastValueAgg;
 import org.apache.paimon.mergetree.compact.aggregate.FieldSumAgg;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.UserDefinedSeqComparator;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import org.assertj.core.util.Lists;
 import org.junit.jupiter.api.Test;
@@ -69,6 +74,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
                         EQUALISER,
                         changelogRowDeduplicate,
                         LookupStrategy.CHANGELOG_ONLY,
+                        null,
                         null);
 
         // Without level-0
@@ -227,6 +233,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
                         EQUALISER,
                         changelogRowDeduplicate,
                         LookupStrategy.CHANGELOG_ONLY,
+                        null,
                         null);
 
         // Without level-0
@@ -293,6 +300,85 @@ public class LookupChangelogMergeFunctionWrapperTest {
         kv = result.result();
         assertThat(kv).isNotNull();
         assertThat(kv.value().getInt(0)).isEqualTo(2);
+    }
+
+    @Test
+    public void testMergeHighLevelOrder() {
+        Map<InternalRow, KeyValue> highLevel = new HashMap<>();
+        LookupChangelogMergeFunctionWrapper function =
+                new LookupChangelogMergeFunctionWrapper(
+                        LookupMergeFunction.wrap(
+                                projection ->
+                                        new AggregateMergeFunction(
+                                                new FieldGetter[] {
+                                                    row -> row.isNullAt(0) ? null : row.getInt(0)
+                                                },
+                                                new FieldAggregator[] {
+                                                    new FieldLastValueAgg(DataTypes.INT())
+                                                }),
+                                RowType.of(DataTypes.INT()),
+                                RowType.of(DataTypes.INT())),
+                        highLevel::get,
+                        EQUALISER,
+                        false,
+                        LookupStrategy.CHANGELOG_ONLY,
+                        null,
+                        UserDefinedSeqComparator.create(
+                                RowType.builder().field("f0", DataTypes.INT()).build(),
+                                CoreOptions.fromMap(ImmutableMap.of("sequence.field", "f0"))));
+
+        // Only level-0 record and find record of higher sequence.field value in high level.
+        highLevel.put(row(1), new KeyValue().replace(row(1), 1, INSERT, row(3)).setLevel(3));
+        function.reset();
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(2)).setLevel(0));
+        ChangelogResult result = function.getResult();
+        assertThat(result).isNotNull();
+        List<KeyValue> changelogs = result.changelogs();
+        // 3 -> 3
+        assertThat(changelogs).hasSize(2);
+        assertThat(changelogs.get(0).valueKind()).isEqualTo(UPDATE_BEFORE);
+        assertThat(changelogs.get(0).value().getInt(0)).isEqualTo(3);
+        assertThat(changelogs.get(1).valueKind()).isEqualTo(UPDATE_AFTER);
+        assertThat(changelogs.get(1).value().getInt(0)).isEqualTo(3);
+        KeyValue kv = result.result();
+        assertThat(kv).isNotNull();
+        assertThat(kv.value().getInt(0)).isEqualTo(3);
+
+        // Only level-0 record and find record of lower sequence.field value in high level.
+        highLevel.put(row(1), new KeyValue().replace(row(1), 1, INSERT, row(1)).setLevel(3));
+        function.reset();
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(2)).setLevel(0));
+        result = function.getResult();
+        assertThat(result).isNotNull();
+        changelogs = result.changelogs();
+        // 1 -> 2
+        assertThat(changelogs).hasSize(2);
+        assertThat(changelogs.get(0).valueKind()).isEqualTo(UPDATE_BEFORE);
+        assertThat(changelogs.get(0).value().getInt(0)).isEqualTo(1);
+        assertThat(changelogs.get(1).valueKind()).isEqualTo(UPDATE_AFTER);
+        assertThat(changelogs.get(1).value().getInt(0)).isEqualTo(2);
+        kv = result.result();
+        assertThat(kv).isNotNull();
+        assertThat(kv.value().getInt(0)).isEqualTo(2);
+
+        // Only level-0 record and find record of middle sequence.field value in high level.
+        // 1 2 3
+        highLevel.put(row(1), new KeyValue().replace(row(1), 1, INSERT, row(2)).setLevel(3));
+        function.reset();
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(1)).setLevel(0));
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(3)).setLevel(0));
+        result = function.getResult();
+        assertThat(result).isNotNull();
+        changelogs = result.changelogs();
+        // 2 -> 3
+        assertThat(changelogs).hasSize(2);
+        assertThat(changelogs.get(0).valueKind()).isEqualTo(UPDATE_BEFORE);
+        assertThat(changelogs.get(0).value().getInt(0)).isEqualTo(2);
+        assertThat(changelogs.get(1).valueKind()).isEqualTo(UPDATE_AFTER);
+        assertThat(changelogs.get(1).value().getInt(0)).isEqualTo(3);
+        kv = result.result();
+        assertThat(kv).isNotNull();
+        assertThat(kv.value().getInt(0)).isEqualTo(3);
     }
 
     @Test
