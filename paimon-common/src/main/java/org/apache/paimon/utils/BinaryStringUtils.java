@@ -276,7 +276,12 @@ public class BinaryStringUtils {
     }
 
     public static int toDate(BinaryString input) throws DateTimeException {
-        Integer date = DateTimeUtils.parseDate(input.toString());
+        String str = input.toString();
+        if (StringUtils.isNumeric(str)) {
+            // for Integer.toString conversion
+            return toInt(input);
+        }
+        Integer date = DateTimeUtils.parseDate(str);
         if (date == null) {
             throw new DateTimeException("For input string: '" + input + "'.");
         }
@@ -285,7 +290,12 @@ public class BinaryStringUtils {
     }
 
     public static int toTime(BinaryString input) throws DateTimeException {
-        Integer date = DateTimeUtils.parseTime(input.toString());
+        String str = input.toString();
+        if (StringUtils.isNumeric(str)) {
+            // for Integer.toString conversion
+            return toInt(input);
+        }
+        Integer date = DateTimeUtils.parseTime(str);
         if (date == null) {
             throw new DateTimeException("For input string: '" + input + "'.");
         }

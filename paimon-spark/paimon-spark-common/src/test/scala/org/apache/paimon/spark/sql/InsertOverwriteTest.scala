@@ -19,9 +19,10 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.spark.PaimonSparkTestBase
-
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.types._
+
+import java.sql.Date
 
 class InsertOverwriteTest extends PaimonSparkTestBase {
 
@@ -328,4 +329,19 @@ class InsertOverwriteTest extends PaimonSparkTestBase {
       }
   }
 
+  test(s"insert overwrite date type partition table") {
+    spark.sql(s"""
+                 |CREATE TABLE T (
+                 |  id STRING,
+                 |  dt date)
+                 |PARTITIONED BY (dt)
+                 |TBLPROPERTIES (
+                 |  'primary-key' = 'id,dt',
+                 |  'bucket' = '3'
+                 |);
+                 |""".stripMargin)
+
+    spark.sql("INSERT OVERWRITE T partition (dt='2024-04-18') values(1)")
+    checkAnswer(spark.sql("SELECT * FROM T"), Row("1", Date.valueOf("2024-04-18")))
+  }
 }
