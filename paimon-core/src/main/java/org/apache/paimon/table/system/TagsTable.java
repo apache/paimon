@@ -52,9 +52,6 @@ import org.apache.paimon.utils.TagManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -67,14 +64,14 @@ import java.util.Objects;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
-/** A {@link Table} for showing tags of table. */
+/**
+ * A {@link Table} for showing tags of table.
+ */
 public class TagsTable implements ReadonlyTable {
 
     private static final long serialVersionUID = 1L;
 
     public static final String TAGS = "tags";
-    private static final LocalDateTime DEFAULT_TAG_CREATE_TIME =
-            LocalDateTime.ofInstant(Instant.ofEpochMilli(0L), ZoneId.systemDefault());
 
     public static final RowType TABLE_TYPE =
             new RowType(
@@ -85,7 +82,7 @@ public class TagsTable implements ReadonlyTable {
                             new DataField(3, "commit_time", new TimestampType(false, 3)),
                             new DataField(4, "record_count", new BigIntType(true)),
                             new DataField(5, "branches", SerializationUtils.newStringType(true)),
-                            new DataField(6, "create_time", new TimestampType(false, 3)),
+                            new DataField(6, "create_time", new TimestampType(true, 3)),
                             new DataField(
                                     7, "time_retained", SerializationUtils.newStringType(true))));
 
@@ -250,10 +247,8 @@ public class TagsTable implements ReadonlyTable {
                     Timestamp.fromLocalDateTime(DateTimeUtils.toLocalDateTime(tag.timeMillis())),
                     tag.totalRecordCount(),
                     BinaryString.fromString(branches == null ? "[]" : branches.toString()),
-                    Timestamp.fromLocalDateTime(
-                            tag.getTagCreateTime() == null
-                                    ? DEFAULT_TAG_CREATE_TIME
-                                    : tag.getTagCreateTime()),
+                    tag.getTagCreateTime() == null ? null
+                            : Timestamp.fromLocalDateTime(tag.getTagCreateTime()),
                     BinaryString.fromString(
                             tag.getTagTimeRetained() == null
                                     ? ""
