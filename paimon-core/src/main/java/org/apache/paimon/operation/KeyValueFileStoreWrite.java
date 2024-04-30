@@ -307,7 +307,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         new LookupMergeFunctionWrapperFactory<>(
                                 valueEqualiserSupplier.get(),
                                 options.changelogRowDeduplicate(),
-                                lookupStrategy);
+                                lookupStrategy,
+                                UserDefinedSeqComparator.create(valueType, options));
             }
             return new LookupMergeTreeCompactRewriter(
                     maxLevel,
