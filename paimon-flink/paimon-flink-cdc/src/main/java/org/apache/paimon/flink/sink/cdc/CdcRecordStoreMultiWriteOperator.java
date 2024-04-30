@@ -190,7 +190,8 @@ public class CdcRecordStoreMultiWriteOperator
 
         if (table.bucketMode() != BucketMode.FIXED) {
             throw new UnsupportedOperationException(
-                    "Unified Sink only supports FIXED bucket mode, but is " + table.bucketMode());
+                    "Combine mode Sink only supports FIXED bucket mode, but is "
+                            + table.bucketMode());
         }
         return table;
     }
