@@ -76,7 +76,7 @@ public class LookupChangelogMergeFunctionWrapper<T>
             boolean changelogRowDeduplicate,
             LookupStrategy lookupStrategy,
             @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer,
-            UserDefinedSeqComparator userDefinedSeqComparator) {
+            @Nullable UserDefinedSeqComparator userDefinedSeqComparator) {
         MergeFunction<KeyValue> mergeFunction = mergeFunctionFactory.create();
         checkArgument(
                 mergeFunction instanceof LookupMergeFunction,
