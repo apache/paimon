@@ -149,6 +149,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
 
         // With level-0 'delete' record, without level-x record, query fail
         function.reset();
+        highLevel.clear();
         function.add(new KeyValue().replace(row(1), 1, UPDATE_BEFORE, row(2)).setLevel(0));
         result = function.getResult();
         assertThat(result).isNotNull();
