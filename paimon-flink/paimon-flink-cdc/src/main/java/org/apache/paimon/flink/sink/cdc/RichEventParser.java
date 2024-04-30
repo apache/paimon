@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataType;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -32,7 +31,7 @@ public class RichEventParser implements EventParser<RichCdcRecord> {
 
     private RichCdcRecord record;
 
-    private final LinkedHashMap<String, DataType> previousDataFields = new LinkedHashMap<>();
+    private final LinkedHashMap<String, DataField> previousDataFields = new LinkedHashMap<>();
 
     @Override
     public void setRawEvent(RichCdcRecord rawEvent) {
@@ -42,13 +41,13 @@ public class RichEventParser implements EventParser<RichCdcRecord> {
     @Override
     public List<DataField> parseSchemaChange() {
         List<DataField> change = new ArrayList<>();
-        record.fieldTypes()
+        record.fields()
                 .forEach(
-                        (field, type) -> {
-                            DataType previous = previousDataFields.get(field);
-                            if (!Objects.equals(previous, type)) {
-                                previousDataFields.put(field, type);
-                                change.add(new DataField(0, field, type));
+                        dataField -> {
+                            DataField previous = previousDataFields.get(dataField.name());
+                            if (!Objects.equals(previous, dataField)) {
+                                previousDataFields.put(dataField.name(), dataField);
+                                change.add(dataField);
                             }
                         });
         return change;

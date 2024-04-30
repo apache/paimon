@@ -18,12 +18,11 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataField;
 
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
 
@@ -34,19 +33,19 @@ public class RichCdcMultiplexRecord implements Serializable {
 
     @Nullable private final String databaseName;
     @Nullable private final String tableName;
-    private final LinkedHashMap<String, DataType> fieldTypes;
+    private final List<DataField> fields;
     private final List<String> primaryKeys;
     private final CdcRecord cdcRecord;
 
     public RichCdcMultiplexRecord(
             @Nullable String databaseName,
             @Nullable String tableName,
-            LinkedHashMap<String, DataType> fieldTypes,
+            List<DataField> fields,
             List<String> primaryKeys,
             CdcRecord cdcRecord) {
         this.databaseName = databaseName;
         this.tableName = tableName;
-        this.fieldTypes = fieldTypes;
+        this.fields = fields;
         this.primaryKeys = primaryKeys;
         this.cdcRecord = cdcRecord;
     }
@@ -61,8 +60,8 @@ public class RichCdcMultiplexRecord implements Serializable {
         return tableName;
     }
 
-    public LinkedHashMap<String, DataType> fieldTypes() {
-        return fieldTypes;
+    public List<DataField> fields() {
+        return fields;
     }
 
     public List<String> primaryKeys() {
@@ -70,12 +69,12 @@ public class RichCdcMultiplexRecord implements Serializable {
     }
 
     public RichCdcRecord toRichCdcRecord() {
-        return new RichCdcRecord(cdcRecord, fieldTypes);
+        return new RichCdcRecord(cdcRecord, fields);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(databaseName, tableName, fieldTypes, primaryKeys, cdcRecord);
+        return Objects.hash(databaseName, tableName, fields, primaryKeys, cdcRecord);
     }
 
     @Override
@@ -89,7 +88,7 @@ public class RichCdcMultiplexRecord implements Serializable {
         RichCdcMultiplexRecord that = (RichCdcMultiplexRecord) o;
         return Objects.equals(databaseName, that.databaseName)
                 && Objects.equals(tableName, that.tableName)
-                && Objects.equals(fieldTypes, that.fieldTypes)
+                && Objects.equals(fields, that.fields)
                 && Objects.equals(primaryKeys, that.primaryKeys)
                 && Objects.equals(cdcRecord, that.cdcRecord);
     }
@@ -101,8 +100,8 @@ public class RichCdcMultiplexRecord implements Serializable {
                 + databaseName
                 + ", tableName="
                 + tableName
-                + ", fieldTypes="
-                + fieldTypes
+                + ", fields="
+                + fields
                 + ", primaryKeys="
                 + primaryKeys
                 + ", cdcRecord="

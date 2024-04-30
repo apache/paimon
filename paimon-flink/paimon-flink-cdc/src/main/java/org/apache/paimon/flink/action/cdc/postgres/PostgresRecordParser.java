@@ -25,9 +25,11 @@ import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mysql.format.DebeziumEvent;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
@@ -144,7 +146,7 @@ public class PostgresRecordParser
         extractRecords().forEach(out::collect);
     }
 
-    private LinkedHashMap<String, DataType> extractFieldTypes(DebeziumEvent.Field schema) {
+    private List<DataField> extractFields(DebeziumEvent.Field schema) {
         Map<String, DebeziumEvent.Field> afterFields = schema.afterFields();
         Preconditions.checkArgument(
                 !afterFields.isEmpty(),
@@ -152,7 +154,7 @@ public class PostgresRecordParser
                         + "Please make sure that `includeSchema` is true "
                         + "in the JsonDebeziumDeserializationSchema you created");
 
-        LinkedHashMap<String, DataType> fieldTypes = new LinkedHashMap<>(afterFields.size());
+        RowType.Builder rowType = RowType.builder();
         Set<String> existedFields = new HashSet<>();
         Function<String, String> columnDuplicateErrMsg = columnDuplicateErrMsg(currentTable);
         afterFields.forEach(
@@ -166,13 +168,13 @@ public class PostgresRecordParser
                             dataType.copy(
                                     typeMapping.containsMode(TO_NULLABLE) || value.optional());
 
-                    fieldTypes.put(columnName, dataType);
+                    rowType.field(columnName, dataType);
                 });
-        return fieldTypes;
+        return rowType.build().getFields();
     }
 
     /**
-     * Extract field types from json records, see <a
+     * Extract fields from json records, see <a
      * href="https://debezium.io/documentation/reference/stable/connectors/postgresql.html#postgresql-data-types">postgresql-data-types</a>.
      */
     private DataType extractFieldType(DebeziumEvent.Field field) {
@@ -246,12 +248,12 @@ public class PostgresRecordParser
         Map<String, String> after = extractRow(root.payload().after());
         if (!after.isEmpty()) {
             after = mapKeyCaseConvert(after, caseSensitive, recordKeyDuplicateErrMsg(after));
-            LinkedHashMap<String, DataType> fieldTypes = extractFieldTypes(root.schema());
+            List<DataField> fields = extractFields(root.schema());
             records.add(
                     new RichCdcMultiplexRecord(
                             databaseName,
                             currentTable,
-                            fieldTypes,
+                            fields,
                             Collections.emptyList(),
                             new CdcRecord(RowKind.INSERT, after)));
         }
@@ -398,7 +400,7 @@ public class PostgresRecordParser
         return new RichCdcMultiplexRecord(
                 databaseName,
                 currentTable,
-                new LinkedHashMap<>(0),
+                Collections.emptyList(),
                 Collections.emptyList(),
                 new CdcRecord(rowKind, data));
     }
