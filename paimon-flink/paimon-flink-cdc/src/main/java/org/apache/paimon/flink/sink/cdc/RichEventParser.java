@@ -22,12 +22,16 @@ import org.apache.paimon.types.DataField;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Objects;
 
 /** A {@link EventParser} for {@link RichCdcRecord}. */
 public class RichEventParser implements EventParser<RichCdcRecord> {
 
     private RichCdcRecord record;
+
+    private final LinkedHashMap<String, DataField> previousDataFields = new LinkedHashMap<>();
 
     @Override
     public void setRawEvent(RichCdcRecord rawEvent) {
@@ -36,7 +40,17 @@ public class RichEventParser implements EventParser<RichCdcRecord> {
 
     @Override
     public List<DataField> parseSchemaChange() {
-        return new ArrayList<>(record.fields());
+        List<DataField> change = new ArrayList<>();
+        record.fields()
+                .forEach(
+                        dataField -> {
+                            DataField previous = previousDataFields.get(dataField.name());
+                            if (!Objects.equals(previous, dataField)) {
+                                previousDataFields.put(dataField.name(), dataField);
+                                change.add(dataField);
+                            }
+                        });
+        return change;
     }
 
     @Override
