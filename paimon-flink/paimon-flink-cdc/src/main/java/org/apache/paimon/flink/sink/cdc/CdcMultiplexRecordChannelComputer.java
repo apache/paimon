@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.ChannelComputer;
 
@@ -77,6 +78,13 @@ public class CdcMultiplexRecordChannelComputer implements ChannelComputer<CdcMul
                         LOG.error("Failed to get table " + id.getFullName());
                         return null;
                     }
+
+                    if (table.bucketMode() != BucketMode.FIXED) {
+                        throw new UnsupportedOperationException(
+                                "Unified Sink only supports FIXED bucket mode, but is "
+                                        + table.bucketMode());
+                    }
+
                     CdcRecordChannelComputer channelComputer =
                             new CdcRecordChannelComputer(table.schema());
                     channelComputer.setup(numChannels);
