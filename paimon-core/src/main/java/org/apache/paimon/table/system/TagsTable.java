@@ -52,7 +52,9 @@ import org.apache.paimon.utils.TagManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -71,6 +73,8 @@ public class TagsTable implements ReadonlyTable {
     private static final long serialVersionUID = 1L;
 
     public static final String TAGS = "tags";
+    private static final LocalDateTime DEFAULT_TAG_CREATE_TIME =
+            LocalDateTime.ofInstant(Instant.ofEpochMilli(0L), ZoneId.systemDefault());
 
     public static final RowType TABLE_TYPE =
             new RowType(
@@ -248,7 +252,7 @@ public class TagsTable implements ReadonlyTable {
                     BinaryString.fromString(branches == null ? "[]" : branches.toString()),
                     Timestamp.fromLocalDateTime(
                             tag.getTagCreateTime() == null
-                                    ? LocalDateTime.MIN
+                                    ? DEFAULT_TAG_CREATE_TIME
                                     : tag.getTagCreateTime()),
                     BinaryString.fromString(
                             tag.getTagTimeRetained() == null
