@@ -1337,7 +1337,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                 RowType.builder()
                         .field("pk", DataTypes.INT().notNull(), "pk comment")
                         .field("c1", DataTypes.DATE(), "c1 comment")
-                        .field("c2", DataTypes.STRING().notNull(), "c2 comment")
+                        .field("c2", DataTypes.VARCHAR(10).notNull(), "c2 comment")
                         .build();
 
         createFileStoreTable(

@@ -319,7 +319,7 @@ CREATE TABLE test_exist_options_change (
 CREATE TABLE test_exist_column_comment_change (
     pk INT,
     c1 DATE,
-    c2 STRING not null comment 'c2 comment',
+    c2 VARCHAR(10) not null comment 'c2 comment',
     PRIMARY KEY (pk)
 );
 
