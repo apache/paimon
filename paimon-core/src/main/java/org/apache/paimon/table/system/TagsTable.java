@@ -64,9 +64,7 @@ import java.util.Objects;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
-/**
- * A {@link Table} for showing tags of table.
- */
+/** A {@link Table} for showing tags of table. */
 public class TagsTable implements ReadonlyTable {
 
     private static final long serialVersionUID = 1L;
@@ -247,7 +245,8 @@ public class TagsTable implements ReadonlyTable {
                     Timestamp.fromLocalDateTime(DateTimeUtils.toLocalDateTime(tag.timeMillis())),
                     tag.totalRecordCount(),
                     BinaryString.fromString(branches == null ? "[]" : branches.toString()),
-                    tag.getTagCreateTime() == null ? null
+                    tag.getTagCreateTime() == null
+                            ? null
                             : Timestamp.fromLocalDateTime(tag.getTagCreateTime()),
                     BinaryString.fromString(
                             tag.getTagTimeRetained() == null
