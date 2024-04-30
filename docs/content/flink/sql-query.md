@@ -91,6 +91,9 @@ SELECT * FROM t /*+ OPTIONS('incremental-between' = '12,20') */;
 SELECT * FROM t /*+ OPTIONS('incremental-between-timestamp' = '1692169000000,1692169900000') */;
 ```
 
+By default, will scan changelog files for the table which produces changelog files. Otherwise, scan newly changed files.
+You can also force specifying `'incremental-between-scan-mode'`.
+
 In Batch SQL, the `DELETE` records are not allowed to be returned, so records of `-D` will be dropped.
 If you want see `DELETE` records, you can use audit_log table:
 

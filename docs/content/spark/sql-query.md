@@ -72,6 +72,9 @@ For example:
 - '5,10' means changes between snapshot 5 and snapshot 10.
 - 'TAG1,TAG3' means changes between TAG1 and TAG3.
 
+By default, will scan changelog files for the table which produces changelog files. Otherwise, scan newly changed files.
+You can also force specifying `'incremental-between-scan-mode'`.
+
 Requires Spark 3.2+.
 
 Paimon supports that use Spark SQL to do the incremental query that implemented by Spark Table Valued Function.

@@ -24,13 +24,18 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
-import org.apache.paimon.table.source.ScanMode;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
+import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
+import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_SCAN_MODE;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link IncrementalStartingScanner}. */
@@ -55,27 +60,22 @@ public class IncrementalStartingScannerTest extends ScannerTestBase {
         write.compact(binaryRow(1), 0, false);
         commit.commit(1, write.prepareCommit(true, 1));
 
+        write.close();
+        commit.close();
+
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(4);
 
-        IncrementalStartingScanner deltaScanner =
-                new IncrementalStartingScanner(snapshotManager, 1L, 4L, ScanMode.DELTA);
-        StartingScanner.ScannedResult deltaResult =
-                (StartingScanner.ScannedResult) deltaScanner.scan(snapshotReader);
-        assertThat(deltaResult.currentSnapshotId()).isEqualTo(4);
-        assertThat(getResult(table.newRead(), toSplits(deltaResult.splits())))
-                .hasSameElementsAs(Arrays.asList("+I 2|20|200", "+I 1|10|100", "+I 3|40|500"));
-
-        IncrementalStartingScanner changeLogScanner =
-                new IncrementalStartingScanner(snapshotManager, 1L, 4L, ScanMode.CHANGELOG);
-        StartingScanner.ScannedResult changeLogResult =
-                (StartingScanner.ScannedResult) changeLogScanner.scan(snapshotReader);
-        assertThat(changeLogResult.currentSnapshotId()).isEqualTo(4);
-        assertThat(getResult(table.newRead(), toSplits(changeLogResult.splits())))
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(INCREMENTAL_BETWEEN.key(), "1,4");
+        List<Split> splits = table.copy(dynamicOptions).newScan().plan().splits();
+        assertThat(getResult(table.newRead(), splits))
                 .hasSameElementsAs(
                         Arrays.asList("+I 2|20|200", "+I 1|10|100", "+I 3|40|400", "+U 3|40|500"));
 
-        write.close();
-        commit.close();
+        dynamicOptions.put(INCREMENTAL_BETWEEN_SCAN_MODE.key(), "delta");
+        splits = table.copy(dynamicOptions).newScan().plan().splits();
+        assertThat(getResult(table.newRead(), splits))
+                .hasSameElementsAs(Arrays.asList("+I 2|20|200", "+I 1|10|100", "+I 3|40|500"));
     }
 
     @Override
