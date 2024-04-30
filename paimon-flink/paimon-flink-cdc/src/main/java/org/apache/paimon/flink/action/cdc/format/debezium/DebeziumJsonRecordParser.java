@@ -63,7 +63,7 @@ import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
  * operation type, and primary key field names are used to construct the details of each record
  * event.
  */
-public class DebeziumRecordParser extends RecordParser {
+public class DebeziumJsonRecordParser extends RecordParser {
 
     private static final String FIELD_SCHEMA = "schema";
     protected static final String FIELD_PAYLOAD = "payload";
@@ -83,7 +83,7 @@ public class DebeziumRecordParser extends RecordParser {
     private final Map<String, String> classNames = new HashMap<>();
     private final Map<String, Map<String, String>> parameters = new HashMap<>();
 
-    public DebeziumRecordParser(
+    public DebeziumJsonRecordParser(
             boolean caseSensitive, TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
         super(caseSensitive, typeMapping, computedColumns);
     }

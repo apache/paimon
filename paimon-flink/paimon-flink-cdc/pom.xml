@@ -42,6 +42,7 @@ under the License.
         <json-path.version>2.9.0</json-path.version>
         <mongodb.testcontainers.version>1.19.1</mongodb.testcontainers.version>
         <flink.connector.pulsar.version>4.0.0-1.17</flink.connector.pulsar.version>
+        <confluent.platform.version>7.5.0</confluent.platform.version>
     </properties>
 
     <dependencies>
@@ -121,6 +122,13 @@ under the License.
             <groupId>org.apache.avro</groupId>
             <artifactId>avro</artifactId>
             <version>${avro.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-avro-confluent-registry</artifactId>
+            <version>${flink.version}</version>
             <scope>provided</scope>
         </dependency>
 
