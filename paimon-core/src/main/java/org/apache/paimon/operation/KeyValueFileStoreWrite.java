@@ -35,8 +35,10 @@ import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.IndexMaintainer;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.FileReaderFactory;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
+import org.apache.paimon.io.RecordLevelExpire;
 import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.lookup.hash.HashLookupStoreFactory;
 import org.apache.paimon.mergetree.Levels;
@@ -100,6 +102,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     private final FileIO fileIO;
     private final RowType keyType;
     private final RowType valueType;
+    @Nullable private final RecordLevelExpire recordLevelExpire;
 
     public KeyValueFileStoreWrite(
             FileIO fileIO,
@@ -144,6 +147,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         pathFactory,
                         extractor,
                         options);
+        this.recordLevelExpire = RecordLevelExpire.create(options, valueType);
         this.writerFactoryBuilder =
                 KeyValueFileWriterFactory.builder(
                         fileIO,
@@ -258,8 +262,11 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             Levels levels,
             @Nullable DeletionVectorsMaintainer dvMaintainer) {
         DeletionVector.Factory dvFactory = DeletionVector.factory(dvMaintainer);
-        KeyValueFileReaderFactory readerFactory =
+        FileReaderFactory<KeyValue> readerFactory =
                 readerFactoryBuilder.build(partition, bucket, dvFactory);
+        if (recordLevelExpire != null) {
+            readerFactory = recordLevelExpire.wrap(readerFactory);
+        }
         KeyValueFileWriterFactory writerFactory =
                 writerFactoryBuilder.build(partition, bucket, options);
         MergeSorter mergeSorter = new MergeSorter(options, keyType, valueType, ioManager);
@@ -282,7 +289,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             LookupStrategy lookupStrategy = options.lookupStrategy();
             LookupLevels.ValueProcessor<?> processor;
             LookupMergeTreeCompactRewriter.MergeFunctionWrapperFactory<?> wrapperFactory;
-            KeyValueFileReaderFactory lookupReaderFactory = readerFactory;
+            FileReaderFactory<KeyValue> lookupReaderFactory = readerFactory;
             if (mergeEngine == FIRST_ROW) {
                 if (options.deletionVectorsEnabled()) {
                     throw new UnsupportedOperationException(
@@ -337,7 +344,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     private <T> LookupLevels<T> createLookupLevels(
             Levels levels,
             LookupLevels.ValueProcessor<T> valueProcessor,
-            KeyValueFileReaderFactory readerFactory) {
+            FileReaderFactory<KeyValue> readerFactory) {
         if (ioManager == null) {
             throw new RuntimeException(
                     "Can not use lookup, there is no temp disk directory to use.");
@@ -348,9 +355,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 keyComparatorSupplier.get(),
                 keyType,
                 valueProcessor,
-                file ->
-                        readerFactory.createRecordReader(
-                                file.schemaId(), file.fileName(), file.fileSize(), file.level()),
+                readerFactory::createRecordReader,
                 () -> ioManager.createChannel().getPathFile(),
                 new HashLookupStoreFactory(
                         cacheManager,

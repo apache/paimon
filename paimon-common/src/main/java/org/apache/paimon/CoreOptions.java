@@ -1128,6 +1128,23 @@ public class CoreOptions implements Serializable {
                     .defaultValue(1000)
                     .withDescription(
                             "The magnification of local sample for sort-compaction.The size of local sample is sink parallelism * magnification.");
+
+    public static final ConfigOption<Duration> RECORD_LEVEL_EXPIRE_TIME =
+            key("record-level.expire-time")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Record level expire time for primary key table, expiration happens in compaction, "
+                                    + "there is no strong guarantee to expire records in time. "
+                                    + "You must specific 'record-level.time-field' too.");
+
+    public static final ConfigOption<String> RECORD_LEVEL_TIME_FIELD =
+            key("record-level.time-field")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Time field for record level expire, it should be a seconds INT.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -1758,8 +1775,19 @@ public class CoreOptions implements Serializable {
         return options.get(FILE_INDEX_READ_ENABLED);
     }
 
+<<<<<<< HEAD
     public boolean deleteForceProduceChangelog() {
         return options.get(DELETION_FORCE_PRODUCE_CHANGELOG);
+=======
+    @Nullable
+    public Duration recordLevelExpireTime() {
+        return options.get(RECORD_LEVEL_EXPIRE_TIME);
+    }
+
+    @Nullable
+    public String recordLevelTimeField() {
+        return options.get(RECORD_LEVEL_TIME_FIELD);
+>>>>>>> 581c6d5c7 ([core] Introduce record-level expire time)
     }
 
     /** Specifies the merge engine for table with primary key. */

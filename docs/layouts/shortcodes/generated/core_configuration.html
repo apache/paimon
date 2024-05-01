@@ -474,6 +474,18 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Read batch size for orc and parquet.</td>
         </tr>
         <tr>
+            <td><h5>record-level.expire-time</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>Record level expire time for primary key table, expiration happens in compaction, there is no strong guarantee to expire records in time. You must specific 'record-level.time-field' too.</td>
+        </tr>
+        <tr>
+            <td><h5>record-level.time-field</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Time field for record level expire, it should be a seconds INT.</td>
+        </tr>
+        <tr>
             <td><h5>rowkind.field</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>

@@ -22,7 +22,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.io.KeyValueFileReaderFactory;
+import org.apache.paimon.io.FileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.mergetree.DropDeleteReader;
@@ -42,7 +42,7 @@ import java.util.List;
 /** Default {@link CompactRewriter} for merge trees. */
 public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
 
-    protected final KeyValueFileReaderFactory readerFactory;
+    protected final FileReaderFactory<KeyValue> readerFactory;
     protected final KeyValueFileWriterFactory writerFactory;
     protected final Comparator<InternalRow> keyComparator;
     @Nullable protected final FieldsComparator userDefinedSeqComparator;
@@ -50,7 +50,7 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
     protected final MergeSorter mergeSorter;
 
     public MergeTreeCompactRewriter(
-            KeyValueFileReaderFactory readerFactory,
+            FileReaderFactory<KeyValue> readerFactory,
             KeyValueFileWriterFactory writerFactory,
             Comparator<InternalRow> keyComparator,
             @Nullable FieldsComparator userDefinedSeqComparator,
