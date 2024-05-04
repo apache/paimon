@@ -152,7 +152,9 @@ public class TagAutoCreation {
                 || isAfterOrEqual(time.minus(delay), periodHandler.nextTagTime(nextTag))) {
             LocalDateTime thisTag = periodHandler.normalizeToPreviousTag(time);
             String tagName = periodHandler.timeToTag(thisTag);
-            tagManager.createTag(snapshot, tagName, defaultTimeRetained, callbacks);
+            if (!tagManager.tagExists(tagName)) {
+                tagManager.createTag(snapshot, tagName, defaultTimeRetained, callbacks);
+            }
             nextTag = periodHandler.nextTagTime(thisTag);
 
             if (numRetainedMax != null) {
