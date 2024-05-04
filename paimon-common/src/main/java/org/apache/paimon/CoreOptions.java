@@ -1104,6 +1104,14 @@ public class CoreOptions implements Serializable {
                             "Whether to enable deletion vectors mode. In this mode, index files containing deletion"
                                     + " vectors are generated when data is written, which marks the data for deletion."
                                     + " During read operations, by applying these index files, merging can be avoided.");
+
+    public static final ConfigOption<Boolean> DELETION_FORCE_PRODUCE_CHANGELOG =
+            key("delete.force-produce-changelog")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Force produce changelog in delete sql no matter what if changelog producer is not NONE.");
+
     public static final ConfigOption<RangeStrategy> SORT_RANG_STRATEGY =
             key("sort-compaction.range-strategy")
                     .enumType(RangeStrategy.class)
@@ -1747,6 +1755,11 @@ public class CoreOptions implements Serializable {
 
     public boolean fileIndexReadEnabled() {
         return options.get(FILE_INDEX_READ_ENABLED);
+    }
+
+    public boolean deleteForceProduceChangelog() {
+        return options.get(DELETION_FORCE_PRODUCE_CHANGELOG)
+                && changelogProducer() != CoreOptions.ChangelogProducer.NONE;
     }
 
     /** Specifies the merge engine for table with primary key. */

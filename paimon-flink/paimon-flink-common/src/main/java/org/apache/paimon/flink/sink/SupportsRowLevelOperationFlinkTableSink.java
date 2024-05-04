@@ -58,7 +58,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 import static org.apache.paimon.CoreOptions.MergeEngine.PARTIAL_UPDATE;
@@ -193,7 +192,9 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
     }
 
     private boolean canPushDownDeleteFilter() {
-        return -1 != Options.fromMap(table.options()).get(BUCKET)
+        CoreOptions coreOptions = CoreOptions.fromMap(table.options());
+        return -1 != coreOptions.bucket()
+                && !coreOptions.deleteForceProduceChangelog()
                 && (deletePredicate == null || deleteIsDropPartition() || deleteInSingleNode());
     }
 
