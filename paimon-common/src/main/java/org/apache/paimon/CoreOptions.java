@@ -1110,7 +1110,8 @@ public class CoreOptions implements Serializable {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "Force produce changelog in delete sql no matter what if changelog producer is not NONE.");
+                            "Force produce changelog in delete sql, "
+                                    + "or you can use 'streaming-read-overwrite' to read changelog from overwrite commit.");
 
     public static final ConfigOption<RangeStrategy> SORT_RANG_STRATEGY =
             key("sort-compaction.range-strategy")
@@ -1758,8 +1759,7 @@ public class CoreOptions implements Serializable {
     }
 
     public boolean deleteForceProduceChangelog() {
-        return options.get(DELETION_FORCE_PRODUCE_CHANGELOG)
-                && changelogProducer() != CoreOptions.ChangelogProducer.NONE;
+        return options.get(DELETION_FORCE_PRODUCE_CHANGELOG);
     }
 
     /** Specifies the merge engine for table with primary key. */

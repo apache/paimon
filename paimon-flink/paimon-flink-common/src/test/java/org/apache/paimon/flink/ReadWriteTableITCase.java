@@ -1552,7 +1552,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testDeletePushDownWithPrimaryKey() throws Exception {
+    public void testDeleteWithPrimaryKeyFilter() throws Exception {
         // Step1: define table schema
         String table =
                 createTable(

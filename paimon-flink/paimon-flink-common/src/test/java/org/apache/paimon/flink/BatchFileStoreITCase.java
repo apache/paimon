@@ -440,7 +440,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"lookup", "input"})
+    @ValueSource(strings = {"none", "lookup", "input"})
     public void testDeletePartitionWithChangelog(String producer) throws Exception {
         sql(
                 "CREATE TABLE delete_table (pt INT, pk INT, v STRING, PRIMARY KEY(pt, pk) NOT ENFORCED) PARTITIONED BY (pt)   "
