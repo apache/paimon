@@ -382,7 +382,11 @@ public class MySqlTypeUtils {
                 && typeName.contains(RIGHT_BRACKETS)
                 && isScaleType(typeName)) {
             return Integer.parseInt(
-                    typeName.substring(typeName.indexOf(LEFT_BRACKETS) + 1, typeName.indexOf(COMMA))
+                    typeName.substring(
+                                    typeName.indexOf(LEFT_BRACKETS) + 1,
+                                    typeName.contains(COMMA)
+                                            ? typeName.indexOf(COMMA)
+                                            : typeName.indexOf(RIGHT_BRACKETS))
                             .trim());
         } else if ((typeName.contains(LEFT_BRACKETS)
                 && typeName.contains(RIGHT_BRACKETS)
