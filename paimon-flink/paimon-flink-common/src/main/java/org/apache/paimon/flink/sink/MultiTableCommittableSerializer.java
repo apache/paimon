@@ -53,21 +53,19 @@ public class MultiTableCommittableSerializer
     @Override
     public byte[] serialize(MultiTableCommittable committable) throws IOException {
         // first serialize all metadata
-        String database = committable.getDatabase();
-        int databaseLen = database.getBytes(StandardCharsets.UTF_8).length;
-        String table = committable.getTable();
-        int tableLen = table.getBytes(StandardCharsets.UTF_8).length;
+        byte[] database = committable.getDatabase().getBytes(StandardCharsets.UTF_8);
+        byte[] table = committable.getTable().getBytes(StandardCharsets.UTF_8);
 
-        int multiTableMetaLen = databaseLen + tableLen + 2 * 4;
+        int multiTableMetaLen = database.length + table.length + 2 * 4;
 
         // use committable serializer (of the same version) to serialize committable
         byte[] serializedCommittable = serializeCommittable(committable);
 
         return ByteBuffer.allocate(multiTableMetaLen + serializedCommittable.length)
-                .putInt(databaseLen)
-                .put(database.getBytes())
-                .putInt(tableLen)
-                .put(table.getBytes())
+                .putInt(database.length)
+                .put(database)
+                .putInt(table.length)
+                .put(table)
                 .put(serializedCommittable)
                 .array();
     }
