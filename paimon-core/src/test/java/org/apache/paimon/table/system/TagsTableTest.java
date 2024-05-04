@@ -135,10 +135,10 @@ class TagsTableTest extends TableTestBase {
                             tag.getTagCreateTime() == null
                                     ? null
                                     : Timestamp.fromLocalDateTime(tag.getTagCreateTime()),
-                            BinaryString.fromString(
-                                    tag.getTagTimeRetained() == null
-                                            ? ""
-                                            : tag.getTagTimeRetained().toString())));
+                            tag.getTagTimeRetained() == null
+                                    ? null
+                                    : BinaryString.fromString(
+                                            tag.getTagTimeRetained().toString())));
         }
         return internalRows;
     }

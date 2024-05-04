@@ -61,6 +61,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
@@ -245,13 +246,13 @@ public class TagsTable implements ReadonlyTable {
                     Timestamp.fromLocalDateTime(DateTimeUtils.toLocalDateTime(tag.timeMillis())),
                     tag.totalRecordCount(),
                     BinaryString.fromString(branches == null ? "[]" : branches.toString()),
-                    tag.getTagCreateTime() == null
-                            ? null
-                            : Timestamp.fromLocalDateTime(tag.getTagCreateTime()),
-                    BinaryString.fromString(
-                            tag.getTagTimeRetained() == null
-                                    ? ""
-                                    : tag.getTagTimeRetained().toString()));
+                    Optional.ofNullable(tag.getTagCreateTime())
+                            .map(Timestamp::fromLocalDateTime)
+                            .orElse(null),
+                    Optional.ofNullable(tag.getTagTimeRetained())
+                            .map(Object::toString)
+                            .map(BinaryString::fromString)
+                            .orElse(null));
         }
     }
 }
