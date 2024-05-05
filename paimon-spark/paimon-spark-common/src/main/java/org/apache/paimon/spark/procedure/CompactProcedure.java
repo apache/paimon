@@ -41,7 +41,7 @@ import org.apache.paimon.table.sink.CommitMessageSerializer;
 import org.apache.paimon.table.sink.CompactionTaskSerializer;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ParameterUtils;
 import org.apache.paimon.utils.SerializationUtils;
@@ -221,13 +221,13 @@ public class CompactProcedure extends BaseProcedure {
 
     private void compactAwareBucketTable(
             FileStoreTable table, @Nullable Predicate filter, JavaSparkContext javaSparkContext) {
-        InnerTableScan scan = table.newScan();
+        SnapshotReader snapshotReader = table.newSnapshotReader();
         if (filter != null) {
-            scan.withFilter(filter);
+            snapshotReader.withFilter(filter);
         }
 
         List<Pair<byte[], Integer>> partitionBuckets =
-                scan.plan().splits().stream()
+                snapshotReader.read().splits().stream()
                         .map(split -> (DataSplit) split)
                         .map(dataSplit -> Pair.of(dataSplit.partition(), dataSplit.bucket()))
                         .distinct()

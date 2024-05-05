@@ -19,9 +19,11 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.CoreOptions
+import org.apache.paimon.CoreOptions.MergeEngine
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.spark.catalyst.analysis.Delete
 
+import org.apache.spark.sql.Row
 import org.assertj.core.api.Assertions.{assertThat, assertThatThrownBy}
 
 abstract class DeleteFromTableTestBase extends PaimonSparkTestBase {
@@ -176,23 +178,30 @@ abstract class DeleteFromTableTestBase extends PaimonSparkTestBase {
     mergeEngine =>
       {
         test(s"test delete with merge engine $mergeEngine") {
-          val options = if ("first-row".equals(mergeEngine.toString)) {
-            s"'primary-key' = 'id', 'merge-engine' = '$mergeEngine', 'changelog-producer' = 'lookup'"
-          } else {
-            s"'primary-key' = 'id', 'merge-engine' = '$mergeEngine'"
-          }
+          val otherOptions =
+            if ("first-row".equals(mergeEngine.toString)) "'changelog-producer' = 'lookup'," else ""
           spark.sql(s"""
-                       |CREATE TABLE T (id INT, name STRING, dt STRING)
-                       |TBLPROPERTIES ($options)
+                       |CREATE TABLE T (id INT, name STRING, age INT)
+                       |TBLPROPERTIES (
+                       |  $otherOptions
+                       |  'primary-key' = 'id',
+                       |  'merge-engine' = '$mergeEngine',
+                       |  'write-only' = 'true')
                        |""".stripMargin)
 
-          spark.sql("INSERT INTO T VALUES (1, 'a', '11'), (2, 'b', '22')")
+          spark.sql("INSERT INTO T VALUES (1, 'a', NULL)")
+          spark.sql("INSERT INTO T VALUES (2, 'b', NULL)")
+          spark.sql("INSERT INTO T VALUES (1, NULL, 16)")
 
-          if (Delete.supportedMergeEngine.contains(mergeEngine)) {
-            spark.sql("DELETE FROM T WHERE name = 'a'")
-          } else
-            assertThatThrownBy(() => spark.sql("DELETE FROM T WHERE name = 'a'"))
-              .isInstanceOf(classOf[UnsupportedOperationException])
+          if (mergeEngine != MergeEngine.DEDUPLICATE) {
+            assertThatThrownBy(() => spark.sql("DELETE FROM T WHERE id = 1"))
+              .hasMessageContaining("please use 'COMPACT' procedure")
+            spark.sql("CALL sys.compact(table => 'T')")
+          }
+
+          spark.sql("DELETE FROM T WHERE id = 1")
+          assertThat(spark.sql("SELECT * FROM T").collectAsList().toString)
+            .isEqualTo("[[2,b,null]]")
         }
       }
   }
@@ -345,7 +354,6 @@ abstract class DeleteFromTableTestBase extends PaimonSparkTestBase {
     spark.sql("DELETE FROM T WHERE hh = '12'")
     assertThat(spark.sql("SELECT * FROM `T$audit_log` WHERE rowkind='-D'").collectAsList().size())
       .isEqualTo(3)
-
   }
 }
 

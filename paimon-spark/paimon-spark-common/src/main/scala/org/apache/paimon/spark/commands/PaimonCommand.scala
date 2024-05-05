@@ -27,6 +27,7 @@ import org.apache.paimon.spark.commands.SparkDataFileMeta.convertToSparkDataFile
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.types.RowType
+import org.apache.paimon.utils.Preconditions
 
 import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.SparkSession
@@ -95,6 +96,7 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
   protected def findCandidateDataSplits(
       condition: Expression,
       output: Seq[Attribute]): Seq[DataSplit] = {
+    // low level snapshot reader, it can not be affected by 'scan.mode'
     val snapshotReader = table.newSnapshotReader()
     if (condition == TrueLiteral) {
       val filter =
@@ -111,6 +113,14 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
       relation: DataSourceV2Relation,
       sparkSession: SparkSession): Array[String] = {
     import sparkSession.implicits._
+
+    // only raw convertible can generate input_file_name()
+    for (split <- candidateDataSplits) {
+      if (!split.rawConvertible()) {
+        throw new IllegalArgumentException(
+          "Only compacted table can generate touched files, please use 'COMPACT' procedure.");
+      }
+    }
 
     val scan = PaimonSplitScan(table, candidateDataSplits.toArray)
     val filteredRelation =
