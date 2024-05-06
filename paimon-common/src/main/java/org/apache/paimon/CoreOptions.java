@@ -883,10 +883,9 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<IncrementalBetweenScanMode> INCREMENTAL_BETWEEN_SCAN_MODE =
             key("incremental-between-scan-mode")
                     .enumType(IncrementalBetweenScanMode.class)
-                    .defaultValue(IncrementalBetweenScanMode.DELTA)
+                    .defaultValue(IncrementalBetweenScanMode.AUTO)
                     .withDescription(
-                            "Scan kind when Read incremental changes between start snapshot (exclusive) and end snapshot, "
-                                    + "'delta' for scan newly changed files between snapshots, 'changelog' scan changelog files between snapshots.");
+                            "Scan kind when Read incremental changes between start snapshot (exclusive) and end snapshot. ");
 
     public static final ConfigOption<String> INCREMENTAL_BETWEEN_TIMESTAMP =
             key("incremental-between-timestamp")
@@ -2081,6 +2080,9 @@ public class CoreOptions implements Serializable {
 
     /** Specifies this scan type for incremental scan . */
     public enum IncrementalBetweenScanMode implements DescribedEnum {
+        AUTO(
+                "auto",
+                "Scan changelog files for the table which produces changelog files. Otherwise, scan newly changed files."),
         DELTA("delta", "Scan newly changed files between snapshots."),
         CHANGELOG("changelog", "Scan changelog files between snapshots.");
 

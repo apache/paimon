@@ -274,9 +274,9 @@ under the License.
         </tr>
         <tr>
             <td><h5>incremental-between-scan-mode</h5></td>
-            <td style="word-wrap: break-word;">delta</td>
+            <td style="word-wrap: break-word;">auto</td>
             <td><p>Enum</p></td>
-            <td>Scan kind when Read incremental changes between start snapshot (exclusive) and end snapshot, 'delta' for scan newly changed files between snapshots, 'changelog' scan changelog files between snapshots.<br /><br />Possible values:<ul><li>"delta": Scan newly changed files between snapshots.</li><li>"changelog": Scan changelog files between snapshots.</li></ul></td>
+            <td>Scan kind when Read incremental changes between start snapshot (exclusive) and end snapshot. <br /><br />Possible values:<ul><li>"auto": Scan changelog files for the table which produces changelog files. Otherwise, scan newly changed files.</li><li>"delta": Scan newly changed files between snapshots.</li><li>"changelog": Scan changelog files between snapshots.</li></ul></td>
         </tr>
         <tr>
             <td><h5>incremental-between-timestamp</h5></td>
