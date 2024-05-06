@@ -529,7 +529,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
                         "Partial update streaming"
                                 + " reading is not supported. "
                                 + "You can use 'lookup' or 'full-compaction' changelog producer to support streaming reading. "
-                                + "('input' changelog producer is also supported, but only returns input records.)");
+                                + "('input' changelog producer is also supported, but only returns input records related to the updated columns.)");
     }
 
     @Test

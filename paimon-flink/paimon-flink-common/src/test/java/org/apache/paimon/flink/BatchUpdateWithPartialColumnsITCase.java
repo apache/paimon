@@ -19,12 +19,14 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.flink.util.AbstractTestBase;
+import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.table.api.ExplainDetail;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import java.time.LocalDateTime;
@@ -36,14 +38,18 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
+import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.bEnv;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.createTable;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.insertInto;
+import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.sEnv;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testBatchRead;
+import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.validateStreamingReadResult;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -784,6 +790,114 @@ public class BatchUpdateWithPartialColumnsITCase extends AbstractTestBase {
                 String.format("UPDATE %s SET c = 6.6 WHERE id = 1 AND dt = '2022-01-01'", table);
         assertThatThrownBy(() -> executeUpdates(updateStatement))
                 .hasMessageStartingWith("The data types of the source and sink are inconsistent.");
+    }
+
+    private static Stream<Arguments> getMergeEngineWithChangelogProducers() {
+        List<String> mergeEngines = Arrays.asList("partial-update", "aggregation");
+        List<String> changelogProducers = Arrays.asList("lookup", "input");
+
+        return mergeEngines.stream()
+                .flatMap(
+                        mergeEngine ->
+                                changelogProducers.stream()
+                                        .map(
+                                                changelogProducer ->
+                                                        Arguments.of(
+                                                                mergeEngine, changelogProducer)));
+    }
+
+    @ParameterizedTest
+    @MethodSource("getMergeEngineWithChangelogProducers")
+    public void testUpdateWithChangelog(String mergeEngine, String producer) throws Exception {
+        String table =
+                createTable(
+                        Arrays.asList(
+                                "id BIGINT NOT NULL",
+                                "a STRING",
+                                "b INT",
+                                "ut1 TIMESTAMP",
+                                "dt STRING"),
+                        Arrays.asList("id", "dt"),
+                        Collections.singletonList("dt"),
+                        setupOptions(
+                                MERGE_ENGINE.key(),
+                                mergeEngine,
+                                CHANGELOG_PRODUCER.key(),
+                                producer,
+                                "fields.ut1.sequence-group",
+                                "b",
+                                "fields.b.aggregate-function",
+                                "sum"));
+        BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(
+                        sEnv.executeSql(String.format("SELECT * FROM %s", table)).collect());
+
+        insertInto(
+                table,
+                "(1, 'a', 1, CAST('2022-01-01 10:10:10' AS TIMESTAMP), '2022-01-01')",
+                "(2, 'b', 2, CAST('2022-01-02 20:20:20' AS TIMESTAMP), '2022-01-02')");
+        validateStreamingReadResult(
+                iterator,
+                Arrays.asList(
+                        changelogRow(
+                                "+I",
+                                1L,
+                                "a",
+                                1,
+                                LocalDateTime.parse("2022-01-01T10:10:10"),
+                                "2022-01-01"),
+                        changelogRow(
+                                "+I",
+                                2L,
+                                "b",
+                                2,
+                                LocalDateTime.parse("2022-01-02T20:20:20"),
+                                "2022-01-02")));
+
+        String updateStatement =
+                String.format("UPDATE %s SET b = 10 WHERE id = 1 and dt = '2022-01-01'", table);
+        testExplainSqlMatchPartialColumns(
+                updateStatement,
+                table,
+                "partial-update".equals(mergeEngine)
+                        ? Arrays.asList("id", "b", "ut1", "dt")
+                        : Arrays.asList("id", "b", "dt"));
+        executeUpdates(updateStatement);
+
+        if ("input".equals(producer)) {
+            validateStreamingReadResult(
+                    iterator,
+                    Collections.singletonList(
+                            changelogRow(
+                                    "+U",
+                                    1L,
+                                    null,
+                                    10,
+                                    "partial-update".equals(mergeEngine)
+                                            ? LocalDateTime.parse("2022-01-01T10:10:10")
+                                            : null,
+                                    "2022-01-01")));
+        } else {
+            validateStreamingReadResult(
+                    iterator,
+                    Arrays.asList(
+                            changelogRow(
+                                    "-U",
+                                    1L,
+                                    "a",
+                                    1,
+                                    LocalDateTime.parse("2022-01-01T10:10:10"),
+                                    "2022-01-01"),
+                            changelogRow(
+                                    "+U",
+                                    1L,
+                                    "a",
+                                    11,
+                                    LocalDateTime.parse("2022-01-01T10:10:10"),
+                                    "2022-01-01")));
+        }
+
+        iterator.close();
     }
 
     private void updateAndSelect(String updateStatement, String querySql, Row... rows)

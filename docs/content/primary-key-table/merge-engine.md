@@ -54,7 +54,7 @@ Assuming that the first column is the primary key, the final result would be `<1
 
 {{< hint info >}}
 For streaming queries, `partial-update` merge engine must be used together with `lookup` or `full-compaction`
-[changelog producer]({{< ref "primary-key-table/changelog-producer" >}}). ('input' changelog producer is also supported, but only returns input records.)
+[changelog producer]({{< ref "primary-key-table/changelog-producer" >}}). ('input' changelog producer is also supported, but only returns input records related to the updated columns.)
 {{< /hint >}}
 
 {{< hint info >}}
@@ -325,7 +325,7 @@ Current supported aggregate functions and data types are:
 
 {{< hint info >}}
 For streaming queries, `aggregation` merge engine must be used together with `lookup` or `full-compaction`
-[changelog producer]({{< ref "primary-key-table/changelog-producer" >}}). ('input' changelog producer is also supported, but only returns input records.)
+[changelog producer]({{< ref "primary-key-table/changelog-producer" >}}). ('input' changelog producer is also supported, but only returns input records related to the updated columns.)
 {{< /hint >}}
 
 ### Retract
