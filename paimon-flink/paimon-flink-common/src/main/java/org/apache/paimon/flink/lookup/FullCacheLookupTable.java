@@ -26,6 +26,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.lookup.BulkLoader;
 import org.apache.paimon.lookup.RocksDBState;
 import org.apache.paimon.lookup.RocksDBStateFactory;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReaderIterator;
@@ -39,6 +40,9 @@ import org.apache.paimon.utils.PartialRow;
 import org.apache.paimon.utils.TypeUtils;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import java.io.File;
@@ -47,18 +51,29 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+
+import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_REFRESH_ASYNC;
 
 /** Lookup table of full cache. */
 public abstract class FullCacheLookupTable implements LookupTable {
+    private static final Logger LOG = LoggerFactory.getLogger(FullCacheLookupTable.class);
 
+    protected final Object lock = new Object();
     protected final Context context;
     protected final RowType projectedType;
+    protected final boolean refreshAsync;
 
     @Nullable protected final FieldsComparator userDefinedSeqComparator;
     protected final int appendUdsFieldNumber;
 
     protected RocksDBStateFactory stateFactory;
+    private final ExecutorService refreshExecutor;
+    private final AtomicReference<Exception> cachedException;
     private LookupStreamingReader reader;
     private Predicate specificPartition;
 
@@ -92,6 +107,9 @@ public abstract class FullCacheLookupTable implements LookupTable {
             this.appendUdsFieldNumber = 0;
         }
         this.projectedType = projectedType;
+        this.refreshAsync = Options.fromMap(context.table.options()).get(LOOKUP_REFRESH_ASYNC);
+        this.refreshExecutor = this.refreshAsync ? Executors.newSingleThreadExecutor() : null;
+        this.cachedException = new AtomicReference<>();
     }
 
     @Override
@@ -145,6 +163,27 @@ public abstract class FullCacheLookupTable implements LookupTable {
 
     @Override
     public void refresh() throws Exception {
+        if (refreshAsync) {
+            try {
+                refreshExecutor.execute(
+                        () -> {
+                            try {
+                                doRefresh();
+                            } catch (Exception e) {
+                                LOG.error(
+                                        "Refresh lookup table {} failed", context.table.name(), e);
+                                cachedException.set(e);
+                            }
+                        });
+            } catch (RejectedExecutionException e) {
+                LOG.warn("Add refresh task for lookup table {} failed", context.table.name(), e);
+            }
+        } else {
+            doRefresh();
+        }
+    }
+
+    private void doRefresh() throws Exception {
         while (true) {
             try (RecordReaderIterator<InternalRow> batch =
                     new RecordReaderIterator<>(reader.nextBatch(false))) {
@@ -158,7 +197,14 @@ public abstract class FullCacheLookupTable implements LookupTable {
 
     @Override
     public final List<InternalRow> get(InternalRow key) throws IOException {
-        List<InternalRow> values = innerGet(key);
+        List<InternalRow> values;
+        if (refreshAsync) {
+            synchronized (lock) {
+                values = innerGet(key);
+            }
+        } else {
+            values = innerGet(key);
+        }
         if (appendUdsFieldNumber == 0) {
             return values;
         }
@@ -189,6 +235,9 @@ public abstract class FullCacheLookupTable implements LookupTable {
     @Override
     public void close() throws IOException {
         stateFactory.close();
+        if (refreshExecutor != null) {
+            refreshExecutor.shutdown();
+        }
         FileIOUtils.deleteDirectory(context.tempPath);
     }
 

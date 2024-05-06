@@ -99,25 +99,35 @@ public class PrimaryKeyLookupTable extends FullCacheLookupTable {
         Predicate predicate = projectedPredicate();
         while (incremental.hasNext()) {
             InternalRow row = incremental.next();
-            primaryKeyRow.replaceRow(row);
-            if (userDefinedSeqComparator != null) {
-                InternalRow previous = tableState.get(primaryKeyRow);
-                if (previous != null && userDefinedSeqComparator.compare(previous, row) > 0) {
-                    continue;
-                }
-            }
-
-            if (row.getRowKind() == RowKind.INSERT || row.getRowKind() == RowKind.UPDATE_AFTER) {
-                if (predicate == null || predicate.test(row)) {
-                    tableState.put(primaryKeyRow, row);
-                } else {
-                    // The new record under primary key is filtered
-                    // We need to delete this primary key as it no longer exists.
-                    tableState.delete(primaryKeyRow);
+            if (refreshAsync) {
+                synchronized (lock) {
+                    refreshRow(row, predicate);
                 }
             } else {
+                refreshRow(row, predicate);
+            }
+        }
+    }
+
+    private void refreshRow(InternalRow row, Predicate predicate) throws IOException {
+        primaryKeyRow.replaceRow(row);
+        if (userDefinedSeqComparator != null) {
+            InternalRow previous = tableState.get(primaryKeyRow);
+            if (previous != null && userDefinedSeqComparator.compare(previous, row) > 0) {
+                return;
+            }
+        }
+
+        if (row.getRowKind() == RowKind.INSERT || row.getRowKind() == RowKind.UPDATE_AFTER) {
+            if (predicate == null || predicate.test(row)) {
+                tableState.put(primaryKeyRow, row);
+            } else {
+                // The new record under primary key is filtered
+                // We need to delete this primary key as it no longer exists.
                 tableState.delete(primaryKeyRow);
             }
+        } else {
+            tableState.delete(primaryKeyRow);
         }
     }
 

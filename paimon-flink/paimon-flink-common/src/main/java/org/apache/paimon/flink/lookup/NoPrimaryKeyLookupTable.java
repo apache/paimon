@@ -78,17 +78,27 @@ public class NoPrimaryKeyLookupTable extends FullCacheLookupTable {
         Predicate predicate = projectedPredicate();
         while (incremental.hasNext()) {
             InternalRow row = incremental.next();
-            joinKeyRow.replaceRow(row);
-            if (row.getRowKind() == RowKind.INSERT || row.getRowKind() == RowKind.UPDATE_AFTER) {
-                if (predicate == null || predicate.test(row)) {
-                    state.add(joinKeyRow, row);
+            if (refreshAsync) {
+                synchronized (lock) {
+                    refreshRow(row, predicate);
                 }
             } else {
-                throw new RuntimeException(
-                        String.format(
-                                "Received %s message. Only INSERT/UPDATE_AFTER values are expected here.",
-                                row.getRowKind()));
+                refreshRow(row, predicate);
             }
+        }
+    }
+
+    private void refreshRow(InternalRow row, Predicate predicate) throws IOException {
+        joinKeyRow.replaceRow(row);
+        if (row.getRowKind() == RowKind.INSERT || row.getRowKind() == RowKind.UPDATE_AFTER) {
+            if (predicate == null || predicate.test(row)) {
+                state.add(joinKeyRow, row);
+            }
+        } else {
+            throw new RuntimeException(
+                    String.format(
+                            "Received %s message. Only INSERT/UPDATE_AFTER values are expected here.",
+                            row.getRowKind()));
         }
     }
 

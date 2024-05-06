@@ -311,6 +311,12 @@ public class FlinkConnectorOptions {
                             "Specific dynamic partition refresh interval for lookup, "
                                     + "scan all partitions and obtain corresponding partition.");
 
+    public static final ConfigOption<Boolean> LOOKUP_REFRESH_ASYNC =
+            ConfigOptions.key("lookup.refresh.async")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to refresh lookup table in an async thread.");
+
     public static final ConfigOption<Boolean> SINK_AUTO_TAG_FOR_SAVEPOINT =
             ConfigOptions.key("sink.savepoint.auto-tag")
                     .booleanType()
