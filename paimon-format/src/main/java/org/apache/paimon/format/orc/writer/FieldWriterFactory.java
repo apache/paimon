@@ -186,8 +186,9 @@ public class FieldWriterFactory implements DataTypeVisitor<FieldWriter> {
     public FieldWriter visit(LocalZonedTimestampType localZonedTimestampType) {
         return (rowId, column, getters, columnId) -> {
             Timestamp timestamp =
-                    getters.getTimestamp(columnId, localZonedTimestampType.getPrecision())
-                            .toSQLTimestamp();
+                    Timestamp.from(
+                            getters.getTimestamp(columnId, localZonedTimestampType.getPrecision())
+                                    .toInstant());
             TimestampColumnVector vector = (TimestampColumnVector) column;
             vector.set(rowId, timestamp);
         };

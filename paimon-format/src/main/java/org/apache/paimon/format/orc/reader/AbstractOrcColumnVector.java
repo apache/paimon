@@ -64,7 +64,11 @@ public abstract class AbstractOrcColumnVector
         } else if (vector instanceof DecimalColumnVector) {
             return new OrcDecimalColumnVector((DecimalColumnVector) vector);
         } else if (vector instanceof TimestampColumnVector) {
-            return new OrcTimestampColumnVector(vector);
+            if (dataType.getTypeRoot() == DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE) {
+                return new OrcTimestampColumnVector(vector);
+            } else {
+                return new OrcTimestampLTZColumnVector(vector);
+            }
         } else if (vector instanceof ListColumnVector) {
             return new OrcArrayColumnVector((ListColumnVector) vector, (ArrayType) dataType);
         } else if (vector instanceof StructColumnVector) {
