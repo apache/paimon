@@ -118,7 +118,7 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
     for (split <- candidateDataSplits) {
       if (!split.rawConvertible()) {
         throw new IllegalArgumentException(
-          "Only compacted table can generate touched files, please use 'COMPACT' procedure.");
+          "Only compacted table can generate touched files, please use 'COMPACT' procedure first.");
       }
     }
 

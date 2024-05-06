@@ -195,7 +195,7 @@ abstract class DeleteFromTableTestBase extends PaimonSparkTestBase {
 
           if (mergeEngine != MergeEngine.DEDUPLICATE) {
             assertThatThrownBy(() => spark.sql("DELETE FROM T WHERE id = 1"))
-              .hasMessageContaining("please use 'COMPACT' procedure")
+              .hasMessageContaining("please use 'COMPACT' procedure first")
             spark.sql("CALL sys.compact(table => 'T')")
           }
 
