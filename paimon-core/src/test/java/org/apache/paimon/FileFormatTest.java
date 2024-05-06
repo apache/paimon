@@ -102,7 +102,7 @@ public class FileFormatTest {
     @Test
     public void testCreateFileFormat() {
         Options tableOptions = new Options();
-        tableOptions.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.fromValue(IDENTIFIER));
+        tableOptions.set(CoreOptions.FILE_FORMAT, IDENTIFIER);
         tableOptions.set(CoreOptions.READ_BATCH_SIZE, 1024);
         tableOptions.setString(IDENTIFIER + ".hello", "world");
         FileFormat fileFormat = CoreOptions.createFileFormat(tableOptions, CoreOptions.FILE_FORMAT);
@@ -116,7 +116,7 @@ public class FileFormatTest {
     @Test
     public void testFileFormatOption() {
         Options tableOptions = new Options();
-        tableOptions.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.fromValue(IDENTIFIER));
+        tableOptions.set(CoreOptions.FILE_FORMAT, IDENTIFIER);
         tableOptions.set(CoreOptions.READ_BATCH_SIZE, 1024);
         tableOptions.setString(IDENTIFIER + ".hello", "world");
         FileFormatDiscover fileFormatDiscover =
@@ -130,7 +130,7 @@ public class FileFormatTest {
 
     public FileFormat createFileFormat(String codec) {
         Options tableOptions = new Options();
-        tableOptions.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        tableOptions.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
         tableOptions.setString("avro.codec", codec);
         return CoreOptions.createFileFormat(tableOptions, CoreOptions.FILE_FORMAT);
     }

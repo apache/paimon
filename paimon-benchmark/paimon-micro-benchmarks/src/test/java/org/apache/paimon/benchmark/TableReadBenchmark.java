@@ -80,19 +80,19 @@ public class TableReadBenchmark extends TableBenchmark {
 
     private Options orc() {
         Options options = new Options();
-        options.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.ORC);
+        options.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_ORC);
         return options;
     }
 
     private Options parquet() {
         Options options = new Options();
-        options.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.PARQUET);
+        options.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_ORC);
         return options;
     }
 
     private Options avro() {
         Options options = new Options();
-        options.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        options.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
         return options;
     }
 

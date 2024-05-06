@@ -731,8 +731,8 @@ public class TestFileStore extends KeyValueFileStore {
                     CoreOptions.MANIFEST_TARGET_FILE_SIZE,
                     MemorySize.parse((ThreadLocalRandom.current().nextInt(16) + 1) + "kb"));
 
-            conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.fromValue(format));
-            conf.set(CoreOptions.MANIFEST_FORMAT, CoreOptions.FileFormatType.fromValue(format));
+            conf.set(CoreOptions.FILE_FORMAT, format);
+            conf.set(CoreOptions.MANIFEST_FORMAT, format);
             conf.set(CoreOptions.PATH, root);
             conf.set(CoreOptions.BUCKET, numBuckets);
 

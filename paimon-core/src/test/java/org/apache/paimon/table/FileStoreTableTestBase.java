@@ -198,7 +198,7 @@ public abstract class FileStoreTableTestBase {
     @Test
     public void testChangeFormat() throws Exception {
         FileStoreTable table =
-                createFileStoreTable(conf -> conf.set(FILE_FORMAT, CoreOptions.FileFormatType.ORC));
+                createFileStoreTable(conf -> conf.set(FILE_FORMAT, CoreOptions.FILE_FORMAT_ORC));
 
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
@@ -219,7 +219,7 @@ public abstract class FileStoreTableTestBase {
 
         table =
                 createFileStoreTable(
-                        conf -> conf.set(FILE_FORMAT, CoreOptions.FileFormatType.PARQUET));
+                        conf -> conf.set(FILE_FORMAT, CoreOptions.FILE_FORMAT_PARQUET));
         write = table.newWrite(commitUser);
         commit = table.newCommit(commitUser);
         write.write(rowData(1, 11, 111L));

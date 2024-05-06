@@ -143,7 +143,7 @@ public class PaimonStorageHandlerITCase {
                         GenericRow.of(3, 50L, BinaryString.fromString("Store"), 200L));
 
         Options conf = getBasicConf();
-        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
         RowType rowType =
                 RowType.of(
                         new DataType[] {
@@ -268,7 +268,7 @@ public class PaimonStorageHandlerITCase {
                         GenericRow.of(1, 30, 200L, BinaryString.fromString("Store")));
 
         Options conf = getBasicConf();
-        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
         RowType rowType =
                 RowType.of(
                         new DataType[] {
@@ -366,7 +366,7 @@ public class PaimonStorageHandlerITCase {
                         GenericRow.of(3, 50L, BinaryString.fromString("Store"), 200L));
 
         Options conf = getBasicConf();
-        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
         RowType rowType =
                 RowType.of(
                         new DataType[] {
@@ -445,7 +445,7 @@ public class PaimonStorageHandlerITCase {
                         GenericRow.of(1, 30, 500L, BinaryString.fromString("Store")));
 
         Options conf = getBasicConf();
-        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
         RowType rowType =
                 RowType.of(
                         new DataType[] {
@@ -550,7 +550,7 @@ public class PaimonStorageHandlerITCase {
     @Test
     public void testReadAllSupportedTypes() throws Exception {
         Options conf = getBasicConf();
-        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
         Table table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
@@ -662,7 +662,7 @@ public class PaimonStorageHandlerITCase {
     public void testPredicatePushDown() throws Exception {
         Options conf = getBasicConf();
         conf.set(CoreOptions.BUCKET, 1);
-        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
         Table table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
@@ -741,10 +741,10 @@ public class PaimonStorageHandlerITCase {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         Options conf = getBasicConf();
 
-        CoreOptions.FileFormatType fileFormatType =
+        String fileFormatType =
                 random.nextBoolean()
-                        ? CoreOptions.FileFormatType.ORC
-                        : CoreOptions.FileFormatType.PARQUET;
+                        ? CoreOptions.FILE_FORMAT_ORC
+                        : CoreOptions.FILE_FORMAT_PARQUET;
         conf.set(CoreOptions.FILE_FORMAT, fileFormatType);
 
         int precision = random.nextInt(10);
@@ -804,7 +804,7 @@ public class PaimonStorageHandlerITCase {
         // the original precision is maintained, but the file format will affect the result
         // parquet stores timestamp with three forms
         String fraction;
-        if (fileFormatType == CoreOptions.FileFormatType.ORC) {
+        if (fileFormatType.equals(CoreOptions.FILE_FORMAT_ORC)) {
             fraction = ".123456789";
         } else {
             if (precision <= 3) {
@@ -882,8 +882,8 @@ public class PaimonStorageHandlerITCase {
         conf.set(
                 CoreOptions.FILE_FORMAT,
                 ThreadLocalRandom.current().nextBoolean()
-                        ? CoreOptions.FileFormatType.ORC
-                        : CoreOptions.FileFormatType.PARQUET);
+                        ? CoreOptions.FILE_FORMAT_ORC
+                        : CoreOptions.FILE_FORMAT_PARQUET);
         Table table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,

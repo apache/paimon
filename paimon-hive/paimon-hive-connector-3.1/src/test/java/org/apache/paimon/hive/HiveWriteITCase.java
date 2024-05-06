@@ -98,7 +98,7 @@ public class HiveWriteITCase {
             List<String> partitionKeys,
             List<InternalRow> data,
             String tableName,
-            @Nullable CoreOptions.FileFormatType fileFormatType)
+            @Nullable String fileFormatType)
             throws Exception {
         String path = folder.newFolder().toURI().toString();
         String tableNameNotNull =
@@ -109,7 +109,7 @@ public class HiveWriteITCase {
         conf.set(CoreOptions.BUCKET, 2);
         conf.set(
                 CoreOptions.FILE_FORMAT,
-                fileFormatType == null ? CoreOptions.FileFormatType.AVRO : fileFormatType);
+                fileFormatType == null ? CoreOptions.FILE_FORMAT_AVRO : fileFormatType.toString());
         Identifier identifier = Identifier.create(DATABASE_NAME, tableNameNotNull);
         Table table =
                 FileStoreTestUtils.createFileStoreTable(
@@ -211,7 +211,7 @@ public class HiveWriteITCase {
                         Collections.singletonList("pt"),
                         emptyData,
                         "hive_test_table_output",
-                        CoreOptions.FileFormatType.ORC);
+                        CoreOptions.FILE_FORMAT_ORC);
         hiveShell.execute(
                 String.format(
                         "INSERT INTO %s VALUES (1, '2023-01-13 20:00:01%s', '2023-12-23')",
@@ -243,7 +243,7 @@ public class HiveWriteITCase {
                         Collections.singletonList("pt"),
                         emptyData,
                         "hive_test_table_output",
-                        CoreOptions.FileFormatType.ORC);
+                        CoreOptions.FILE_FORMAT_ORC);
 
         assertThat(hiveShell.executeQuery("SHOW CREATE TABLE " + outputTableName))
                 .contains("  `ltz` timestamp with local time zone COMMENT 'from deserializer')");

@@ -135,11 +135,8 @@ public class SchemaValidation {
                         + " should not be larger than "
                         + CHANGELOG_NUM_RETAINED_MAX.key());
 
-        // Get the format type here which will try to convert string value to {@Code
-        // FileFormatType}. If the string value is illegal, an exception will be thrown.
-        CoreOptions.FileFormatType fileFormatType = options.formatType();
         FileFormat fileFormat =
-                FileFormat.fromIdentifier(fileFormatType.name(), new Options(schema.options()));
+                FileFormat.fromIdentifier(options.formatType(), new Options(schema.options()));
         fileFormat.validateDataFields(new RowType(schema.fields()));
 
         // Check column names in schema

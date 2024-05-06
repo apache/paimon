@@ -36,13 +36,12 @@ import org.apache.paimon.utils.StatsCollectorFactories;
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
 import java.io.IOException;
 import java.util.HashMap;
 
-import static org.apache.paimon.CoreOptions.FileFormatType;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link RollingFileWriter}. */
@@ -94,11 +93,13 @@ public class RollingFileWriterTest {
     }
 
     @ParameterizedTest
-    @EnumSource(FileFormatType.class)
-    public void testRolling(FileFormatType formatType) throws IOException {
-        initialize(formatType.toString());
+    @ValueSource(strings = {"orc", "avro", "parquet"})
+    public void testRolling(String formatType) throws IOException {
+        initialize(formatType);
         int checkInterval =
-                formatType == FileFormatType.ORC ? VectorizedRowBatch.DEFAULT_SIZE : 1000;
+                formatType.equals(CoreOptions.FILE_FORMAT_ORC)
+                        ? VectorizedRowBatch.DEFAULT_SIZE
+                        : 1000;
         for (int i = 0; i < 3000; i++) {
             rollingFileWriter.write(GenericRow.of(i));
             if (i < checkInterval) {

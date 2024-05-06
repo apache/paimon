@@ -1336,7 +1336,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table =
                 createFileStoreTable(
                         options -> {
-                            options.set(FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+                            options.set(FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
                             options.set(SOURCE_SPLIT_OPEN_FILE_COST, MemorySize.ofBytes(1));
                             options.set(SOURCE_SPLIT_TARGET_SIZE, MemorySize.ofKibiBytes(5));
                         });
