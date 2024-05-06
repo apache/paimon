@@ -1775,10 +1775,10 @@ public class CoreOptions implements Serializable {
         return options.get(FILE_INDEX_READ_ENABLED);
     }
 
-<<<<<<< HEAD
     public boolean deleteForceProduceChangelog() {
         return options.get(DELETION_FORCE_PRODUCE_CHANGELOG);
-=======
+    }
+
     @Nullable
     public Duration recordLevelExpireTime() {
         return options.get(RECORD_LEVEL_EXPIRE_TIME);
@@ -1787,7 +1787,6 @@ public class CoreOptions implements Serializable {
     @Nullable
     public String recordLevelTimeField() {
         return options.get(RECORD_LEVEL_TIME_FIELD);
->>>>>>> 581c6d5c7 ([core] Introduce record-level expire time)
     }
 
     /** Specifies the merge engine for table with primary key. */
