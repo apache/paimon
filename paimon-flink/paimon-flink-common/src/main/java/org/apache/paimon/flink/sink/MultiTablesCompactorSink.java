@@ -42,6 +42,7 @@ import java.io.Serializable;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_OPERATOR_CHAINING;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_MANAGED_WRITER_BUFFER_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
 import static org.apache.paimon.flink.utils.ManagedMemoryUtils.declareManagedMemory;
@@ -121,7 +122,9 @@ public class MultiTablesCompactorSink implements Serializable {
         if (streamingCheckpointEnabled) {
             assertStreamingConfiguration(env);
         }
-
+        if (!options.get(SINK_COMMITTER_OPERATOR_CHAINING)) {
+            written = written.rebalance();
+        }
         SingleOutputStreamOperator<?> committed =
                 written.transform(
                                 GLOBAL_COMMITTER_NAME,

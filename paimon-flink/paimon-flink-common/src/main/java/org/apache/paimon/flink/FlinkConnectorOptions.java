@@ -332,6 +332,13 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "Sink committer memory to control heap memory of global committer.");
 
+    public static final ConfigOption<Boolean> SINK_COMMITTER_OPERATOR_CHAINING =
+            ConfigOptions.key("sink.committer-operator-chaining")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Allow sink committer and writer operator to be chained together");
+
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();
         final List<ConfigOption<?>> list = new ArrayList<>(fields.length);
