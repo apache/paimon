@@ -1090,7 +1090,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         "   You'll probably see different base commit user and current commit user below.",
                         "   You can use "
                                 + "https://paimon.apache.org/docs/master/maintenance/dedicated-compaction#dedicated-compaction-job"
-                                + "to support multiple writing.",
+                                + " to support multiple writing.",
                         "3. You're recovering from an old savepoint, or you're creating multiple jobs from a savepoint.",
                         "   The job will fail continuously in this scenario to protect metadata from corruption.",
                         "   You can either recover from the latest savepoint, "
