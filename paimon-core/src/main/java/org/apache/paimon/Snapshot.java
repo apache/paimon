@@ -232,7 +232,7 @@ public class Snapshot {
             @JsonProperty(FIELD_COMMIT_IDENTIFIER) long commitIdentifier,
             @JsonProperty(FIELD_COMMIT_KIND) CommitKind commitKind,
             @JsonProperty(FIELD_TIME_MILLIS) long timeMillis,
-            @JsonProperty(FIELD_LOG_OFFSETS) Map<Integer, Long> logOffsets,
+            @JsonProperty(FIELD_LOG_OFFSETS) @Nullable Map<Integer, Long> logOffsets,
             @JsonProperty(FIELD_TOTAL_RECORD_COUNT) @Nullable Long totalRecordCount,
             @JsonProperty(FIELD_DELTA_RECORD_COUNT) @Nullable Long deltaRecordCount,
             @JsonProperty(FIELD_CHANGELOG_RECORD_COUNT) @Nullable Long changelogRecordCount,
