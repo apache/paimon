@@ -106,7 +106,7 @@ public class FileFormatTest {
         Options tableOptions = new Options();
         tableOptions.set(CoreOptions.FILE_FORMAT, identifier);
         tableOptions.set(CoreOptions.READ_BATCH_SIZE, 1024);
-        tableOptions.setString(identifier + ".hello", "world");
+        tableOptions.setString(identifier.toLowerCase() + ".hello", "world");
         FileFormat fileFormat = CoreOptions.createFileFormat(tableOptions, CoreOptions.FILE_FORMAT);
         assertThat(fileFormat instanceof OrcFileFormat).isTrue();
 
