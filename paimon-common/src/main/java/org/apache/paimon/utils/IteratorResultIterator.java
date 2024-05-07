@@ -18,6 +18,7 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.RecordReader;
@@ -27,15 +28,15 @@ import javax.annotation.Nullable;
 import java.util.Iterator;
 
 /** A simple {@link RecordReader.RecordIterator} that returns the elements of an iterator. */
-public final class IteratorResultIterator<E> extends RecyclableIterator<E>
-        implements FileRecordIterator<E> {
+public final class IteratorResultIterator extends RecyclableIterator<InternalRow>
+        implements FileRecordIterator<InternalRow> {
 
-    private final Iterator<E> records;
+    private final Iterator<InternalRow> records;
     private final Path filePath;
     private long nextFilePos;
 
     public IteratorResultIterator(
-            final Iterator<E> records,
+            final Iterator<InternalRow> records,
             final @Nullable Runnable recycler,
             final Path filePath,
             long pos) {
@@ -47,7 +48,7 @@ public final class IteratorResultIterator<E> extends RecyclableIterator<E>
 
     @Nullable
     @Override
-    public E next() {
+    public InternalRow next() {
         if (records.hasNext()) {
             nextFilePos++;
             return records.next();
