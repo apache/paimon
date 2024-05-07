@@ -108,7 +108,7 @@ public class AvroBulkFormat implements FormatReaderFactory {
             long rowPosition = currentRowPosition;
             currentRowPosition += reader.getBlockCount();
             Iterator<InternalRow> iterator = new AvroBlockIterator(reader.getBlockCount(), reader);
-            return new IteratorResultIterator<>(
+            return new IteratorResultIterator(
                     iterator, () -> pool.recycler().recycle(ticket), filePath, rowPosition);
         }
 

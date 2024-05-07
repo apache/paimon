@@ -148,7 +148,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         Optional<DeletionVector> deletionVector = dvFactory.create(fileName);
         if (deletionVector.isPresent() && !deletionVector.get().isEmpty()) {
             fileRecordReader =
-                    new ApplyDeletionVectorReader<>(fileRecordReader, deletionVector.get());
+                    new ApplyDeletionVectorReader(fileRecordReader, deletionVector.get());
         }
 
         return new KeyValueDataFileRecordReader(

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.deletionvectors;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.FileRecordIterator;
 
@@ -26,18 +27,18 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 
 /** A {@link FileRecordIterator} wraps a {@link FileRecordIterator} and {@link DeletionVector}. */
-public class ApplyDeletionFileRecordIterator<T> implements FileRecordIterator<T> {
+public class ApplyDeletionFileRecordIterator implements FileRecordIterator<InternalRow> {
 
-    private final FileRecordIterator<T> iterator;
+    private final FileRecordIterator<InternalRow> iterator;
     private final DeletionVector deletionVector;
 
     public ApplyDeletionFileRecordIterator(
-            FileRecordIterator<T> iterator, DeletionVector deletionVector) {
+            FileRecordIterator<InternalRow> iterator, DeletionVector deletionVector) {
         this.iterator = iterator;
         this.deletionVector = deletionVector;
     }
 
-    public FileRecordIterator<T> iterator() {
+    public FileRecordIterator<InternalRow> iterator() {
         return iterator;
     }
 
@@ -57,9 +58,9 @@ public class ApplyDeletionFileRecordIterator<T> implements FileRecordIterator<T>
 
     @Nullable
     @Override
-    public T next() throws IOException {
+    public InternalRow next() throws IOException {
         while (true) {
-            T next = iterator.next();
+            InternalRow next = iterator.next();
             if (next == null) {
                 return null;
             }
