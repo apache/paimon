@@ -1187,7 +1187,7 @@ public class CoreOptions implements Serializable {
     }
 
     public String formatType() {
-        return options.get(FILE_FORMAT).toLowerCase();
+        return normalizeFileFormat(options.get(FILE_FORMAT));
     }
 
     public FileFormat fileFormat() {
@@ -1223,7 +1223,7 @@ public class CoreOptions implements Serializable {
     }
 
     public static FileFormat createFileFormat(Options options, ConfigOption<String> formatOption) {
-        String formatIdentifier = options.get(formatOption);
+        String formatIdentifier = normalizeFileFormat(options.get(formatOption));
         return FileFormat.getFileFormat(options, formatIdentifier);
     }
 
@@ -1236,7 +1236,14 @@ public class CoreOptions implements Serializable {
     public Map<Integer, String> fileFormatPerLevel() {
         Map<String, String> levelFormats = options.get(FILE_FORMAT_PER_LEVEL);
         return levelFormats.entrySet().stream()
-                .collect(Collectors.toMap(e -> Integer.valueOf(e.getKey()), Map.Entry::getValue));
+                .collect(
+                        Collectors.toMap(
+                                e -> Integer.valueOf(e.getKey()),
+                                e -> normalizeFileFormat(e.getValue())));
+    }
+
+    private static String normalizeFileFormat(String fileFormat) {
+        return fileFormat.toLowerCase();
     }
 
     public boolean definedAggFunc() {
