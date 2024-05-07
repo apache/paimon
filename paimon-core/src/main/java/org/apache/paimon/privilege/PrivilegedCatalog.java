@@ -54,6 +54,14 @@ public class PrivilegedCatalog implements Catalog {
         this.privilegeManager = privilegeManager;
     }
 
+    public Catalog wrapped() {
+        return wrapped;
+    }
+
+    public PrivilegeManager privilegeManager() {
+        return privilegeManager;
+    }
+
     @Override
     public boolean caseSensitive() {
         return wrapped.caseSensitive();
