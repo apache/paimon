@@ -1162,7 +1162,7 @@ public class CoreOptions implements Serializable {
     }
 
     public String formatType() {
-        return options.get(FILE_FORMAT);
+        return options.get(FILE_FORMAT).toLowerCase();
     }
 
     public FileFormat fileFormat() {
@@ -1198,7 +1198,7 @@ public class CoreOptions implements Serializable {
     }
 
     public static FileFormat createFileFormat(Options options, ConfigOption<String> formatOption) {
-        String formatIdentifier = options.get(formatOption).toString();
+        String formatIdentifier = options.get(formatOption);
         return FileFormat.getFileFormat(options, formatIdentifier);
     }
 

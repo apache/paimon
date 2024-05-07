@@ -238,9 +238,9 @@ under the License.
         </tr>
         <tr>
             <td><h5>file.format</h5></td>
-            <td style="word-wrap: break-word;">orc</td>
-            <td><p>Enum</p></td>
-            <td>Specify the message format of data files, currently orc, parquet and avro are supported.<br /><br />Possible values:<ul><li>"orc": ORC file format.</li><li>"parquet": Parquet file format.</li><li>"avro": Avro file format.</li></ul></td>
+            <td style="word-wrap: break-word;">"orc"</td>
+            <td>String</td>
+            <td>Specify the message format of data files, currently orc, parquet and avro are supported.</td>
         </tr>
         <tr>
             <td><h5>file.format.per.level</h5></td>
@@ -335,9 +335,9 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
         </tr>
         <tr>
             <td><h5>manifest.format</h5></td>
-            <td style="word-wrap: break-word;">avro</td>
-            <td><p>Enum</p></td>
-            <td>Specify the message format of manifest files.<br /><br />Possible values:<ul><li>"orc": ORC file format.</li><li>"parquet": Parquet file format.</li><li>"avro": Avro file format.</li></ul></td>
+            <td style="word-wrap: break-word;">"avro"</td>
+            <td>String</td>
+            <td>Specify the message format of manifest files.</td>
         </tr>
         <tr>
             <td><h5>manifest.full-compaction-threshold-size</h5></td>
