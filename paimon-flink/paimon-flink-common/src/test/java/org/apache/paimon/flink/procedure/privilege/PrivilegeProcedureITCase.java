@@ -18,8 +18,13 @@
 
 package org.apache.paimon.flink.procedure.privilege;
 
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.FileSystemCatalog;
+import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.flink.util.AbstractTestBase;
+import org.apache.paimon.privilege.FileBasedPrivilegeManager;
 import org.apache.paimon.privilege.NoPrivilegeException;
+import org.apache.paimon.privilege.PrivilegedCatalog;
 
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.types.Row;
@@ -74,6 +79,17 @@ public class PrivilegeProcedureITCase extends AbstractTestBase {
                                 + "  'warehouse' = '%s'\n"
                                 + ")",
                         path));
+
+        org.apache.flink.table.catalog.Catalog catalog = tEnv.getCatalog("anonymouscat").get();
+        assertThat(catalog).isInstanceOf(FlinkCatalog.class);
+        Catalog paimonCatalog = ((FlinkCatalog) catalog).catalog();
+        assertThat(paimonCatalog).isInstanceOf(PrivilegedCatalog.class);
+        PrivilegedCatalog privilegedCatalog = (PrivilegedCatalog) paimonCatalog;
+        assertThat(privilegedCatalog.wrapped()).isInstanceOf(FileSystemCatalog.class);
+        assertThat(privilegedCatalog.privilegeManager())
+                .isInstanceOf(FileBasedPrivilegeManager.class);
+        assertThat(privilegedCatalog.privilegeManager().privilegeEnabled()).isTrue();
+
         tEnv.executeSql("USE CATALOG anonymouscat");
         assertNoPrivilege(
                 () -> tEnv.executeSql("INSERT INTO mydb.T1 VALUES (1, 11), (2, 21)").await());
