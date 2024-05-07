@@ -112,10 +112,14 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("The file path of this table in the filesystem.");
 
-    public static final ConfigOption<FileFormatType> FILE_FORMAT =
+    public static final String FILE_FORMAT_ORC = "orc";
+    public static final String FILE_FORMAT_AVRO = "avro";
+    public static final String FILE_FORMAT_PARQUET = "parquet";
+
+    public static final ConfigOption<String> FILE_FORMAT =
             key("file.format")
-                    .enumType(FileFormatType.class)
-                    .defaultValue(FileFormatType.ORC)
+                    .stringType()
+                    .defaultValue(FILE_FORMAT_ORC)
                     .withDescription(
                             "Specify the message format of data files, currently orc, parquet and avro are supported.");
 
@@ -158,10 +162,10 @@ public class CoreOptions implements Serializable {
                     .defaultValue(true)
                     .withDescription("Whether enabled read file index.");
 
-    public static final ConfigOption<FileFormatType> MANIFEST_FORMAT =
+    public static final ConfigOption<String> MANIFEST_FORMAT =
             key("manifest.format")
-                    .enumType(FileFormatType.class)
-                    .defaultValue(FileFormatType.AVRO)
+                    .stringType()
+                    .defaultValue(CoreOptions.FILE_FORMAT_AVRO)
                     .withDescription("Specify the message format of manifest files.");
 
     public static final ConfigOption<MemorySize> MANIFEST_TARGET_FILE_SIZE =
@@ -1182,8 +1186,8 @@ public class CoreOptions implements Serializable {
         return new Path(options.get(PATH));
     }
 
-    public FileFormatType formatType() {
-        return options.get(FILE_FORMAT);
+    public String formatType() {
+        return options.get(FILE_FORMAT).toLowerCase();
     }
 
     public FileFormat fileFormat() {
@@ -1218,9 +1222,8 @@ public class CoreOptions implements Serializable {
         return options.get(SORT_COMPACTION_SAMPLE_MAGNIFICATION);
     }
 
-    public static FileFormat createFileFormat(
-            Options options, ConfigOption<FileFormatType> formatOption) {
-        String formatIdentifier = options.get(formatOption).toString();
+    public static FileFormat createFileFormat(Options options, ConfigOption<String> formatOption) {
+        String formatIdentifier = options.get(formatOption);
         return FileFormat.getFileFormat(options, formatIdentifier);
     }
 
@@ -1988,46 +1991,6 @@ public class CoreOptions implements Serializable {
         @Override
         public InlineElement getDescription() {
             return text(description);
-        }
-    }
-
-    /** Specifies the file format type for store. */
-    public enum FileFormatType implements DescribedEnum {
-        ORC("orc", "ORC file format."),
-        PARQUET("parquet", "Parquet file format."),
-        AVRO("avro", "Avro file format.");
-
-        private final String value;
-        private final String description;
-
-        FileFormatType(String value, String description) {
-            this.value = value;
-            this.description = description;
-        }
-
-        @Override
-        public String toString() {
-            return value;
-        }
-
-        @Override
-        public InlineElement getDescription() {
-            return text(description);
-        }
-
-        @VisibleForTesting
-        public static FileFormatType fromValue(String value) {
-            for (FileFormatType formatType : FileFormatType.values()) {
-                if (formatType.value.equals(value)) {
-                    return formatType;
-                }
-            }
-            throw new IllegalArgumentException(
-                    String.format(
-                            "Invalid format type %s, only support [%s]",
-                            value,
-                            StringUtils.join(
-                                    Arrays.stream(FileFormatType.values()).iterator(), ",")));
         }
     }
 
