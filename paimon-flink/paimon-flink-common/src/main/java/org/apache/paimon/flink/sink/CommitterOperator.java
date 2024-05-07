@@ -89,6 +89,7 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
     public CommitterOperator(
             boolean streamingCheckpointEnabled,
             boolean forceSingleParallelism,
+            boolean chaining,
             String initialCommitUser,
             Committer.Factory<CommitT, GlobalCommitT> committerFactory,
             CommittableStateManager<GlobalCommitT> committableStateManager) {
@@ -98,7 +99,7 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
         this.committablesPerCheckpoint = new TreeMap<>();
         this.committerFactory = checkNotNull(committerFactory);
         this.committableStateManager = committableStateManager;
-        setChainingStrategy(ChainingStrategy.ALWAYS);
+        setChainingStrategy(chaining ? ChainingStrategy.ALWAYS : ChainingStrategy.NEVER);
     }
 
     @Override

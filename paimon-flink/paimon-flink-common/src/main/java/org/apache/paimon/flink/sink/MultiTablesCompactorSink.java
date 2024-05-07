@@ -27,15 +27,12 @@ import org.apache.paimon.options.Options;
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.configuration.ReadableConfig;
-import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.CheckpointConfig;
-import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
-import org.apache.flink.streaming.api.operators.ChainingStrategy;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.table.data.RowData;
 
@@ -46,8 +43,9 @@ import java.util.UUID;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_OPERATOR_CHAINING;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_MANAGED_WRITER_BUFFER_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
+import static org.apache.paimon.flink.sink.FlinkSink.assertBatchConfiguration;
+import static org.apache.paimon.flink.sink.FlinkSink.assertStreamingConfiguration;
 import static org.apache.paimon.flink.utils.ManagedMemoryUtils.declareManagedMemory;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A sink for processing multi-tables in dedicated compaction job. */
 public class MultiTablesCompactorSink implements Serializable {
@@ -123,49 +121,20 @@ public class MultiTablesCompactorSink implements Serializable {
         if (streamingCheckpointEnabled) {
             assertStreamingConfiguration(env);
         }
-        CommitterOperator<MultiTableCommittable, WrappedManifestCommittable> committerOperator =
-                new CommitterOperator<>(
-                        streamingCheckpointEnabled,
-                        false,
-                        commitUser,
-                        createCommitterFactory(),
-                        createCommittableStateManager());
-
-        if (!options.get(SINK_COMMITTER_OPERATOR_CHAINING)) {
-            committerOperator.setChainingStrategy(ChainingStrategy.NEVER);
-        }
         SingleOutputStreamOperator<?> committed =
                 written.transform(
                                 GLOBAL_COMMITTER_NAME,
                                 new MultiTableCommittableTypeInfo(),
-                                committerOperator)
+                                new CommitterOperator<>(
+                                        streamingCheckpointEnabled,
+                                        false,
+                                        options.get(SINK_COMMITTER_OPERATOR_CHAINING),
+                                        commitUser,
+                                        createCommitterFactory(),
+                                        createCommittableStateManager()))
                         .setParallelism(1)
                         .setMaxParallelism(1);
         return committed.addSink(new DiscardingSink<>()).name("end").setParallelism(1);
-    }
-
-    public static void assertStreamingConfiguration(StreamExecutionEnvironment env) {
-        checkArgument(
-                !env.getCheckpointConfig().isUnalignedCheckpointsEnabled(),
-                "Paimon sink currently does not support unaligned checkpoints. Please set "
-                        + ExecutionCheckpointingOptions.ENABLE_UNALIGNED.key()
-                        + " to false.");
-        checkArgument(
-                env.getCheckpointConfig().getCheckpointingMode() == CheckpointingMode.EXACTLY_ONCE,
-                "Paimon sink currently only supports EXACTLY_ONCE checkpoint mode. Please set "
-                        + ExecutionCheckpointingOptions.CHECKPOINTING_MODE.key()
-                        + " to exactly-once");
-    }
-
-    private void assertBatchConfiguration(StreamExecutionEnvironment env, int sinkParallelism) {
-        try {
-            checkArgument(
-                    sinkParallelism != -1 || !AdaptiveParallelism.isEnabled(env),
-                    "Paimon Sink does not support Flink's Adaptive Parallelism mode. "
-                            + "Please manually turn it off or set Paimon `sink.parallelism` manually.");
-        } catch (NoClassDefFoundError ignored) {
-            // before 1.17, there is no adaptive parallelism
-        }
     }
 
     // TODO:refactor FlinkSink to adopt this sink

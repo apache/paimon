@@ -726,6 +726,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         return new CommitterOperator<>(
                 true,
                 true,
+                true,
                 commitUser == null ? initialCommitUser : commitUser,
                 (user, metricGroup) ->
                         new StoreCommitter(
@@ -740,6 +741,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
             CommittableStateManager<ManifestCommittable> committableStateManager,
             ThrowingConsumer<StateInitializationContext, Exception> initializeFunction) {
         return new CommitterOperator<Committable, ManifestCommittable>(
+                true,
                 true,
                 true,
                 commitUser == null ? initialCommitUser : commitUser,

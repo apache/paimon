@@ -64,14 +64,17 @@ public class FlinkCdcMultiTableSink implements Serializable {
     private final Catalog.Loader catalogLoader;
     private final double commitCpuCores;
     @Nullable private final MemorySize commitHeapMemory;
+    private final boolean commitChaining;
 
     public FlinkCdcMultiTableSink(
             Catalog.Loader catalogLoader,
             double commitCpuCores,
-            @Nullable MemorySize commitHeapMemory) {
+            @Nullable MemorySize commitHeapMemory,
+            boolean commitChaining) {
         this.catalogLoader = catalogLoader;
         this.commitCpuCores = commitCpuCores;
         this.commitHeapMemory = commitHeapMemory;
+        this.commitChaining = commitChaining;
     }
 
     private StoreSinkWrite.WithWriteBufferProvider createWriteProvider() {
@@ -128,6 +131,7 @@ public class FlinkCdcMultiTableSink implements Serializable {
                                 new CommitterOperator<>(
                                         true,
                                         false,
+                                        commitChaining,
                                         commitUser,
                                         createCommitterFactory(),
                                         createCommittableStateManager()))
