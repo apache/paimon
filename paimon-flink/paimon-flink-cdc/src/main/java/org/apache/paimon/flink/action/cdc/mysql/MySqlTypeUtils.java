@@ -409,10 +409,13 @@ public class MySqlTypeUtils {
         if (typeName.contains(LEFT_BRACKETS)
                 && typeName.contains(RIGHT_BRACKETS)
                 && isScaleType(typeName)) {
-            return Integer.parseInt(
-                    typeName.substring(
-                                    typeName.indexOf(COMMA) + 1, typeName.indexOf(RIGHT_BRACKETS))
-                            .trim());
+            return typeName.contains(COMMA)
+                    ? Integer.parseInt(
+                            typeName.substring(
+                                            typeName.indexOf(COMMA) + 1,
+                                            typeName.indexOf(RIGHT_BRACKETS))
+                                    .trim())
+                    : 0;
         } else {
             // When missing scale of the decimal, we
             // use the max scale to avoid parse error
