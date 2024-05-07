@@ -67,7 +67,7 @@ By partitioning, users can efficiently operate on a slice of records in the tabl
 ## Consistency Guarantees
 
 Paimon writers use two-phase commit protocol to atomically commit a batch of records to the table. Each commit produces
-at most two [snapshots]({{< ref "concepts/basic-concepts#snapshot" >}}) at commit time.
+at most two [snapshots]({{< ref "concepts/basic-concepts#snapshot" >}}) at commit time. It depends on the incremental write and compaction strategy. If only incremental writes are performed without triggering a compaction operation, only an incremental snapshot will be created. If a compaction operation is triggered, an incremental snapshot and a compacted snapshot will be created.
 
 For any two writers modifying a table at the same time, as long as they do not modify the same partition, their commits 
 can occur in parallel. If they modify the same partition, only snapshot isolation is guaranteed. That is, the final table 
