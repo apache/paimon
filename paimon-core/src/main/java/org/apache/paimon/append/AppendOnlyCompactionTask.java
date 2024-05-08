@@ -18,7 +18,6 @@
 
 package org.apache.paimon.append;
 
-import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
@@ -40,22 +39,13 @@ public class AppendOnlyCompactionTask {
     private final List<DataFileMeta> compactBefore;
     private final List<DataFileMeta> compactAfter;
 
-    private final Identifier tableIdentifier;
-
     public AppendOnlyCompactionTask(BinaryRow partition, List<DataFileMeta> files) {
-        this(partition, files, Identifier.EMPTY);
-    }
-
-    public AppendOnlyCompactionTask(
-            BinaryRow partition, List<DataFileMeta> files, Identifier identifier) {
-
         Preconditions.checkArgument(
                 files != null && files.size() > 1,
                 "AppendOnlyCompactionTask need more than one file input.");
         this.partition = partition;
         compactBefore = new ArrayList<>(files);
         compactAfter = new ArrayList<>();
-        this.tableIdentifier = identifier;
     }
 
     public BinaryRow partition() {
@@ -82,12 +72,8 @@ public class AppendOnlyCompactionTask {
                 compactIncrement);
     }
 
-    public Identifier tableIdentifier() {
-        return tableIdentifier;
-    }
-
     public int hashCode() {
-        return Objects.hash(partition, compactBefore, compactAfter, tableIdentifier);
+        return Objects.hash(partition, compactBefore, compactAfter);
     }
 
     @Override
@@ -102,8 +88,7 @@ public class AppendOnlyCompactionTask {
         AppendOnlyCompactionTask that = (AppendOnlyCompactionTask) o;
         return Objects.equals(partition, that.partition)
                 && Objects.equals(compactBefore, that.compactBefore)
-                && Objects.equals(compactAfter, that.compactAfter)
-                && Objects.equals(tableIdentifier, that.tableIdentifier);
+                && Objects.equals(compactAfter, that.compactAfter);
     }
 
     @Override
@@ -112,8 +97,7 @@ public class AppendOnlyCompactionTask {
                 "CompactionTask {"
                         + "partition = %s, "
                         + "compactBefore = %s, "
-                        + "compactAfter = %s, "
-                        + "tableIdentifier = %s}",
-                partition, compactBefore, compactAfter, tableIdentifier);
+                        + "compactAfter = %s}",
+                partition, compactBefore, compactAfter);
     }
 }
