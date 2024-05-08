@@ -35,7 +35,6 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  */
 @Public
 public class Identifier implements Serializable {
-    public static final Identifier EMPTY = new Identifier(null, null);
 
     private static final long serialVersionUID = 1L;
 
