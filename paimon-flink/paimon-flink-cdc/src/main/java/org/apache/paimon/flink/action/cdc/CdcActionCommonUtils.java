@@ -87,7 +87,7 @@ public class CdcActionCommonUtils {
                 return false;
             }
             DataType type = paimonSchema.fields().get(idx).type();
-            if (UpdatedDataFieldsProcessFunction.canConvert(field.type(), type)
+            if (UpdatedDataFieldsProcessFunction.canConvert(type, field.type())
                     != UpdatedDataFieldsProcessFunction.ConvertAction.CONVERT) {
                 LOG.info(
                         "Cannot convert field '{}' from source table type '{}' to Paimon type '{}'.",
