@@ -44,7 +44,7 @@ public class UnawareBucketCompactionSink extends FlinkSink<AppendOnlyCompactionT
     @Override
     protected OneInputStreamOperator<AppendOnlyCompactionTask, Committable> createWriteOperator(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new AppendOnlyTableCompactionWorkerOperator(table, commitUser);
+        return new AppendOnlySingleTableCompactionWorkerOperator(table, commitUser);
     }
 
     @Override
