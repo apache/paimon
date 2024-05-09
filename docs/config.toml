@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-baseURL = '//paimon.apache.org/docs/master'
+baseURL = '//paimon.apache.org/docs/0,7'
 languageCode = 'en-us'
 title = 'Apache Paimon'
 enableGitInfo = false
@@ -24,7 +24,7 @@ pygmentsUseClasses = true
 [params]
   # Flag whether this is a stable version or not.
   # Used for the quickstart page.
-  IsStable = false
+  IsStable = true
 
   # Flag to indicate whether an outdated warning should be shown.
   ShowOutDatedWarning = false
@@ -34,14 +34,14 @@ pygmentsUseClasses = true
   # we change the version for the complete docs when forking of a release branch
   # etc.
   # The full version string as referenced in Maven (e.g. 1.2.1)
-  Version = "0.8-SNAPSHOT"
+  Version = "0.8.0"
 
   # For stable releases, leave the bugfix version out (e.g. 1.2). For snapshot
   # release this should be the same as the regular version
-  VersionTitle = "0.8-SNAPSHOT"
+  VersionTitle = "0.8"
 
   # The branch for this version of Apache Paimon
-  Branch = "master"
+  Branch = "0.8"
 
   # The github repository for Apache Paimon
   Repo = "//github.com/apache/paimon"
@@ -64,12 +64,12 @@ pygmentsUseClasses = true
     ["JavaDocs", "//paimon.apache.org/docs/master/api/java/"],
   ]
 
-  StableDocs = "https://paimon.apache.org/docs/0.7"
+  StableDocs = "https://paimon.apache.org/docs/0.8"
 
   PreviousDocs = [
     ["master", "https://paimon.apache.org/docs/master"],
-    ["stable", "https://paimon.apache.org/docs/0.7"],
-    ["0.7", "https://paimon.apache.org/docs/0.7"],
+    ["stable", "https://paimon.apache.org/docs/0.8"],
+    ["0.8", "https://paimon.apache.org/docs/0.8"],
   ]
 
   BookSection = '/'
