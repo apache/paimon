@@ -27,14 +27,20 @@ import org.apache.paimon.hive.annotation.Minio;
 import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
 import org.apache.paimon.privilege.NoPrivilegeException;
 import org.apache.paimon.s3.MinioTestContainer;
+import org.apache.paimon.utils.FileUtils;
+import org.apache.paimon.utils.IOUtils;
 
 import com.klarna.hiverunner.HiveShell;
 import com.klarna.hiverunner.annotations.HiveSQL;
+import org.apache.flink.core.fs.FSDataInputStream;
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.TableException;
+import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.ValidationException;
+import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.table.api.internal.TableEnvironmentImpl;
 import org.apache.flink.table.catalog.exceptions.DatabaseAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotEmptyException;
@@ -51,10 +57,14 @@ import org.junit.rules.TestRule;
 import org.junit.runner.RunWith;
 import org.junit.runners.model.Statement;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -80,6 +90,7 @@ public abstract class HiveCatalogITCaseBase {
 
     protected String path;
     protected TableEnvironment tEnv;
+    protected TableEnvironment sEnv;
     private boolean locationInProperties;
 
     @HiveSQL(files = {})
@@ -100,6 +111,10 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql("DROP DATABASE IF EXISTS test_db CASCADE");
         tEnv.executeSql("CREATE DATABASE test_db").await();
         tEnv.executeSql("USE test_db").await();
+
+        sEnv.executeSql("USE CATALOG my_hive").await();
+        sEnv.executeSql("USE test_db").await();
+
         hiveShell.execute("USE test_db");
         hiveShell.execute("CREATE TABLE hive_table ( a INT, b STRING )");
         hiveShell.execute("INSERT INTO hive_table VALUES (100, 'Hive'), (200, 'Table')");
@@ -117,8 +132,15 @@ public abstract class HiveCatalogITCaseBase {
             catalogProperties.putAll(minioTestContainer.getS3ConfigOptions());
         }
 
-        EnvironmentSettings settings = EnvironmentSettings.newInstance().inBatchMode().build();
-        tEnv = TableEnvironmentImpl.create(settings);
+        tEnv = TableEnvironmentImpl.create(EnvironmentSettings.newInstance().inBatchMode().build());
+        sEnv =
+                TableEnvironmentImpl.create(
+                        EnvironmentSettings.newInstance().inStreamingMode().build());
+        sEnv.getConfig()
+                .getConfiguration()
+                .set(ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL, Duration.ofSeconds(1));
+        sEnv.getConfig().set(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 1);
+
         tEnv.executeSql(
                         String.join(
                                 "\n",
@@ -132,6 +154,8 @@ public abstract class HiveCatalogITCaseBase {
                                         .collect(Collectors.joining(",\n")),
                                 ")"))
                 .await();
+
+        sEnv.registerCatalog(catalogName, tEnv.getCatalog(catalogName).get());
     }
 
     private void after() {
@@ -1109,6 +1133,42 @@ public abstract class HiveCatalogITCaseBase {
                 .containsExactly(Row.of(1, 10), Row.of(2, 20));
         assertNoPrivilege(() -> tEnv.executeSql("INSERT INTO t VALUES (3, 30)").await());
         assertNoPrivilege(() -> tEnv.executeSql("DROP TABLE t").await());
+    }
+
+    @Test
+    public void testMarkDone() throws Exception {
+        sEnv.executeSql(
+                "CREATE TABLE mark_done_t1 (a INT, dt STRING) WITH ('continuous.discovery-interval' = '1s')");
+        sEnv.executeSql(
+                        "CREATE TABLE mark_done_t2 (a INT, dt STRING) PARTITIONED BY (dt) WITH ("
+                                + "'partition.timestamp-formatter'='yyyyMMdd',"
+                                + "'partition.timestamp-pattern'='$dt',"
+                                + "'partition.idle-time-to-done'='1 s',"
+                                + "'partition.time-interval'='1 d',"
+                                + "'metastore.partitioned-table'='true',"
+                                + "'partition.mark-done-action'='done-partition,success-file'"
+                                + ")")
+                .await();
+
+        TableResult insertSql =
+                sEnv.executeSql("INSERT INTO mark_done_t2 SELECT * FROM mark_done_t1");
+
+        tEnv.executeSql("INSERT INTO mark_done_t1 VALUES (5, '20240501')").await();
+
+        Thread.sleep(10 * 1000);
+
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS mark_done_t2"))
+                .containsExactlyInAnyOrder("dt=20240501", "dt=20240501.done");
+
+        Path successFile = new Path(path, "test_db.db/mark_done_t2/dt=20240501/_SUCCESS");
+        String successText;
+        try (FSDataInputStream in = successFile.getFileSystem().open(successFile)) {
+            successText = IOUtils.readUTF8Fully(in);
+        }
+
+        assertThat(successText).contains("creationTime").contains("modificationTime");
+
+        insertSql.getJobClient().get().cancel();
     }
 
     private void assertNoPrivilege(Executable executable) {
