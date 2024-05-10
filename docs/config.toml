@@ -70,6 +70,9 @@ pygmentsUseClasses = true
     ["master", "https://paimon.apache.org/docs/master"],
     ["stable", "https://paimon.apache.org/docs/0.8"],
     ["0.8", "https://paimon.apache.org/docs/0.8"],
+    ["0.7", "https://paimon.apache.org/docs/0.7"],
+    ["0.6", "https://paimon.apache.org/docs/0.6"],
+    ["0.5", "https://paimon.apache.org/docs/0.5"]
   ]
 
   BookSection = '/'
