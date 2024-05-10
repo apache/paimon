@@ -25,7 +25,6 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 
-import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -64,7 +63,6 @@ public class MultiUnawareBucketTableScan
         tablesMap = new HashMap<>();
     }
 
-    @NotNull
     @Override
     List<MultiTableAppendOnlyCompactionTask> doScan() {
         // do scan and plan action, emit append-only compaction tasks.
