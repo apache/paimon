@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-baseURL = '//paimon.apache.org/docs/0,7'
+baseURL = '//paimon.apache.org/docs/0.8'
 languageCode = 'en-us'
 title = 'Apache Paimon'
 enableGitInfo = false
