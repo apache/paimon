@@ -67,6 +67,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD;
 import static org.apache.paimon.table.sink.KeyAndBucketExtractor.bucket;
 import static org.apache.paimon.table.sink.KeyAndBucketExtractor.bucketKeyHashCode;
@@ -827,6 +828,9 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         Options conf = new Options();
         conf.set(CoreOptions.PATH, tablePath.toString());
         configure.accept(conf);
+        if (!conf.contains(BUCKET_KEY)) {
+            conf.set(BUCKET_KEY, "a");
+        }
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
                         new SchemaManager(LocalFileIO.create(), tablePath),

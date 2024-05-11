@@ -432,6 +432,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                 createTable(
                         Collections.singletonList("k int"),
                         Collections.emptyList(),
+                        Collections.singletonList("k"),
                         Collections.emptyList());
 
         assertThatThrownBy(

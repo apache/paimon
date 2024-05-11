@@ -156,6 +156,7 @@ public class AppendOnlyFileStoreWriteTest {
                         .column("f2", DataTypes.INT())
                         .partitionKeys("f0")
                         .option("bucket", "100")
+                        .option("bucket-key", "f1")
                         .build();
         Identifier identifier = Identifier.create("default", "test");
         catalog.createDatabase("default", false);

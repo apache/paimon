@@ -75,9 +75,15 @@ class PaimonQueryTest extends PaimonSparkTestBase {
             import _spark.implicits._
 
             withTable("T") {
+              val bucketProp = if (bucketMode != -1) {
+                s", 'bucket-key'='id', 'bucket' = '$bucketMode' "
+              } else {
+                ""
+              }
+
               spark.sql(s"""
                            |CREATE TABLE T (id INT, name STRING)
-                           |TBLPROPERTIES ('file.format'='$fileFormat', 'bucket'='$bucketMode')
+                           |TBLPROPERTIES ('file.format'='$fileFormat' $bucketProp)
                            |""".stripMargin)
 
               val location = loadTable("T").location().toUri.toString
@@ -114,11 +120,17 @@ class PaimonQueryTest extends PaimonSparkTestBase {
             val _spark: SparkSession = spark
             import _spark.implicits._
 
+            val bucketProp = if (bucketMode != -1) {
+              s", 'bucket-key'='id', 'bucket' = '$bucketMode' "
+            } else {
+              ""
+            }
+
             withTable("T") {
               spark.sql(s"""
                            |CREATE TABLE T (id INT, name STRING, pt STRING)
                            |PARTITIONED BY (pt)
-                           |TBLPROPERTIES ('file.format'='$fileFormat', 'bucket'='$bucketMode')
+                           |TBLPROPERTIES ('file.format'='$fileFormat' $bucketProp)
                            |""".stripMargin)
 
               val location = loadTable("T").location().toUri.toString

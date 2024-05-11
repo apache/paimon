@@ -540,7 +540,7 @@ public class SchemaValidation {
 
             if (schema.primaryKeys().isEmpty() && schema.bucketKeys().isEmpty()) {
                 throw new RuntimeException(
-                        "You should define a 'bucket-key' for append queue mode.");
+                        "You should define a 'bucket-key' for bucketed append mode.");
             }
         }
     }

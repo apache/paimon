@@ -189,7 +189,6 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
         // define an append-only table and sink into it with aggregation and watermark in append mode
         spark.sql(s"""
                      |CREATE TABLE T (start Timestamp, stockId INT, avg_price DOUBLE)
-                     |TBLPROPERTIES ('bucket'='3')
                      |""".stripMargin)
         val location = loadTable("T").location().toString
 
