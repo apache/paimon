@@ -48,6 +48,13 @@ public interface DeletionVector {
     void delete(long position);
 
     /**
+     * merge another {@link DeletionVector} to this current one.
+     *
+     * @param deletionVector the other {@link DeletionVector}
+     */
+    void merge(DeletionVector deletionVector);
+
+    /**
      * Marks the row at the specified position as deleted.
      *
      * @param position The position of the row to be marked as deleted.
@@ -76,6 +83,9 @@ public interface DeletionVector {
      * @return true if the deletion vector is empty, false if it contains deletions.
      */
     boolean isEmpty();
+
+    /** @return the number of distinct integers added to the DeletionVector. */
+    long getCardinality();
 
     /**
      * Serializes the deletion vector to a byte array for storage or transmission.
