@@ -102,6 +102,21 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
     reusedSpark.stop()
   }
 
+  test("Paimon DDL with hive catalog: drop database cascade which contains paimon table") {
+    // Spark supports DROP DATABASE CASCADE since 3.3
+    if (gteqSpark3_3) {
+      Seq("spark_catalog", paimonHiveCatalogName).foreach {
+        catalogName =>
+          spark.sql(s"USE $catalogName")
+          spark.sql(s"CREATE DATABASE paimon_db")
+          spark.sql(s"USE paimon_db")
+          spark.sql(s"CREATE TABLE paimon_tbl (id int, name string, dt string) using paimon")
+          spark.sql(s"USE default")
+          spark.sql(s"DROP DATABASE paimon_db CASCADE")
+      }
+    }
+  }
+
   def supportDefaultDatabaseWithSessionCatalog = true
 
   def getDatabaseLocation(dbName: String): String = {
