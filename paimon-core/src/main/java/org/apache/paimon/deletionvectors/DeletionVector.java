@@ -29,9 +29,7 @@ import javax.annotation.Nullable;
 import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -151,23 +149,13 @@ public interface DeletionVector {
 
     static Factory factory(
             FileIO fileIO, List<DataFileMeta> files, @Nullable List<DeletionFile> deletionFiles) {
-        if (deletionFiles == null) {
-            return emptyFactory();
-        }
-        Map<String, DeletionFile> fileToDeletion = new HashMap<>();
-        for (int i = 0; i < files.size(); i++) {
-            DeletionFile deletionFile = deletionFiles.get(i);
-            if (deletionFile != null) {
-                fileToDeletion.put(files.get(i).fileName(), deletionFile);
-            }
-        }
+        DeletionFile.Factory factory = DeletionFile.factory(files, deletionFiles);
         return fileName -> {
-            DeletionFile deletionFile = fileToDeletion.get(fileName);
-            if (deletionFile == null) {
-                return Optional.empty();
+            Optional<DeletionFile> deletionFile = factory.create(fileName);
+            if (deletionFile.isPresent()) {
+                return Optional.of(DeletionVector.read(fileIO, deletionFile.get()));
             }
-
-            return Optional.of(DeletionVector.read(fileIO, deletionFile));
+            return Optional.empty();
         };
     }
 
