@@ -19,15 +19,15 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.CoreOptions.WRITE_ONLY
+import org.apache.paimon.deletionvectors.{DeletionVector, DeletionVectorsMaintainer}
 import org.apache.paimon.index.{BucketAssigner, SimpleHashBucketAssigner}
+import org.apache.paimon.io.{CompactIncrement, DataIncrement, IndexIncrement}
 import org.apache.paimon.spark.{SparkRow, SparkTableWrite}
-import org.apache.paimon.spark.schema.SparkSystemColumns
 import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
 import org.apache.paimon.spark.util.SparkRowUtils
 import org.apache.paimon.table.{BucketMode, FileStoreTable}
-import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageSerializer, RowPartitionKeyExtractor}
-import org.apache.paimon.utils.Preconditions
-import org.apache.paimon.utils.Preconditions.checkArgument
+import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageImpl, CommitMessageSerializer, RowPartitionKeyExtractor}
+import org.apache.paimon.utils.SerializationUtils
 
 import org.apache.spark.{Partitioner, TaskContext}
 import org.apache.spark.sql.{DataFrame, Dataset, Row, SparkSession}
@@ -194,6 +194,35 @@ case class PaimonSparkWriter(table: FileStoreTable) {
       .collect()
       .map(deserializeCommitMessage(serializer, _))
       .toSeq
+  }
+
+  def persistDeletionVectors(deletionVectors: Dataset[SparkDeletionVector]): Seq[CommitMessage] = {
+    val sparkSession = deletionVectors.sparkSession
+    import sparkSession.implicits._
+
+    val store = table.store()
+    deletionVectors
+      .map {
+        sdv =>
+          val deletionVectorsMaintainerFactory =
+            new DeletionVectorsMaintainer.Factory(store.newIndexFileHandler())
+          val maintainer = deletionVectorsMaintainerFactory.create()
+          maintainer.notifyNewDeletion(
+            sdv.file,
+            DeletionVector.deserializeFromBytes(sdv.deletionVector))
+
+          val commitMessage = new CommitMessageImpl(
+            SerializationUtils.deserializeBinaryRow(sdv.partition),
+            sdv.bucket,
+            DataIncrement.emptyIncrement(),
+            CompactIncrement.emptyIncrement(),
+            new IndexIncrement(maintainer.prepareCommit()))
+
+          val serializer = new CommitMessageSerializer
+          serializer.serialize(commitMessage)
+      }
+      .collect()
+      .map(deserializeCommitMessage(serializer, _))
   }
 
   def commit(commitMessages: Seq[CommitMessage]): Unit = {

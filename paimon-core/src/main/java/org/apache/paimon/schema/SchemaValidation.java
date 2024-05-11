@@ -460,9 +460,9 @@ public class SchemaValidation {
     }
 
     private static void validateForDeletionVectors(TableSchema schema, CoreOptions options) {
-        checkArgument(
-                !schema.primaryKeys().isEmpty(),
-                "Deletion vectors mode is only supported for tables with primary keys.");
+        //        checkArgument(
+        //                !schema.primaryKeys().isEmpty(),
+        //                "Deletion vectors mode is only supported for tables with primary keys.");
 
         checkArgument(
                 options.changelogProducer() == ChangelogProducer.NONE

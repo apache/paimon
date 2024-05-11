@@ -21,6 +21,7 @@ package org.apache.paimon.spark.schema
 import org.apache.paimon.spark.SparkTypeUtils
 import org.apache.paimon.types.DataField
 
+import org.apache.spark.sql.catalyst.expressions.AttributeReference
 import org.apache.spark.sql.connector.catalog.MetadataColumn
 import org.apache.spark.sql.types.{DataType, LongType, StringType}
 
@@ -30,6 +31,11 @@ case class PaimonMetadataColumn(id: Int, override val name: String, override val
   def toPaimonDataField: DataField = {
     new DataField(id, name, SparkTypeUtils.toPaimonType(dataType));
   }
+
+  def toAttribute: AttributeReference = {
+    AttributeReference(name, dataType)()
+  }
+
 }
 
 object PaimonMetadataColumn {
