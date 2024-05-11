@@ -74,21 +74,11 @@ public class NoPrimaryKeyLookupTable extends FullCacheLookupTable {
             throw new IllegalArgumentException(
                     "Append table does not support user defined sequence fields.");
         }
-
-        Predicate predicate = projectedPredicate();
-        while (incremental.hasNext()) {
-            InternalRow row = incremental.next();
-            if (refreshAsync) {
-                synchronized (lock) {
-                    refreshRow(row, predicate);
-                }
-            } else {
-                refreshRow(row, predicate);
-            }
-        }
+        super.refresh(incremental);
     }
 
-    private void refreshRow(InternalRow row, Predicate predicate) throws IOException {
+    @Override
+    protected void refreshRow(InternalRow row, Predicate predicate) throws IOException {
         joinKeyRow.replaceRow(row);
         if (row.getRowKind() == RowKind.INSERT || row.getRowKind() == RowKind.UPDATE_AFTER) {
             if (predicate == null || predicate.test(row)) {

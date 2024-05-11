@@ -28,7 +28,6 @@ import org.apache.paimon.utils.TypeUtils;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 
 /** A {@link LookupTable} for primary key table which provides lookup by secondary key. */
@@ -74,21 +73,7 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
     }
 
     @Override
-    public void refresh(Iterator<InternalRow> incremental) throws IOException {
-        Predicate predicate = projectedPredicate();
-        while (incremental.hasNext()) {
-            InternalRow row = incremental.next();
-            if (refreshAsync) {
-                synchronized (lock) {
-                    refreshRow(row, predicate);
-                }
-            } else {
-                refreshRow(row, predicate);
-            }
-        }
-    }
-
-    private void refreshRow(InternalRow row, Predicate predicate) throws IOException {
+    protected void refreshRow(InternalRow row, Predicate predicate) throws IOException {
         primaryKeyRow.replaceRow(row);
 
         boolean previousFetched = false;

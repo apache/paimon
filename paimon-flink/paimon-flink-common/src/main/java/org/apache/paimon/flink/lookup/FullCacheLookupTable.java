@@ -217,9 +217,23 @@ public abstract class FullCacheLookupTable implements LookupTable {
         return dropSequence;
     }
 
+    public void refresh(Iterator<InternalRow> input) throws IOException {
+        Predicate predicate = projectedPredicate();
+        while (input.hasNext()) {
+            InternalRow row = input.next();
+            if (refreshAsync) {
+                synchronized (lock) {
+                    refreshRow(row, predicate);
+                }
+            } else {
+                refreshRow(row, predicate);
+            }
+        }
+    }
+
     public abstract List<InternalRow> innerGet(InternalRow key) throws IOException;
 
-    public abstract void refresh(Iterator<InternalRow> input) throws IOException;
+    protected abstract void refreshRow(InternalRow row, Predicate predicate) throws IOException;
 
     @Nullable
     public Predicate projectedPredicate() {

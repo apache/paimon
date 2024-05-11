@@ -33,7 +33,6 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Collections;
-import java.util.Iterator;
 import java.util.List;
 
 /** A {@link LookupTable} for primary key table. */
@@ -95,21 +94,7 @@ public class PrimaryKeyLookupTable extends FullCacheLookupTable {
     }
 
     @Override
-    public void refresh(Iterator<InternalRow> incremental) throws IOException {
-        Predicate predicate = projectedPredicate();
-        while (incremental.hasNext()) {
-            InternalRow row = incremental.next();
-            if (refreshAsync) {
-                synchronized (lock) {
-                    refreshRow(row, predicate);
-                }
-            } else {
-                refreshRow(row, predicate);
-            }
-        }
-    }
-
-    private void refreshRow(InternalRow row, Predicate predicate) throws IOException {
+    protected void refreshRow(InternalRow row, Predicate predicate) throws IOException {
         primaryKeyRow.replaceRow(row);
         if (userDefinedSeqComparator != null) {
             InternalRow previous = tableState.get(primaryKeyRow);
