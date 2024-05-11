@@ -45,6 +45,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
@@ -516,7 +517,7 @@ public class SchemaValidation {
     private static void validateBucket(TableSchema schema, CoreOptions options) {
         int bucket = options.bucket();
         if (bucket == -1) {
-            if (!schema.bucketKeys().isEmpty()) {
+            if (options.toMap().get(BUCKET_KEY.key()) != null) {
                 throw new RuntimeException(
                         "Cannot define 'bucket-key' with bucket -1, please specify a bucket number.");
             }
