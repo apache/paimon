@@ -27,7 +27,7 @@ import org.apache.paimon.spark.schema.SparkSystemColumns
 import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
 import org.apache.paimon.spark.util.SparkRowUtils
 import org.apache.paimon.table.{BucketMode, FileStoreTable}
-import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageSerializer, RowPartitionKeyExtractor}
+import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageImpl, CommitMessageSerializer, RowPartitionKeyExtractor}
 
 import org.apache.spark.Partitioner
 import org.apache.spark.sql.{DataFrame, Dataset, Row, SparkSession}
@@ -109,6 +109,16 @@ case class PaimonSparkWriter(table: FileStoreTable) {
       .map(deserializeCommitMessage(serializer, _))
 
     commitMessages.toSeq
+  }
+
+  def collectCommitMessage(
+      sparkSession: SparkSession,
+      commitMessages: Dataset[Array[Byte]]): Seq[CommitMessage] = {
+
+    commitMessages
+      .collect()
+      .map(deserializeCommitMessage(serializer, _))
+
   }
 
   def commit(commitMessages: Seq[CommitMessage]): Unit = {

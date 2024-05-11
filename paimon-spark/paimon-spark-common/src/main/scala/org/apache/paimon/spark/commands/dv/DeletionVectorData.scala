@@ -16,26 +16,9 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark
+package org.apache.paimon.spark.commands.dv
 
-import org.apache.paimon.spark.schema.PaimonMetadataColumn
-import org.apache.paimon.table.Table
-import org.apache.paimon.table.source.{DataSplit, Split}
+import org.apache.paimon.data.BinaryRow
+import org.apache.paimon.table.source.DeletionFile
 
-import org.apache.spark.sql.connector.read.{Batch, Scan}
-import org.apache.spark.sql.types.StructType
-
-/** For internal use only. */
-case class PaimonSplitScan(
-    table: Table,
-    dataSplits: Array[DataSplit],
-    metadataColumns: Seq[PaimonMetadataColumn] = Seq.empty)
-  extends Scan {
-
-  override def readSchema(): StructType = SparkTypeUtils.fromPaimonRowType(table.rowType())
-
-  override def toBatch: Batch = {
-    PaimonBatch(dataSplits.asInstanceOf[Array[Split]], table.newReadBuilder, metadataColumns)
-  }
-
-}
+case class SparkDeletionFile(partition: BinaryRow, bucket: Int, deletionFile: Option[DeletionFile])

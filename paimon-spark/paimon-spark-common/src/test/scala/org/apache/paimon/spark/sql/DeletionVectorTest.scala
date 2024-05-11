@@ -29,6 +29,30 @@ import scala.util.Random
 
 class DeletionVectorTest extends PaimonSparkTestBase {
 
+  test("Paimon deletionVector2: deletion vector write verification") {
+    withTable("T") {
+      spark.sql(s"""
+                   |CREATE TABLE T (id INT, name STRING)
+                   |TBLPROPERTIES (
+                   | 'bucket' = '1',
+                   | 'file.format' = 'parquet',
+                   | 'deletion-vectors.enabled' = 'true'
+                   |)
+                   |""".stripMargin)
+      val table = loadTable("T")
+
+      // Insert1
+      // f1 (1, 2, 3), row with positions 0 and 2 in f1 are marked deleted
+      // f2 (1, 3)
+      spark.sql("INSERT INTO T VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd')")
+//      spark.sql("INSERT INTO T VALUES (1, 'a_new1'), (3, 'c_new1')")
+      spark.sql("DELETE FROM T WHERE id = 4")
+      checkAnswer(
+        spark.sql(s"SELECT * from T ORDER BY id"),
+        Row(1, "a") :: Row(2, "b") :: Row(3, "c") :: Nil)
+    }
+  }
+
   test("Paimon deletionVector: deletion vector write verification") {
     withTable("T") {
       spark.sql(s"""
