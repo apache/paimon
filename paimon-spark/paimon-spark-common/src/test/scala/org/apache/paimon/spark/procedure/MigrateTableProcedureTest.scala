@@ -52,7 +52,7 @@ class MigrateTableProcedureTest extends PaimonHiveTestBase {
         withTable("hive_tbl_rn") {
           // create hive table
           spark.sql(s"""
-                       |CREATE TABLE hive_tbl (id STRING, name STRING, pt STRING)
+                       |CREATE TABLE hive_tbl_rn (id STRING, name STRING, pt STRING)
                        |USING $format
                        |""".stripMargin)
 
