@@ -1042,8 +1042,10 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
         kafkaConfig.put(TOPIC.key(), topic);
+        Map<String, String> tableConfig = getBasicTableConfig();
+        tableConfig.remove("bucket");
         KafkaSyncTableAction action =
-                syncTableActionBuilder(kafkaConfig).withTableConfig(getBasicTableConfig()).build();
+                syncTableActionBuilder(kafkaConfig).withTableConfig(tableConfig).build();
 
         runActionWithDefaultEnv(action);
 

@@ -508,6 +508,10 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put(TOPIC.key(), topic);
 
         Map<String, String> config = getBasicTableConfig();
+        if ("debezium".equals(format)) {
+            // debezium has no key
+            config.remove("bucket");
+        }
         config.put("tag.automatic-creation", "watermark");
         config.put("tag.creation-period", "hourly");
         config.put("scan.watermark.alignment.group", "alignment-group-1");

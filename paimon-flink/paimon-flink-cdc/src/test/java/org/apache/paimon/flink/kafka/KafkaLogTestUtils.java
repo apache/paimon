@@ -223,7 +223,9 @@ public class KafkaLogTestUtils {
         if (primaryKeys.isEmpty()) {
             for (String fieldSpec : fieldsSpec) {
                 String fieldName = fieldSpec.split(" ")[0];
-                if (!partitionKeys.contains(fieldName)) {
+                if (!partitionKeys.contains(fieldName)
+                        && !"WATERMARK".equalsIgnoreCase(fieldName)
+                        && !fieldSpec.contains(" AS ")) {
                     bucketKeys.add(fieldName);
                 }
             }
