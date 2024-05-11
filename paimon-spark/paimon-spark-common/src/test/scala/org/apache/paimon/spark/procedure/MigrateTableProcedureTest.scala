@@ -56,7 +56,7 @@ class MigrateTableProcedureTest extends PaimonHiveTestBase {
                        |USING $format
                        |""".stripMargin)
 
-          spark.sql(s"INSERT OVERWRITE hive_tbl_rn VALUES ('1', 'a', 'p1'), ('2', 'b', 'p2')")
+          spark.sql(s"INSERT INTO hive_tbl_rn VALUES ('1', 'a', 'p1'), ('2', 'b', 'p2')")
 
           spark.sql(
             s"CALL sys.migrate_table(source_type => 'hive', table => '$hiveDbName.hive_tbl_rn', options => 'file.format=$format', rename => false)")
@@ -64,6 +64,8 @@ class MigrateTableProcedureTest extends PaimonHiveTestBase {
           checkAnswer(
             spark.sql(s"SELECT * FROM hive_tbl_rn_paimon_ ORDER BY id"),
             Row("1", "a", "p1") :: Row("2", "b", "p2") :: Nil)
+
+          spark.sql(s"drop table hive_tbl_rn_paimon_")
         }
       }
     })
