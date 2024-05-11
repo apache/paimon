@@ -243,6 +243,11 @@ public abstract class E2eTestBase {
                     "SQL update statement has been successfully submitted to the cluster:\\s+Job ID: (\\S+)");
 
     protected String runSql(String sql) throws Exception {
+        sql =
+                "SET 'execution.runtime-mode' = 'batch';\n"
+                        + "SET 'table.dml-sync' = 'true';\n"
+                        + "\n"
+                        + sql;
         String fileName = UUID.randomUUID() + ".sql";
         writeSharedFile(fileName, sql);
         Container.ExecResult execResult =
@@ -250,8 +255,6 @@ public abstract class E2eTestBase {
                         "su",
                         "flink",
                         "-c",
-                        "-D",
-                        "execution.runtime-mode=batch",
                         "bin/sql-client.sh -f " + TEST_DATA_DIR + "/" + fileName);
         LOG.info(execResult.getStdout());
         LOG.info(execResult.getStderr());
