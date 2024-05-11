@@ -33,6 +33,7 @@ import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -1363,5 +1364,41 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         assertThat(actual.get("pk").description()).isEqualTo("pk comment");
         assertThat(actual.get("c1").description()).isEqualTo("c1 comment");
         assertThat(actual.get("c2").description()).isEqualTo("c2 comment");
+    }
+
+    @Test
+    @Timeout(60)
+    public void testColumnTypeLengthChangeInExistingTable() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put("bucket", "1");
+        options.put("sink.parallelism", "1");
+
+        RowType rowType =
+                RowType.builder()
+                        .field("pk", DataTypes.INT().notNull(), "pk comment")
+                        .field("c1", DataTypes.DATE(), "c1 comment")
+                        .field("c2", DataTypes.VARCHAR(10).notNull(), "c2 comment")
+                        .build();
+
+        createFileStoreTable(
+                rowType, Collections.emptyList(), Collections.singletonList("pk"), options);
+
+        // Alter column type length
+        try (Statement statement = getStatement()) {
+            statement.executeUpdate("USE " + DATABASE_NAME);
+            statement.executeUpdate(
+                    "ALTER TABLE test_exist_column_length_change MODIFY COLUMN v2 varchar(20)");
+        }
+
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", DATABASE_NAME);
+        mySqlConfig.put("table-name", "test_exist_column_length_change");
+
+        MySqlSyncTableAction action =
+                syncTableActionBuilder(mySqlConfig)
+                        .withPrimaryKeys("pk")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        Assertions.assertDoesNotThrow(() -> runActionWithDefaultEnv(action));
     }
 }
