@@ -86,10 +86,7 @@ public class FileStoreBatchE2eTest extends E2eTestBase {
                         + "    person VARCHAR,\n"
                         + "    category VARCHAR,\n"
                         + "    price INT\n"
-                        + ") PARTITIONED BY (dt, hr) WITH (\n"
-                        + "    'bucket' = '3',\n"
-                        + "    'scan.infer-parallelism' = 'false'\n"
-                        + ");";
+                        + ") PARTITIONED BY (dt, hr);";
 
         // prepare test data
         writeSharedFile(testDataSourceFile, String.join("\n", data));

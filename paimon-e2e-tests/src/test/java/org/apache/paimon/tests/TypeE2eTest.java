@@ -61,13 +61,7 @@ public class TypeE2eTest extends E2eTestBase {
 
         String tableDdl =
                 String.join(
-                        "\n",
-                        Arrays.asList(
-                                "CREATE TABLE IF NOT EXISTS ts_table(",
-                                schema,
-                                ") WITH (",
-                                "  'bucket' = '1'",
-                                ");"));
+                        "\n", Arrays.asList("CREATE TABLE IF NOT EXISTS ts_table(", schema, ");"));
 
         runSql(
                 "INSERT INTO ts_table VALUES ("

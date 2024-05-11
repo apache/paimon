@@ -250,6 +250,8 @@ public abstract class E2eTestBase {
                         "su",
                         "flink",
                         "-c",
+                        "-D",
+                        "execution.runtime-mode=batch",
                         "bin/sql-client.sh -f " + TEST_DATA_DIR + "/" + fileName);
         LOG.info(execResult.getStdout());
         LOG.info(execResult.getStderr());

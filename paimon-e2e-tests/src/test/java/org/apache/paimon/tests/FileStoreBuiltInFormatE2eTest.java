@@ -55,7 +55,6 @@ public class FileStoreBuiltInFormatE2eTest extends E2eTestBase {
                 "CREATE TABLE IF NOT EXISTS ts_table (\n"
                         + schema
                         + ") WITH (\n"
-                        + "    'bucket' = '3',\n"
                         + "    'file.format' = 'parquet'\n"
                         + ");";
 
