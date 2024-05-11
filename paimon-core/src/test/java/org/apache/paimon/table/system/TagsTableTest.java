@@ -132,14 +132,13 @@ class TagsTableTest extends TableTestBase {
                                     DateTimeUtils.toLocalDateTime(tag.timeMillis())),
                             tag.totalRecordCount(),
                             BinaryString.fromString(tagBranchesFunction.apply(tagName).toString()),
-                            Timestamp.fromLocalDateTime(
-                                    tag.getTagCreateTime() == null
-                                            ? LocalDateTime.MIN
-                                            : tag.getTagCreateTime()),
-                            BinaryString.fromString(
-                                    tag.getTagTimeRetained() == null
-                                            ? ""
-                                            : tag.getTagTimeRetained().toString())));
+                            tag.getTagCreateTime() == null
+                                    ? null
+                                    : Timestamp.fromLocalDateTime(tag.getTagCreateTime()),
+                            tag.getTagTimeRetained() == null
+                                    ? null
+                                    : BinaryString.fromString(
+                                            tag.getTagTimeRetained().toString())));
         }
         return internalRows;
     }

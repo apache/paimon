@@ -24,7 +24,6 @@ import org.apache.paimon.utils.ObjectSerializerTestBase;
 import org.apache.paimon.utils.Pair;
 
 import java.util.LinkedHashMap;
-import java.util.Map;
 import java.util.Random;
 
 /** Test for {@link org.apache.paimon.index.IndexFileMetaSerializer}. */
@@ -49,7 +48,8 @@ public class IndexFileMetaSerializerTest extends ObjectSerializerTestBase<IndexF
                     rnd.nextInt(),
                     rnd.nextInt());
         } else {
-            Map<String, Pair<Integer, Integer>> deletionVectorsRanges = new LinkedHashMap<>();
+            LinkedHashMap<String, Pair<Integer, Integer>> deletionVectorsRanges =
+                    new LinkedHashMap<>();
             deletionVectorsRanges.put("my_file_name1", Pair.of(rnd.nextInt(), rnd.nextInt()));
             deletionVectorsRanges.put("my_file_name2", Pair.of(rnd.nextInt(), rnd.nextInt()));
             return new IndexFileMeta(

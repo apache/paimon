@@ -53,7 +53,7 @@ import java.util.Optional;
 import java.util.function.Supplier;
 
 /** Factory to create {@link RecordReader}s for reading {@link KeyValue} files. */
-public class KeyValueFileReaderFactory {
+public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
 
     private final FileIO fileIO;
     private final SchemaManager schemaManager;
@@ -93,6 +93,11 @@ public class KeyValueFileReaderFactory {
         this.bulkFormatMappings = new HashMap<>();
         this.dvFactory = dvFactory;
         this.ignoreDelete = CoreOptions.fromMap(schema.options()).ignoreDelete();
+    }
+
+    @Override
+    public RecordReader<KeyValue> createRecordReader(DataFileMeta file) throws IOException {
+        return createRecordReader(file.schemaId(), file.fileName(), file.fileSize(), file.level());
     }
 
     public RecordReader<KeyValue> createRecordReader(
@@ -143,7 +148,7 @@ public class KeyValueFileReaderFactory {
         Optional<DeletionVector> deletionVector = dvFactory.create(fileName);
         if (deletionVector.isPresent() && !deletionVector.get().isEmpty()) {
             fileRecordReader =
-                    new ApplyDeletionVectorReader<>(fileRecordReader, deletionVector.get());
+                    new ApplyDeletionVectorReader(fileRecordReader, deletionVector.get());
         }
 
         return new KeyValueDataFileRecordReader(

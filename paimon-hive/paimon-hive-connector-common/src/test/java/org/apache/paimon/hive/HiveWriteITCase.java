@@ -109,7 +109,7 @@ public class HiveWriteITCase extends HiveTestBase {
         Options conf = new Options();
         conf.set(CatalogOptions.WAREHOUSE, path);
         conf.set(CoreOptions.BUCKET, 2);
-        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
         Identifier identifier = Identifier.create(DATABASE_NAME, tableNameNotNull);
         Table table =
                 FileStoreTestUtils.createFileStoreTable(
@@ -133,7 +133,7 @@ public class HiveWriteITCase extends HiveTestBase {
         Options conf = new Options();
         conf.set(CatalogOptions.WAREHOUSE, path);
         conf.set(CoreOptions.BUCKET, 2);
-        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
         Identifier identifier = Identifier.create(DATABASE_NAME, tableNameNotNull);
         Table table =
                 FileStoreTestUtils.createFileStoreTable(
@@ -203,7 +203,7 @@ public class HiveWriteITCase extends HiveTestBase {
         Options conf = new Options();
         conf.set(CatalogOptions.WAREHOUSE, path);
         conf.set(CoreOptions.BUCKET, 1);
-        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
         Identifier identifier = Identifier.create(DATABASE_NAME, innerName);
         Table table =
                 FileStoreTestUtils.createFileStoreTable(
@@ -247,7 +247,7 @@ public class HiveWriteITCase extends HiveTestBase {
         Options conf = new Options();
         conf.set(CatalogOptions.WAREHOUSE, path);
         conf.set(CoreOptions.BUCKET, 1);
-        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
         conf.set(CoreOptions.COMPACTION_MAX_FILE_NUM, maxCompact);
         Identifier identifier = Identifier.create(DATABASE_NAME, innerName);
         Table table =
@@ -590,7 +590,7 @@ public class HiveWriteITCase extends HiveTestBase {
         String tablePath = String.format("%s/test_db.db/hive_test_table", root);
         Options conf = new Options();
         conf.set(CatalogOptions.WAREHOUSE, root);
-        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
         conf.set("bucket", "1");
         Table table =
                 FileStoreTestUtils.createFileStoreTable(

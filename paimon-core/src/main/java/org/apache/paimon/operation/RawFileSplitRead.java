@@ -231,7 +231,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
 
         Optional<DeletionVector> deletionVector = dvFactory.create(file.fileName());
         if (deletionVector.isPresent() && !deletionVector.get().isEmpty()) {
-            return new ApplyDeletionVectorReader<>(fileRecordReader, deletionVector.get());
+            return new ApplyDeletionVectorReader(fileRecordReader, deletionVector.get());
         }
         return fileRecordReader;
     }

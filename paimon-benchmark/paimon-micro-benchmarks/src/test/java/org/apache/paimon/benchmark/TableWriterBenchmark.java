@@ -35,7 +35,7 @@ public class TableWriterBenchmark extends TableBenchmark {
     @Test
     public void testAvro() throws Exception {
         Options options = new Options();
-        options.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        options.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
         innerTest("avro", options);
         /*
          * Java HotSpot(TM) 64-Bit Server VM 1.8.0_301-b09 on Mac OS X 10.16
@@ -49,7 +49,7 @@ public class TableWriterBenchmark extends TableBenchmark {
     @Test
     public void testAvroWithoutStats() throws Exception {
         Options options = new Options();
-        options.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        options.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
         options.set(CoreOptions.METADATA_STATS_MODE, "none");
         innerTest("avro", options);
         /*
@@ -64,7 +64,7 @@ public class TableWriterBenchmark extends TableBenchmark {
     @Test
     public void testOrcNoCompression() throws Exception {
         Options options = new Options();
-        options.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.ORC);
+        options.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_ORC);
         options.set("orc.compress", "none");
         innerTest("orc", options);
         /*
@@ -79,7 +79,7 @@ public class TableWriterBenchmark extends TableBenchmark {
     @Test
     public void testParquet() throws Exception {
         Options options = new Options();
-        options.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.PARQUET);
+        options.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_PARQUET);
         innerTest("parquet", options);
         /*
          * Java HotSpot(TM) 64-Bit Server VM 1.8.0_301-b09 on Mac OS X 10.16
@@ -93,7 +93,7 @@ public class TableWriterBenchmark extends TableBenchmark {
     @Test
     public void testOrc() throws Exception {
         Options options = new Options();
-        options.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.ORC);
+        options.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_ORC);
         innerTest("orc", options);
         /*
          * Java HotSpot(TM) 64-Bit Server VM 1.8.0_301-b09 on Mac OS X 10.16

@@ -85,7 +85,7 @@ This section introduce all available spark procedures about paimon.
       <td>
          To delete a tag. Arguments:
             <li>table: the target table identifier. Cannot be empty.</li>
-            <li>tag: name of the tag to be deleted.</li>
+            <li>tag: name of the tag to be deleted. If you specify multiple tags, delimiter is ','.</li>
       </td>
       <td>CALL sys.delete_tag(table => 'default.T', tag => 'my_tag')</td>
     </tr>

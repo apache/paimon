@@ -45,6 +45,8 @@ import static org.apache.paimon.flink.utils.ManagedMemoryUtils.computeManagedMem
 public abstract class PrepareCommitOperator<IN, OUT> extends AbstractStreamOperator<OUT>
         implements OneInputStreamOperator<IN, OUT>, BoundedOneInput {
 
+    private static final long serialVersionUID = 1L;
+
     @Nullable protected transient MemorySegmentPool memoryPool;
     @Nullable private transient MemorySegmentAllocator memoryAllocator;
     private final Options options;

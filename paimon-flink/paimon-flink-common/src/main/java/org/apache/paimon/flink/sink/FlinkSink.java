@@ -57,6 +57,7 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRODUCER_F
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_AUTO_TAG_FOR_SAVEPOINT;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_CPU;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_MEMORY;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_OPERATOR_CHAINING;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_MANAGED_WRITER_BUFFER_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.prepareCommitWaitCompaction;
@@ -225,14 +226,16 @@ public abstract class FlinkSink<T> implements Serializable {
             assertStreamingConfiguration(env);
         }
 
+        Options options = Options.fromMap(table.options());
         OneInputStreamOperator<Committable, Committable> committerOperator =
                 new CommitterOperator<>(
                         streamingCheckpointEnabled,
                         true,
+                        options.get(SINK_COMMITTER_OPERATOR_CHAINING),
                         commitUser,
                         createCommitterFactory(streamingCheckpointEnabled),
                         createCommittableStateManager());
-        if (Options.fromMap(table.options()).get(SINK_AUTO_TAG_FOR_SAVEPOINT)) {
+        if (options.get(SINK_AUTO_TAG_FOR_SAVEPOINT)) {
             committerOperator =
                     new AutoTagForSavepointCommitterOperator<>(
                             (CommitterOperator<Committable, ManifestCommittable>) committerOperator,
@@ -256,7 +259,6 @@ public abstract class FlinkSink<T> implements Serializable {
                                 committerOperator)
                         .setParallelism(1)
                         .setMaxParallelism(1);
-        Options options = Options.fromMap(table.options());
         configureGlobalCommitter(
                 committed, options.get(SINK_COMMITTER_CPU), options.get(SINK_COMMITTER_MEMORY));
         return committed.addSink(new DiscardingSink<>()).name("end").setParallelism(1);
@@ -293,7 +295,8 @@ public abstract class FlinkSink<T> implements Serializable {
                         + " to exactly-once");
     }
 
-    private void assertBatchConfiguration(StreamExecutionEnvironment env, int sinkParallelism) {
+    public static void assertBatchConfiguration(
+            StreamExecutionEnvironment env, int sinkParallelism) {
         try {
             checkArgument(
                     sinkParallelism != -1 || !AdaptiveParallelism.isEnabled(env),

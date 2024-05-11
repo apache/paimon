@@ -573,7 +573,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                                 IllegalArgumentException.class,
                                 "Cannot synchronize record when database name or table name is unknown. "
                                         + "Invalid record is:\n"
-                                        + "{databaseName=null, tableName=null, fieldTypes={k=STRING, v0=STRING, v1=STRING}, "
+                                        + "{databaseName=null, tableName=null, fields=[`k` STRING, `v0` STRING, `v1` STRING], "
                                         + "primaryKeys=[], cdcRecord=+I {v0=five, k=5, v1=50}}"));
     }
 }

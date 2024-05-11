@@ -455,7 +455,7 @@ this means that there are at least 5 files in a bucket. If you want to reduce th
 By default, Append also does automatic compaction to reduce the number of small files.
 
 However, for Bucket's Append table, it will only compact the files within the Bucket for sequential
-purposes, which may keep more small files. See [Append Queue Table]({{< ref "append-table/append-queue-table" >}}).
+purposes, which may keep more small files. See [Append Queue]({{< ref "append-table/append-queue" >}}).
 
 ### Understand Full-Compaction
 

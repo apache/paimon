@@ -22,9 +22,9 @@ import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
-import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
@@ -39,7 +39,6 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -78,15 +77,13 @@ public abstract class JsonRecordParser extends RecordParser {
     protected abstract String dataField();
 
     // use STRING type in default when we cannot get origin data types (most cases)
-    protected LinkedHashMap<String, DataType> fillDefaultTypes(JsonNode record) {
-        LinkedHashMap<String, DataType> fieldTypes = new LinkedHashMap<>();
-        record.fieldNames().forEachRemaining(name -> fieldTypes.put(name, DataTypes.STRING()));
-        return fieldTypes;
+    protected void fillDefaultTypes(JsonNode record, RowType.Builder rowTypeBuilder) {
+        record.fieldNames()
+                .forEachRemaining(name -> rowTypeBuilder.field(name, DataTypes.STRING()));
     }
 
-    protected Map<String, String> extractRowData(
-            JsonNode record, LinkedHashMap<String, DataType> paimonFieldTypes) {
-        paimonFieldTypes.putAll(fillDefaultTypes(record));
+    protected Map<String, String> extractRowData(JsonNode record, RowType.Builder rowTypeBuilder) {
+        fillDefaultTypes(record, rowTypeBuilder);
         Map<String, Object> recordMap =
                 convertValue(record, new TypeReference<Map<String, Object>>() {});
         Map<String, String> rowData =
@@ -107,7 +104,7 @@ public abstract class JsonRecordParser extends RecordParser {
                                             }
                                             return Objects.toString(entry.getValue());
                                         }));
-        evalComputedColumns(rowData, paimonFieldTypes);
+        evalComputedColumns(rowData, rowTypeBuilder);
         return rowData;
     }
 
@@ -125,9 +122,9 @@ public abstract class JsonRecordParser extends RecordParser {
 
     protected void processRecord(
             JsonNode jsonNode, RowKind rowKind, List<RichCdcMultiplexRecord> records) {
-        LinkedHashMap<String, DataType> paimonFieldTypes = new LinkedHashMap<>(jsonNode.size());
-        Map<String, String> rowData = this.extractRowData(jsonNode, paimonFieldTypes);
-        records.add(createRecord(rowKind, rowData, paimonFieldTypes));
+        RowType.Builder rowTypeBuilder = RowType.builder();
+        Map<String, String> rowData = this.extractRowData(jsonNode, rowTypeBuilder);
+        records.add(createRecord(rowKind, rowData, rowTypeBuilder.build().getFields()));
     }
 
     protected JsonNode mergeOldRecord(JsonNode data, JsonNode oldNode) {

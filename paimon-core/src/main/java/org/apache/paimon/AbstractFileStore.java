@@ -62,7 +62,7 @@ import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
  *
  * @param <T> type of record to read and write.
  */
-public abstract class AbstractFileStore<T> implements FileStore<T> {
+abstract class AbstractFileStore<T> implements FileStore<T> {
 
     protected final FileIO fileIO;
     protected final SchemaManager schemaManager;
@@ -73,7 +73,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @Nullable private final SegmentsCache<String> writeManifestCache;
 
-    public AbstractFileStore(
+    protected AbstractFileStore(
             FileIO fileIO,
             SchemaManager schemaManager,
             TableSchema schema,

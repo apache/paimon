@@ -192,6 +192,12 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
                         options.incrementalBetweenScanMode();
                 ScanMode scanMode;
                 switch (scanType) {
+                    case AUTO:
+                        scanMode =
+                                options.changelogProducer() == ChangelogProducer.NONE
+                                        ? ScanMode.DELTA
+                                        : ScanMode.CHANGELOG;
+                        break;
                     case DELTA:
                         scanMode = ScanMode.DELTA;
                         break;

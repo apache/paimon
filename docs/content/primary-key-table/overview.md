@@ -69,3 +69,11 @@ To limit the number of sorted runs, we have to merge several sorted runs into on
 However, compaction is a resource intensive procedure which consumes a certain amount of CPU time and disk IO, so too frequent compaction may in turn result in slower writes. It is a trade-off between query and write performance. Paimon currently adapts a compaction strategy similar to Rocksdb's [universal compaction](https://github.com/facebook/rocksdb/wiki/Universal-Compaction).
 
 By default, when Paimon appends records to the LSM tree, it will also perform compactions as needed. Users can also choose to perform all compactions in a dedicated compaction job. See [dedicated compaction job]({{< ref "maintenance/dedicated-compaction#dedicated-compaction-job" >}}) for more info.
+
+### Record-Level expire
+
+In compaction, you can configure record-Level expire time to expire records, you should configure:
+1. `'record-level.expire-time'`: time retain for records.
+2. `'record-level.time-field'`: time field for record level expire, it should be a seconds INT.
+
+Expiration happens in compaction, and there is no strong guarantee to expire records in time.

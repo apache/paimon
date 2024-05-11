@@ -112,10 +112,14 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("The file path of this table in the filesystem.");
 
-    public static final ConfigOption<FileFormatType> FILE_FORMAT =
+    public static final String FILE_FORMAT_ORC = "orc";
+    public static final String FILE_FORMAT_AVRO = "avro";
+    public static final String FILE_FORMAT_PARQUET = "parquet";
+
+    public static final ConfigOption<String> FILE_FORMAT =
             key("file.format")
-                    .enumType(FileFormatType.class)
-                    .defaultValue(FileFormatType.ORC)
+                    .stringType()
+                    .defaultValue(FILE_FORMAT_ORC)
                     .withDescription(
                             "Specify the message format of data files, currently orc, parquet and avro are supported.");
 
@@ -158,10 +162,10 @@ public class CoreOptions implements Serializable {
                     .defaultValue(true)
                     .withDescription("Whether enabled read file index.");
 
-    public static final ConfigOption<FileFormatType> MANIFEST_FORMAT =
+    public static final ConfigOption<String> MANIFEST_FORMAT =
             key("manifest.format")
-                    .enumType(FileFormatType.class)
-                    .defaultValue(FileFormatType.AVRO)
+                    .stringType()
+                    .defaultValue(CoreOptions.FILE_FORMAT_AVRO)
                     .withDescription("Specify the message format of manifest files.");
 
     public static final ConfigOption<MemorySize> MANIFEST_TARGET_FILE_SIZE =
@@ -883,10 +887,9 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<IncrementalBetweenScanMode> INCREMENTAL_BETWEEN_SCAN_MODE =
             key("incremental-between-scan-mode")
                     .enumType(IncrementalBetweenScanMode.class)
-                    .defaultValue(IncrementalBetweenScanMode.DELTA)
+                    .defaultValue(IncrementalBetweenScanMode.AUTO)
                     .withDescription(
-                            "Scan kind when Read incremental changes between start snapshot (exclusive) and end snapshot, "
-                                    + "'delta' for scan newly changed files between snapshots, 'changelog' scan changelog files between snapshots.");
+                            "Scan kind when Read incremental changes between start snapshot (exclusive) and end snapshot. ");
 
     public static final ConfigOption<String> INCREMENTAL_BETWEEN_TIMESTAMP =
             key("incremental-between-timestamp")
@@ -1104,6 +1107,15 @@ public class CoreOptions implements Serializable {
                             "Whether to enable deletion vectors mode. In this mode, index files containing deletion"
                                     + " vectors are generated when data is written, which marks the data for deletion."
                                     + " During read operations, by applying these index files, merging can be avoided.");
+
+    public static final ConfigOption<Boolean> DELETION_FORCE_PRODUCE_CHANGELOG =
+            key("delete.force-produce-changelog")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Force produce changelog in delete sql, "
+                                    + "or you can use 'streaming-read-overwrite' to read changelog from overwrite commit.");
+
     public static final ConfigOption<RangeStrategy> SORT_RANG_STRATEGY =
             key("sort-compaction.range-strategy")
                     .enumType(RangeStrategy.class)
@@ -1119,6 +1131,23 @@ public class CoreOptions implements Serializable {
                     .defaultValue(1000)
                     .withDescription(
                             "The magnification of local sample for sort-compaction.The size of local sample is sink parallelism * magnification.");
+
+    public static final ConfigOption<Duration> RECORD_LEVEL_EXPIRE_TIME =
+            key("record-level.expire-time")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Record level expire time for primary key table, expiration happens in compaction, "
+                                    + "there is no strong guarantee to expire records in time. "
+                                    + "You must specific 'record-level.time-field' too.");
+
+    public static final ConfigOption<String> RECORD_LEVEL_TIME_FIELD =
+            key("record-level.time-field")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Time field for record level expire, it should be a seconds INT.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -1157,8 +1186,8 @@ public class CoreOptions implements Serializable {
         return new Path(options.get(PATH));
     }
 
-    public FileFormatType formatType() {
-        return options.get(FILE_FORMAT);
+    public String formatType() {
+        return normalizeFileFormat(options.get(FILE_FORMAT));
     }
 
     public FileFormat fileFormat() {
@@ -1193,9 +1222,8 @@ public class CoreOptions implements Serializable {
         return options.get(SORT_COMPACTION_SAMPLE_MAGNIFICATION);
     }
 
-    public static FileFormat createFileFormat(
-            Options options, ConfigOption<FileFormatType> formatOption) {
-        String formatIdentifier = options.get(formatOption).toString();
+    public static FileFormat createFileFormat(Options options, ConfigOption<String> formatOption) {
+        String formatIdentifier = normalizeFileFormat(options.get(formatOption));
         return FileFormat.getFileFormat(options, formatIdentifier);
     }
 
@@ -1208,7 +1236,14 @@ public class CoreOptions implements Serializable {
     public Map<Integer, String> fileFormatPerLevel() {
         Map<String, String> levelFormats = options.get(FILE_FORMAT_PER_LEVEL);
         return levelFormats.entrySet().stream()
-                .collect(Collectors.toMap(e -> Integer.valueOf(e.getKey()), Map.Entry::getValue));
+                .collect(
+                        Collectors.toMap(
+                                e -> Integer.valueOf(e.getKey()),
+                                e -> normalizeFileFormat(e.getValue())));
+    }
+
+    private static String normalizeFileFormat(String fileFormat) {
+        return fileFormat.toLowerCase();
     }
 
     public boolean definedAggFunc() {
@@ -1749,6 +1784,20 @@ public class CoreOptions implements Serializable {
         return options.get(FILE_INDEX_READ_ENABLED);
     }
 
+    public boolean deleteForceProduceChangelog() {
+        return options.get(DELETION_FORCE_PRODUCE_CHANGELOG);
+    }
+
+    @Nullable
+    public Duration recordLevelExpireTime() {
+        return options.get(RECORD_LEVEL_EXPIRE_TIME);
+    }
+
+    @Nullable
+    public String recordLevelTimeField() {
+        return options.get(RECORD_LEVEL_TIME_FIELD);
+    }
+
     /** Specifies the merge engine for table with primary key. */
     public enum MergeEngine implements DescribedEnum {
         DEDUPLICATE("deduplicate", "De-duplicate and keep the last row."),
@@ -1952,46 +2001,6 @@ public class CoreOptions implements Serializable {
         }
     }
 
-    /** Specifies the file format type for store. */
-    public enum FileFormatType implements DescribedEnum {
-        ORC("orc", "ORC file format."),
-        PARQUET("parquet", "Parquet file format."),
-        AVRO("avro", "Avro file format.");
-
-        private final String value;
-        private final String description;
-
-        FileFormatType(String value, String description) {
-            this.value = value;
-            this.description = description;
-        }
-
-        @Override
-        public String toString() {
-            return value;
-        }
-
-        @Override
-        public InlineElement getDescription() {
-            return text(description);
-        }
-
-        @VisibleForTesting
-        public static FileFormatType fromValue(String value) {
-            for (FileFormatType formatType : FileFormatType.values()) {
-                if (formatType.value.equals(value)) {
-                    return formatType;
-                }
-            }
-            throw new IllegalArgumentException(
-                    String.format(
-                            "Invalid format type %s, only support [%s]",
-                            value,
-                            StringUtils.join(
-                                    Arrays.stream(FileFormatType.values()).iterator(), ",")));
-        }
-    }
-
     /** Specifies the type for streaming read. */
     public enum StreamingReadMode implements DescribedEnum {
         LOG("log", "Reads from the log store."),
@@ -2068,6 +2077,9 @@ public class CoreOptions implements Serializable {
 
     /** Specifies this scan type for incremental scan . */
     public enum IncrementalBetweenScanMode implements DescribedEnum {
+        AUTO(
+                "auto",
+                "Scan changelog files for the table which produces changelog files. Otherwise, scan newly changed files."),
         DELTA("delta", "Scan newly changed files between snapshots."),
         CHANGELOG("changelog", "Scan changelog files between snapshots.");
 

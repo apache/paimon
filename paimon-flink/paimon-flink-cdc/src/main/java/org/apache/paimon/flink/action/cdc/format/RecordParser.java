@@ -24,8 +24,9 @@ import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
 
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.util.Collector;
@@ -34,12 +35,11 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.fieldNameCaseConvert;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.listCaseConvert;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.recordKeyDuplicateErrMsg;
@@ -84,7 +84,13 @@ public abstract class RecordParser
             }
 
             Schema.Builder builder = Schema.newBuilder();
-            recordOpt.get().fieldTypes().forEach(builder::column);
+            recordOpt
+                    .get()
+                    .fields()
+                    .forEach(
+                            field ->
+                                    builder.column(
+                                            field.name(), field.type(), field.description()));
             builder.primaryKey(extractPrimaryKeys());
             return builder.build();
         } catch (Exception e) {
@@ -116,37 +122,28 @@ public abstract class RecordParser
 
     /** generate values for computed columns. */
     protected void evalComputedColumns(
-            Map<String, String> rowData, LinkedHashMap<String, DataType> paimonFieldTypes) {
+            Map<String, String> rowData, RowType.Builder rowTypeBuilder) {
         computedColumns.forEach(
                 computedColumn -> {
                     rowData.put(
                             computedColumn.columnName(),
                             computedColumn.eval(rowData.get(computedColumn.fieldReference())));
-                    paimonFieldTypes.put(computedColumn.columnName(), computedColumn.columnType());
+                    rowTypeBuilder.field(computedColumn.columnName(), computedColumn.columnType());
                 });
     }
 
     /** Handle case sensitivity here. */
     protected RichCdcMultiplexRecord createRecord(
-            RowKind rowKind,
-            Map<String, String> data,
-            LinkedHashMap<String, DataType> paimonFieldTypes) {
+            RowKind rowKind, Map<String, String> data, List<DataField> paimonFields) {
         String databaseName = getDatabaseName();
         String tableName = getTableName();
-        paimonFieldTypes =
-                mapKeyCaseConvert(
-                        paimonFieldTypes,
-                        caseSensitive,
-                        columnDuplicateErrMsg(tableName == null ? "UNKNOWN" : tableName));
+        paimonFields = fieldNameCaseConvert(paimonFields, caseSensitive, tableName);
+
         data = mapKeyCaseConvert(data, caseSensitive, recordKeyDuplicateErrMsg(data));
         List<String> primaryKeys = listCaseConvert(extractPrimaryKeys(), caseSensitive);
 
         return new RichCdcMultiplexRecord(
-                databaseName,
-                tableName,
-                paimonFieldTypes,
-                primaryKeys,
-                new CdcRecord(rowKind, data));
+                databaseName, tableName, paimonFields, primaryKeys, new CdcRecord(rowKind, data));
     }
 
     @Nullable

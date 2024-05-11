@@ -25,13 +25,11 @@ import org.apache.paimon.flink.PredicateConverter;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.predicate.AllPrimaryKeyEqualVisitor;
 import org.apache.paimon.predicate.OnlyPartitionKeyEqualVisitor;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.TableUtils;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 
 import org.apache.flink.table.catalog.Column;
@@ -58,10 +56,10 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 import static org.apache.paimon.CoreOptions.MergeEngine.PARTIAL_UPDATE;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Flink table sink that supports row level update and delete. */
 public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTableSinkBase
@@ -168,12 +166,10 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
         if (deletePredicate == null) {
             commit.truncateTable(identifier);
             return Optional.empty();
-        } else if (deleteIsDropPartition()) {
+        } else {
+            checkArgument(deleteIsDropPartition());
             commit.dropPartitions(Collections.singletonList(deletePartitions()), identifier);
             return Optional.empty();
-        } else {
-            return Optional.of(
-                    TableUtils.deleteWhere(table, Collections.singletonList(deletePredicate)));
         }
     }
 
@@ -193,8 +189,9 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
     }
 
     private boolean canPushDownDeleteFilter() {
-        return -1 != Options.fromMap(table.options()).get(BUCKET)
-                && (deletePredicate == null || deleteIsDropPartition() || deleteInSingleNode());
+        CoreOptions options = CoreOptions.fromMap(table.options());
+        return (deletePredicate == null || deleteIsDropPartition())
+                && !options.deleteForceProduceChangelog();
     }
 
     private boolean deleteIsDropPartition() {
@@ -212,14 +209,5 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
                 new OnlyPartitionKeyEqualVisitor(table.partitionKeys());
         deletePredicate.visit(visitor);
         return visitor.partitions();
-    }
-
-    private boolean deleteInSingleNode() {
-        if (deletePredicate == null) {
-            return false;
-        }
-        return deletePredicate
-                .visit(new AllPrimaryKeyEqualVisitor(table.primaryKeys()))
-                .containsAll(table.primaryKeys());
     }
 }

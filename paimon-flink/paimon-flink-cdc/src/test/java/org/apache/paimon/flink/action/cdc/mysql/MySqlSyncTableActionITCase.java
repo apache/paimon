@@ -51,6 +51,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
@@ -1323,5 +1324,44 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
         FileStoreTable table = getFileStoreTable();
         assertThat(table.options().get(BUCKET.key())).isEqualTo("1");
+    }
+
+    @Test
+    @Timeout(60)
+    public void testColumnCommentChangeInExistingTable() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put("bucket", "1");
+        options.put("sink.parallelism", "1");
+
+        RowType rowType =
+                RowType.builder()
+                        .field("pk", DataTypes.INT().notNull(), "pk comment")
+                        .field("c1", DataTypes.DATE(), "c1 comment")
+                        .field("c2", DataTypes.VARCHAR(10).notNull(), "c2 comment")
+                        .build();
+
+        createFileStoreTable(
+                rowType, Collections.emptyList(), Collections.singletonList("pk"), options);
+
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", DATABASE_NAME);
+        mySqlConfig.put("table-name", "test_exist_column_comment_change");
+
+        // Flink cdc 2.3 does not support collecting field comments, and existing paimon table field
+        // comments will not be changed.
+        MySqlSyncTableAction action =
+                syncTableActionBuilder(mySqlConfig)
+                        .withPrimaryKeys("pk")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        FileStoreTable table = getFileStoreTable();
+        Map<String, DataField> actual =
+                table.schema().fields().stream()
+                        .collect(Collectors.toMap(DataField::name, Function.identity()));
+        assertThat(actual.get("pk").description()).isEqualTo("pk comment");
+        assertThat(actual.get("c1").description()).isEqualTo("c1 comment");
+        assertThat(actual.get("c2").description()).isEqualTo("c2 comment");
     }
 }

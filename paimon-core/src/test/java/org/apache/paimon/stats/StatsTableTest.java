@@ -18,8 +18,8 @@
 
 package org.apache.paimon.stats;
 
-import org.apache.paimon.AbstractFileStore;
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.FileStore;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.io.DataFileMeta;
@@ -67,7 +67,7 @@ public class StatsTableTest extends TableTestBase {
                 GenericRow.of(2, 1, 1));
 
         FileStoreTable storeTable = (FileStoreTable) table;
-        AbstractFileStore<?> store = (AbstractFileStore<?>) storeTable.store();
+        FileStore<?> store = storeTable.store();
         String manifestListFile = storeTable.snapshotManager().latestSnapshot().deltaManifestList();
 
         ManifestList manifestList = store.manifestListFactory().create();

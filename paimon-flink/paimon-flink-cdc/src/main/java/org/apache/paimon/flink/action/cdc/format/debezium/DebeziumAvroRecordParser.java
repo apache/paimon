@@ -23,8 +23,8 @@ import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.format.RecordParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
-import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
 
 import io.debezium.data.geometry.Geometry;
 import org.apache.avro.Schema;
@@ -112,9 +112,9 @@ public class DebeziumAvroRecordParser extends RecordParser {
 
     private void processRecord(
             GenericRecord record, RowKind rowKind, List<RichCdcMultiplexRecord> records) {
-        LinkedHashMap<String, DataType> paimonFieldTypes = new LinkedHashMap<>();
-        Map<String, String> rowData = this.extractRowData(record, paimonFieldTypes);
-        records.add(createRecord(rowKind, rowData, paimonFieldTypes));
+        RowType.Builder rowTypeBuilder = RowType.builder();
+        Map<String, String> rowData = this.extractRowData(record, rowTypeBuilder);
+        records.add(createRecord(rowKind, rowData, rowTypeBuilder.build().getFields()));
     }
 
     @Override
@@ -127,7 +127,7 @@ public class DebeziumAvroRecordParser extends RecordParser {
     }
 
     private Map<String, String> extractRowData(
-            GenericRecord record, LinkedHashMap<String, DataType> paimonFieldTypes) {
+            GenericRecord record, RowType.Builder rowTypeBuilder) {
         Schema payloadSchema = sanitizedSchema(record.getSchema());
 
         LinkedHashMap<String, String> resultMap = new LinkedHashMap<>();
@@ -147,10 +147,10 @@ public class DebeziumAvroRecordParser extends RecordParser {
                                                     .get(Geometry.WKB_FIELD),
                             ZoneOffset.UTC);
             resultMap.put(fieldName, transformed);
-            paimonFieldTypes.put(fieldName, avroToPaimonDataType(schema));
+            rowTypeBuilder.field(fieldName, avroToPaimonDataType(schema));
         }
 
-        evalComputedColumns(resultMap, paimonFieldTypes);
+        evalComputedColumns(resultMap, rowTypeBuilder);
         return resultMap;
     }
 

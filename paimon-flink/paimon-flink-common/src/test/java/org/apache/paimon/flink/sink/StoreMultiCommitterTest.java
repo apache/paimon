@@ -637,6 +637,7 @@ class StoreMultiCommitterTest {
                 new CommitterOperator<>(
                         true,
                         false,
+                        true,
                         initialCommitUser,
                         (user, metricGroup) ->
                                 new StoreMultiCommitter(
@@ -654,6 +655,7 @@ class StoreMultiCommitterTest {
                 new CommitterOperator<>(
                         true,
                         false,
+                        true,
                         initialCommitUser,
                         (user, metricGroup) ->
                                 new StoreMultiCommitter(
