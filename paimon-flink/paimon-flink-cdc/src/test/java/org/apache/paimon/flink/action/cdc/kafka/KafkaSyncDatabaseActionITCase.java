@@ -219,6 +219,7 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                         new String[] {"id", "name", "description", "weight"}),
                 Collections.emptyList(),
                 getPrimaryKey(format),
+                getBucketKey(format),
                 Collections.emptyMap());
 
         final String topic1 = "prefix_suffix_0";
@@ -268,6 +269,7 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                         new String[] {"id", "name", "description", "weight"}),
                 Collections.emptyList(),
                 getPrimaryKey(format),
+                getBucketKey(format),
                 Collections.emptyMap());
 
         final String topic1 = "prefix_suffix";
@@ -504,5 +506,11 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         return format.equals("debezium")
                 ? Collections.emptyList()
                 : Collections.singletonList("id");
+    }
+
+    private List<String> getBucketKey(String format) {
+        return format.equals("debezium")
+                ? Collections.singletonList("id")
+                : Collections.emptyList();
     }
 }

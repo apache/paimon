@@ -173,6 +173,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                         new String[] {"k", "v1"}),
                 Collections.emptyList(),
                 Collections.singletonList("k"),
+                Collections.emptyList(),
                 Collections.emptyMap());
 
         KafkaSyncTableAction action =

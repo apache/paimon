@@ -47,6 +47,7 @@ import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.utils.TypeConversions;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -218,10 +219,20 @@ public class KafkaLogTestUtils {
             List<String> partitionKeys,
             boolean manuallyCreateLogTable) {
         String topic = "topic_" + UUID.randomUUID();
+        List<String> bucketKeys = new ArrayList<>();
+        if (primaryKeys.isEmpty()) {
+            for (String fieldSpec : fieldsSpec) {
+                String fieldName = fieldSpec.split(" ")[0];
+                if (!partitionKeys.contains(fieldName)) {
+                    bucketKeys.add(fieldName);
+                }
+            }
+        }
         String table =
                 createTable(
                         fieldsSpec,
                         primaryKeys,
+                        bucketKeys,
                         partitionKeys,
                         new HashMap<String, String>() {
                             {

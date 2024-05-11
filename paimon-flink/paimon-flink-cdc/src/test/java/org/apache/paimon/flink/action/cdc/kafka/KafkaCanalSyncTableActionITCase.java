@@ -594,6 +594,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
                         new String[] {"k", "v1"}),
                 Collections.emptyList(),
                 Collections.singletonList("k"),
+                Collections.emptyList(),
                 Collections.emptyMap());
 
         KafkaSyncTableAction action =
@@ -969,6 +970,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
                         new String[] {"_id", "_date", "_year"}),
                 Collections.singletonList("_year"),
                 Arrays.asList("_id", "_year"),
+                Collections.emptyList(),
                 Collections.emptyMap());
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
@@ -1103,6 +1105,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
                             new String[] {"_id", "_date", "_year"}),
                     Collections.emptyList(),
                     Collections.singletonList("_id"),
+                    Collections.emptyList(),
                     Collections.emptyMap());
         } else {
             writeRecordsToKafka(topic, "kafka/canal/table/computedcolumn/canal-data-2.txt");
