@@ -39,6 +39,10 @@ public class RoaringBitmap32 {
         roaringBitmap.add(x);
     }
 
+    public void or(RoaringBitmap32 other) {
+        roaringBitmap.or(other.roaringBitmap);
+    }
+
     public boolean checkedAdd(int x) {
         return roaringBitmap.checkedAdd(x);
     }
@@ -49,6 +53,10 @@ public class RoaringBitmap32 {
 
     public boolean isEmpty() {
         return roaringBitmap.isEmpty();
+    }
+
+    public long getCardinality() {
+        return roaringBitmap.getLongCardinality();
     }
 
     public void serialize(DataOutput out) throws IOException {

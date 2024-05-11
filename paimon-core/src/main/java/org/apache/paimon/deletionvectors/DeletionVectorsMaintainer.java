@@ -41,21 +41,9 @@ public class DeletionVectorsMaintainer {
     private boolean modified;
 
     private DeletionVectorsMaintainer(
-            IndexFileHandler fileHandler,
-            @Nullable Long snapshotId,
-            BinaryRow partition,
-            int bucket) {
+            IndexFileHandler fileHandler, Map<String, DeletionVector> deletionVectors) {
         this.indexFileHandler = fileHandler;
-        IndexFileMeta indexFile =
-                snapshotId == null
-                        ? null
-                        : fileHandler
-                                .scan(snapshotId, DELETION_VECTORS_INDEX, partition, bucket)
-                                .orElse(null);
-        this.deletionVectors =
-                indexFile == null
-                        ? new HashMap<>()
-                        : new HashMap<>(indexFileHandler.readAllDeletionVectors(indexFile));
+        this.deletionVectors = deletionVectors;
         this.modified = false;
     }
 
@@ -72,6 +60,17 @@ public class DeletionVectorsMaintainer {
         if (deletionVector.checkedDelete(position)) {
             modified = true;
         }
+    }
+
+    /**
+     * Notifies a new deletion which marks the specified deletion vector with the given file name.
+     *
+     * @param fileName The name of the file where the deletion occurred.
+     * @param deletionVector The deletion vector
+     */
+    public void notifyNewDeletion(String fileName, DeletionVector deletionVector) {
+        deletionVectors.put(fileName, deletionVector);
+        modified = true;
     }
 
     /**
@@ -130,7 +129,25 @@ public class DeletionVectorsMaintainer {
 
         public DeletionVectorsMaintainer createOrRestore(
                 @Nullable Long snapshotId, BinaryRow partition, int bucket) {
-            return new DeletionVectorsMaintainer(handler, snapshotId, partition, bucket);
+            IndexFileMeta indexFile =
+                    snapshotId == null
+                            ? null
+                            : handler.scan(snapshotId, DELETION_VECTORS_INDEX, partition, bucket)
+                                    .orElse(null);
+            Map<String, DeletionVector> deletionVectors =
+                    indexFile == null
+                            ? new HashMap<>()
+                            : new HashMap<>(handler.readAllDeletionVectors(indexFile));
+            return createOrRestore(deletionVectors);
+        }
+
+        public DeletionVectorsMaintainer create() {
+            return createOrRestore(new HashMap<>());
+        }
+
+        public DeletionVectorsMaintainer createOrRestore(
+                Map<String, DeletionVector> deletionVectors) {
+            return new DeletionVectorsMaintainer(handler, deletionVectors);
         }
     }
 }
