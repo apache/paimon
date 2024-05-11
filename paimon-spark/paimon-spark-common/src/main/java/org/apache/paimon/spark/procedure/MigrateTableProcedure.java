@@ -32,6 +32,7 @@ import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 
+import static org.apache.spark.sql.types.DataTypes.BooleanType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /**
@@ -49,7 +50,8 @@ public class MigrateTableProcedure extends BaseProcedure {
             new ProcedureParameter[] {
                 ProcedureParameter.required("source_type", StringType),
                 ProcedureParameter.required("table", StringType),
-                ProcedureParameter.optional("options", StringType)
+                ProcedureParameter.optional("options", StringType),
+                ProcedureParameter.optional("rename", BooleanType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -77,6 +79,7 @@ public class MigrateTableProcedure extends BaseProcedure {
         String format = args.getString(0);
         String sourceTable = args.getString(1);
         String properties = args.isNullAt(2) ? null : args.getString(2);
+        Boolean rename = args.isNullAt(3) ? true : args.getBoolean(3);
 
         Identifier sourceTableId = Identifier.fromString(sourceTable);
         Identifier tmpTableId = Identifier.fromString(sourceTable + TMP_TBL_SUFFIX);
@@ -94,7 +97,9 @@ public class MigrateTableProcedure extends BaseProcedure {
                             tmpTableId.getObjectName(),
                             ParameterUtils.parseCommaSeparatedKeyValues(properties));
             migrator.executeMigrate();
-            paimonCatalog.renameTable(tmpTableId, sourceTableId, false);
+            if (rename) {
+                paimonCatalog.renameTable(tmpTableId, sourceTableId, false);
+            }
         } catch (Exception e) {
             throw new RuntimeException("Call migrate_table error", e);
         }
