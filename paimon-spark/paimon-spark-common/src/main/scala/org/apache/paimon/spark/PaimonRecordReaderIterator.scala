@@ -97,7 +97,11 @@ case class PaimonRecordReaderIterator(
         while (!stop) {
           val dataRow = currentIterator.next()
           if (dataRow != null) {
-            if (needMetadata && isFileRecordIterator) {
+            if (needMetadata) {
+              if (!isFileRecordIterator) {
+                throw new RuntimeException(
+                  "There need be FileRecoredIterator when metadata columns are required.")
+              }
               updateMetadataRow(currentIterator.asInstanceOf[FileRecordIterator[PaimonInternalRow]])
               currentResult = joinedRow.replace(dataRow, metadataRow)
             } else {
