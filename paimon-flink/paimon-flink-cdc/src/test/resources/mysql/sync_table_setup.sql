@@ -323,7 +323,7 @@ CREATE TABLE test_exist_column_comment_change (
     PRIMARY KEY (pk)
 );
 
-CREATE TABLE test_exist_column_length_change (
+CREATE TABLE test_exist_column_type_length_change (
     pk INT,
     c1 DATE,
     c2 VARCHAR(10) not null,

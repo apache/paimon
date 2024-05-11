@@ -1387,12 +1387,12 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         try (Statement statement = getStatement()) {
             statement.executeUpdate("USE " + DATABASE_NAME);
             statement.executeUpdate(
-                    "ALTER TABLE test_exist_column_length_change MODIFY COLUMN v2 varchar(20)");
+                    "ALTER TABLE test_exist_column_type_length_change MODIFY COLUMN c2 varchar(20)");
         }
 
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", DATABASE_NAME);
-        mySqlConfig.put("table-name", "test_exist_column_length_change");
+        mySqlConfig.put("table-name", "test_exist_column_type_length_change");
 
         MySqlSyncTableAction action =
                 syncTableActionBuilder(mySqlConfig)
