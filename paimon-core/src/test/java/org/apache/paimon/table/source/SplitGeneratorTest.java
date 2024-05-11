@@ -71,7 +71,7 @@ public class SplitGeneratorTest {
                         newFileFromSequence("6", 101, 61, 100));
         assertThat(
                         toNames(
-                                new AppendOnlySplitGenerator(40, 2, BucketMode.FIXED)
+                                new AppendOnlySplitGenerator(40, 2, BucketMode.HASH_FIXED)
                                         .splitForBatch(files)))
                 .containsExactlyInAnyOrder(
                         Arrays.asList("1", "2"),
@@ -81,7 +81,7 @@ public class SplitGeneratorTest {
 
         assertThat(
                         toNames(
-                                new AppendOnlySplitGenerator(70, 2, BucketMode.FIXED)
+                                new AppendOnlySplitGenerator(70, 2, BucketMode.HASH_FIXED)
                                         .splitForBatch(files)))
                 .containsExactlyInAnyOrder(
                         Arrays.asList("1", "2", "3"),
@@ -90,7 +90,7 @@ public class SplitGeneratorTest {
 
         assertThat(
                         toNames(
-                                new AppendOnlySplitGenerator(40, 20, BucketMode.FIXED)
+                                new AppendOnlySplitGenerator(40, 20, BucketMode.HASH_FIXED)
                                         .splitForBatch(files)))
                 .containsExactlyInAnyOrder(
                         Arrays.asList("1", "2"),

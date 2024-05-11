@@ -134,13 +134,13 @@ public class FlinkSinkBuilder {
 
         BucketMode bucketMode = table.bucketMode();
         switch (bucketMode) {
-            case FIXED:
+            case HASH_FIXED:
                 return buildForFixedBucket(input);
-            case DYNAMIC:
+            case HASH_DYNAMIC:
                 return buildDynamicBucketSink(input, false);
-            case GLOBAL_DYNAMIC:
+            case CROSS_PARTITION:
                 return buildDynamicBucketSink(input, true);
-            case UNAWARE:
+            case BUCKET_UNAWARE:
                 return buildUnawareBucketSink(input);
             default:
                 throw new UnsupportedOperationException("Unsupported bucket mode: " + bucketMode);

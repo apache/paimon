@@ -45,7 +45,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
@@ -517,9 +516,9 @@ public class SchemaValidation {
     private static void validateBucket(TableSchema schema, CoreOptions options) {
         int bucket = options.bucket();
         if (bucket == -1) {
-            if (options.toMap().get(BUCKET_KEY.key()) != null) {
+            if (!schema.bucketKeys().isEmpty()) {
                 throw new RuntimeException(
-                        "Cannot define 'bucket-key' in unaware or dynamic bucket mode.");
+                        "Cannot define 'bucket-key' with bucket -1, please specify a bucket number.");
             }
 
             if (schema.primaryKeys().isEmpty()
@@ -536,6 +535,11 @@ public class SchemaValidation {
                                 "You should use dynamic bucket (bucket = -1) mode in cross partition update case "
                                         + "(Primary key constraint %s not include all partition fields %s).",
                                 schema.primaryKeys(), schema.partitionKeys()));
+            }
+
+            if (schema.primaryKeys().isEmpty() && schema.bucketKeys().isEmpty()) {
+                throw new RuntimeException(
+                        "You should define a 'bucket-key' for append queue mode.");
             }
         }
     }

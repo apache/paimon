@@ -49,7 +49,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
     case fileStoreTable: FileStoreTable =>
       fileStoreTable.bucketMode
     case _ =>
-      BucketMode.FIXED
+      BucketMode.HASH_FIXED
   }
 
   private lazy val primaryKeyCols = tableSchema.trimmedPrimaryKeys().asScala
@@ -132,7 +132,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
     val encoderWithBucketCOl = encoderGroupWithBucketCol.encoder
 
     bucketMode match {
-      case BucketMode.DYNAMIC =>
+      case BucketMode.HASH_DYNAMIC =>
         assert(primaryKeyCols.nonEmpty, "Only primary-key table can support dynamic bucket.")
 
         // Topology: input -> shuffle by special key & partition hash -> bucket-assigner -> shuffle by partition & bucket
@@ -163,7 +163,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
         repartitionByPartitionsAndBucket(
           partitioned.mapPartitions(dynamicBucketProcessor.processPartition)(encoderWithBucketCOl))
 
-      case BucketMode.UNAWARE =>
+      case BucketMode.BUCKET_UNAWARE =>
         assert(primaryKeyCols.isEmpty, "Only append table can support unaware bucket.")
 
         // Topology: input -> bucket-assigner
@@ -172,7 +172,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
           .mapPartitions(unawareBucketProcessor.processPartition)(encoderWithBucketCOl)
           .toDF()
 
-      case BucketMode.FIXED =>
+      case BucketMode.HASH_FIXED =>
         // Topology: input -> bucket-assigner -> shuffle by partition & bucket
         val commonBucketProcessor =
           CommonBucketProcessor(table, bucketColIdx, encoderGroupWithBucketCol)
