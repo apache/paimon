@@ -16,41 +16,47 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.serialization;
+package org.apache.paimon.flink.action.cdc.pulsar;
 
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
+import org.apache.paimon.flink.action.cdc.serialization.ConfluentAvroDeserializationSchema;
 
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.DeserializationFeature;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
-
+import io.confluent.kafka.schemaregistry.client.CachedSchemaRegistryClient;
+import org.apache.avro.generic.GenericRecord;
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.configuration.Configuration;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 
 import static org.apache.flink.api.java.typeutils.TypeExtractor.getForClass;
+import static org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils.SCHEMA_REGISTRY_URL;
 
 /** A simple deserialization schema for {@link CdcSourceRecord}. */
-public class CdcJsonDeserializationSchema implements DeserializationSchema<CdcSourceRecord> {
+public class PulsarDebeziumAvroDeserializationSchema
+        implements DeserializationSchema<CdcSourceRecord> {
 
     private static final long serialVersionUID = 1L;
 
-    private static final Logger LOG = LoggerFactory.getLogger(CdcJsonDeserializationSchema.class);
+    private static final int DEFAULT_IDENTITY_MAP_CAPACITY = 1000;
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final String topic;
+    private final String schemaRegistryUrl;
 
-    public CdcJsonDeserializationSchema(Configuration cdcSourceConfig) {
-        this();
+    /** The deserializer to deserialize Debezium Avro data. */
+    private ConfluentAvroDeserializationSchema avroDeserializer;
+
+    public PulsarDebeziumAvroDeserializationSchema(Configuration cdcSourceConfig) {
+        this.topic = PulsarActionUtils.findOneTopic(cdcSourceConfig);
+        this.schemaRegistryUrl = cdcSourceConfig.getString(SCHEMA_REGISTRY_URL);
     }
 
-    public CdcJsonDeserializationSchema() {
-        objectMapper
-                .configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true)
-                .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+    @Override
+    public void open(InitializationContext context) throws Exception {
+        avroDeserializer =
+                new ConfluentAvroDeserializationSchema(
+                        new CachedSchemaRegistryClient(
+                                schemaRegistryUrl, DEFAULT_IDENTITY_MAP_CAPACITY));
     }
 
     @Override
@@ -59,12 +65,9 @@ public class CdcJsonDeserializationSchema implements DeserializationSchema<CdcSo
             return null;
         }
 
-        try {
-            return new CdcSourceRecord(objectMapper.readValue(message, JsonNode.class));
-        } catch (Exception e) {
-            LOG.error("Invalid Json:\n{}", new String(message));
-            throw e;
-        }
+        GenericRecord value =
+                (GenericRecord) this.avroDeserializer.deserialize(topic, false, message);
+        return new CdcSourceRecord(topic, null, value);
     }
 
     @Override

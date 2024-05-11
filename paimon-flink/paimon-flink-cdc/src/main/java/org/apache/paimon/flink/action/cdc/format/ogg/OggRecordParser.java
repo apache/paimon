@@ -21,7 +21,7 @@ package org.apache.paimon.flink.action.cdc.format.ogg;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
-import org.apache.paimon.flink.action.cdc.format.RecordParser;
+import org.apache.paimon.flink.action.cdc.format.JsonRecordParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.RowKind;
 
@@ -35,11 +35,11 @@ import java.util.List;
 import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
 
 /**
- * The {@code OggRecordParser} class extends the abstract {@link RecordParser} and is responsible
- * for parsing records from the Oracle GoldenGate (OGG) JSON format. Oracle GoldenGate is a software
- * application used for real-time data integration and replication in heterogeneous IT environments.
- * This parser extracts relevant information from the OGG JSON records and transforms them into a
- * list of {@link RichCdcMultiplexRecord} objects.
+ * The {@code OggRecordParser} class extends the abstract {@link JsonRecordParser} and is
+ * responsible for parsing records from the Oracle GoldenGate (OGG) JSON format. Oracle GoldenGate
+ * is a software application used for real-time data integration and replication in heterogeneous IT
+ * environments. This parser extracts relevant information from the OGG JSON records and transforms
+ * them into a list of {@link RichCdcMultiplexRecord} objects.
  *
  * <p>The class handles three types of database operations, represented by "U" for UPDATE, "I" for
  * INSERT, and "D" for DELETE. It then generates corresponding {@link RichCdcMultiplexRecord}
@@ -50,7 +50,7 @@ import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
  * providing a way to understand the structure of the incoming records and their corresponding field
  * types.
  */
-public class OggRecordParser extends RecordParser {
+public class OggRecordParser extends JsonRecordParser {
 
     private static final String FIELD_BEFORE = "before";
     private static final String FIELD_TYPE = "op_type";

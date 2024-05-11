@@ -485,7 +485,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
 
         Schema kafkaSchema =
                 MessageQueueSchemaUtils.getSchema(
-                        getKafkaEarliestConsumer(kafkaConfig),
+                        getKafkaEarliestConsumer(
+                                kafkaConfig, new KafkaDebeziumJsonDeserializationSchema()),
                         getDataFormat(kafkaConfig),
                         TypeMapping.defaultMapping());
         List<DataField> fields = new ArrayList<>();

@@ -183,9 +183,13 @@ public class SyncJobHandler {
     public Source<CdcSourceRecord, ?, ?> provideSource() {
         switch (sourceType) {
             case KAFKA:
-                return KafkaActionUtils.buildKafkaSource(cdcSourceConfig);
+                return KafkaActionUtils.buildKafkaSource(
+                        cdcSourceConfig,
+                        provideDataFormat().createKafkaDeserializer(cdcSourceConfig));
             case PULSAR:
-                return PulsarActionUtils.buildPulsarSource(cdcSourceConfig);
+                return PulsarActionUtils.buildPulsarSource(
+                        cdcSourceConfig,
+                        provideDataFormat().createPulsarDeserializer(cdcSourceConfig));
             default:
                 throw new UnsupportedOperationException(
                         "Cannot get source from source type" + sourceType);
@@ -238,9 +242,13 @@ public class SyncJobHandler {
     public MessageQueueSchemaUtils.ConsumerWrapper provideConsumer() {
         switch (sourceType) {
             case KAFKA:
-                return KafkaActionUtils.getKafkaEarliestConsumer(cdcSourceConfig);
+                return KafkaActionUtils.getKafkaEarliestConsumer(
+                        cdcSourceConfig,
+                        provideDataFormat().createKafkaDeserializer(cdcSourceConfig));
             case PULSAR:
-                return PulsarActionUtils.createPulsarConsumer(cdcSourceConfig);
+                return PulsarActionUtils.createPulsarConsumer(
+                        cdcSourceConfig,
+                        provideDataFormat().createPulsarDeserializer(cdcSourceConfig));
             default:
                 throw new UnsupportedOperationException(
                         "Cannot get consumer from source type" + sourceType);

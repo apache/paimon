@@ -329,7 +329,11 @@ public class MySqlTypeUtils {
     }
 
     public static String convertWkbArray(byte[] wkb) throws JsonProcessingException {
-        String geoJson = OGCGeometry.fromBinary(ByteBuffer.wrap(wkb)).asGeoJson();
+        return convertWkbArray(ByteBuffer.wrap(wkb));
+    }
+
+    public static String convertWkbArray(ByteBuffer wkbByteBuffer) throws JsonProcessingException {
+        String geoJson = OGCGeometry.fromBinary(wkbByteBuffer).asGeoJson();
         JsonNode originGeoNode = objectMapper.readTree(geoJson);
 
         Optional<Integer> srid =

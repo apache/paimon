@@ -25,15 +25,7 @@ import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
-import org.apache.paimon.utils.TypeUtils;
-
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ArrayNode;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.util.Collector;
@@ -42,23 +34,15 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
-import java.util.stream.Collectors;
-import java.util.stream.StreamSupport;
 
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.listCaseConvert;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.recordKeyDuplicateErrMsg;
-import static org.apache.paimon.utils.JsonSerdeUtil.convertValue;
-import static org.apache.paimon.utils.JsonSerdeUtil.getNodeAs;
-import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
-import static org.apache.paimon.utils.JsonSerdeUtil.writeValueAsString;
 
 /**
  * Provides a base implementation for parsing messages of various formats into {@link
@@ -75,11 +59,9 @@ public abstract class RecordParser
 
     protected static final String FIELD_TABLE = "table";
     protected static final String FIELD_DATABASE = "database";
-    private final boolean caseSensitive;
+    protected final boolean caseSensitive;
     protected final TypeMapping typeMapping;
     protected final List<ComputedColumn> computedColumns;
-
-    protected JsonNode root;
 
     public RecordParser(
             boolean caseSensitive, TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
@@ -111,23 +93,6 @@ public abstract class RecordParser
         }
     }
 
-    protected abstract List<RichCdcMultiplexRecord> extractRecords();
-
-    protected abstract String primaryField();
-
-    protected abstract String dataField();
-
-    protected boolean isDDL() {
-        return false;
-    }
-
-    // use STRING type in default when we cannot get origin data types (most cases)
-    protected LinkedHashMap<String, DataType> fillDefaultTypes(JsonNode record) {
-        LinkedHashMap<String, DataType> fieldTypes = new LinkedHashMap<>();
-        record.fieldNames().forEachRemaining(name -> fieldTypes.put(name, DataTypes.STRING()));
-        return fieldTypes;
-    }
-
     @Override
     public void flatMap(CdcSourceRecord value, Collector<RichCdcMultiplexRecord> out) {
         try {
@@ -139,34 +104,17 @@ public abstract class RecordParser
         }
     }
 
-    protected Map<String, String> extractRowData(
-            JsonNode record, LinkedHashMap<String, DataType> paimonFieldTypes) {
-        paimonFieldTypes.putAll(fillDefaultTypes(record));
-        Map<String, Object> recordMap =
-                convertValue(record, new TypeReference<Map<String, Object>>() {});
-        Map<String, String> rowData =
-                recordMap.entrySet().stream()
-                        .filter(entry -> Objects.nonNull(entry.getKey()))
-                        .collect(
-                                Collectors.toMap(
-                                        Map.Entry::getKey,
-                                        entry -> {
-                                            if (Objects.nonNull(entry.getValue())
-                                                    && !TypeUtils.isBasicType(entry.getValue())) {
-                                                try {
-                                                    return writeValueAsString(entry.getValue());
-                                                } catch (JsonProcessingException e) {
-                                                    LOG.error("Failed to deserialize record.", e);
-                                                    return Objects.toString(entry.getValue());
-                                                }
-                                            }
-                                            return Objects.toString(entry.getValue());
-                                        }));
-        evalComputedColumns(rowData, paimonFieldTypes);
-        return rowData;
+    protected abstract void setRoot(CdcSourceRecord record);
+
+    protected abstract List<RichCdcMultiplexRecord> extractRecords();
+
+    protected boolean isDDL() {
+        return false;
     }
 
-    // generate values for computed columns
+    protected abstract List<String> extractPrimaryKeys();
+
+    /** generate values for computed columns. */
     protected void evalComputedColumns(
             Map<String, String> rowData, LinkedHashMap<String, DataType> paimonFieldTypes) {
         computedColumns.forEach(
@@ -178,26 +126,8 @@ public abstract class RecordParser
                 });
     }
 
-    private List<String> extractPrimaryKeys() {
-        ArrayNode pkNames = getNodeAs(root, primaryField(), ArrayNode.class);
-        if (pkNames == null) {
-            return Collections.emptyList();
-        }
-
-        return StreamSupport.stream(pkNames.spliterator(), false)
-                .map(JsonNode::asText)
-                .collect(Collectors.toList());
-    }
-
-    protected void processRecord(
-            JsonNode jsonNode, RowKind rowKind, List<RichCdcMultiplexRecord> records) {
-        LinkedHashMap<String, DataType> paimonFieldTypes = new LinkedHashMap<>(jsonNode.size());
-        Map<String, String> rowData = this.extractRowData(jsonNode, paimonFieldTypes);
-        records.add(createRecord(rowKind, rowData, paimonFieldTypes));
-    }
-
     /** Handle case sensitivity here. */
-    private RichCdcMultiplexRecord createRecord(
+    protected RichCdcMultiplexRecord createRecord(
             RowKind rowKind,
             Map<String, String> data,
             LinkedHashMap<String, DataType> paimonFieldTypes) {
@@ -219,63 +149,14 @@ public abstract class RecordParser
                 new CdcRecord(rowKind, data));
     }
 
-    protected void setRoot(CdcSourceRecord record) {
-        root = (JsonNode) record.getValue();
-    }
-
-    protected JsonNode mergeOldRecord(JsonNode data, JsonNode oldNode) {
-        JsonNode oldFullRecordNode = data.deepCopy();
-        oldNode.fieldNames()
-                .forEachRemaining(
-                        fieldName ->
-                                ((ObjectNode) oldFullRecordNode)
-                                        .set(fieldName, oldNode.get(fieldName)));
-        return oldFullRecordNode;
-    }
+    @Nullable
+    protected abstract String getTableName();
 
     @Nullable
-    protected String getTableName() {
-        JsonNode node = root.get(FIELD_TABLE);
-        return isNull(node) ? null : node.asText();
-    }
-
-    @Nullable
-    protected String getDatabaseName() {
-        JsonNode node = root.get(FIELD_DATABASE);
-        return isNull(node) ? null : node.asText();
-    }
+    protected abstract String getDatabaseName();
 
     private void logInvalidSourceRecord(CdcSourceRecord record) {
         LOG.error("Invalid source record:\n{}", record.toString());
-    }
-
-    protected void checkNotNull(JsonNode node, String key) {
-        if (isNull(node)) {
-            throw new RuntimeException(
-                    String.format("Invalid %s format: missing '%s' field.", format(), key));
-        }
-    }
-
-    protected void checkNotNull(
-            JsonNode node, String key, String conditionKey, String conditionValue) {
-        if (isNull(node)) {
-            throw new RuntimeException(
-                    String.format(
-                            "Invalid %s format: missing '%s' field when '%s' is '%s'.",
-                            format(), key, conditionKey, conditionValue));
-        }
-    }
-
-    protected JsonNode getAndCheck(String key) {
-        JsonNode node = root.get(key);
-        checkNotNull(node, key);
-        return node;
-    }
-
-    protected JsonNode getAndCheck(String key, String conditionKey, String conditionValue) {
-        JsonNode node = root.get(key);
-        checkNotNull(node, key, conditionKey, conditionValue);
-        return node;
     }
 
     protected abstract String format();
