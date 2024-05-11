@@ -1,9 +1,9 @@
 ---
-title: "Append Queue Table"
+title: "Append Queue"
 weight: 3
 type: docs
 aliases:
-- /append-table/append-queue-table.html
+- /append-table/append-queue.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -24,16 +24,34 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Append Queue Table
+# Append Queue
 
 ## Definition
 
 In this mode, you can regard append table as a queue separated by bucket. Every record in the same bucket is ordered strictly,
 streaming read will transfer the record to down-stream exactly in the order of writing. To use this mode, you do not need
 to config special configurations, all the data will go into one bucket as a queue. You can also define the `bucket` and
-`bucket-key` to enable larger parallelism and disperse data (see [Example]({{< ref "#example" >}})).
+`bucket-key` to enable larger parallelism and disperse data.
 
 {{< img src="/img/for-queue.png">}}
+
+Example to create append queue table:
+
+{{< tabs "create-append-queue" >}}
+{{< tab "Flink" >}}
+
+```sql
+CREATE TABLE my_table (
+    product_id BIGINT,
+    price DOUBLE,
+    sales BIGINT
+) WITH (
+    'bucket' = '8',
+    'bucket-key' = 'product_id'
+);
+```
+{{< /tab >}}
+{{< /tabs >}}
 
 ## Compaction
 
@@ -158,25 +176,3 @@ INSERT INTO paimon_table SELECT * FROM kakfa_table;
 -- launch a bounded streaming job to read paimon_table
 SELECT * FROM paimon_table /*+ OPTIONS('scan.bounded.watermark'='...') */;
 ```
-
-## Example
-
-The following is an example of creating the Append table and specifying the bucket key.
-
-{{< tabs "create-append-table" >}}
-
-{{< tab "Flink" >}}
-
-```sql
-CREATE TABLE my_table (
-                         product_id BIGINT,
-                         price DOUBLE,
-                         sales BIGINT
-) WITH (
-      'bucket' = '8',
-      'bucket-key' = 'product_id'
-      );
-```
-{{< /tab >}}
-
-{{< /tabs >}}
