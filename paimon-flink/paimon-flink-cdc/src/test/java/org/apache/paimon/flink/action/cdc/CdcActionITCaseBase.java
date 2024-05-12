@@ -160,6 +160,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         config.put("bucket", String.valueOf(random.nextInt(3) + 1));
         config.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
+        config.put("write-only", "true");
         return config;
     }
 
