@@ -191,7 +191,7 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
         return GenericRow.of(RANDOM.nextInt(), RANDOM.nextLong(), randomString());
     }
 
-    private List<AppendOnlyCompactionTask> packTask(List<CommitMessage> messages, int fileSize) {
+    public static List<AppendOnlyCompactionTask> packTask(List<CommitMessage> messages, int fileSize) {
         List<AppendOnlyCompactionTask> result = new ArrayList<>();
         List<DataFileMeta> metas =
                 messages.stream()
