@@ -54,7 +54,7 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
     private final Catalog.Loader catalogLoader;
 
     // support multi table compaction
-    private transient Map<Identifier, UnawareBucketCompactor> compactionHelperContainer;
+    private transient Map<Identifier, UnawareBucketCompactor> compactorContainer;
 
     private transient ExecutorService lazyCompactExecutor;
 
@@ -70,7 +70,7 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
     @Override
     public void open() throws Exception {
         LOG.debug("Opened a append-only multi table compaction worker.");
-        compactionHelperContainer = new HashMap<>();
+        compactorContainer = new HashMap<>();
         catalog = catalogLoader.load();
     }
 
@@ -78,12 +78,12 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
     protected List<MultiTableCommittable> prepareCommit(boolean waitCompaction, long checkpointId)
             throws IOException {
         List<MultiTableCommittable> result = new ArrayList<>();
-        for (Map.Entry<Identifier, UnawareBucketCompactor> helperEntry :
-                compactionHelperContainer.entrySet()) {
-            Identifier tableId = helperEntry.getKey();
-            UnawareBucketCompactor helper = helperEntry.getValue();
+        for (Map.Entry<Identifier, UnawareBucketCompactor> compactorWithTable :
+                compactorContainer.entrySet()) {
+            Identifier tableId = compactorWithTable.getKey();
+            UnawareBucketCompactor compactor = compactorWithTable.getValue();
 
-            for (Committable committable : helper.prepareCommit(waitCompaction, checkpointId)) {
+            for (Committable committable : compactor.prepareCommit(waitCompaction, checkpointId)) {
                 result.add(
                         new MultiTableCommittable(
                                 tableId.getDatabaseName(),
@@ -101,12 +101,12 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
     public void processElement(StreamRecord<MultiTableAppendOnlyCompactionTask> element)
             throws Exception {
         Identifier identifier = element.getValue().tableIdentifier();
-        compactionHelperContainer
-                .computeIfAbsent(identifier, this::unwareBucketCompactionHelper)
+        compactorContainer
+                .computeIfAbsent(identifier, this::compactor)
                 .processElement(element.getValue());
     }
 
-    private UnawareBucketCompactor unwareBucketCompactionHelper(Identifier tableId) {
+    private UnawareBucketCompactor compactor(Identifier tableId) {
         try {
             return new UnawareBucketCompactor(
                     (FileStoreTable) catalog.getTable(tableId), commitUser, this::workerExecutor);
@@ -136,8 +136,8 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
                         "Executors shutdown timeout, there may be some files aren't deleted correctly");
             }
 
-            for (UnawareBucketCompactor helperEntry : compactionHelperContainer.values()) {
-                helperEntry.close();
+            for (UnawareBucketCompactor compactor : compactorContainer.values()) {
+                compactor.close();
             }
         }
     }
