@@ -117,7 +117,7 @@ public class FileStoreBuiltInFormatE2eTest extends E2eTestBase {
     }
 
     private void runSql(String sql, String... ddls) throws Exception {
-        runSql(
+        runBatchSql(
                 "SET 'execution.runtime-mode' = 'batch';\n"
                         + "SET 'table.dml-sync' = 'true';\n"
                         + String.join("\n", ddls)

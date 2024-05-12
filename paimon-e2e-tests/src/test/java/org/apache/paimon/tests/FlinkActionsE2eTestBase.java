@@ -47,7 +47,11 @@ public abstract class FlinkActionsE2eTestBase extends E2eTestBase {
         useCatalogCmd = "USE CATALOG ts_catalog;";
     }
 
-    protected void runSql(String sql, String... ddls) throws Exception {
-        runSql(String.join("\n", ddls) + "\n" + sql);
+    protected void runBatchSql(String sql, String... ddls) throws Exception {
+        runBatchSql(String.join("\n", ddls) + "\n" + sql);
+    }
+
+    protected void runStreamingSql(String sql, String... ddls) throws Exception {
+        runStreamingSql(String.join("\n", ddls) + "\n" + sql);
     }
 }

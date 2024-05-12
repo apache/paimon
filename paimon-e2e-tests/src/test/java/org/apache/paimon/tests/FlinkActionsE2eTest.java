@@ -49,7 +49,8 @@ public class FlinkActionsE2eTest extends FlinkActionsE2eTestBase {
                         + "('2023-01-16', 1, 0, 25), ('2023-01-17', 1, 0, 50), ('2023-01-18', 1, 0, 75), "
                         + "('2023-01-19', 1, 1, 23), ('2023-01-20', 1, 1, 28), ('2023-01-21', 1, 1, 31);";
 
-        runSql("SET 'table.dml-sync' = 'true';\n" + insert, catalogDdl, useCatalogCmd, tableDdl);
+        runBatchSql(
+                "SET 'table.dml-sync' = 'true';\n" + insert, catalogDdl, useCatalogCmd, tableDdl);
 
         // run drop partition job
         Container.ExecResult execResult =
@@ -74,7 +75,7 @@ public class FlinkActionsE2eTest extends FlinkActionsE2eTestBase {
         LOG.info(execResult.getStderr());
 
         // read all data from paimon
-        runSql(
+        runBatchSql(
                 "INSERT INTO result1 SELECT * FROM ts_table;",
                 catalogDdl,
                 useCatalogCmd,
@@ -106,7 +107,8 @@ public class FlinkActionsE2eTest extends FlinkActionsE2eTestBase {
                         + "('2023-01-16', 1, 25), ('2023-01-17', 1, 50), ('2023-01-18', 1, 75), "
                         + "('2023-01-19', 1, 23), ('2023-01-20', 1, 28), ('2023-01-21', 1, 31);";
 
-        runSql("SET 'table.dml-sync' = 'true';\n" + insert, catalogDdl, useCatalogCmd, tableDdl);
+        runBatchSql(
+                "SET 'table.dml-sync' = 'true';\n" + insert, catalogDdl, useCatalogCmd, tableDdl);
 
         // run delete job
         Container.ExecResult execResult =
@@ -130,7 +132,7 @@ public class FlinkActionsE2eTest extends FlinkActionsE2eTestBase {
         LOG.info(execResult.getStderr());
 
         // read all data from paimon
-        runSql(
+        runBatchSql(
                 "INSERT INTO result1 SELECT * FROM ts_table;",
                 catalogDdl,
                 useCatalogCmd,
@@ -166,7 +168,7 @@ public class FlinkActionsE2eTest extends FlinkActionsE2eTestBase {
 
         String insertToS = "INSERT INTO S VALUES (1, 'Hi');\n";
 
-        runSql(
+        runBatchSql(
                 "SET 'table.dml-sync' = 'true';\n" + insertToT + insertToS,
                 catalogDdl,
                 useCatalogCmd,
@@ -201,7 +203,7 @@ public class FlinkActionsE2eTest extends FlinkActionsE2eTestBase {
         LOG.info(execResult.getStderr());
 
         // read all data from paimon
-        runSql(
+        runBatchSql(
                 "INSERT INTO result1 SELECT * FROM T;",
                 catalogDdl,
                 useCatalogCmd,
@@ -227,7 +229,8 @@ public class FlinkActionsE2eTest extends FlinkActionsE2eTestBase {
                         + "INSERT INTO T VALUES (2, 'Hello');\n"
                         + "INSERT INTO T VALUES (3, 'Paimon');\n";
 
-        runSql("SET 'table.dml-sync' = 'true';\n" + inserts, catalogDdl, useCatalogCmd, tableTDdl);
+        runBatchSql(
+                "SET 'table.dml-sync' = 'true';\n" + inserts, catalogDdl, useCatalogCmd, tableTDdl);
 
         // create tag at snapshot 2 and check
         Container.ExecResult execResult =
@@ -249,7 +252,7 @@ public class FlinkActionsE2eTest extends FlinkActionsE2eTestBase {
         LOG.info(execResult.getStdout());
         LOG.info(execResult.getStderr());
 
-        runSql(
+        runBatchSql(
                 "INSERT INTO _tags1 SELECT tag_name, snapshot_id FROM T\\$tags;",
                 catalogDdl,
                 useCatalogCmd,
@@ -258,7 +261,7 @@ public class FlinkActionsE2eTest extends FlinkActionsE2eTestBase {
         clearCurrentResults();
 
         // read tag2
-        runSql(
+        runBatchSql(
                 "SET 'execution.runtime-mode' = 'batch';\n"
                         + "INSERT INTO result1 SELECT * FROM T /*+ OPTIONS('scan.tag-name'='tag2') */;",
                 catalogDdl,
@@ -285,7 +288,7 @@ public class FlinkActionsE2eTest extends FlinkActionsE2eTestBase {
         LOG.info(execResult.getStdout());
         LOG.info(execResult.getStderr());
 
-        runSql(
+        runBatchSql(
                 "INSERT INTO _tags2 SELECT tag_name, snapshot_id FROM T\\$tags;",
                 catalogDdl,
                 useCatalogCmd,
@@ -294,7 +297,7 @@ public class FlinkActionsE2eTest extends FlinkActionsE2eTestBase {
         checkResult();
     }
 
-    protected void runSql(String sql, String... ddls) throws Exception {
-        runSql(String.join("\n", ddls) + "\n" + sql);
+    protected void runBatchSql(String sql, String... ddls) throws Exception {
+        runBatchSql(String.join("\n", ddls) + "\n" + sql);
     }
 }

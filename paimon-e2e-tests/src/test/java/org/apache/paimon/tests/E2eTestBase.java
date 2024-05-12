@@ -242,12 +242,21 @@ public abstract class E2eTestBase {
             Pattern.compile(
                     "SQL update statement has been successfully submitted to the cluster:\\s+Job ID: (\\S+)");
 
-    protected String runSql(String sql) throws Exception {
+    protected String runStreamingSql(String sql) throws Exception {
+        sql = "SET 'execution.checkpointing.interval' = '1s';\n" + "\n" + sql;
+        return runSql(sql);
+    }
+
+    protected String runBatchSql(String sql) throws Exception {
         sql =
-                "SET 'execution.runtime-mode' = 'batch';\n"
+                "SET 'execution.runtime-mode' = 'streaming';\n"
                         + "SET 'table.dml-sync' = 'true';\n"
                         + "\n"
                         + sql;
+        return runSql(sql);
+    }
+
+    private String runSql(String sql) throws Exception {
         String fileName = UUID.randomUUID() + ".sql";
         writeSharedFile(fileName, sql);
         Container.ExecResult execResult =

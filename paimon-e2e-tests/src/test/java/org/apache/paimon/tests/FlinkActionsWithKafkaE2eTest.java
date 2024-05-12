@@ -70,9 +70,8 @@ public class FlinkActionsWithKafkaE2eTest extends FlinkActionsE2eTestBase {
                         + ");";
 
         // insert data into paimon
-        runSql(
-                "SET 'execution.checkpointing.interval' = '1s';\n"
-                        + "INSERT INTO ts_table SELECT * FROM test_source;",
+        runStreamingSql(
+                "INSERT INTO ts_table SELECT * FROM test_source;",
                 catalogDdl,
                 useCatalogCmd,
                 tableDdl,
@@ -102,7 +101,7 @@ public class FlinkActionsWithKafkaE2eTest extends FlinkActionsE2eTestBase {
         LOG.info(execResult.getStderr());
 
         // read all data from paimon
-        runSql(
+        runBatchSql(
                 "INSERT INTO result1 SELECT * FROM ts_table;",
                 catalogDdl,
                 useCatalogCmd,

@@ -125,6 +125,6 @@ public class FlinkProceduresE2eTest extends E2eTestBase {
     }
 
     private void runSql(String sql, String... ddls) throws Exception {
-        runSql(String.join("\n", ddls) + "\n" + sql);
+        runBatchSql(String.join("\n", ddls) + "\n" + sql);
     }
 }
