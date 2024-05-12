@@ -94,3 +94,7 @@ CREATE TABLE <PAIMON_TABLE> (<COLUMN> <COLUMN_TYPE> , ...) WITH (
     'file-index.bloom-filter.c1.items' = '200'
 );
 ```
+
+## DELETE & UPDATE
+
+Now, only Spark SQL supports DELETE & UPDATE, you can take a look to [Spark Write]({{< ref "spark/sql-write" >}}).
