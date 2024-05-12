@@ -103,7 +103,7 @@ public class FlinkProceduresE2eTest extends E2eTestBase {
         runStreamingSql(callStatement, catalogDdl, useCatalogCmd);
 
         // read all data from paimon
-        runBatchSql(
+        runStreamingSql(
                 "INSERT INTO result1 SELECT * FROM ts_table;",
                 catalogDdl,
                 useCatalogCmd,
