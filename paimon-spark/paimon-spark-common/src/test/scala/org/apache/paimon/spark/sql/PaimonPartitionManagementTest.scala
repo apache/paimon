@@ -34,7 +34,7 @@ class PaimonPartitionManagementTest extends PaimonSparkTestBase {
             } else if (bucket != -1) {
               s"'bucket-key'='a,b', 'bucket' = '$bucket' "
             } else {
-              ""
+              "'write-only'='true'"
             }
 
             spark.sql(
@@ -86,7 +86,7 @@ class PaimonPartitionManagementTest extends PaimonSparkTestBase {
             } else if (bucket != -1) {
               s"'bucket-key'='a,b', 'bucket' = '$bucket' "
             } else {
-              ""
+              "'write-only'='true'"
             }
 
             spark.sql(s"""

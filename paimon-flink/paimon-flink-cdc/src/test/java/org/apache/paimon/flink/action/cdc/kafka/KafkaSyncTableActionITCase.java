@@ -510,7 +510,9 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         Map<String, String> config = getBasicTableConfig();
         if ("debezium".equals(format)) {
             // debezium has no key
+            // append mode never stop with compaction
             config.remove("bucket");
+            config.put("write-only", "true");
         }
         config.put("tag.automatic-creation", "watermark");
         config.put("tag.creation-period", "hourly");

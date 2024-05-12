@@ -34,7 +34,7 @@ class TableValuedFunctionsTest extends PaimonSparkTestBase {
             } else if (bucket != -1) {
               s"'bucket-key'='b', 'bucket' = '$bucket' "
             } else {
-              ""
+              "'write-only'='true'"
             }
 
             spark.sql(s"""

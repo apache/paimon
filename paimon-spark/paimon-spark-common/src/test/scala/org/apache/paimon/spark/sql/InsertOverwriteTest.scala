@@ -37,7 +37,7 @@ class InsertOverwriteTest extends PaimonSparkTestBase {
             } else if (bucket != -1) {
               s"'bucket-key'='a,b', 'bucket' = '$bucket' "
             } else {
-              ""
+              "'write-only'='true'"
             }
 
             spark.sql(s"""
@@ -68,7 +68,7 @@ class InsertOverwriteTest extends PaimonSparkTestBase {
             } else if (bucket != -1) {
               s"'bucket-key'='b', 'bucket' = '$bucket' "
             } else {
-              ""
+              "'write-only'='true'"
             }
 
             spark.sql(s"""
@@ -108,7 +108,7 @@ class InsertOverwriteTest extends PaimonSparkTestBase {
             } else if (bucket != -1) {
               s"'bucket-key'='a', 'bucket' = '$bucket' "
             } else {
-              ""
+              "'write-only'='true'"
             }
 
             spark.sql(s"""
@@ -230,7 +230,7 @@ class InsertOverwriteTest extends PaimonSparkTestBase {
             } else if (bucket != -1) {
               s"'bucket-key'='b', 'bucket' = '$bucket' "
             } else {
-              ""
+              "'write-only'='true'"
             }
 
             spark.sql(s"""
@@ -272,7 +272,7 @@ class InsertOverwriteTest extends PaimonSparkTestBase {
             } else if (bucket != -1) {
               s"'bucket-key'='a', 'bucket' = '$bucket' "
             } else {
-              ""
+              "'write-only'='true'"
             }
 
             spark.sql(s"""

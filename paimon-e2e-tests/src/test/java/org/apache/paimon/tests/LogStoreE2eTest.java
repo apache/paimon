@@ -108,7 +108,7 @@ public class LogStoreE2eTest extends E2eTestBase {
                 testDataSourceDdl);
 
         // read all data from paimon
-        runBatchSql(
+        runStreamingSql(
                 "INSERT INTO result1 SELECT * FROM ts_table;",
                 catalogDdl,
                 useCatalogCmd,

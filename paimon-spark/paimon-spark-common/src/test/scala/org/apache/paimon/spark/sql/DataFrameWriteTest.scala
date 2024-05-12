@@ -70,7 +70,7 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
             } else if (bucket != -1) {
               s"'bucket-key'='a', 'bucket' = '$bucket' "
             } else {
-              ""
+              "'write-only'='true'"
             }
 
             spark.sql(s"""
@@ -118,7 +118,7 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
             } else if (bucket != -1) {
               s"'bucket-key'='a', 'bucket' = '$bucket' "
             } else {
-              ""
+              "'write-only'='true'"
             }
 
             spark.sql(s"""
@@ -209,7 +209,7 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
             } else if (bucket != -1) {
               s"'bucket-key'='a', 'bucket' = '$bucket' "
             } else {
-              ""
+              "'write-only'='true'"
             }
 
             spark.sql(s"""

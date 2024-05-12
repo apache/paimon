@@ -101,7 +101,7 @@ public class FlinkActionsWithKafkaE2eTest extends FlinkActionsE2eTestBase {
         LOG.info(execResult.getStderr());
 
         // read all data from paimon
-        runBatchSql(
+        runStreamingSql(
                 "INSERT INTO result1 SELECT * FROM ts_table;",
                 catalogDdl,
                 useCatalogCmd,
