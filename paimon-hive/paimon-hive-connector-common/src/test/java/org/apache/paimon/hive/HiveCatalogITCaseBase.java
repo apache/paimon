@@ -42,6 +42,7 @@ import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableAlreadyExistException;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
+import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.jupiter.api.function.Executable;
@@ -158,6 +159,44 @@ public abstract class HiveCatalogITCaseBase {
                             }
                         }
                     };
+
+    @Test
+    public void testDbLocation() {
+        String dbLocation = minioTestContainer.getS3UriForDefaultBucket() + "/" + UUID.randomUUID();
+        Catalog catalog =
+                ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
+        Map<String, String> properties = new HashMap<>();
+        properties.put("location", dbLocation);
+
+        assertThatThrownBy(() -> catalog.createDatabase("location_test_db", false, properties))
+                .hasRootCauseInstanceOf(MetaException.class)
+                .hasRootCauseMessage(
+                        "Got exception: java.io.IOException No FileSystem for scheme: s3");
+    }
+
+    @Test
+    @LocationInProperties
+    public void testDbLocationWithMetastoreLocationInProperties()
+            throws Catalog.DatabaseAlreadyExistException {
+        String dbLocation = minioTestContainer.getS3UriForDefaultBucket() + "/" + UUID.randomUUID();
+        Catalog catalog =
+                ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
+        Map<String, String> properties = new HashMap<>();
+        properties.put("location", dbLocation);
+
+        catalog.createDatabase("location_test_db", false, properties);
+        assertThat(catalog.databaseExists("location_test_db"));
+
+        hiveShell.execute("USE location_test_db");
+        hiveShell.execute("CREATE TABLE location_test_db ( a INT, b INT )");
+        hiveShell.execute("INSERT INTO location_test_db VALUES (1, 100)");
+        hiveShell.execute("INSERT INTO location_test_db VALUES (2, 200)");
+
+        assertThat(hiveShell.executeQuery("SELECT * from location_test_db"))
+                .containsExactlyInAnyOrder("1\t100", "2\t200");
+
+        hiveShell.execute("DROP DATABASE IF EXISTS location_test_db CASCADE");
+    }
 
     @Test
     public void testDatabaseOperations() throws Exception {
