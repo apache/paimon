@@ -124,12 +124,4 @@ public class LogStoreE2eTest extends E2eTestBase {
         // check that we can receive data from log store quickly
         checkResult(s -> s.split(",")[0], "A, 100", "B, 2", "C, 30", "D, 400");
     }
-
-    private void runBatchSql(String sql, String... ddls) throws Exception {
-        runBatchSql(String.join("\n", ddls) + "\n" + sql);
-    }
-
-    private void runStreamingSql(String sql, String... ddls) throws Exception {
-        runStreamingSql(String.join("\n", ddls) + "\n" + sql);
-    }
 }

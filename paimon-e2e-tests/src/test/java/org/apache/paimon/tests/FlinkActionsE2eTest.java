@@ -262,8 +262,7 @@ public class FlinkActionsE2eTest extends FlinkActionsE2eTestBase {
 
         // read tag2
         runBatchSql(
-                "SET 'execution.runtime-mode' = 'batch';\n"
-                        + "INSERT INTO result1 SELECT * FROM T /*+ OPTIONS('scan.tag-name'='tag2') */;",
+                "INSERT INTO result1 SELECT * FROM T /*+ OPTIONS('scan.tag-name'='tag2') */;",
                 catalogDdl,
                 useCatalogCmd,
                 createResultSink("result1", "k INT, v STRING"));
@@ -295,9 +294,5 @@ public class FlinkActionsE2eTest extends FlinkActionsE2eTestBase {
                 createResultSink("_tags2", "tag_name STRING, snapshot_id BIGINT"));
         Thread.sleep(5000);
         checkResult();
-    }
-
-    protected void runBatchSql(String sql, String... ddls) throws Exception {
-        runBatchSql(String.join("\n", ddls) + "\n" + sql);
     }
 }

@@ -277,10 +277,6 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
                 mySqlContainer.getPassword());
     }
 
-    protected String runBatchSql(String sql, String... ddls) throws Exception {
-        return runBatchSql(String.join("\n", ddls) + "\n" + sql);
-    }
-
     protected void cancelJob(String jobId) throws Exception {
         jobManager.execInContainer("bin/flink", "cancel", jobId);
     }
