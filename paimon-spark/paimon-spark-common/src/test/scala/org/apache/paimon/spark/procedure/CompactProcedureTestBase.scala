@@ -439,7 +439,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     spark.sql(
       s"""
          |CREATE TABLE T (id INT, value STRING, dt STRING, hh INT)
-         |TBLPROPERTIES ('bucket'='1', 'write-only'='true', 'compaction.min.file-num'='1', 'compaction.max.file-num'='2')
+         |TBLPROPERTIES ('bucket'='1', 'bucket-key'='id', 'write-only'='true', 'compaction.min.file-num'='1', 'compaction.max.file-num'='2')
          |PARTITIONED BY (dt, hh)
          |""".stripMargin)
 

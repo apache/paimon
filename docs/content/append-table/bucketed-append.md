@@ -1,9 +1,9 @@
 ---
-title: "Append Queue"
+title: "Bucketed Append"
 weight: 3
 type: docs
 aliases:
-- /append-table/append-queue.html
+- /append-table/bucketed-append.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -24,20 +24,22 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Append Queue
+# Bucketed Append
 
 ## Definition
 
-In this mode, you can regard append table as a queue separated by bucket. Every record in the same bucket is ordered strictly,
-streaming read will transfer the record to down-stream exactly in the order of writing. To use this mode, you do not need
-to config special configurations, all the data will go into one bucket as a queue. You can also define the `bucket` and
-`bucket-key` to enable larger parallelism and disperse data.
+An ordinary Append table has no strict ordering guarantees for its streaming writes and reads, but there are some cases
+where you need to define a key similar to Kafka's.
+
+You can define the `bucket` and `bucket-key` to get a bucketed append table. Every record in the same bucket is ordered 
+strictly, streaming read will transfer the record to down-stream exactly in the order of writing. To use this mode, you
+do not need to config special configurations, all the data will go into one bucket as a queue.
 
 {{< img src="/img/for-queue.png">}}
 
-Example to create append queue table:
+Example to create bucketed append table:
 
-{{< tabs "create-append-queue" >}}
+{{< tabs "create-bucketed-append" >}}
 {{< tab "Flink" >}}
 
 ```sql
