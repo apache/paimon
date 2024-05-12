@@ -30,15 +30,17 @@ class InsertOverwriteTest extends PaimonSparkTestBase {
       bucketModes.foreach {
         bucket =>
           test(s"insert overwrite non-partitioned table: hasPk: $hasPk, bucket: $bucket") {
-            val primaryKeysProp = if (hasPk) {
-              "'primary-key'='a,b',"
+            val prop = if (hasPk) {
+              s"'primary-key'='a,b', 'bucket' = '$bucket' "
+            } else if (bucket != -1) {
+              s"'bucket-key'='a,b', 'bucket' = '$bucket' "
             } else {
-              ""
+              "'write-only'='true'"
             }
 
             spark.sql(s"""
                          |CREATE TABLE T (a INT, b INT, c STRING)
-                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket')
+                         |TBLPROPERTIES ($prop)
                          |""".stripMargin)
 
             spark.sql("INSERT INTO T values (1, 1, '1'), (2, 2, '2')")
@@ -59,15 +61,17 @@ class InsertOverwriteTest extends PaimonSparkTestBase {
       bucketModes.foreach {
         bucket =>
           test(s"insert overwrite single-partitioned table: hasPk: $hasPk, bucket: $bucket") {
-            val primaryKeysProp = if (hasPk) {
-              "'primary-key'='a,b',"
+            val prop = if (hasPk) {
+              s"'primary-key'='a,b', 'bucket' = '$bucket' "
+            } else if (bucket != -1) {
+              s"'bucket-key'='b', 'bucket' = '$bucket' "
             } else {
-              ""
+              "'write-only'='true'"
             }
 
             spark.sql(s"""
                          |CREATE TABLE T (a INT, b INT, c STRING)
-                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket')
+                         |TBLPROPERTIES ($prop)
                          |PARTITIONED BY (a)
                          |""".stripMargin)
 
@@ -97,15 +101,17 @@ class InsertOverwriteTest extends PaimonSparkTestBase {
       bucketModes.foreach {
         bucket =>
           test(s"insert overwrite mutil-partitioned table: hasPk: $hasPk, bucket: $bucket") {
-            val primaryKeysProp = if (hasPk) {
-              "'primary-key'='a,pt1,pt2',"
+            val prop = if (hasPk) {
+              s"'primary-key'='a,pt1,pt2', 'bucket' = '$bucket' "
+            } else if (bucket != -1) {
+              s"'bucket-key'='a', 'bucket' = '$bucket' "
             } else {
-              ""
+              "'write-only'='true'"
             }
 
             spark.sql(s"""
                          |CREATE TABLE T (a INT, b STRING, pt1 STRING, pt2 INT)
-                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket')
+                         |TBLPROPERTIES ($prop)
                          |PARTITIONED BY (pt1, pt2)
                          |""".stripMargin)
 
@@ -217,15 +223,17 @@ class InsertOverwriteTest extends PaimonSparkTestBase {
         bucket =>
           test(
             s"dynamic insert overwrite single-partitioned table: hasPk: $hasPk, bucket: $bucket") {
-            val primaryKeysProp = if (hasPk) {
-              "'primary-key'='a,b',"
+            val prop = if (hasPk) {
+              s"'primary-key'='a,b', 'bucket' = '$bucket' "
+            } else if (bucket != -1) {
+              s"'bucket-key'='b', 'bucket' = '$bucket' "
             } else {
-              ""
+              "'write-only'='true'"
             }
 
             spark.sql(s"""
                          |CREATE TABLE T (a INT, b INT, c STRING)
-                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket')
+                         |TBLPROPERTIES ($prop)
                          |PARTITIONED BY (a)
                          |""".stripMargin)
 
@@ -257,15 +265,17 @@ class InsertOverwriteTest extends PaimonSparkTestBase {
         bucket =>
           test(
             s"dynamic insert overwrite mutil-partitioned table: hasPk: $hasPk, bucket: $bucket") {
-            val primaryKeysProp = if (hasPk) {
-              "'primary-key'='a,pt1,pt2',"
+            val prop = if (hasPk) {
+              s"'primary-key'='a,pt1,pt2', 'bucket' = '$bucket' "
+            } else if (bucket != -1) {
+              s"'bucket-key'='a', 'bucket' = '$bucket' "
             } else {
-              ""
+              "'write-only'='true'"
             }
 
             spark.sql(s"""
                          |CREATE TABLE T (a INT, b STRING, pt1 STRING, pt2 INT)
-                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket')
+                         |TBLPROPERTIES ($prop)
                          |PARTITIONED BY (pt1, pt2)
                          |""".stripMargin)
 
