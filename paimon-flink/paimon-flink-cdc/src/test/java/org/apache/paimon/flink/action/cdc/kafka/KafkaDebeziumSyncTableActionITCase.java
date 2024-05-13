@@ -36,84 +36,84 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOp
 /** IT cases for {@link KafkaSyncTableAction}. */
 public class KafkaDebeziumSyncTableActionITCase extends KafkaSyncTableActionITCase {
 
-    private static final String DEBEZIUM = "debezium";
+    private static final String FORMAT = "debezium-json";
 
     @Test
     @Timeout(60)
     public void testSchemaEvolution() throws Exception {
-        runSingleTableSchemaEvolution("schemaevolution", DEBEZIUM);
+        runSingleTableSchemaEvolution("schemaevolution", FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testNotSupportFormat() throws Exception {
-        testNotSupportFormat(DEBEZIUM);
+        testNotSupportFormat(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testAssertSchemaCompatible() throws Exception {
-        testAssertSchemaCompatible(DEBEZIUM);
+        testAssertSchemaCompatible(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testStarUpOptionSpecific() throws Exception {
-        testStarUpOptionSpecific(DEBEZIUM);
+        testStarUpOptionSpecific(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testStarUpOptionLatest() throws Exception {
-        testStarUpOptionLatest(DEBEZIUM);
+        testStarUpOptionLatest(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testStarUpOptionTimestamp() throws Exception {
-        testStarUpOptionTimestamp(DEBEZIUM);
+        testStarUpOptionTimestamp(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testStarUpOptionEarliest() throws Exception {
-        testStarUpOptionEarliest(DEBEZIUM);
+        testStarUpOptionEarliest(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testStarUpOptionGroup() throws Exception {
-        testStarUpOptionGroup(DEBEZIUM);
+        testStarUpOptionGroup(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testComputedColumn() throws Exception {
-        testComputedColumn(DEBEZIUM);
+        testComputedColumn(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testWaterMarkSyncTable() throws Exception {
-        testWaterMarkSyncTable(DEBEZIUM);
+        testWaterMarkSyncTable(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testKafkaBuildSchemaWithDelete() throws Exception {
-        testKafkaBuildSchemaWithDelete(DEBEZIUM);
+        testKafkaBuildSchemaWithDelete(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testSchemaIncludeRecord1() throws Exception {
-        testSchemaIncludeRecord(DEBEZIUM);
+        testSchemaIncludeRecord(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testAllTypesWithSchema() throws Exception {
-        testAllTypesWithSchemaImpl(DEBEZIUM);
+        testAllTypesWithSchemaImpl(FORMAT);
     }
 
     @Test
@@ -122,13 +122,13 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaSyncTableActionITCa
         final String topic = "test_null_value";
         createTestTopic(topic, 1, 1);
 
-        writeRecordsToKafka(topic, "kafka/debezium/table/nullvalue/debezium-data-1.txt");
+        writeRecordsToKafka(topic, "kafka/%s/table/nullvalue/%s-data-1.txt", FORMAT, FORMAT);
         // write null value
         kafkaProducer.send(new ProducerRecord<>(topic, null));
-        writeRecordsToKafka(topic, "kafka/debezium/table/nullvalue/debezium-data-2.txt");
+        writeRecordsToKafka(topic, "kafka/%s/table/nullvalue/%s-data-2.txt", FORMAT, FORMAT);
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), "debezium-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), FORMAT);
         kafkaConfig.put(TOPIC.key(), topic);
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)

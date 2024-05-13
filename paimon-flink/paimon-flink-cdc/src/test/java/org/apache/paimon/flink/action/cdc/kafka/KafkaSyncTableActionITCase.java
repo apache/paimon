@@ -21,6 +21,7 @@ package org.apache.paimon.flink.action.cdc.kafka;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
+import org.apache.paimon.flink.action.cdc.format.DataFormat;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
@@ -61,7 +62,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         writeRecordsToKafka(topic, "kafka/%s/table/%s/%s-data-1.txt", format, sourceDir, format);
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), format);
         kafkaConfig.put(TOPIC.key(), topic);
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
@@ -163,7 +164,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         writeRecordsToKafka(topic, "kafka/%s/table/schemaevolution/%s-data-1.txt", format, format);
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), format);
         kafkaConfig.put(TOPIC.key(), topic);
 
         // create an incompatible table
@@ -196,7 +197,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         writeRecordsToKafka(topic, "kafka/%s/table/startupmode/%s-data-1.txt", format, format);
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), format);
         kafkaConfig.put(TOPIC.key(), topic);
         kafkaConfig.put(SCAN_STARTUP_MODE.key(), SPECIFIC_OFFSETS.toString());
         kafkaConfig.put(SCAN_STARTUP_SPECIFIC_OFFSETS.key(), "partition:0,offset:1");
@@ -232,7 +233,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                 topic, true, "kafka/%s/table/startupmode/%s-data-1.txt", format, format);
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), format);
         kafkaConfig.put(TOPIC.key(), topic);
         kafkaConfig.put(SCAN_STARTUP_MODE.key(), LATEST_OFFSET.toString());
         KafkaSyncTableAction action =
@@ -272,7 +273,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                 topic, true, "kafka/%s/table/startupmode/%s-data-1.txt", format, format);
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), format);
         kafkaConfig.put(TOPIC.key(), topic);
         kafkaConfig.put(SCAN_STARTUP_MODE.key(), TIMESTAMP.toString());
         kafkaConfig.put(
@@ -312,7 +313,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         writeRecordsToKafka(topic, "kafka/%s/table/startupmode/%s-data-1.txt", format, format);
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), format);
         kafkaConfig.put(TOPIC.key(), topic);
         kafkaConfig.put(SCAN_STARTUP_MODE.key(), EARLIEST_OFFSET.toString());
         KafkaSyncTableAction action =
@@ -352,7 +353,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         writeRecordsToKafka(topic, "kafka/%s/table/startupmode/%s-data-1.txt", format, format);
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), format);
         kafkaConfig.put(TOPIC.key(), topic);
         kafkaConfig.put(SCAN_STARTUP_MODE.key(), GROUP_OFFSETS.toString());
         KafkaSyncTableAction action =
@@ -392,7 +393,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         writeRecordsToKafka(topic, "kafka/%s/table/computedcolumn/%s-data-1.txt", format, format);
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), format);
         kafkaConfig.put(TOPIC.key(), topic);
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
@@ -424,7 +425,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         writeRecordsToKafka(topic, "kafka/%s/table/event/event-insert.txt", format);
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), "ogg-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), format);
         kafkaConfig.put(TOPIC.key(), topic);
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
@@ -480,13 +481,15 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                 topic, "kafka/%s/table/schema/schemaevolution/%s-data-4.txt", format, format);
 
         Configuration kafkaConfig = Configuration.fromMap(getBasicKafkaConfig());
-        kafkaConfig.setString(VALUE_FORMAT.key(), format + "-json");
+        kafkaConfig.setString(VALUE_FORMAT.key(), format);
         kafkaConfig.setString(TOPIC.key(), topic);
+
+        DataFormat dataFormat = DataFormat.fromConfigString(format);
 
         Schema kafkaSchema =
                 MessageQueueSchemaUtils.getSchema(
                         getKafkaEarliestConsumer(
-                                kafkaConfig, new KafkaDebeziumJsonDeserializationSchema()),
+                                kafkaConfig, dataFormat.createKafkaDeserializer(kafkaConfig)),
                         getDataFormat(kafkaConfig),
                         TypeMapping.defaultMapping());
         List<DataField> fields = new ArrayList<>();
@@ -504,7 +507,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         writeRecordsToKafka(topic, "kafka/%s/table/watermark/%s-data-1.txt", format, format);
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), format);
         kafkaConfig.put(TOPIC.key(), topic);
 
         Map<String, String> config = getBasicTableConfig();
@@ -533,10 +536,10 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
     public void testSchemaIncludeRecord(String format) throws Exception {
         String topic = "schema_include";
         createTestTopic(topic, 1, 1);
-        writeRecordsToKafka(topic, "kafka/debezium/table/schema/include/debezium-data-1.txt");
+        writeRecordsToKafka(topic, "kafka/debezium-json/table/schema/include/debezium-data-1.txt");
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), format);
         kafkaConfig.put(TOPIC.key(), topic);
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
@@ -567,10 +570,10 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
     public void testAllTypesWithSchemaImpl(String format) throws Exception {
         String topic = "schema_include_all_type";
         createTestTopic(topic, 1, 1);
-        writeRecordsToKafka(topic, "kafka/debezium/table/schema/alltype/debezium-data-1.txt");
+        writeRecordsToKafka(topic, "kafka/debezium-json/table/schema/alltype/debezium-data-1.txt");
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), format);
         kafkaConfig.put(TOPIC.key(), topic);
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
@@ -812,7 +815,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         writeRecordsToKafka(topic, "kafka/%s/table/schemaevolution/%s-data-4.txt", format, format);
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), format);
         kafkaConfig.put(TOPIC.key(), topic);
         kafkaConfig.put(SCAN_STARTUP_MODE.key(), EARLIEST_OFFSET.toString());
         KafkaSyncTableAction action =

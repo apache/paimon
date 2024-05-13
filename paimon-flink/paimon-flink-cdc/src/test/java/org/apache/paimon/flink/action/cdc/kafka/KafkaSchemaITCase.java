@@ -43,15 +43,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for building schema from Kafka. */
 public class KafkaSchemaITCase extends KafkaActionITCaseBase {
+    private static final String FORMAT = "canal-json";
+
     @Test
     @Timeout(60)
     public void testKafkaSchema() throws Exception {
         final String topic = "test_kafka_schema";
         createTestTopic(topic, 1, 1);
-        writeRecordsToKafka(topic, "kafka/canal/table/schemaevolution/canal-data-1.txt");
+        writeRecordsToKafka(topic, "kafka/%s/table/schemaevolution/%s-data-1.txt", FORMAT, FORMAT);
 
         Configuration kafkaConfig = Configuration.fromMap(getBasicKafkaConfig());
-        kafkaConfig.setString(VALUE_FORMAT.key(), "canal-json");
+        kafkaConfig.setString(VALUE_FORMAT.key(), FORMAT);
         kafkaConfig.setString(TOPIC.key(), topic);
 
         Schema kafkaSchema =
@@ -72,10 +74,10 @@ public class KafkaSchemaITCase extends KafkaActionITCaseBase {
     public void testTableOptionsChange() throws Exception {
         final String topic = "test_table_options_change";
         createTestTopic(topic, 1, 1);
-        writeRecordsToKafka(topic, "kafka/canal/table/optionschange/canal-data-1.txt");
+        writeRecordsToKafka(topic, "kafka/%s/table/optionschange/%s-data-1.txt", FORMAT, FORMAT);
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), FORMAT);
         kafkaConfig.put(TOPIC.key(), topic);
         Map<String, String> tableConfig = new HashMap<>();
         tableConfig.put("bucket", "1");
@@ -88,7 +90,7 @@ public class KafkaSchemaITCase extends KafkaActionITCaseBase {
         waitingTables(tableName);
         jobClient.cancel();
 
-        writeRecordsToKafka(topic, "kafka/canal/table/optionschange/canal-data-2.txt");
+        writeRecordsToKafka(topic, "kafka/%s/table/optionschange/%s-data-2.txt", FORMAT, FORMAT);
 
         tableConfig.put("sink.savepoint.auto-tag", "true");
         tableConfig.put("tag.num-retained-max", "5");
@@ -115,10 +117,11 @@ public class KafkaSchemaITCase extends KafkaActionITCaseBase {
     public void testNewlyAddedTablesOptionsChange() throws Exception {
         final String topic = "test_database_options_change";
         createTestTopic(topic, 1, 1);
-        writeRecordsToKafka(topic, "kafka/canal/database/schemaevolution/topic0/canal-data-1.txt");
+        writeRecordsToKafka(
+                topic, "kafka/%s/database/schemaevolution/topic0/%s-data-1.txt", FORMAT, FORMAT);
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), FORMAT);
         kafkaConfig.put(TOPIC.key(), topic);
         Map<String, String> tableConfig = new HashMap<>();
         tableConfig.put("bucket", "1");
@@ -140,7 +143,8 @@ public class KafkaSchemaITCase extends KafkaActionITCaseBase {
         tableConfig.put("snapshot.num-retained.max", "10");
         tableConfig.put("changelog-producer", "input");
 
-        writeRecordsToKafka(topic, "kafka/canal/database/schemaevolution/topic1/canal-data-1.txt");
+        writeRecordsToKafka(
+                topic, "kafka/%s/database/schemaevolution/topic1/%s-data-1.txt", FORMAT, FORMAT);
         KafkaSyncDatabaseAction action2 =
                 syncDatabaseActionBuilder(kafkaConfig).withTableConfig(tableConfig).build();
         runActionWithDefaultEnv(action2);

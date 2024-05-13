@@ -40,6 +40,7 @@ import static org.apache.paimon.flink.action.cdc.pulsar.PulsarActionUtils.VALUE_
 
 /** IT cases for {@link PulsarSyncTableAction}. */
 public class PulsarSyncTableActionITCase extends PulsarActionITCaseBase {
+    private static final String FORMAT = "canal-json";
 
     @Test
     @Timeout(120)
@@ -53,8 +54,7 @@ public class PulsarSyncTableActionITCase extends PulsarActionITCaseBase {
         createTopic(topic, 1);
         // ---------- Write the Canal json into Pulsar -------------------
         sendMessages(
-                topic,
-                getMessages(String.format("kafka/canal/table/%s/canal-data-1.txt", sourceDir)));
+                topic, getMessages("kafka/%s/table/%s/%s-data-1.txt", FORMAT, sourceDir, FORMAT));
 
         Map<String, String> pulsarConfig = getBasicPulsarConfig();
         pulsarConfig.put(PULSAR_PARTITION_DISCOVERY_INTERVAL_MS.key(), "-1");
@@ -63,7 +63,7 @@ public class PulsarSyncTableActionITCase extends PulsarActionITCaseBase {
         } else {
             pulsarConfig.put(TOPIC_PATTERN.key(), "schema_.*");
         }
-        pulsarConfig.put(VALUE_FORMAT.key(), "canal-json");
+        pulsarConfig.put(VALUE_FORMAT.key(), FORMAT);
 
         PulsarSyncTableAction action =
                 syncTableActionBuilder(pulsarConfig)
@@ -92,8 +92,7 @@ public class PulsarSyncTableActionITCase extends PulsarActionITCaseBase {
         waitForResult(expected, table, rowType, primaryKeys);
 
         sendMessages(
-                topic,
-                getMessages(String.format("kafka/canal/table/%s/canal-data-2.txt", sourceDir)));
+                topic, getMessages("kafka/%s/table/%s/%s-data-2.txt", FORMAT, sourceDir, FORMAT));
 
         rowType =
                 RowType.of(
@@ -115,8 +114,7 @@ public class PulsarSyncTableActionITCase extends PulsarActionITCaseBase {
         waitForResult(expected, table, rowType, primaryKeys);
 
         sendMessages(
-                topic,
-                getMessages(String.format("kafka/canal/table/%s/canal-data-3.txt", sourceDir)));
+                topic, getMessages("kafka/%s/table/%s/%s-data-3.txt", FORMAT, sourceDir, FORMAT));
 
         rowType =
                 RowType.of(
@@ -139,8 +137,7 @@ public class PulsarSyncTableActionITCase extends PulsarActionITCaseBase {
         waitForResult(expected, table, rowType, primaryKeys);
 
         sendMessages(
-                topic,
-                getMessages(String.format("kafka/canal/table/%s/canal-data-4.txt", sourceDir)));
+                topic, getMessages("kafka/%s/table/%s/%s-data-4.txt", FORMAT, sourceDir, FORMAT));
 
         rowType =
                 RowType.of(
@@ -167,8 +164,7 @@ public class PulsarSyncTableActionITCase extends PulsarActionITCaseBase {
         waitForResult(expected, table, rowType, primaryKeys);
 
         sendMessages(
-                topic,
-                getMessages(String.format("kafka/canal/table/%s/canal-data-5.txt", sourceDir)));
+                topic, getMessages("kafka/%s/table/%s/%s-data-5.txt", FORMAT, sourceDir, FORMAT));
 
         rowType =
                 RowType.of(
@@ -201,12 +197,12 @@ public class PulsarSyncTableActionITCase extends PulsarActionITCaseBase {
         String topic = "watermark";
         topics = Collections.singletonList(topic);
         createTopic(topic, 1);
-        sendMessages(topic, getMessages("kafka/canal/table/watermark/canal-data-1.txt"));
+        sendMessages(topic, getMessages("kafka/%s/table/watermark/%s-data-1.txt", FORMAT, FORMAT));
 
         Map<String, String> pulsarConfig = getBasicPulsarConfig();
         pulsarConfig.put(PULSAR_PARTITION_DISCOVERY_INTERVAL_MS.key(), "-1");
         pulsarConfig.put(TOPIC.key(), topic);
-        pulsarConfig.put(VALUE_FORMAT.key(), "canal-json");
+        pulsarConfig.put(VALUE_FORMAT.key(), FORMAT);
         Map<String, String> config = getBasicTableConfig();
         config.put("tag.automatic-creation", "watermark");
         config.put("tag.creation-period", "hourly");

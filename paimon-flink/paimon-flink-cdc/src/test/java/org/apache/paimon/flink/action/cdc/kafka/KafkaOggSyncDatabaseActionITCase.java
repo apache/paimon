@@ -23,58 +23,58 @@ import org.junit.jupiter.api.Timeout;
 
 /** IT cases for {@link KafkaSyncDatabaseAction}. */
 public class KafkaOggSyncDatabaseActionITCase extends KafkaSyncDatabaseActionITCase {
-    private static final String OGG = "ogg";
+    private static final String FORMAT = "ogg-json";
 
     @Test
     @Timeout(60)
     public void testSchemaEvolutionMultiTopic() throws Exception {
-        testSchemaEvolutionMultiTopic(OGG);
+        testSchemaEvolutionMultiTopic(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testSchemaEvolutionOneTopic() throws Exception {
-        testSchemaEvolutionOneTopic(OGG);
+        testSchemaEvolutionOneTopic(FORMAT);
     }
 
     @Test
     public void testTopicIsEmpty() {
-        testTopicIsEmpty(OGG);
+        testTopicIsEmpty(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testTableAffixMultiTopic() throws Exception {
-        testTableAffixMultiTopic(OGG);
+        testTableAffixMultiTopic(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testTableAffixOneTopic() throws Exception {
-        testTableAffixOneTopic(OGG);
+        testTableAffixOneTopic(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testIncludingTables() throws Exception {
-        testIncludingTables(OGG);
+        testIncludingTables(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testExcludingTables() throws Exception {
-        testExcludingTables(OGG);
+        testExcludingTables(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testIncludingAndExcludingTables() throws Exception {
-        testIncludingAndExcludingTables(OGG);
+        testIncludingAndExcludingTables(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testCaseInsensitive() throws Exception {
-        testCaseInsensitive(OGG);
+        testCaseInsensitive(FORMAT);
     }
 }

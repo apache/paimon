@@ -69,8 +69,10 @@ public enum DataFormat {
     // Add more data formats here if needed
 
     private final RecordParserFactory parser;
+    // Deserializer for Kafka
     private final Function<Configuration, KafkaDeserializationSchema<CdcSourceRecord>>
             kafkaDeserializer;
+    // Deserializer for Pulsar
     private final Function<Configuration, DeserializationSchema<CdcSourceRecord>>
             pulsarDeserializer;
 

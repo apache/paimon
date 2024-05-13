@@ -23,52 +23,52 @@ import org.junit.jupiter.api.Timeout;
 
 /** IT cases for {@link KafkaSyncDatabaseAction}. */
 public class KafkaDebeziumSyncDatabaseActionITCase extends KafkaSyncDatabaseActionITCase {
-    private static final String DEBEZIUM = "debezium";
+    private static final String FORMAT = "debezium-json";
 
     @Test
     @Timeout(60)
     public void testSchemaEvolutionMultiTopic() throws Exception {
-        testSchemaEvolutionMultiTopic(DEBEZIUM);
+        testSchemaEvolutionMultiTopic(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testSchemaEvolutionOneTopic() throws Exception {
-        testSchemaEvolutionOneTopic(DEBEZIUM);
+        testSchemaEvolutionOneTopic(FORMAT);
     }
 
     @Test
     public void testTopicIsEmpty() {
-        testTopicIsEmpty(DEBEZIUM);
+        testTopicIsEmpty(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testTableAffixMultiTopic() throws Exception {
-        testTableAffixMultiTopic(DEBEZIUM);
+        testTableAffixMultiTopic(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testTableAffixOneTopic() throws Exception {
-        testTableAffixOneTopic(DEBEZIUM);
+        testTableAffixOneTopic(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testIncludingTables() throws Exception {
-        testIncludingTables(DEBEZIUM);
+        testIncludingTables(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testExcludingTables() throws Exception {
-        testExcludingTables(DEBEZIUM);
+        testExcludingTables(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testIncludingAndExcludingTables() throws Exception {
-        testIncludingAndExcludingTables(DEBEZIUM);
+        testIncludingAndExcludingTables(FORMAT);
     }
 }

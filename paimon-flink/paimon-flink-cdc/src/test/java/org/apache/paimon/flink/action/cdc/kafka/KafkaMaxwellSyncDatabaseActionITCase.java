@@ -24,52 +24,52 @@ import org.junit.jupiter.api.Timeout;
 /** IT cases for {@link KafkaSyncDatabaseAction}. */
 public class KafkaMaxwellSyncDatabaseActionITCase extends KafkaSyncDatabaseActionITCase {
 
-    private static final String MAXWELL = "maxwell";
+    private static final String FORMAT = "maxwell-json";
 
     @Test
     @Timeout(60)
     public void testSchemaEvolutionMultiTopic() throws Exception {
-        testSchemaEvolutionMultiTopic(MAXWELL);
+        testSchemaEvolutionMultiTopic(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testSchemaEvolutionOneTopic() throws Exception {
-        testSchemaEvolutionOneTopic(MAXWELL);
+        testSchemaEvolutionOneTopic(FORMAT);
     }
 
     @Test
     public void testTopicIsEmpty() {
-        testTopicIsEmpty(MAXWELL);
+        testTopicIsEmpty(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testTableAffixMultiTopic() throws Exception {
-        testTableAffixMultiTopic(MAXWELL);
+        testTableAffixMultiTopic(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testTableAffixOneTopic() throws Exception {
-        testTableAffixOneTopic(MAXWELL);
+        testTableAffixOneTopic(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testIncludingTables() throws Exception {
-        testIncludingTables(MAXWELL);
+        testIncludingTables(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testExcludingTables() throws Exception {
-        testExcludingTables(MAXWELL);
+        testExcludingTables(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testIncludingAndExcludingTables() throws Exception {
-        testIncludingAndExcludingTables(MAXWELL);
+        testIncludingAndExcludingTables(FORMAT);
     }
 }

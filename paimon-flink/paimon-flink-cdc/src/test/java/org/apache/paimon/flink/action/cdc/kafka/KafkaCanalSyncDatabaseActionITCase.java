@@ -46,6 +46,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link KafkaSyncDatabaseAction}. */
 public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
+    private static final String FORMAT = "canal-json";
 
     @Test
     @Timeout(60)
@@ -61,12 +62,14 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         for (int i = 0; i < fileCount; i++) {
             writeRecordsToKafka(
                     topics.get(i),
-                    "kafka/canal/database/schemaevolution/topic%s/canal-data-1.txt",
-                    i);
+                    "kafka/%s/database/schemaevolution/topic%s/%s-data-1.txt",
+                    FORMAT,
+                    i,
+                    FORMAT);
         }
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), FORMAT);
         if (ThreadLocalRandom.current().nextBoolean()) {
             kafkaConfig.put(TOPIC.key(), String.join(";", topics));
         } else {
@@ -94,12 +97,14 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         for (int i = 0; i < fileCount; i++) {
             writeRecordsToKafka(
                     topics.get(0),
-                    "kafka/canal/database/schemaevolution/topic%s/canal-data-1.txt",
-                    i);
+                    "kafka/%s/database/schemaevolution/topic%s/%s-data-1.txt",
+                    FORMAT,
+                    i,
+                    FORMAT);
         }
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), FORMAT);
         kafkaConfig.put(TOPIC.key(), String.join(";", topics));
 
         KafkaSyncDatabaseAction action =
@@ -141,8 +146,10 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         for (int i = 0; i < fileCount; i++) {
             writeRecordsToKafka(
                     writeOne ? topics.get(0) : topics.get(i),
-                    "kafka/canal/database/schemaevolution/topic%s/canal-data-2.txt",
-                    i);
+                    "kafka/%s/database/schemaevolution/topic%s/%s-data-2.txt",
+                    FORMAT,
+                    i,
+                    FORMAT);
         }
 
         rowType1 =
@@ -180,8 +187,10 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         for (int i = 0; i < fileCount; i++) {
             writeRecordsToKafka(
                     writeOne ? topics.get(0) : topics.get(i),
-                    "kafka/canal/database/schemaevolution/topic%s/canal-data-3.txt",
-                    i);
+                    "kafka/%s/database/schemaevolution/topic%s/%s-data-3.txt",
+                    FORMAT,
+                    i,
+                    FORMAT);
         }
 
         rowType1 =
@@ -222,7 +231,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     @Test
     public void testTopicIsEmpty() {
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), FORMAT);
 
         KafkaSyncDatabaseAction action = syncDatabaseActionBuilder(kafkaConfig).build();
 
@@ -255,12 +264,16 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
         for (int i = 0; i < topics.size(); i++) {
             writeRecordsToKafka(
-                    topics.get(i), "kafka/canal/database/prefixsuffix/topic%s/canal-data-1.txt", i);
+                    topics.get(i),
+                    "kafka/%s/database/prefixsuffix/topic%s/%s-data-1.txt",
+                    FORMAT,
+                    i,
+                    FORMAT);
         }
 
         // try synchronization
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), FORMAT);
         kafkaConfig.put(TOPIC.key(), String.join(";", topics));
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(kafkaConfig)
@@ -296,12 +309,16 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
         for (int i = 0; i < fileCount; i++) {
             writeRecordsToKafka(
-                    topics.get(0), "kafka/canal/database/prefixsuffix/topic%s/canal-data-1.txt", i);
+                    topics.get(0),
+                    "kafka/%s/database/prefixsuffix/topic%s/%s-data-1.txt",
+                    FORMAT,
+                    i,
+                    FORMAT);
         }
 
         // try synchronization
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), FORMAT);
         kafkaConfig.put(TOPIC.key(), String.join(";", topics));
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(kafkaConfig)
@@ -342,8 +359,10 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         for (int i = 0; i < fileCount; i++) {
             writeRecordsToKafka(
                     writeOne ? topics.get(0) : topics.get(i),
-                    "kafka/canal/database/prefixsuffix/topic%s/canal-data-2.txt",
-                    i);
+                    "kafka/%s/database/prefixsuffix/topic%s/%s-data-2.txt",
+                    FORMAT,
+                    i,
+                    FORMAT);
         }
         rowType1 =
                 RowType.of(
@@ -376,8 +395,10 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         for (int i = 0; i < fileCount; i++) {
             writeRecordsToKafka(
                     writeOne ? topics.get(0) : topics.get(i),
-                    "kafka/canal/database/prefixsuffix/topic%s/canal-data-3.txt",
-                    i);
+                    "kafka/%s/database/prefixsuffix/topic%s/%s-data-3.txt",
+                    FORMAT,
+                    i,
+                    FORMAT);
         }
 
         rowType1 =
@@ -450,11 +471,12 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         final String topic1 = "include_exclude" + UUID.randomUUID();
         List<String> topics = Collections.singletonList(topic1);
         topics.forEach(topic -> createTestTopic(topic, 1, 1));
-        writeRecordsToKafka(topics.get(0), "kafka/canal/database/include/topic0/canal-data-1.txt");
+        writeRecordsToKafka(
+                topics.get(0), "kafka/%s/database/include/topic0/%s-data-1.txt", FORMAT, FORMAT);
 
         // try synchronization
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), FORMAT);
         kafkaConfig.put(TOPIC.key(), String.join(";", topics));
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(kafkaConfig)
@@ -474,10 +496,10 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     public void testTypeMappingToString() throws Exception {
         final String topic = "map-to-string";
         createTestTopic(topic, 1, 1);
-        writeRecordsToKafka(topic, "kafka/canal/database/tostring/canal-data-1.txt");
+        writeRecordsToKafka(topic, "kafka/%s/database/tostring/%s-data-1.txt", FORMAT, FORMAT);
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), FORMAT);
         kafkaConfig.put(TOPIC.key(), topic);
 
         KafkaSyncDatabaseAction action =
@@ -520,10 +542,11 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     public void testCaseInsensitive() throws Exception {
         final String topic = "case-insensitive";
         createTestTopic(topic, 1, 1);
-        writeRecordsToKafka(topic, "kafka/canal/database/case-insensitive/canal-data-1.txt");
+        writeRecordsToKafka(
+                topic, "kafka/%s/database/case-insensitive/%s-data-1.txt", FORMAT, FORMAT);
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), FORMAT);
         kafkaConfig.put(TOPIC.key(), topic);
 
         KafkaSyncDatabaseAction action =
@@ -555,10 +578,10 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     public void testCannotSynchronizeIncompleteJson() throws Exception {
         final String topic = "incomplete";
         createTestTopic(topic, 1, 1);
-        writeRecordsToKafka(topic, "kafka/canal/database/incomplete/canal-data-1.txt");
+        writeRecordsToKafka(topic, "kafka/%s/database/incomplete/%s-data-1.txt", FORMAT, FORMAT);
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), FORMAT);
         kafkaConfig.put(TOPIC.key(), topic);
 
         KafkaSyncDatabaseAction action =

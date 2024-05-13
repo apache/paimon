@@ -40,6 +40,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for building schema from Pulsar. */
 public class PulsarSchemaITCase extends PulsarActionITCaseBase {
+    private static final String FORMAT = "canal-json";
 
     @Test
     @Timeout(60)
@@ -48,12 +49,13 @@ public class PulsarSchemaITCase extends PulsarActionITCaseBase {
         createTopic(topic);
 
         // ---------- Write the Canal json into pulsar -------------------
-        List<String> messages = getMessages("kafka/canal/table/schemaevolution/canal-data-1.txt");
+        List<String> messages =
+                getMessages("kafka/%s/table/schemaevolution/%s-data-1.txt", FORMAT, FORMAT);
         sendMessages(topic, messages);
 
         Configuration pulsarConfig = Configuration.fromMap(getBasicPulsarConfig());
         pulsarConfig.setString(TOPIC.key(), topic);
-        pulsarConfig.set(VALUE_FORMAT, "canal-json");
+        pulsarConfig.set(VALUE_FORMAT, FORMAT);
 
         Schema pulsarSchema =
                 MessageQueueSchemaUtils.getSchema(

@@ -24,71 +24,71 @@ import org.junit.jupiter.api.Timeout;
 /** IT cases for {@link KafkaSyncTableAction}. */
 public class KafkaOggSyncTableActionITCase extends KafkaSyncTableActionITCase {
 
-    private static final String OGG = "ogg";
+    private static final String FORMAT = "ogg-json";
 
     @Test
     @Timeout(60)
     public void testSchemaEvolution() throws Exception {
-        runSingleTableSchemaEvolution("schemaevolution", OGG);
+        runSingleTableSchemaEvolution("schemaevolution", FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testNotSupportFormat() throws Exception {
-        testNotSupportFormat(OGG);
+        testNotSupportFormat(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testAssertSchemaCompatible() throws Exception {
-        testAssertSchemaCompatible(OGG);
+        testAssertSchemaCompatible(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testStarUpOptionSpecific() throws Exception {
-        testStarUpOptionSpecific(OGG);
+        testStarUpOptionSpecific(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testStarUpOptionLatest() throws Exception {
-        testStarUpOptionLatest(OGG);
+        testStarUpOptionLatest(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testStarUpOptionTimestamp() throws Exception {
-        testStarUpOptionTimestamp(OGG);
+        testStarUpOptionTimestamp(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testStarUpOptionEarliest() throws Exception {
-        testStarUpOptionEarliest(OGG);
+        testStarUpOptionEarliest(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testStarUpOptionGroup() throws Exception {
-        testStarUpOptionGroup(OGG);
+        testStarUpOptionGroup(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testComputedColumn() throws Exception {
-        testComputedColumn(OGG);
+        testComputedColumn(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testCDCOperations() throws Exception {
-        testCDCOperations(OGG);
+        testCDCOperations(FORMAT);
     }
 
     @Test
     @Timeout(60)
     public void testWaterMarkSyncTable() throws Exception {
-        testWaterMarkSyncTable(OGG);
+        testWaterMarkSyncTable(FORMAT);
     }
 }

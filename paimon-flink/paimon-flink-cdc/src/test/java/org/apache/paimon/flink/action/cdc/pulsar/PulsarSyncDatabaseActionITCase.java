@@ -39,6 +39,7 @@ import static org.apache.paimon.flink.action.cdc.pulsar.PulsarActionUtils.VALUE_
 
 /** IT cases for {@link PulsarSyncDatabaseAction}. */
 public class PulsarSyncDatabaseActionITCase extends PulsarActionITCaseBase {
+    private static final String FORMAT = "canal-json";
 
     @Test
     @Timeout(60)
@@ -58,9 +59,8 @@ public class PulsarSyncDatabaseActionITCase extends PulsarActionITCaseBase {
                 sendMessages(
                         topics.get(i),
                         getMessages(
-                                "kafka/canal/database/schemaevolution/topic"
-                                        + i
-                                        + "/canal-data-1.txt"));
+                                "kafka/%s/database/schemaevolution/topic%s/%s-data-1.txt",
+                                FORMAT, i, FORMAT));
             } catch (Exception e) {
                 throw new Exception("Failed to write canal data to Pulsar.", e);
             }
@@ -68,7 +68,7 @@ public class PulsarSyncDatabaseActionITCase extends PulsarActionITCaseBase {
 
         Map<String, String> pulsarConfig = getBasicPulsarConfig();
         pulsarConfig.put(PULSAR_PARTITION_DISCOVERY_INTERVAL_MS.key(), "-1");
-        pulsarConfig.put(VALUE_FORMAT.key(), "canal-json");
+        pulsarConfig.put(VALUE_FORMAT.key(), FORMAT);
         if (ThreadLocalRandom.current().nextBoolean()) {
             pulsarConfig.put(TOPIC.key(), String.join(";", topics));
         } else {
@@ -100,9 +100,8 @@ public class PulsarSyncDatabaseActionITCase extends PulsarActionITCaseBase {
                 sendMessages(
                         topics.get(0),
                         getMessages(
-                                "kafka/canal/database/schemaevolution/topic"
-                                        + i
-                                        + "/canal-data-1.txt"));
+                                "kafka/%s/database/schemaevolution/topic%s/%s-data-1.txt",
+                                FORMAT, i, FORMAT));
             } catch (Exception e) {
                 throw new Exception("Failed to write canal data to Pulsar.", e);
             }
@@ -110,7 +109,7 @@ public class PulsarSyncDatabaseActionITCase extends PulsarActionITCaseBase {
 
         Map<String, String> pulsarConfig = getBasicPulsarConfig();
         pulsarConfig.put(PULSAR_PARTITION_DISCOVERY_INTERVAL_MS.key(), "-1");
-        pulsarConfig.put(VALUE_FORMAT.key(), "canal-json");
+        pulsarConfig.put(VALUE_FORMAT.key(), FORMAT);
         pulsarConfig.put(TOPIC.key(), String.join(";", topics));
 
         PulsarSyncDatabaseAction action =
@@ -154,9 +153,8 @@ public class PulsarSyncDatabaseActionITCase extends PulsarActionITCaseBase {
                 sendMessages(
                         writeOne ? topics.get(0) : topics.get(i),
                         getMessages(
-                                "kafka/canal/database/schemaevolution/topic"
-                                        + i
-                                        + "/canal-data-2.txt"));
+                                "kafka/%s/database/schemaevolution/topic%s/%s-data-2.txt",
+                                FORMAT, i, FORMAT));
             } catch (Exception e) {
                 throw new Exception("Failed to write canal data to Pulsar.", e);
             }
@@ -199,9 +197,8 @@ public class PulsarSyncDatabaseActionITCase extends PulsarActionITCaseBase {
                 sendMessages(
                         writeOne ? topics.get(0) : topics.get(i),
                         getMessages(
-                                "kafka/canal/database/schemaevolution/topic"
-                                        + i
-                                        + "/canal-data-3.txt"));
+                                "kafka/%s/database/schemaevolution/topic%s/%s-data-3.txt",
+                                FORMAT, i, FORMAT));
             } catch (Exception e) {
                 throw new Exception("Failed to write canal data to Pulsar.", e);
             }
