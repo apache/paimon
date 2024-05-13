@@ -78,6 +78,7 @@ public class HiveMigrator implements Migrator {
     private final String targetDatabase;
     private final String targetTable;
     private final Map<String, String> options;
+    private Boolean delete = true;
 
     public HiveMigrator(
             HiveCatalog hiveCatalog,
@@ -114,6 +115,11 @@ public class HiveMigrator implements Migrator {
         } catch (TException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    @Override
+    public void deleteOriginTable(boolean delete) {
+        this.delete = delete;
     }
 
     @Override
@@ -202,8 +208,10 @@ public class HiveMigrator implements Migrator {
             throw new RuntimeException("Migrating failed", e);
         }
 
-        // if all success, drop the origin table
-        client.dropTable(sourceDatabase, sourceTable, true, true);
+        // if all success, drop the origin table according the delete field
+        if (delete) {
+            client.dropTable(sourceDatabase, sourceTable, true, true);
+        }
     }
 
     @Override
