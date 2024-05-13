@@ -512,7 +512,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put(TOPIC.key(), topic);
 
         Map<String, String> config = getBasicTableConfig();
-        if ("debezium".equals(format)) {
+        if (DataFormat.DEBEZIUM_JSON.asConfigString().equals(format)) {
             // debezium has no key
             // append mode never stop with compaction
             config.remove("bucket");

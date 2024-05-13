@@ -176,7 +176,7 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                         },
                         new String[] {"id", "name", "description", "weight", "address"});
 
-        if (format.equals("debezium")) {
+        if (format.equals(DataFormat.DEBEZIUM_JSON.asConfigString())) {
             expected =
                     Arrays.asList(
                             "+I[103, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3, 0.8, NULL]",
@@ -512,7 +512,7 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     }
 
     private List<String> getBucketKey(String format) {
-        return format.equals("debezium")
+        return format.equals(DataFormat.DEBEZIUM_JSON.asConfigString())
                 ? Collections.singletonList("id")
                 : Collections.emptyList();
     }
