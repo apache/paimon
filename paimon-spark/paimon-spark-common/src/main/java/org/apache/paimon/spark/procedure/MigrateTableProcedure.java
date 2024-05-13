@@ -24,6 +24,7 @@ import org.apache.paimon.migrate.Migrator;
 import org.apache.paimon.spark.catalog.WithPaimonCatalog;
 import org.apache.paimon.spark.utils.TableMigrationUtils;
 import org.apache.paimon.utils.ParameterUtils;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
@@ -51,7 +52,8 @@ public class MigrateTableProcedure extends BaseProcedure {
                 ProcedureParameter.required("source_type", StringType),
                 ProcedureParameter.required("table", StringType),
                 ProcedureParameter.optional("options", StringType),
-                ProcedureParameter.optional("rename", BooleanType)
+                ProcedureParameter.optional("delete_origin", BooleanType),
+                ProcedureParameter.optional("target_table", StringType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -79,10 +81,14 @@ public class MigrateTableProcedure extends BaseProcedure {
         String format = args.getString(0);
         String sourceTable = args.getString(1);
         String properties = args.isNullAt(2) ? null : args.getString(2);
-        Boolean rename = args.isNullAt(3) ? true : args.getBoolean(3);
+        Boolean deleteNeed = args.isNullAt(3) ? true : args.getBoolean(3);
+        String targetTable = args.isNullAt(4) ? null : args.getString(4);
 
         Identifier sourceTableId = Identifier.fromString(sourceTable);
-        Identifier tmpTableId = Identifier.fromString(sourceTable + TMP_TBL_SUFFIX);
+        Identifier tmpTableId =
+                StringUtils.isEmpty(targetTable)
+                        ? Identifier.fromString(sourceTable + TMP_TBL_SUFFIX)
+                        : Identifier.fromString(targetTable);
 
         Catalog paimonCatalog = ((WithPaimonCatalog) tableCatalog()).paimonCatalog();
 
@@ -96,8 +102,11 @@ public class MigrateTableProcedure extends BaseProcedure {
                             tmpTableId.getDatabaseName(),
                             tmpTableId.getObjectName(),
                             ParameterUtils.parseCommaSeparatedKeyValues(properties));
+
+            deleteNeed = deleteNeed && !StringUtils.isEmpty(targetTable);
+            migrator.deleteOriginTable(deleteNeed);
             migrator.executeMigrate();
-            if (rename) {
+            if (StringUtils.isEmpty(targetTable)) {
                 paimonCatalog.renameTable(tmpTableId, sourceTableId, false);
             }
         } catch (Exception e) {
