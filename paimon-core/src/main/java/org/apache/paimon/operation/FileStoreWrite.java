@@ -146,6 +146,7 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
         protected final long baseSnapshotId;
         protected final long lastModifiedCommitIdentifier;
         protected final List<DataFileMeta> dataFiles;
+        protected final long maxSequenceNumber;
         @Nullable protected final IndexMaintainer<T> indexMaintainer;
         @Nullable protected final DeletionVectorsMaintainer deletionVectorsMaintainer;
         protected final CommitIncrement commitIncrement;
@@ -156,6 +157,7 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
                 long baseSnapshotId,
                 long lastModifiedCommitIdentifier,
                 Collection<DataFileMeta> dataFiles,
+                long maxSequenceNumber,
                 @Nullable IndexMaintainer<T> indexMaintainer,
                 @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer,
                 CommitIncrement commitIncrement) {
@@ -164,6 +166,7 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
             this.baseSnapshotId = baseSnapshotId;
             this.lastModifiedCommitIdentifier = lastModifiedCommitIdentifier;
             this.dataFiles = new ArrayList<>(dataFiles);
+            this.maxSequenceNumber = maxSequenceNumber;
             this.indexMaintainer = indexMaintainer;
             this.deletionVectorsMaintainer = deletionVectorsMaintainer;
             this.commitIncrement = commitIncrement;
@@ -172,12 +175,13 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
         @Override
         public String toString() {
             return String.format(
-                    "{%s, %d, %d, %d, %s, %s,  %s, %s}",
+                    "{%s, %d, %d, %d, %s, %d, %s, %s, %s}",
                     partition,
                     bucket,
                     baseSnapshotId,
                     lastModifiedCommitIdentifier,
                     dataFiles,
+                    maxSequenceNumber,
                     indexMaintainer,
                     deletionVectorsMaintainer,
                     commitIncrement);

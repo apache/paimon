@@ -52,6 +52,8 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+import static org.apache.paimon.io.DataFileMeta.getMaxSequenceNumber;
+
 /**
  * Base {@link FileStoreWrite} implementation.
  *
@@ -297,6 +299,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                                 writerContainer.baseSnapshotId,
                                 writerContainer.lastModifiedCommitIdentifier,
                                 dataFiles,
+                                writerContainer.writer.maxSequenceNumber(),
                                 writerContainer.indexMaintainer,
                                 writerContainer.deletionVectorsMaintainer,
                                 increment));
@@ -317,6 +320,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                             state.partition,
                             state.bucket,
                             state.dataFiles,
+                            state.maxSequenceNumber,
                             state.commitIncrement,
                             compactExecutor(),
                             state.deletionVectorsMaintainer);
@@ -382,6 +386,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                         partition.copy(),
                         bucket,
                         restoreFiles,
+                        getMaxSequenceNumber(restoreFiles),
                         null,
                         compactExecutor(),
                         deletionVectorsMaintainer);
@@ -432,6 +437,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             BinaryRow partition,
             int bucket,
             List<DataFileMeta> restoreFiles,
+            long restoredMaxSeqNumber,
             @Nullable CommitIncrement restoreIncrement,
             ExecutorService compactExecutor,
             @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer);
