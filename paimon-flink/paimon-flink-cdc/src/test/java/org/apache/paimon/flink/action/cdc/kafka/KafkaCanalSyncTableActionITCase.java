@@ -985,7 +985,8 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
                         .build();
         runActionWithDefaultEnv(action);
 
-        writeRecordsToKafka(topic, "kafka/%s/table/initialemptytopic/%s-data-1.txt", FORMAT);
+        writeRecordsToKafka(
+                topic, "kafka/%s/table/initialemptytopic/%s-data-1.txt", FORMAT, FORMAT);
 
         RowType rowType =
                 RowType.of(

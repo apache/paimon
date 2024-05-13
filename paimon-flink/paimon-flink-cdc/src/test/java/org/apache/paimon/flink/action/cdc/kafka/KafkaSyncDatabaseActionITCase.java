@@ -59,7 +59,7 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         }
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), format);
         kafkaConfig.put(TOPIC.key(), String.join(";", topics));
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(kafkaConfig)
@@ -87,7 +87,7 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         }
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), format);
         kafkaConfig.put(TOPIC.key(), String.join(";", topics));
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(kafkaConfig)
@@ -194,7 +194,7 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
     protected void testTopicIsEmpty(String format) {
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), format);
 
         KafkaSyncDatabaseAction action = syncDatabaseActionBuilder(kafkaConfig).build();
 
@@ -239,7 +239,7 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
         // try synchronization
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), format);
         kafkaConfig.put(TOPIC.key(), String.join(";", topics));
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(kafkaConfig)
@@ -286,7 +286,7 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
         // try synchronization
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), format);
         kafkaConfig.put(TOPIC.key(), String.join(";", topics));
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(kafkaConfig)
@@ -442,7 +442,7 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
         // try synchronization
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), format);
         kafkaConfig.put(TOPIC.key(), String.join(";", topics));
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(kafkaConfig)
@@ -465,7 +465,7 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                 topic, "kafka/%s/database/case-insensitive/%s-data-1.txt", format, format);
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), format);
         kafkaConfig.put(TOPIC.key(), topic);
 
         KafkaSyncDatabaseAction action =

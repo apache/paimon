@@ -536,7 +536,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
     public void testSchemaIncludeRecord(String format) throws Exception {
         String topic = "schema_include";
         createTestTopic(topic, 1, 1);
-        writeRecordsToKafka(topic, "kafka/debezium-json/table/schema/include/debezium-data-1.txt");
+        writeRecordsToKafka(topic, "kafka/%s/table/schema/include/%s-data-1.txt", format, format);
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put(VALUE_FORMAT.key(), format);
@@ -570,7 +570,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
     public void testAllTypesWithSchemaImpl(String format) throws Exception {
         String topic = "schema_include_all_type";
         createTestTopic(topic, 1, 1);
-        writeRecordsToKafka(topic, "kafka/debezium-json/table/schema/alltype/debezium-data-1.txt");
+        writeRecordsToKafka(topic, "kafka/%s/table/schema/alltype/%s-data-1.txt", format, format);
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put(VALUE_FORMAT.key(), format);
