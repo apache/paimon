@@ -53,6 +53,7 @@ public class TagActionITCase extends ActionITCaseBase {
                         rowType,
                         Collections.emptyList(),
                         Collections.singletonList("k"),
+                        Collections.emptyList(),
                         Collections.emptyMap());
 
         StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
@@ -125,6 +126,7 @@ public class TagActionITCase extends ActionITCaseBase {
                         rowType,
                         Collections.emptyList(),
                         Collections.singletonList("k"),
+                        Collections.emptyList(),
                         Collections.emptyMap());
 
         StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);

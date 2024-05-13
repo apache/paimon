@@ -103,10 +103,10 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     @Override
     public BucketMode bucketMode() {
         if (options.bucket() == -1) {
-            return crossPartitionUpdate ? BucketMode.GLOBAL_DYNAMIC : BucketMode.DYNAMIC;
+            return crossPartitionUpdate ? BucketMode.CROSS_PARTITION : BucketMode.HASH_DYNAMIC;
         } else {
             checkArgument(!crossPartitionUpdate);
-            return BucketMode.FIXED;
+            return BucketMode.HASH_FIXED;
         }
     }
 
@@ -163,7 +163,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     @Override
     public KeyValueFileStoreWrite newWrite(String commitUser, ManifestCacheFilter manifestFilter) {
         IndexMaintainer.Factory<KeyValue> indexFactory = null;
-        if (bucketMode() == BucketMode.DYNAMIC) {
+        if (bucketMode() == BucketMode.HASH_DYNAMIC) {
             indexFactory = new HashIndexMaintainer.Factory(newIndexFileHandler());
         }
         DeletionVectorsMaintainer.Factory deletionVectorsMaintainerFactory = null;
@@ -214,7 +214,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 new ScanBucketFilter(bucketKeyType) {
                     @Override
                     public void pushdown(Predicate keyFilter) {
-                        if (bucketMode() != BucketMode.FIXED) {
+                        if (bucketMode() != BucketMode.HASH_FIXED) {
                             return;
                         }
 

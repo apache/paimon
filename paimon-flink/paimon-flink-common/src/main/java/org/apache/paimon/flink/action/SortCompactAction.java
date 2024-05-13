@@ -78,8 +78,8 @@ public class SortCompactAction extends CompactAction {
         }
         FileStoreTable fileStoreTable = (FileStoreTable) table;
 
-        if (fileStoreTable.bucketMode() != BucketMode.UNAWARE
-                && fileStoreTable.bucketMode() != BucketMode.DYNAMIC) {
+        if (fileStoreTable.bucketMode() != BucketMode.BUCKET_UNAWARE
+                && fileStoreTable.bucketMode() != BucketMode.HASH_DYNAMIC) {
             throw new IllegalArgumentException("Sort Compact only supports bucket=-1 yet.");
         }
         Map<String, String> tableConfig = fileStoreTable.options();

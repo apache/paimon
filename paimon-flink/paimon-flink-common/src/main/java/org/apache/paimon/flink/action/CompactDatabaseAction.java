@@ -166,14 +166,14 @@ public class CompactDatabaseAction extends ActionBase {
         for (Map.Entry<String, FileStoreTable> entry : tableMap.entrySet()) {
             FileStoreTable fileStoreTable = entry.getValue();
             switch (fileStoreTable.bucketMode()) {
-                case UNAWARE:
+                case BUCKET_UNAWARE:
                     {
                         buildForUnawareBucketCompaction(
                                 env, entry.getKey(), fileStoreTable, isStreaming);
                         break;
                     }
-                case FIXED:
-                case DYNAMIC:
+                case HASH_FIXED:
+                case HASH_DYNAMIC:
                 default:
                     {
                         buildForTraditionalCompaction(

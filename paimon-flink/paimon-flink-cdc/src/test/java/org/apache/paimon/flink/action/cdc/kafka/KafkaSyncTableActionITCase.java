@@ -174,6 +174,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                         new String[] {"k", "v1"}),
                 Collections.emptyList(),
                 Collections.singletonList("k"),
+                Collections.emptyList(),
                 Collections.emptyMap());
 
         KafkaSyncTableAction action =
@@ -511,6 +512,12 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put(TOPIC.key(), topic);
 
         Map<String, String> config = getBasicTableConfig();
+        if ("debezium".equals(format)) {
+            // debezium has no key
+            // append mode never stop with compaction
+            config.remove("bucket");
+            config.put("write-only", "true");
+        }
         config.put("tag.automatic-creation", "watermark");
         config.put("tag.creation-period", "hourly");
         config.put("scan.watermark.alignment.group", "alignment-group-1");

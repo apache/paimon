@@ -54,7 +54,7 @@ public class RescaleBucketITCase extends CatalogITCaseBase {
                 String.format(
                         "CREATE CATALOG `fs_catalog` WITH ('type' = 'paimon', 'warehouse' = '%s')",
                         path),
-                "CREATE TABLE IF NOT EXISTS `fs_catalog`.`default`.`T1` (f0 INT) WITH ('bucket' = '2')");
+                "CREATE TABLE IF NOT EXISTS `fs_catalog`.`default`.`T1` (f0 INT) WITH ('bucket' = '2', 'bucket-key' = 'f0')");
     }
 
     @Test
@@ -69,7 +69,7 @@ public class RescaleBucketITCase extends CatalogITCaseBase {
                 Arrays.asList(
                         "USE CATALOG fs_catalog",
                         "CREATE TEMPORARY TABLE IF NOT EXISTS `S0` (f0 INT) WITH ('connector' = 'datagen')",
-                        "CREATE TABLE IF NOT EXISTS `T3` (f0 INT) WITH ('bucket' = '2')",
+                        "CREATE TABLE IF NOT EXISTS `T3` (f0 INT) WITH ('bucket' = '2', 'bucket-key' = 'f0')",
                         "CREATE TABLE IF NOT EXISTS `T4` (f0 INT)"));
         SchemaManager schemaManager =
                 new SchemaManager(LocalFileIO.create(), getTableDirectory("T3"));

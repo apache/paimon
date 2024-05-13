@@ -35,8 +35,8 @@ public class BitmapDeletionVector implements DeletionVector {
 
     private final RoaringBitmap32 roaringBitmap;
 
-    BitmapDeletionVector() {
-        roaringBitmap = new RoaringBitmap32();
+    public BitmapDeletionVector() {
+        this.roaringBitmap = new RoaringBitmap32();
     }
 
     private BitmapDeletionVector(RoaringBitmap32 roaringBitmap) {
@@ -47,6 +47,15 @@ public class BitmapDeletionVector implements DeletionVector {
     public void delete(long position) {
         checkPosition(position);
         roaringBitmap.add((int) position);
+    }
+
+    @Override
+    public void merge(DeletionVector deletionVector) {
+        if (deletionVector instanceof BitmapDeletionVector) {
+            roaringBitmap.or(((BitmapDeletionVector) deletionVector).roaringBitmap);
+        } else {
+            throw new RuntimeException("Only instance with the same class type can be merged.");
+        }
     }
 
     @Override
@@ -64,6 +73,11 @@ public class BitmapDeletionVector implements DeletionVector {
     @Override
     public boolean isEmpty() {
         return roaringBitmap.isEmpty();
+    }
+
+    @Override
+    public long getCardinality() {
+        return roaringBitmap.getCardinality();
     }
 
     @Override

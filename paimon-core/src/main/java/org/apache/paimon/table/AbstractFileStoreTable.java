@@ -125,12 +125,12 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     public RowKeyExtractor createRowKeyExtractor() {
         switch (bucketMode()) {
-            case FIXED:
+            case HASH_FIXED:
                 return new FixedBucketRowKeyExtractor(schema());
-            case DYNAMIC:
-            case GLOBAL_DYNAMIC:
+            case HASH_DYNAMIC:
+            case CROSS_PARTITION:
                 return new DynamicBucketRowKeyExtractor(schema());
-            case UNAWARE:
+            case BUCKET_UNAWARE:
                 return new UnawareBucketRowKeyExtractor(schema());
             default:
                 throw new UnsupportedOperationException("Unsupported mode: " + bucketMode());

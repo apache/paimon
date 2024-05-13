@@ -155,6 +155,9 @@ public abstract class ScannerTestBase {
         }
         if (!conf.contains(CoreOptions.BUCKET)) {
             conf.set(CoreOptions.BUCKET, 1);
+            if (!withPrimaryKeys) {
+                conf.set(CoreOptions.BUCKET_KEY, "a");
+            }
         }
         TableSchema tableSchema =
                 schemaManager.createTable(

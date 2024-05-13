@@ -597,6 +597,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
                         new String[] {"k", "v1"}),
                 Collections.emptyList(),
                 Collections.singletonList("k"),
+                Collections.emptyList(),
                 Collections.emptyMap());
 
         KafkaSyncTableAction action =
@@ -974,6 +975,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
                         new String[] {"_id", "_date", "_year"}),
                 Collections.singletonList("_year"),
                 Arrays.asList("_id", "_year"),
+                Collections.emptyList(),
                 Collections.emptyMap());
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
@@ -1046,8 +1048,10 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put(VALUE_FORMAT.key(), FORMAT);
         kafkaConfig.put(TOPIC.key(), topic);
+        Map<String, String> tableConfig = getBasicTableConfig();
+        tableConfig.remove("bucket");
         KafkaSyncTableAction action =
-                syncTableActionBuilder(kafkaConfig).withTableConfig(getBasicTableConfig()).build();
+                syncTableActionBuilder(kafkaConfig).withTableConfig(tableConfig).build();
 
         runActionWithDefaultEnv(action);
 
@@ -1109,6 +1113,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
                             new String[] {"_id", "_date", "_year"}),
                     Collections.emptyList(),
                     Collections.singletonList("_id"),
+                    Collections.emptyList(),
                     Collections.emptyMap());
         } else {
             writeRecordsToKafka(

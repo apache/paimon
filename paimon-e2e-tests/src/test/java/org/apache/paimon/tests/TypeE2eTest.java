@@ -61,15 +61,9 @@ public class TypeE2eTest extends E2eTestBase {
 
         String tableDdl =
                 String.join(
-                        "\n",
-                        Arrays.asList(
-                                "CREATE TABLE IF NOT EXISTS ts_table(",
-                                schema,
-                                ") WITH (",
-                                "  'bucket' = '1'",
-                                ");"));
+                        "\n", Arrays.asList("CREATE TABLE IF NOT EXISTS ts_table(", schema, ");"));
 
-        runSql(
+        runBatchSql(
                 "INSERT INTO ts_table VALUES ("
                         + "true, cast(1 as tinyint), cast(10 as smallint), "
                         + "100, 1000, cast(1.1 as float), 1.11, 12.456, "
@@ -89,7 +83,7 @@ public class TypeE2eTest extends E2eTestBase {
                 catalogDdl,
                 useCatalogCmd,
                 tableDdl);
-        runSql(
+        runBatchSql(
                 "INSERT INTO result1 SELECT f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, "
                         + "f10, f11, f12, f13, f14, f15, f16 FROM ts_table;",
                 catalogDdl,
@@ -154,7 +148,7 @@ public class TypeE2eTest extends E2eTestBase {
                                 "  'bucket' = '1'",
                                 ");"));
 
-        runSql(
+        runBatchSql(
                 "INSERT INTO ts_table VALUES (1,"
                         + "true, cast(1 as tinyint), cast(10 as smallint), "
                         + "100, 1000, cast(1.1 as float), 1.11, 12.456, "
@@ -176,7 +170,7 @@ public class TypeE2eTest extends E2eTestBase {
                 catalogDdl,
                 useCatalogCmd,
                 tableDdl);
-        runSql(
+        runBatchSql(
                 "INSERT INTO result1 SELECT * FROM ts_table;",
                 catalogDdl,
                 useCatalogCmd,
@@ -192,14 +186,5 @@ public class TypeE2eTest extends E2eTestBase {
                 expected,
                 "2, null, null, null, null, null, null, null, null, null, "
                         + "null, null, null, null, null, null, null, null, null");
-    }
-
-    private void runSql(String sql, String... ddls) throws Exception {
-        runSql(
-                "SET 'execution.runtime-mode' = 'batch';\n"
-                        + "SET 'table.dml-sync' = 'true';\n"
-                        + String.join("\n", ddls)
-                        + "\n"
-                        + sql);
     }
 }

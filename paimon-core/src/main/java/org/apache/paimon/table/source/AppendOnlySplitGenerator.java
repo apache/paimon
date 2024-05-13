@@ -47,7 +47,7 @@ public class AppendOnlySplitGenerator implements SplitGenerator {
     @Override
     public List<SplitGroup> splitForBatch(List<DataFileMeta> input) {
         List<DataFileMeta> files = new ArrayList<>(input);
-        files.sort(fileComparator(bucketMode == BucketMode.UNAWARE));
+        files.sort(fileComparator(bucketMode == BucketMode.BUCKET_UNAWARE));
         Function<DataFileMeta, Long> weightFunc = file -> Math.max(file.fileSize(), openFileCost);
         return BinPacking.packForOrdered(files, weightFunc, targetSplitSize).stream()
                 .map(SplitGroup::rawConvertibleGroup)
@@ -58,7 +58,7 @@ public class AppendOnlySplitGenerator implements SplitGenerator {
     public List<SplitGroup> splitForStreaming(List<DataFileMeta> files) {
         // When the bucket mode is unaware, we spit the files as batch, because unaware-bucket table
         // only contains one bucket (bucket 0).
-        if (bucketMode == BucketMode.UNAWARE) {
+        if (bucketMode == BucketMode.BUCKET_UNAWARE) {
             return splitForBatch(files);
         } else {
             return Collections.singletonList(SplitGroup.rawConvertibleGroup(files));

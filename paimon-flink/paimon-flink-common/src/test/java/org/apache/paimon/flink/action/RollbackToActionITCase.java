@@ -56,6 +56,7 @@ public class RollbackToActionITCase extends ActionITCaseBase {
                         ROW_TYPE,
                         Collections.emptyList(),
                         Collections.singletonList("k"),
+                        Collections.emptyList(),
                         Collections.emptyMap());
         StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
         write = writeBuilder.newWrite();
@@ -95,6 +96,7 @@ public class RollbackToActionITCase extends ActionITCaseBase {
                         ROW_TYPE,
                         Collections.emptyList(),
                         Collections.singletonList("k"),
+                        Collections.emptyList(),
                         Collections.emptyMap());
         StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
         write = writeBuilder.newWrite();

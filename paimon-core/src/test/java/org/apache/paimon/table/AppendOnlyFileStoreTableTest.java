@@ -67,7 +67,10 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD;
+import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.apache.paimon.table.sink.KeyAndBucketExtractor.bucket;
 import static org.apache.paimon.table.sink.KeyAndBucketExtractor.bucketKeyHashCode;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -681,7 +684,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                         serializer
                                 .toBinaryRow(rowData(i, random.nextInt(), random.nextLong()))
                                 .copy();
-                int bucket = bucket(bucketKeyHashCode(data), numOfBucket);
+                int bucket = bucket(bucketKeyHashCode(row(data.getInt(1))), numOfBucket);
                 dataPerBucket.compute(
                         bucket,
                         (k, v) -> {
@@ -827,6 +830,9 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         Options conf = new Options();
         conf.set(CoreOptions.PATH, tablePath.toString());
         configure.accept(conf);
+        if (!conf.contains(BUCKET_KEY) && conf.get(BUCKET) != -1) {
+            conf.set(BUCKET_KEY, "a");
+        }
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
                         new SchemaManager(LocalFileIO.create(), tablePath),

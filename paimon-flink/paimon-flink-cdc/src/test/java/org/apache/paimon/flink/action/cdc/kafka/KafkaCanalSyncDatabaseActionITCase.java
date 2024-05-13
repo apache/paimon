@@ -254,6 +254,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                         new String[] {"k1", "v0"}),
                 Collections.emptyList(),
                 Collections.singletonList("k1"),
+                Collections.emptyList(),
                 Collections.emptyMap());
 
         final String topic1 = "prefix_suffix_0";
@@ -300,6 +301,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                         new String[] {"k1", "v0"}),
                 Collections.emptyList(),
                 Collections.singletonList("k1"),
+                Collections.emptyList(),
                 Collections.emptyMap());
 
         final String topic1 = "prefix_suffix";
