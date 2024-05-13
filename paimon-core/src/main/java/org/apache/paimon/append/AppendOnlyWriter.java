@@ -174,6 +174,11 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     }
 
     @Override
+    public long maxSequenceNumber() {
+        return seqNumCounter.getValue() - 1;
+    }
+
+    @Override
     public CommitIncrement prepareCommit(boolean waitCompaction) throws Exception {
         flush(false, false);
         trySyncLatestCompaction(waitCompaction || forceCompact);

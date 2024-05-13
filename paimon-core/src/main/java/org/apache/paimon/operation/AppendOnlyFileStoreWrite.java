@@ -54,8 +54,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 
-import static org.apache.paimon.io.DataFileMeta.getMaxSequenceNumber;
-
 /** {@link FileStoreWrite} for {@link AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> {
 
@@ -119,12 +117,12 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
             BinaryRow partition,
             int bucket,
             List<DataFileMeta> restoredFiles,
+            long restoredMaxSeqNumber,
             @Nullable CommitIncrement restoreIncrement,
             ExecutorService compactExecutor,
             @Nullable DeletionVectorsMaintainer ignore) {
         // let writer and compact manager hold the same reference
         // and make restore files mutable to update
-        long maxSequenceNumber = getMaxSequenceNumber(restoredFiles);
         DataFilePathFactory factory = pathFactory.createDataFilePathFactory(partition, bucket);
         CompactManager compactManager =
                 skipCompaction
@@ -147,7 +145,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                 fileFormat,
                 targetFileSize,
                 rowType,
-                maxSequenceNumber,
+                restoredMaxSeqNumber,
                 compactManager,
                 bucketReader(partition, bucket),
                 commitForceCompact,

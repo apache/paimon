@@ -183,6 +183,11 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     }
 
     @Override
+    public long maxSequenceNumber() {
+        return newSequenceNumber - 1;
+    }
+
+    @Override
     public long memoryOccupancy() {
         return writeBuffer.memoryOccupancy();
     }
