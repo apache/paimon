@@ -26,7 +26,7 @@ import org.junit.jupiter.api.Assertions
 abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
 
   test("Paimon DDL with hive catalog: create database with location and comment") {
-    Seq("spark_catalog", paimonHiveCatalogName).foreach {
+    Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
       catalogName =>
         spark.sql(s"USE $catalogName")
         withTempDir {
@@ -54,7 +54,7 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
   }
 
   test("Paimon DDL with hive catalog: create database with props") {
-    Seq("spark_catalog", paimonHiveCatalogName).foreach {
+    Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
       catalogName =>
         spark.sql(s"USE $catalogName")
         withDatabase("paimon_db") {
@@ -69,7 +69,7 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
   test("Paimon DDL with hive catalog: set default database") {
     var reusedSpark = spark
 
-    Seq("paimon", "spark_catalog", paimonHiveCatalogName).foreach {
+    Seq("paimon", sparkCatalogName, paimonHiveCatalogName).foreach {
       catalogName =>
         {
           val dbName = s"${catalogName}_default_db"
@@ -89,7 +89,7 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
             .config(s"spark.sql.catalog.$catalogName.defaultDatabase", dbName)
             .getOrCreate()
 
-          if (catalogName.equals("spark_catalog") && !supportDefaultDatabaseWithSessionCatalog) {
+          if (catalogName.equals(sparkCatalogName) && !supportDefaultDatabaseWithSessionCatalog) {
             checkAnswer(reusedSpark.sql("show tables").select("tableName"), Nil)
             reusedSpark.sql(s"use $dbName")
           }
@@ -105,7 +105,7 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
   test("Paimon DDL with hive catalog: drop database cascade which contains paimon table") {
     // Spark supports DROP DATABASE CASCADE since 3.3
     if (gteqSpark3_3) {
-      Seq("spark_catalog", paimonHiveCatalogName).foreach {
+      Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
         catalogName =>
           spark.sql(s"USE $catalogName")
           spark.sql(s"CREATE DATABASE paimon_db")
