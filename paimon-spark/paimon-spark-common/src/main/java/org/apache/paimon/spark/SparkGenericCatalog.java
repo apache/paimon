@@ -132,6 +132,11 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
     @Override
     public boolean dropNamespace(String[] namespace, boolean cascade)
             throws NoSuchNamespaceException, NonEmptyNamespaceException {
+        if (namespace.length == 1 && namespaceExists(namespace) && cascade) {
+            for (Identifier table : listTables(namespace)) {
+                dropTable(table);
+            }
+        }
         return asNamespaceCatalog().dropNamespace(namespace, cascade);
     }
 
