@@ -49,7 +49,7 @@ class MigrateTableProcedureTest extends PaimonHiveTestBase {
   Seq("parquet", "orc", "avro").foreach(
     format => {
       test(
-        s"Paimon migrate table procedure: migrate $format non-partitioned table with set taget table") {
+        s"Paimon migrate table procedure: migrate $format non-partitioned table with set target table") {
         withTable("hive_tbl_rn") {
           // create hive table
           spark.sql(s"""
@@ -60,7 +60,7 @@ class MigrateTableProcedureTest extends PaimonHiveTestBase {
           spark.sql(s"INSERT INTO hive_tbl_$format VALUES ('1', 'a', 'p1'), ('2', 'b', 'p2')")
 
           spark.sql(
-            s"CALL sys.migrate_table(source_type => 'hive', table => '$hiveDbName.hive_tbl_$format', options => 'file.format=$format', target_table => '$hiveDbName.target_$format')")
+            s"CALL sys.migrate_table(source_type => 'hive', table => '$hiveDbName.hive_tbl_$format', options => 'file.format=$format', target_table => '$hiveDbName.target_$format', delete_origin => false)")
 
           checkAnswer(
             spark.sql(s"SELECT * FROM $hiveDbName.hive_tbl_$format ORDER BY id"),
