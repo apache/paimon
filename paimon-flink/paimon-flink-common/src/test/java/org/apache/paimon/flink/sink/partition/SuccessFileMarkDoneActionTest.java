@@ -28,8 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class SuccessFileMarkDoneActionTest {
 
-    @TempDir
-    java.nio.file.Path temp;
+    @TempDir java.nio.file.Path temp;
 
     @Test
     public void test() throws Exception {

@@ -27,7 +27,6 @@ import org.apache.paimon.hive.annotation.Minio;
 import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
 import org.apache.paimon.privilege.NoPrivilegeException;
 import org.apache.paimon.s3.MinioTestContainer;
-import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.IOUtils;
 
 import com.klarna.hiverunner.HiveShell;
@@ -57,13 +56,10 @@ import org.junit.rules.TestRule;
 import org.junit.runner.RunWith;
 import org.junit.runners.model.Statement;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
