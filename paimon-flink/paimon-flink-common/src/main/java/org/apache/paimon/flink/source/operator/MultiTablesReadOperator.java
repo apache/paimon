@@ -44,9 +44,9 @@ import static org.apache.paimon.flink.utils.MultiTablesCompactorUtil.compactOpti
 
 /**
  * The operator that reads the Tuple2<{@link Split}, String> received from the preceding {@link
- * MultiTablesBatchCompactorSourceFunction} or {@link MultiTablesStreamingCompactorSourceFunction}.
- * Contrary to the {@link MultiTablesCompactorSourceFunction} which has a parallelism of 1, this
- * operator can have DOP > 1.
+ * CombinedAwareBatchSourceFunction} or {@link CombinedAwareStreamingSourceFunction}. Contrary to
+ * the {@link CombinedCompactorSourceFunction} which has a parallelism of 1, this operator can have
+ * DOP > 1.
  */
 public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
         implements OneInputStreamOperator<Tuple2<Split, String>, RowData> {

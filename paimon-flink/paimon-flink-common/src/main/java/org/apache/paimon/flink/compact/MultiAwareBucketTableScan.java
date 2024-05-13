@@ -85,7 +85,7 @@ public class MultiAwareBucketTableScan extends MultiTableScanBase<Tuple2<Split, 
 
     @Override
     public void addScanTable(FileStoreTable fileStoreTable, Identifier identifier) {
-        if (fileStoreTable.bucketMode() != BucketMode.UNAWARE) {
+        if (fileStoreTable.bucketMode() != BucketMode.BUCKET_UNAWARE) {
             BucketsTable bucketsTable =
                     new BucketsTable(fileStoreTable, isStreaming, identifier.getDatabaseName())
                             .copy(compactOptions(isStreaming));

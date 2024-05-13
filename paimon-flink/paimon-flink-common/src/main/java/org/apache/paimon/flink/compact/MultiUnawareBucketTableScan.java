@@ -89,7 +89,7 @@ public class MultiUnawareBucketTableScan
 
     @Override
     public void addScanTable(FileStoreTable fileStoreTable, Identifier identifier) {
-        if (fileStoreTable.bucketMode() == BucketMode.UNAWARE) {
+        if (fileStoreTable.bucketMode() == BucketMode.BUCKET_UNAWARE) {
             tablesMap.put(
                     identifier,
                     new AppendOnlyTableCompactionCoordinator(fileStoreTable, isStreaming));

@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.append.MultiTableAppendOnlyCompactionTask;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.VersionedSerializerWrapper;
 import org.apache.paimon.manifest.WrappedManifestCommittable;
@@ -48,7 +49,7 @@ import static org.apache.paimon.flink.sink.FlinkSink.assertStreamingConfiguratio
 import static org.apache.paimon.flink.utils.ManagedMemoryUtils.declareManagedMemory;
 
 /** A sink for processing multi-tables in dedicated compaction job. */
-public class MultiTablesCompactorSink implements Serializable {
+public class CombinedTableCompactorSink implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private static final String WRITER_NAME = "Writer";
@@ -59,54 +60,75 @@ public class MultiTablesCompactorSink implements Serializable {
 
     private final Options options;
 
-    public MultiTablesCompactorSink(Catalog.Loader catalogLoader, Options options) {
+    public CombinedTableCompactorSink(Catalog.Loader catalogLoader, Options options) {
         this.catalogLoader = catalogLoader;
         this.ignorePreviousFiles = false;
         this.options = options;
     }
 
-    public DataStreamSink<?> sinkFrom(DataStream<RowData> input) {
+    public DataStreamSink<?> sinkFrom(
+            DataStream<RowData> awareBucketTableSource,
+            DataStream<MultiTableAppendOnlyCompactionTask> unawareBucketTableSource) {
         // This commitUser is valid only for new jobs.
         // After the job starts, this commitUser will be recorded into the states of write and
         // commit operators.
         // When the job restarts, commitUser will be recovered from states and this value is
         // ignored.
         String initialCommitUser = UUID.randomUUID().toString();
-        return sinkFrom(input, initialCommitUser);
+        return sinkFrom(awareBucketTableSource, unawareBucketTableSource, initialCommitUser);
     }
 
-    public DataStreamSink<?> sinkFrom(DataStream<RowData> input, String initialCommitUser) {
+    public DataStreamSink<?> sinkFrom(
+            DataStream<RowData> awareBucketTableSource,
+            DataStream<MultiTableAppendOnlyCompactionTask> unawareBucketTableSource,
+            String initialCommitUser) {
         // do the actually writing action, no snapshot generated in this stage
-        SingleOutputStreamOperator<MultiTableCommittable> written =
-                doWrite(input, initialCommitUser, input.getParallelism());
+        DataStream<MultiTableCommittable> written =
+                doWrite(awareBucketTableSource, unawareBucketTableSource, initialCommitUser);
 
         // commit the committable to generate a new snapshot
         return doCommit(written, initialCommitUser);
     }
 
-    public SingleOutputStreamOperator<MultiTableCommittable> doWrite(
-            DataStream<RowData> input, String commitUser, Integer parallelism) {
-        StreamExecutionEnvironment env = input.getExecutionEnvironment();
+    public DataStream<MultiTableCommittable> doWrite(
+            DataStream<RowData> awareBucketTableSource,
+            DataStream<MultiTableAppendOnlyCompactionTask> unawareBucketTableSource,
+            String commitUser) {
+        StreamExecutionEnvironment env = awareBucketTableSource.getExecutionEnvironment();
         boolean isStreaming =
                 env.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
                         == RuntimeExecutionMode.STREAMING;
 
-        SingleOutputStreamOperator<MultiTableCommittable> written =
-                input.transform(
-                                WRITER_NAME,
+        SingleOutputStreamOperator<MultiTableCommittable> multiBucketTableRewriter =
+                awareBucketTableSource
+                        .transform(
+                                String.format("%s-%s", "Multi-Bucket-Table", WRITER_NAME),
                                 new MultiTableCommittableTypeInfo(),
-                                createWriteOperator(
+                                combinedMultiComacptionWriteOperator(
                                         env.getCheckpointConfig(), isStreaming, commitUser))
-                        .setParallelism(parallelism == null ? input.getParallelism() : parallelism);
+                        .setParallelism(awareBucketTableSource.getParallelism());
+
+        SingleOutputStreamOperator<MultiTableCommittable> unawareBucketTableRewriter =
+                unawareBucketTableSource
+                        .transform(
+                                String.format("%s-%s", "Unaware-Bucket-Table", WRITER_NAME),
+                                new MultiTableCommittableTypeInfo(),
+                                new AppendOnlyMultiTableCompactionWorkerOperator(
+                                        catalogLoader, commitUser, options))
+                        .setParallelism(unawareBucketTableSource.getParallelism());
 
         if (!isStreaming) {
-            assertBatchConfiguration(env, written.getParallelism());
+            assertBatchConfiguration(env, multiBucketTableRewriter.getParallelism());
+            assertBatchConfiguration(env, unawareBucketTableRewriter.getParallelism());
         }
 
         if (options.get(SINK_USE_MANAGED_MEMORY)) {
-            declareManagedMemory(written, options.get(SINK_MANAGED_WRITER_BUFFER_MEMORY));
+            declareManagedMemory(
+                    multiBucketTableRewriter, options.get(SINK_MANAGED_WRITER_BUFFER_MEMORY));
+            declareManagedMemory(
+                    unawareBucketTableRewriter, options.get(SINK_MANAGED_WRITER_BUFFER_MEMORY));
         }
-        return written;
+        return multiBucketTableRewriter.union(unawareBucketTableRewriter);
     }
 
     protected DataStreamSink<?> doCommit(
@@ -138,8 +160,9 @@ public class MultiTablesCompactorSink implements Serializable {
     }
 
     // TODO:refactor FlinkSink to adopt this sink
-    protected OneInputStreamOperator<RowData, MultiTableCommittable> createWriteOperator(
-            CheckpointConfig checkpointConfig, boolean isStreaming, String commitUser) {
+    protected OneInputStreamOperator<RowData, MultiTableCommittable>
+            combinedMultiComacptionWriteOperator(
+                    CheckpointConfig checkpointConfig, boolean isStreaming, String commitUser) {
         return new MultiTablesStoreCompactOperator(
                 catalogLoader,
                 commitUser,

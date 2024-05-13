@@ -65,7 +65,7 @@ import java.util.regex.Pattern;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** IT cases for {@link MultiTablesCompactorSourceBuilder}. */
+/** IT cases for {@link CombinedTableCompactorSourceBuilder}. */
 public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
         implements Serializable {
     private String warehouse;
@@ -161,7 +161,7 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
                         .parallelism(ThreadLocalRandom.current().nextInt(2) + 1)
                         .build();
         DataStream<RowData> source =
-                new MultiTablesCompactorSourceBuilder(
+                new CombinedTableCompactorSourceBuilder(
                                 catalogLoader(),
                                 Pattern.compile("db1|db2"),
                                 Pattern.compile(".*"),
@@ -169,7 +169,7 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
                                 monitorInterval)
                         .withContinuousMode(false)
                         .withEnv(env)
-                        .build();
+                        .buildAwareBucketTableSource();
         CloseableIterator<RowData> it = source.executeAndCollect();
         List<String> actual = new ArrayList<>();
         while (it.hasNext()) {
@@ -258,7 +258,7 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
         StreamExecutionEnvironment env =
                 streamExecutionEnvironmentBuilder().streamingMode().build();
         DataStream<RowData> compactorSource =
-                new MultiTablesCompactorSourceBuilder(
+                new CombinedTableCompactorSourceBuilder(
                                 catalogLoader(),
                                 Pattern.compile(".*"),
                                 Pattern.compile(".*"),
@@ -266,7 +266,7 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
                                 monitorInterval)
                         .withContinuousMode(true)
                         .withEnv(env)
-                        .build();
+                        .buildAwareBucketTableSource();
         CloseableIterator<RowData> it = compactorSource.executeAndCollect();
 
         List<String> actual = new ArrayList<>();
@@ -428,7 +428,7 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
         StreamExecutionEnvironment env =
                 streamExecutionEnvironmentBuilder().streamingMode().build();
         DataStream<RowData> compactorSource =
-                new MultiTablesCompactorSourceBuilder(
+                new CombinedTableCompactorSourceBuilder(
                                 catalogLoader(),
                                 Pattern.compile(".*"),
                                 Pattern.compile("db1.+|db2.t1|db3.t1"),
@@ -436,7 +436,7 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
                                 monitorInterval)
                         .withContinuousMode(true)
                         .withEnv(env)
-                        .build();
+                        .buildAwareBucketTableSource();
         CloseableIterator<RowData> it = compactorSource.executeAndCollect();
 
         List<String> actual = new ArrayList<>();
