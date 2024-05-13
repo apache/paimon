@@ -118,7 +118,7 @@ public class HiveMigrator implements Migrator {
     }
 
     @Override
-    public void deleteOriginTable(Boolean delete) {
+    public void deleteOriginTable(boolean delete) {
         this.delete = delete;
     }
 
