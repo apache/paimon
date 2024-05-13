@@ -57,17 +57,17 @@ class MigrateTableProcedureTest extends PaimonHiveTestBase {
                        |USING $format
                        |""".stripMargin)
 
-          spark.sql(s"INSERT INTO hive_tbl_$format VALUES ('1', 'a', 'p1'), ('2', 'b', 'p2')")
+          spark.sql(s"INSERT INTO l$format VALUES ('1', 'a', 'p1'), ('2', 'b', 'p2')")
 
           spark.sql(
             s"CALL sys.migrate_table(source_type => 'hive', table => '$hiveDbName.hive_tbl_$format', options => 'file.format=$format', target_table => '$hiveDbName.target_$format', delete_origin => false)")
 
           checkAnswer(
-            spark.sql(s"SELECT * FROM $hiveDbName.hive_tbl_$format ORDER BY id"),
+            spark.sql(s"SELECT * FROM target_$format ORDER BY id"),
             Row("1", "a", "p1") :: Row("2", "b", "p2") :: Nil)
 
           checkAnswer(
-            spark.sql(s"SELECT * FROM target_$format ORDER BY id"),
+            spark.sql(s"SELECT * FROM hive_tbl_$format ORDER BY id"),
             Row("1", "a", "p1") :: Row("2", "b", "p2") :: Nil)
         }
       }
