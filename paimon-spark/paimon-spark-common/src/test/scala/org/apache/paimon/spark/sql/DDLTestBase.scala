@@ -71,4 +71,16 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
         }
     }
   }
+
+  test("Paimon DDL: create other table with paimon SparkCatalog") {
+    withTable("paimon_tbl1", "paimon_tbl2", "parquet_tbl") {
+      spark.sql(s"CREATE TABLE paimon_tbl1 (id int) USING paimon")
+      spark.sql(s"CREATE TABLE paimon_tbl2 (id int)")
+      val error = intercept[Exception] {
+        spark.sql(s"CREATE TABLE parquet_tbl (id int) USING parquet")
+      }.getMessage
+      assert(
+        error.contains("SparkCatalog can only create paimon table, but current provider is parquet"))
+    }
+  }
 }
