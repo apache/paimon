@@ -519,7 +519,7 @@ public class SchemaValidation {
         if (bucket == -1) {
             if (options.toMap().get(BUCKET_KEY.key()) != null) {
                 throw new RuntimeException(
-                        "Cannot define 'bucket-key' in unaware or dynamic bucket mode.");
+                        "Cannot define 'bucket-key' with bucket -1, please specify a bucket number.");
             }
 
             if (schema.primaryKeys().isEmpty()
@@ -536,6 +536,11 @@ public class SchemaValidation {
                                 "You should use dynamic bucket (bucket = -1) mode in cross partition update case "
                                         + "(Primary key constraint %s not include all partition fields %s).",
                                 schema.primaryKeys(), schema.partitionKeys()));
+            }
+
+            if (schema.primaryKeys().isEmpty() && schema.bucketKeys().isEmpty()) {
+                throw new RuntimeException(
+                        "You should define a 'bucket-key' for bucketed append mode.");
             }
         }
     }

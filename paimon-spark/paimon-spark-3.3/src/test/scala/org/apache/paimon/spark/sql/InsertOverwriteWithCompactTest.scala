@@ -30,15 +30,17 @@ class InsertOverwriteWithCompactTest extends PaimonSparkTestBase {
       bucketModes.foreach {
         bucket =>
           test(s"insert overwrite non-partitioned table: hasPk: $hasPk, bucket: $bucket") {
-            val primaryKeysProp = if (hasPk) {
-              "'primary-key'='a,b',"
+            val prop = if (hasPk) {
+              s"'primary-key'='a,b', 'bucket' = '$bucket' "
+            } else if (bucket != -1) {
+              s"'bucket-key'='a,b', 'bucket' = '$bucket' "
             } else {
-              ""
+              "'write-only'='true'"
             }
 
             spark.sql(s"""
                          |CREATE TABLE T (a INT, b INT, c STRING)
-                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket',
+                         |TBLPROPERTIES ($prop,
                          |'num-sorted-run.compaction-trigger'='1', 'target-file-size'='1b')
                          |""".stripMargin)
 
@@ -64,15 +66,17 @@ class InsertOverwriteWithCompactTest extends PaimonSparkTestBase {
       bucketModes.foreach {
         bucket =>
           test(s"insert overwrite single-partitioned table: hasPk: $hasPk, bucket: $bucket") {
-            val primaryKeysProp = if (hasPk) {
-              "'primary-key'='a,b',"
+            val prop = if (hasPk) {
+              s"'primary-key'='a,b', 'bucket' = '$bucket' "
+            } else if (bucket != -1) {
+              s"'bucket-key'='b', 'bucket' = '$bucket' "
             } else {
-              ""
+              "'write-only'='true'"
             }
 
             spark.sql(s"""
                          |CREATE TABLE T (a INT, b INT, c STRING)
-                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket',
+                         |TBLPROPERTIES ($prop,
                          |'num-sorted-run.compaction-trigger'='1', 'target-file-size'='1b')
                          |PARTITIONED BY (a)
                          |""".stripMargin)

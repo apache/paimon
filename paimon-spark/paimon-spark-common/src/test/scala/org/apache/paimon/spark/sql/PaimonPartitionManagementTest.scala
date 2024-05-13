@@ -29,15 +29,18 @@ class PaimonPartitionManagementTest extends PaimonSparkTestBase {
       bucketModes.foreach {
         bucket =>
           test(s"Partition for non-partitioned table: hasPk: $hasPk, bucket: $bucket") {
-            val primaryKeysProp = if (hasPk) {
-              "'primary-key'='a,b',"
+            val prop = if (hasPk) {
+              s"'primary-key'='a,b', 'bucket' = '$bucket' "
+            } else if (bucket != -1) {
+              s"'bucket-key'='a,b', 'bucket' = '$bucket' "
             } else {
-              ""
+              "'write-only'='true'"
             }
+
             spark.sql(
               s"""
                  |CREATE TABLE T (a VARCHAR(10), b CHAR(10),c BIGINT,dt VARCHAR(8),hh VARCHAR(4))
-                 |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket')
+                 |TBLPROPERTIES ($prop)
                  |""".stripMargin)
             spark.sql("INSERT INTO T VALUES('a','b',1,'20230816','1132')")
             spark.sql("INSERT INTO T VALUES('a','b',1,'20230816','1133')")
@@ -78,15 +81,18 @@ class PaimonPartitionManagementTest extends PaimonSparkTestBase {
       bucketModes.foreach {
         bucket =>
           test(s"Partition for partitioned table: hasPk: $hasPk, bucket: $bucket") {
-            val primaryKeysProp = if (hasPk) {
-              "'primary-key'='a,b,dt,hh',"
+            val prop = if (hasPk) {
+              s"'primary-key'='a,b,dt,hh', 'bucket' = '$bucket' "
+            } else if (bucket != -1) {
+              s"'bucket-key'='a,b', 'bucket' = '$bucket' "
             } else {
-              ""
+              "'write-only'='true'"
             }
+
             spark.sql(s"""
                          |CREATE TABLE T (a VARCHAR(10), b CHAR(10),c BIGINT,dt LONG,hh VARCHAR(4))
                          |PARTITIONED BY (dt, hh)
-                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket')
+                         |TBLPROPERTIES ($prop)
                          |""".stripMargin)
 
             spark.sql("INSERT INTO T VALUES('a','b',1,20230816,'1132')")

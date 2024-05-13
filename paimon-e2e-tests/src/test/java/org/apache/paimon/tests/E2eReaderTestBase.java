@@ -40,14 +40,7 @@ public abstract class E2eReaderTestBase extends E2eTestBase {
 
     protected String createTableSql(String tableName) {
         return String.format(
-                "CREATE TABLE %s ("
-                        + "  a int,"
-                        + "  b bigint,"
-                        + "  c string"
-                        + ") WITH ("
-                        + "  'bucket' = '2'"
-                        + ");",
-                tableName);
+                "CREATE TABLE %s (" + "  a int," + "  b bigint," + "  c string" + ");", tableName);
     }
 
     protected String createInsertSql(String tableName) {

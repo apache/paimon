@@ -227,7 +227,7 @@ public class HiveMigrator implements Migrator {
                     "Hive migrator only support append only table target table");
         }
 
-        if (paimonTable.store().bucketMode() != BucketMode.UNAWARE) {
+        if (paimonTable.store().bucketMode() != BucketMode.BUCKET_UNAWARE) {
             throw new IllegalArgumentException(
                     "Hive migrator only support unaware-bucket target table");
         }

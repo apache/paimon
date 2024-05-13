@@ -52,6 +52,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
@@ -65,7 +66,10 @@ class DataTableSourceTest {
 
     @Test
     void testInferScanParallelism() throws Exception {
-        FileStoreTable fileStoreTable = createTable(ImmutableMap.of("bucket", "1"));
+        Map<String, String> options = new HashMap<>();
+        options.put("bucket", "1");
+        options.put("bucket-key", "a");
+        FileStoreTable fileStoreTable = createTable(options);
         writeData(fileStoreTable);
 
         DataTableSource tableSource =
@@ -120,7 +124,8 @@ class DataTableSourceTest {
     @Test
     public void testSystemTableParallelism() throws Exception {
         FileStoreTable fileStoreTable =
-                createTable(ImmutableMap.of("bucket", "1", "scan.parallelism", "3"));
+                createTable(
+                        ImmutableMap.of("bucket", "1", "bucket-key", "a", "scan.parallelism", "3"));
 
         ReadOptimizedTable ro = new ReadOptimizedTable(fileStoreTable);
 

@@ -55,7 +55,6 @@ public class FileStoreBuiltInFormatE2eTest extends E2eTestBase {
                 "CREATE TABLE IF NOT EXISTS ts_table (\n"
                         + schema
                         + ") WITH (\n"
-                        + "    'bucket' = '3',\n"
                         + "    'file.format' = 'parquet'\n"
                         + ");";
 
@@ -92,9 +91,9 @@ public class FileStoreBuiltInFormatE2eTest extends E2eTestBase {
                         + "DATE '2022-05-23'"
                         + ")";
 
-        runSql(insertDml, catalogDdl, useCatalogCmd, paimonDdl);
+        runBatchSql(insertDml, catalogDdl, useCatalogCmd, paimonDdl);
 
-        runSql(
+        runBatchSql(
                 "INSERT INTO result1 SELECT * FROM ts_table where id > 1;",
                 catalogDdl,
                 useCatalogCmd,
@@ -115,14 +114,5 @@ public class FileStoreBuiltInFormatE2eTest extends E2eTestBase {
                         + "Hi Yu bin, "
                         + "这是一个 built in parquet format, "
                         + "2022-05-23");
-    }
-
-    private void runSql(String sql, String... ddls) throws Exception {
-        runSql(
-                "SET 'execution.runtime-mode' = 'batch';\n"
-                        + "SET 'table.dml-sync' = 'true';\n"
-                        + String.join("\n", ddls)
-                        + "\n"
-                        + sql);
     }
 }

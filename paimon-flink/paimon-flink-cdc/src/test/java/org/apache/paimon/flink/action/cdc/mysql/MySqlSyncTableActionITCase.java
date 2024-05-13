@@ -650,6 +650,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         new String[] {"a", "b", "c"}),
                 Collections.emptyList(),
                 Collections.singletonList("a"),
+                Collections.emptyList(),
                 new HashMap<>());
 
         MySqlSyncTableAction action =
@@ -1116,6 +1117,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         new String[] {"pk", "_date", "_timestamp"}),
                 Collections.emptyList(),
                 Collections.singletonList("pk"),
+                Collections.emptyList(),
                 options);
 
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
@@ -1309,6 +1311,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                 RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"k"}),
                 Collections.emptyList(),
                 Collections.singletonList("k"),
+                Collections.emptyList(),
                 Collections.singletonMap(BUCKET.key(), "1"));
 
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
@@ -1341,7 +1344,11 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         .build();
 
         createFileStoreTable(
-                rowType, Collections.emptyList(), Collections.singletonList("pk"), options);
+                rowType,
+                Collections.emptyList(),
+                Collections.singletonList("pk"),
+                Collections.emptyList(),
+                options);
 
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", DATABASE_NAME);

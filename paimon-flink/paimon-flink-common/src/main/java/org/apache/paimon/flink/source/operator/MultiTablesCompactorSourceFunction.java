@@ -134,7 +134,7 @@ public abstract class MultiTablesCompactorSourceFunction
                             continue;
                         }
                         FileStoreTable fileStoreTable = (FileStoreTable) table;
-                        if (fileStoreTable.bucketMode() == BucketMode.UNAWARE) {
+                        if (fileStoreTable.bucketMode() == BucketMode.BUCKET_UNAWARE) {
                             LOG.info(
                                     String.format(
                                                     "the bucket mode of %s is unware. ",

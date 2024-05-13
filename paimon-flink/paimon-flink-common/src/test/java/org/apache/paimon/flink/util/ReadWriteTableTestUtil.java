@@ -111,13 +111,17 @@ public class ReadWriteTableTestUtil {
     }
 
     public static String createTable(
-            List<String> fieldsSpec, List<String> primaryKeys, List<String> partitionKeys) {
-        return createTable(fieldsSpec, primaryKeys, partitionKeys, new HashMap<>());
+            List<String> fieldsSpec,
+            List<String> primaryKeys,
+            List<String> bucketKeys,
+            List<String> partitionKeys) {
+        return createTable(fieldsSpec, primaryKeys, bucketKeys, partitionKeys, new HashMap<>());
     }
 
     public static String createTable(
             List<String> fieldsSpec,
             List<String> primaryKeys,
+            List<String> bucketKeys,
             List<String> partitionKeys,
             Map<String, String> options) {
         // "-" is not allowed in the table name.
@@ -125,6 +129,9 @@ public class ReadWriteTableTestUtil {
         Map<String, String> newOptions = new HashMap<>(options);
         if (!newOptions.containsKey("bucket")) {
             newOptions.put("bucket", "1");
+        }
+        if (!bucketKeys.isEmpty()) {
+            newOptions.put("bucket-key", String.join(",", bucketKeys));
         }
         sEnv.executeSql(buildDdl(table, fieldsSpec, primaryKeys, partitionKeys, newOptions));
         return table;
