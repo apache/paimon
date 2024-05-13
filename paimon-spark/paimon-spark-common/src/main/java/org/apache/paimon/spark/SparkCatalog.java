@@ -286,7 +286,7 @@ public class SparkCatalog extends SparkBaseCatalog {
         try {
             String provider = properties.get(TableCatalog.PROP_PROVIDER);
             checkArgument(
-                    usePaimon(properties.get(TableCatalog.PROP_PROVIDER)),
+                    usePaimon(provider),
                     "SparkCatalog can only create paimon table, but current provider is %s",
                     provider);
             catalog.createTable(
