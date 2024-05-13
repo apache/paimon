@@ -62,11 +62,12 @@ class MigrateTableProcedureTest extends PaimonHiveTestBase {
           spark.sql(
             s"CALL sys.migrate_table(source_type => 'hive', table => '$hiveDbName.hive_tbl_$format', options => 'file.format=$format', target_table => '$hiveDbName.target_$format', delete_origin => false)")
 
-          checkAnswer(spark.sql(s"SELECT * FROM target_$format ORDER BY id"), Nil)
-
           checkAnswer(
-            spark.sql(s"SELECT * FROM hive_tbl_$format ORDER BY id"),
+            spark.sql(s"SELECT * FROM target_$format ORDER BY id"),
             Row("1", "a", "p1") :: Row("2", "b", "p2") :: Nil)
+
+          checkAnswer(spark.sql(s"SELECT * FROM hive_tbl_$format ORDER BY id"), Nil)
+
         }
       }
     })
