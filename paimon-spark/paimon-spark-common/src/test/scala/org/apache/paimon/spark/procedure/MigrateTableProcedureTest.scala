@@ -18,7 +18,6 @@
 
 package org.apache.paimon.spark.procedure
 
-import org.apache.paimon.catalog.Catalog.TableNotExistException
 import org.apache.paimon.spark.PaimonHiveTestBase
 
 import org.apache.spark.sql.Row
