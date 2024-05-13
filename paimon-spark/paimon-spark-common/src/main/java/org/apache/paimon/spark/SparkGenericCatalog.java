@@ -324,10 +324,6 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
         }
     }
 
-    private boolean usePaimon(String provider) {
-        return provider == null || SparkSource.NAME().equalsIgnoreCase(provider);
-    }
-
     private TableCatalog asTableCatalog() {
         return (TableCatalog) sessionCatalog;
     }
