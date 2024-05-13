@@ -103,7 +103,6 @@ public class MigrateTableProcedure extends BaseProcedure {
                             tmpTableId.getObjectName(),
                             ParameterUtils.parseCommaSeparatedKeyValues(properties));
 
-            deleteNeed = deleteNeed && !StringUtils.isEmpty(targetTable);
             migrator.deleteOriginTable(deleteNeed);
             migrator.executeMigrate();
             if (StringUtils.isEmpty(targetTable)) {
