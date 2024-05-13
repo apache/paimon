@@ -16,9 +16,19 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.commands.dv
+package org.apache.paimon.spark.commands
 
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.table.source.DeletionFile
+
+/**
+ * This class will be used as Dataset's pattern type. So here use Array[Byte] instead of BinaryRow
+ * or DeletionVector.
+ */
+case class SparkDeletionVector(
+    partition: Array[Byte],
+    bucket: Int,
+    file: String,
+    deletionVector: Array[Byte])
 
 case class SparkDeletionFile(partition: BinaryRow, bucket: Int, deletionFile: Option[DeletionFile])

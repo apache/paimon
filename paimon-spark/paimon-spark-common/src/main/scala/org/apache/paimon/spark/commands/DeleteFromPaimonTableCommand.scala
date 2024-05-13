@@ -23,7 +23,6 @@ import org.apache.paimon.CoreOptions.MergeEngine
 import org.apache.paimon.spark.PaimonSplitScan
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
-import org.apache.paimon.spark.commands.dv.SparkDeletionFile
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.schema.SparkSystemColumns.ROW_KIND_COL
 import org.apache.paimon.table.FileStoreTable
@@ -124,22 +123,27 @@ case class DeleteFromPaimonTableCommand(
     val candidateDataSplits = findCandidateDataSplits(condition, relation.output)
     val fileNameToMeta: Map[String, SparkDataFileMeta] = candidateFileMap(candidateDataSplits)
 
-    val fileNameToDeletionFile = fileNameToMeta.map {
-      case (file, dataFileMeta) =>
-        (
-          file,
-          SparkDeletionFile(dataFileMeta.partition, dataFileMeta.bucket, dataFileMeta.deletionFile))
-    }.toArray
-
     val deletionVectorsEnabled = new CoreOptions(table.options()).deletionVectorsEnabled()
     if (deletionVectorsEnabled) {
-      val dvData = persistDeletionVectors(
+      // Step2: collect all the deletion vectors that marks the deleted rows.
+      val dataFileAndDeletionFile = fileNameToMeta.map {
+        case (file, dataFileMeta) =>
+          (
+            file,
+            SparkDeletionFile(
+              dataFileMeta.partition,
+              dataFileMeta.bucket,
+              dataFileMeta.deletionFile))
+      }.toArray
+      val deletionVectors = collectDeletionVectors(
         candidateDataSplits,
-        fileNameToDeletionFile,
+        dataFileAndDeletionFile,
         condition,
         relation,
         sparkSession)
-      writer.collectCommitMessage(dvData)
+
+      // Step3: write these deletion vectors.
+      writer.persistDeletionVectors(deletionVectors)
     } else {
       // Step2: extract out the exactly files, which must have at least one record to be updated.
       val touchedFilePaths =

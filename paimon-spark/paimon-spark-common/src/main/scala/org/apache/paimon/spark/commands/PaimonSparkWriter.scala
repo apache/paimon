@@ -18,9 +18,10 @@
 
 package org.apache.paimon.spark.commands
 
-import org.apache.paimon.CoreOptions
 import org.apache.paimon.CoreOptions.WRITE_ONLY
+import org.apache.paimon.deletionvectors.{DeletionVector, DeletionVectorsMaintainer}
 import org.apache.paimon.index.BucketAssigner
+import org.apache.paimon.io.{CompactIncrement, DataIncrement, IndexIncrement}
 import org.apache.paimon.spark.SparkRow
 import org.apache.paimon.spark.SparkUtils.createIOManager
 import org.apache.paimon.spark.schema.SparkSystemColumns
@@ -28,13 +29,13 @@ import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_C
 import org.apache.paimon.spark.util.SparkRowUtils
 import org.apache.paimon.table.{BucketMode, FileStoreTable}
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageImpl, CommitMessageSerializer, RowPartitionKeyExtractor}
+import org.apache.paimon.utils.SerializationUtils
 
 import org.apache.spark.Partitioner
 import org.apache.spark.sql.{DataFrame, Dataset, Row, SparkSession}
 import org.apache.spark.sql.functions._
 
 import java.io.IOException
-import java.util.Collections
 import java.util.Collections.singletonMap
 
 import scala.collection.JavaConverters._
@@ -111,12 +112,33 @@ case class PaimonSparkWriter(table: FileStoreTable) {
     commitMessages.toSeq
   }
 
-  def collectCommitMessage(commitMessages: Dataset[Array[Byte]]): Seq[CommitMessage] = {
+  def persistDeletionVectors(deletionVectors: Dataset[SparkDeletionVector]): Seq[CommitMessage] = {
+    val sparkSession = deletionVectors.sparkSession
+    import sparkSession.implicits._
 
-    commitMessages
+    val store = table.store()
+    deletionVectors
+      .map {
+        sdv =>
+          val deletionVectorsMaintainerFactory =
+            new DeletionVectorsMaintainer.Factory(store.newIndexFileHandler())
+          val maintainer = deletionVectorsMaintainerFactory.create()
+          maintainer.notifyNewDeletion(
+            sdv.file,
+            DeletionVector.deserializeFromBytes(sdv.deletionVector))
+
+          val commitMessage = new CommitMessageImpl(
+            SerializationUtils.deserializeBinaryRow(sdv.partition),
+            sdv.bucket,
+            DataIncrement.emptyIncrement(),
+            CompactIncrement.emptyIncrement(),
+            new IndexIncrement(maintainer.prepareCommit()))
+
+          val serializer = new CommitMessageSerializer
+          serializer.serialize(commitMessage)
+      }
       .collect()
       .map(deserializeCommitMessage(serializer, _))
-
   }
 
   def commit(commitMessages: Seq[CommitMessage]): Unit = {

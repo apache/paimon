@@ -21,7 +21,6 @@ package org.apache.paimon.spark.schema
 import org.apache.paimon.spark.SparkTypeUtils
 import org.apache.paimon.types.DataField
 
-import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
 import org.apache.spark.sql.catalyst.expressions.AttributeReference
 import org.apache.spark.sql.connector.catalog.MetadataColumn
 import org.apache.spark.sql.types.{DataType, LongType, StringType}
@@ -37,9 +36,6 @@ case class PaimonMetadataColumn(id: Int, override val name: String, override val
     AttributeReference(name, dataType)()
   }
 
-  def toAttribute0: UnresolvedAttribute = {
-    UnresolvedAttribute(name)
-  }
 }
 
 object PaimonMetadataColumn {
