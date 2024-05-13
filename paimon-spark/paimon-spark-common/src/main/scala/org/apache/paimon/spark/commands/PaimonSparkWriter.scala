@@ -111,9 +111,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
     commitMessages.toSeq
   }
 
-  def collectCommitMessage(
-      sparkSession: SparkSession,
-      commitMessages: Dataset[Array[Byte]]): Seq[CommitMessage] = {
+  def collectCommitMessage(commitMessages: Dataset[Array[Byte]]): Seq[CommitMessage] = {
 
     commitMessages
       .collect()

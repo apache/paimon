@@ -140,7 +140,7 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
       .map(relativePath)
   }
 
-  protected def findTouchedFiles0(
+  protected def persistDeletionVectors(
       candidateDataSplits: Seq[DataSplit],
       fileNameToDeletionFile: Array[(String, SparkDeletionFile)],
       condition: Expression,
@@ -148,13 +148,6 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
       sparkSession: SparkSession): Dataset[Array[Byte]] = {
     import sparkSession.implicits._
 
-    // only raw convertible can generate input_file_name()
-    for (split <- candidateDataSplits) {
-      if (!split.rawConvertible()) {
-        throw new IllegalArgumentException(
-          "Only compacted table can generate touched files, please use 'COMPACT' procedure first.");
-      }
-    }
 
     val attrs =
       Seq(PaimonMetadataColumn.FILE_PATH, PaimonMetadataColumn.ROW_INDEX).map(_.toAttribute)

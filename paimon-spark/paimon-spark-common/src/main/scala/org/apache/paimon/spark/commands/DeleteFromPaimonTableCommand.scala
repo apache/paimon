@@ -100,7 +100,7 @@ case class DeleteFromPaimonTableCommand(
         val commitMessages = if (usePrimaryKeyDelete()) {
           performPrimaryKeyDelete(sparkSession)
         } else {
-          performDeleteCopyOnWrite(sparkSession)
+          performNonPrimaryKeyDelete(sparkSession)
         }
         writer.commit(commitMessages)
       }
@@ -119,7 +119,7 @@ case class DeleteFromPaimonTableCommand(
     writer.write(df)
   }
 
-  def performDeleteCopyOnWrite(sparkSession: SparkSession): Seq[CommitMessage] = {
+  def performNonPrimaryKeyDelete(sparkSession: SparkSession): Seq[CommitMessage] = {
     // Step1: the candidate data splits which are filtered by Paimon Predicate.
     val candidateDataSplits = findCandidateDataSplits(condition, relation.output)
     val fileNameToMeta: Map[String, SparkDataFileMeta] = candidateFileMap(candidateDataSplits)
@@ -130,18 +130,17 @@ case class DeleteFromPaimonTableCommand(
           file,
           SparkDeletionFile(dataFileMeta.partition, dataFileMeta.bucket, dataFileMeta.deletionFile))
     }.toArray
-    val dvEnabled = new CoreOptions(table.options()).deletionVectorsEnabled()
-    if (dvEnabled) {
-      val dvData = findTouchedFiles0(
+
+    val deletionVectorsEnabled = new CoreOptions(table.options()).deletionVectorsEnabled()
+    if (deletionVectorsEnabled) {
+      val dvData = persistDeletionVectors(
         candidateDataSplits,
         fileNameToDeletionFile,
         condition,
         relation,
         sparkSession)
-      val message = writer.collectCommitMessage(sparkSession, dvData)
-      message
+      writer.collectCommitMessage(dvData)
     } else {
-
       // Step2: extract out the exactly files, which must have at least one record to be updated.
       val touchedFilePaths =
         findTouchedFiles(candidateDataSplits, condition, relation, sparkSession)
