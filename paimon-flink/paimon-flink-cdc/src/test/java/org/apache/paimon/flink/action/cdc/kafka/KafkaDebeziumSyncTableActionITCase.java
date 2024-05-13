@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
+import org.apache.paimon.flink.action.cdc.format.DataFormat;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -36,7 +37,7 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOp
 /** IT cases for {@link KafkaSyncTableAction}. */
 public class KafkaDebeziumSyncTableActionITCase extends KafkaSyncTableActionITCase {
 
-    private static final String FORMAT = "debezium-json";
+    private static final String FORMAT = DataFormat.DEBEZIUM_JSON.asConfigString();
 
     @Test
     @Timeout(60)

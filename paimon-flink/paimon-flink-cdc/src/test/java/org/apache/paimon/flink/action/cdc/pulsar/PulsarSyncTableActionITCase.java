@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action.cdc.pulsar;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.action.cdc.format.DataFormat;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -40,7 +41,7 @@ import static org.apache.paimon.flink.action.cdc.pulsar.PulsarActionUtils.VALUE_
 
 /** IT cases for {@link PulsarSyncTableAction}. */
 public class PulsarSyncTableActionITCase extends PulsarActionITCaseBase {
-    private static final String FORMAT = "canal-json";
+    private static final String FORMAT = DataFormat.CANAL_JSON.asConfigString();
 
     @Test
     @Timeout(120)

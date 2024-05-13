@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action.cdc.kafka;
 
 import org.apache.paimon.catalog.FileSystemCatalogOptions;
+import org.apache.paimon.flink.action.cdc.format.DataFormat;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -358,7 +359,7 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                             DataTypes.STRING()
                         },
                         new String[] {"id", "name", "description", "weight", "address"});
-        if (format.equals("debezium")) {
+        if (format.equals(DataFormat.DEBEZIUM_JSON.asConfigString())) {
             expected =
                     Arrays.asList(
                             "+I[101, scooter, Small 2-wheel scooter, 3.14, Beijing]",
@@ -383,7 +384,7 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                             DataTypes.STRING()
                         },
                         new String[] {"id", "name", "description", "weight", "age"});
-        if (format.equals("debezium")) {
+        if (format.equals(DataFormat.DEBEZIUM_JSON.asConfigString())) {
             expected =
                     Arrays.asList(
                             "+I[103, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3, 0.8, 19]",
@@ -497,11 +498,13 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     }
 
     private DataType getDataType(String format) {
-        return format.equals("debezium") ? DataTypes.STRING() : DataTypes.STRING().notNull();
+        return format.equals(DataFormat.DEBEZIUM_JSON.asConfigString())
+                ? DataTypes.STRING()
+                : DataTypes.STRING().notNull();
     }
 
     private List<String> getPrimaryKey(String format) {
-        return format.equals("debezium")
+        return format.equals(DataFormat.DEBEZIUM_JSON.asConfigString())
                 ? Collections.emptyList()
                 : Collections.singletonList("id");
     }

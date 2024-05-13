@@ -20,6 +20,7 @@ package org.apache.paimon.flink.action.cdc.kafka;
 
 import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
+import org.apache.paimon.flink.action.cdc.format.DataFormat;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
@@ -43,7 +44,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for building schema from Kafka. */
 public class KafkaSchemaITCase extends KafkaActionITCaseBase {
-    private static final String FORMAT = "canal-json";
+    private static final String FORMAT = DataFormat.CANAL_JSON.asConfigString();
 
     @Test
     @Timeout(60)

@@ -18,12 +18,14 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
+import org.apache.paimon.flink.action.cdc.format.DataFormat;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 /** IT cases for {@link KafkaSyncDatabaseAction}. */
 public class KafkaOggSyncDatabaseActionITCase extends KafkaSyncDatabaseActionITCase {
-    private static final String FORMAT = "ogg-json";
+    private static final String FORMAT = DataFormat.OGG_JSON.asConfigString();
 
     @Test
     @Timeout(60)

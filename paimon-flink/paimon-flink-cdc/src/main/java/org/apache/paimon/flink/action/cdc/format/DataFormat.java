@@ -108,6 +108,11 @@ public enum DataFormat {
         return pulsarDeserializer.apply(cdcSourceConfig);
     }
 
+    /** Returns the configuration string representation of this data format. */
+    public String asConfigString() {
+        return this.name().toLowerCase().replace("_", "-");
+    }
+
     public static DataFormat fromConfigString(String format) {
         try {
             return DataFormat.valueOf(format.replace("-", "_").toUpperCase());

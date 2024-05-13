@@ -18,12 +18,14 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
+import org.apache.paimon.flink.action.cdc.format.DataFormat;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 /** IT cases for {@link KafkaSyncDatabaseAction}. */
 public class KafkaDebeziumSyncDatabaseActionITCase extends KafkaSyncDatabaseActionITCase {
-    private static final String FORMAT = "debezium-json";
+    private static final String FORMAT = DataFormat.DEBEZIUM_JSON.asConfigString();
 
     @Test
     @Timeout(60)

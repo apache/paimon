@@ -20,6 +20,7 @@ package org.apache.paimon.flink.action.cdc.pulsar;
 
 import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
+import org.apache.paimon.flink.action.cdc.format.DataFormat;
 import org.apache.paimon.flink.action.cdc.serialization.CdcJsonDeserializationSchema;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataField;
@@ -40,7 +41,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for building schema from Pulsar. */
 public class PulsarSchemaITCase extends PulsarActionITCaseBase {
-    private static final String FORMAT = "canal-json";
+    private static final String FORMAT = DataFormat.CANAL_JSON.asConfigString();
 
     @Test
     @Timeout(60)

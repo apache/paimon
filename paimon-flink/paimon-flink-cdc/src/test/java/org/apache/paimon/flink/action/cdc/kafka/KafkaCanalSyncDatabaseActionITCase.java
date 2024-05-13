@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action.cdc.kafka;
 
 import org.apache.paimon.catalog.FileSystemCatalogOptions;
+import org.apache.paimon.flink.action.cdc.format.DataFormat;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -46,7 +47,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link KafkaSyncDatabaseAction}. */
 public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
-    private static final String FORMAT = "canal-json";
+    private static final String FORMAT = DataFormat.CANAL_JSON.asConfigString();
 
     @Test
     @Timeout(60)
