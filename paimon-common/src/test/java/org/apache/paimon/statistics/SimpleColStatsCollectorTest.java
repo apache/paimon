@@ -23,7 +23,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.BinaryStringSerializer;
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.data.serializer.Serializer;
-import org.apache.paimon.format.FieldStats;
+import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
@@ -40,8 +40,8 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Test for {@link FieldStatsCollector}. */
-public class FieldStatsCollectorTest {
+/** Test for {@link SimpleColStatsCollector}. */
+public class SimpleColStatsCollectorTest {
 
     private Serializer<Object>[] serializers;
     private static final String s1 = StringUtils.repeat("a", 12);
@@ -65,18 +65,25 @@ public class FieldStatsCollectorTest {
 
     @Test
     public void testParse() {
-        assertThat(FieldStatsCollector.from("none").create() instanceof NoneFieldStatsCollector)
+        assertThat(
+                        SimpleColStatsCollector.from("none").create()
+                                instanceof NoneSimpleColStatsCollector)
                 .isTrue();
-        assertThat(FieldStatsCollector.from("Full").create() instanceof FullFieldStatsCollector)
+        assertThat(
+                        SimpleColStatsCollector.from("Full").create()
+                                instanceof FullSimpleColStatsCollector)
                 .isTrue();
-        assertThat(FieldStatsCollector.from("CoUNts").create() instanceof CountsFieldStatsCollector)
+        assertThat(
+                        SimpleColStatsCollector.from("CoUNts").create()
+                                instanceof CountsSimpleColStatsCollector)
                 .isTrue();
-        TruncateFieldStatsCollector t1 =
-                (TruncateFieldStatsCollector) FieldStatsCollector.from("truncate(10)").create();
+        TruncateSimpleColStatsCollector t1 =
+                (TruncateSimpleColStatsCollector)
+                        SimpleColStatsCollector.from("truncate(10)").create();
         assertThat(t1.getLength()).isEqualTo(10);
-        assertThatThrownBy(() -> FieldStatsCollector.from("aatruncate(10)"))
+        assertThatThrownBy(() -> SimpleColStatsCollector.from("aatruncate(10)"))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> FieldStatsCollector.from("truncate(10.1)"))
+        assertThatThrownBy(() -> SimpleColStatsCollector.from("truncate(10.1)"))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -87,15 +94,15 @@ public class FieldStatsCollectorTest {
         check(
                 rows,
                 0,
-                new FieldStats(null, null, null),
-                new FieldStats(1, 4, 0L),
-                new NoneFieldStatsCollector());
+                new SimpleColStats(null, null, null),
+                new SimpleColStats(1, 4, 0L),
+                new NoneSimpleColStatsCollector());
         check(
                 rows,
                 1,
-                new FieldStats(null, null, null),
-                new FieldStats(s1, s3, 1L),
-                new NoneFieldStatsCollector());
+                new SimpleColStats(null, null, null),
+                new SimpleColStats(s1, s3, 1L),
+                new NoneSimpleColStatsCollector());
     }
 
     @Test
@@ -105,15 +112,15 @@ public class FieldStatsCollectorTest {
         check(
                 rows,
                 0,
-                new FieldStats(null, null, 0L),
-                new FieldStats(1, 4, 0L),
-                new CountsFieldStatsCollector());
+                new SimpleColStats(null, null, 0L),
+                new SimpleColStats(1, 4, 0L),
+                new CountsSimpleColStatsCollector());
         check(
                 rows,
                 1,
-                new FieldStats(null, null, 1L),
-                new FieldStats(s1, s3, 1L),
-                new CountsFieldStatsCollector());
+                new SimpleColStats(null, null, 1L),
+                new SimpleColStats(s1, s3, 1L),
+                new CountsSimpleColStatsCollector());
     }
 
     @Test
@@ -123,15 +130,15 @@ public class FieldStatsCollectorTest {
         check(
                 rows,
                 0,
-                new FieldStats(1, 4, 0L),
-                new FieldStats(1, 4, 0L),
-                new FullFieldStatsCollector());
+                new SimpleColStats(1, 4, 0L),
+                new SimpleColStats(1, 4, 0L),
+                new FullSimpleColStatsCollector());
         check(
                 rows,
                 1,
-                new FieldStats(BinaryString.fromString(s1), BinaryString.fromString(s3), 1L),
-                new FieldStats(BinaryString.fromString(s1), BinaryString.fromString(s3), 1L),
-                new FullFieldStatsCollector());
+                new SimpleColStats(BinaryString.fromString(s1), BinaryString.fromString(s3), 1L),
+                new SimpleColStats(BinaryString.fromString(s1), BinaryString.fromString(s3), 1L),
+                new FullSimpleColStatsCollector());
     }
 
     @Test
@@ -141,53 +148,54 @@ public class FieldStatsCollectorTest {
         check(
                 rows,
                 0,
-                new FieldStats(1, 4, 0L),
-                new FieldStats(1, 4, 0L),
-                new TruncateFieldStatsCollector(1));
+                new SimpleColStats(1, 4, 0L),
+                new SimpleColStats(1, 4, 0L),
+                new TruncateSimpleColStatsCollector(1));
         check(
                 rows,
                 1,
-                new FieldStats(BinaryString.fromString(s1_t), BinaryString.fromString(s3_t), 1L),
-                new FieldStats(BinaryString.fromString(s1), BinaryString.fromString(s3), 1L),
-                new TruncateFieldStatsCollector(2));
+                new SimpleColStats(
+                        BinaryString.fromString(s1_t), BinaryString.fromString(s3_t), 1L),
+                new SimpleColStats(BinaryString.fromString(s1), BinaryString.fromString(s3), 1L),
+                new TruncateSimpleColStatsCollector(2));
     }
 
     @Test
     public void testTruncateTwoChar() {
-        TruncateFieldStatsCollector t1 = new TruncateFieldStatsCollector(1);
-        FieldStats fieldStats =
-                new FieldStats(
+        TruncateSimpleColStatsCollector t1 = new TruncateSimpleColStatsCollector(1);
+        SimpleColStats fieldStats =
+                new SimpleColStats(
                         BinaryString.fromString("\uD83E\uDD18a"),
                         BinaryString.fromString("\uD83E\uDD18b"),
                         0L);
         fieldStats = t1.convert(fieldStats);
-        assertThat(fieldStats.minValue()).isEqualTo(BinaryString.fromString("\uD83E\uDD18"));
-        assertThat(fieldStats.maxValue()).isEqualTo(BinaryString.fromString("\uD83E\uDD19"));
+        assertThat(fieldStats.min()).isEqualTo(BinaryString.fromString("\uD83E\uDD18"));
+        assertThat(fieldStats.max()).isEqualTo(BinaryString.fromString("\uD83E\uDD19"));
     }
 
     @Test
     public void testTruncateCopied() {
-        TruncateFieldStatsCollector collector = new TruncateFieldStatsCollector(16);
+        TruncateSimpleColStatsCollector collector = new TruncateSimpleColStatsCollector(16);
         BinaryString str = BinaryString.fromString("str");
         collector.collect(str, (Serializer) BinaryStringSerializer.INSTANCE);
-        FieldStats stats = collector.result();
-        assertThat(stats.minValue()).isNotSameAs(str);
-        assertThat(stats.maxValue()).isNotSameAs(str);
+        SimpleColStats stats = collector.result();
+        assertThat(stats.min()).isNotSameAs(str);
+        assertThat(stats.max()).isNotSameAs(str);
     }
 
     @Test
     public void testFullCopied() {
-        FullFieldStatsCollector collector = new FullFieldStatsCollector();
+        FullSimpleColStatsCollector collector = new FullSimpleColStatsCollector();
         BinaryString str = BinaryString.fromString("str");
         collector.collect(str, (Serializer) BinaryStringSerializer.INSTANCE);
-        FieldStats stats = collector.result();
-        assertThat(stats.minValue()).isNotSameAs(str);
-        assertThat(stats.maxValue()).isNotSameAs(str);
+        SimpleColStats stats = collector.result();
+        assertThat(stats.min()).isNotSameAs(str);
+        assertThat(stats.max()).isNotSameAs(str);
     }
 
     @Test
     public void testTruncateFail() {
-        TruncateFieldStatsCollector collector = new TruncateFieldStatsCollector(3);
+        TruncateSimpleColStatsCollector collector = new TruncateSimpleColStatsCollector(3);
 
         StringBuilder builder = new StringBuilder();
         builder.appendCodePoint(Character.MAX_CODE_POINT);
@@ -197,27 +205,27 @@ public class FieldStatsCollectorTest {
         BinaryString str = BinaryString.fromString(builder.toString());
 
         collector.collect(str, (Serializer) BinaryStringSerializer.INSTANCE);
-        FieldStats stats = collector.result();
-        assertThat(stats.minValue()).isNull();
-        assertThat(stats.maxValue()).isNull();
+        SimpleColStats stats = collector.result();
+        assertThat(stats.min()).isNull();
+        assertThat(stats.max()).isNull();
 
-        stats = collector.convert(new FieldStats(str, str, 0L));
-        assertThat(stats.minValue()).isNull();
-        assertThat(stats.maxValue()).isNull();
+        stats = collector.convert(new SimpleColStats(str, str, 0L));
+        assertThat(stats.min()).isNull();
+        assertThat(stats.max()).isNull();
     }
 
     private void check(
             List<GenericRow> rows,
             int column,
-            FieldStats expected,
-            FieldStats formatExtracted,
-            FieldStatsCollector fieldStatsCollector) {
+            SimpleColStats expected,
+            SimpleColStats formatExtracted,
+            SimpleColStatsCollector simpleColStatsCollector) {
         for (GenericRow row : rows) {
-            fieldStatsCollector.collect(row.getField(column), serializers[column]);
+            simpleColStatsCollector.collect(row.getField(column), serializers[column]);
         }
 
-        assertThat(fieldStatsCollector.result()).isEqualTo(expected);
-        assertThat(fieldStatsCollector.convert(formatExtracted)).isEqualTo(expected);
+        assertThat(simpleColStatsCollector.result()).isEqualTo(expected);
+        assertThat(simpleColStatsCollector.convert(formatExtracted)).isEqualTo(expected);
     }
 
     private List<GenericRow> getRows() {

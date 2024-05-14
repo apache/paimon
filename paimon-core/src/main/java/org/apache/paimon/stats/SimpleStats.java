@@ -22,21 +22,36 @@ import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.FieldStats;
 
 import java.util.Objects;
 
+import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
-/** A serialized row bytes to cache {@link FieldStats}. */
-public class BinaryTableStats {
+/**
+ * The statistics for columns, supports the following stats.
+ *
+ * <ul>
+ *   <li>minValues: the minimum values of the columns
+ *   <li>maxValues: the maximum values of the columns
+ *   <li>nullCounts: the number of nulls of the columns
+ * </ul>
+ *
+ * <p>All statistics are stored in the form of a Binary, which can significantly reduce its memory
+ * consumption, but the cost is that the column type needs to be known when getting.
+ */
+public class SimpleStats {
+
+    /** Empty stats for 0 column number. */
+    public static final SimpleStats EMPTY_STATS =
+            new SimpleStats(EMPTY_ROW, EMPTY_ROW, BinaryArray.fromLongArray(new Long[0]));
 
     private final BinaryRow minValues;
     private final BinaryRow maxValues;
     private final BinaryArray nullCounts;
 
-    public BinaryTableStats(BinaryRow minValues, BinaryRow maxValues, BinaryArray nullCounts) {
+    public SimpleStats(BinaryRow minValues, BinaryRow maxValues, BinaryArray nullCounts) {
         this.minValues = minValues;
         this.maxValues = maxValues;
         this.nullCounts = nullCounts;
@@ -59,8 +74,8 @@ public class BinaryTableStats {
                 serializeBinaryRow(minValues), serializeBinaryRow(maxValues), nullCounts);
     }
 
-    public static BinaryTableStats fromRow(InternalRow row) {
-        return new BinaryTableStats(
+    public static SimpleStats fromRow(InternalRow row) {
+        return new SimpleStats(
                 deserializeBinaryRow(row.getBinary(0)),
                 deserializeBinaryRow(row.getBinary(1)),
                 BinaryArray.fromLongArray(row.getArray(2)));
@@ -74,7 +89,7 @@ public class BinaryTableStats {
         if (o == null || getClass() != o.getClass()) {
             return false;
         }
-        BinaryTableStats that = (BinaryTableStats) o;
+        SimpleStats that = (SimpleStats) o;
         return Objects.equals(minValues, that.minValues)
                 && Objects.equals(maxValues, that.maxValues)
                 && Objects.equals(nullCounts, that.nullCounts);

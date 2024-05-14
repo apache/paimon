@@ -19,13 +19,13 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.FormatWriterFactory;
-import org.apache.paimon.format.TableStatsCollector;
-import org.apache.paimon.format.TableStatsExtractor;
+import org.apache.paimon.format.SimpleColStats;
+import org.apache.paimon.format.SimpleStatsCollector;
+import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.statistics.FieldStatsCollector;
+import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 
@@ -42,8 +42,8 @@ import java.util.function.Function;
  */
 public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWriter<T, R> {
 
-    @Nullable private final TableStatsExtractor tableStatsExtractor;
-    @Nullable private TableStatsCollector tableStatsCollector = null;
+    @Nullable private final SimpleStatsExtractor simpleStatsExtractor;
+    @Nullable private SimpleStatsCollector simpleStatsCollector = null;
 
     public StatsCollectingSingleFileWriter(
             FileIO fileIO,
@@ -51,13 +51,13 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
             Path path,
             Function<T, InternalRow> converter,
             RowType writeSchema,
-            @Nullable TableStatsExtractor tableStatsExtractor,
+            @Nullable SimpleStatsExtractor simpleStatsExtractor,
             String compression,
-            FieldStatsCollector.Factory[] statsCollectors) {
+            SimpleColStatsCollector.Factory[] statsCollectors) {
         super(fileIO, factory, path, converter, compression);
-        this.tableStatsExtractor = tableStatsExtractor;
-        if (this.tableStatsExtractor == null) {
-            this.tableStatsCollector = new TableStatsCollector(writeSchema, statsCollectors);
+        this.simpleStatsExtractor = simpleStatsExtractor;
+        if (this.simpleStatsExtractor == null) {
+            this.simpleStatsCollector = new SimpleStatsCollector(writeSchema, statsCollectors);
         }
         Preconditions.checkArgument(
                 statsCollectors.length == writeSchema.getFieldCount(),
@@ -67,17 +67,17 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
     @Override
     public void write(T record) throws IOException {
         InternalRow rowData = writeImpl(record);
-        if (tableStatsCollector != null && !tableStatsCollector.isDisabled()) {
-            tableStatsCollector.collect(rowData);
+        if (simpleStatsCollector != null && !simpleStatsCollector.isDisabled()) {
+            simpleStatsCollector.collect(rowData);
         }
     }
 
-    public FieldStats[] fieldStats() throws IOException {
+    public SimpleColStats[] fieldStats() throws IOException {
         Preconditions.checkState(closed, "Cannot access metric unless the writer is closed.");
-        if (tableStatsExtractor != null) {
-            return tableStatsExtractor.extract(fileIO, path);
+        if (simpleStatsExtractor != null) {
+            return simpleStatsExtractor.extract(fileIO, path);
         } else {
-            return tableStatsCollector.extract();
+            return simpleStatsCollector.extract();
         }
     }
 }

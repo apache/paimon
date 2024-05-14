@@ -18,12 +18,12 @@
 
 package org.apache.paimon.format.avro;
 
-import org.apache.paimon.format.FieldStats;
-import org.apache.paimon.format.TableStatsExtractor;
+import org.apache.paimon.format.SimpleColStats;
+import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.statistics.FieldStatsCollector;
+import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
@@ -35,13 +35,14 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.stream.IntStream;
 
-/** {@link TableStatsExtractor} for avro files. */
-public class AvroTableStatsExtractor implements TableStatsExtractor {
+/** {@link SimpleStatsExtractor} for avro files. */
+public class AvroSimpleStatsExtractor implements SimpleStatsExtractor {
 
     private final RowType rowType;
-    private final FieldStatsCollector.Factory[] statsCollectors;
+    private final SimpleColStatsCollector.Factory[] statsCollectors;
 
-    public AvroTableStatsExtractor(RowType rowType, FieldStatsCollector.Factory[] statsCollectors) {
+    public AvroSimpleStatsExtractor(
+            RowType rowType, SimpleColStatsCollector.Factory[] statsCollectors) {
         this.rowType = rowType;
         this.statsCollectors = statsCollectors;
         Preconditions.checkArgument(
@@ -50,12 +51,12 @@ public class AvroTableStatsExtractor implements TableStatsExtractor {
     }
 
     @Override
-    public FieldStats[] extract(FileIO fileIO, Path path) throws IOException {
+    public SimpleColStats[] extract(FileIO fileIO, Path path) throws IOException {
         return extractWithFileInfo(fileIO, path).getLeft();
     }
 
     @Override
-    public Pair<FieldStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path)
+    public Pair<SimpleColStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path)
             throws IOException {
 
         SeekableInputStream fileInputStream = fileIO.newInputStream(path);
@@ -67,9 +68,9 @@ public class AvroTableStatsExtractor implements TableStatsExtractor {
                                 i -> {
                                     // In avro format, minValue, maxValue, and nullCount are not
                                     // counted. So fill it with null.
-                                    return new FieldStats(null, null, null);
+                                    return new SimpleColStats(null, null, null);
                                 })
-                        .toArray(FieldStats[]::new),
+                        .toArray(SimpleColStats[]::new),
                 new FileInfo(rowCount));
     }
 

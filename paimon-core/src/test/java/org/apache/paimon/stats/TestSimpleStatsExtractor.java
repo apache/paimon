@@ -19,14 +19,14 @@
 package org.apache.paimon.stats;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
-import org.apache.paimon.format.TableStatsCollector;
-import org.apache.paimon.format.TableStatsExtractor;
+import org.apache.paimon.format.SimpleColStats;
+import org.apache.paimon.format.SimpleStatsCollector;
+import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.statistics.FieldStatsCollector;
+import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ObjectSerializer;
 import org.apache.paimon.utils.Pair;
@@ -39,17 +39,17 @@ import java.util.List;
 import static org.apache.paimon.utils.FileUtils.createFormatReader;
 
 /**
- * {@link TableStatsExtractor} for test. It reads all records from the file and use {@link
- * TableStatsCollector} to collect the stats.
+ * {@link SimpleStatsExtractor} for test. It reads all records from the file and use {@link
+ * SimpleStatsCollector} to collect the stats.
  */
-public class TestTableStatsExtractor implements TableStatsExtractor {
+public class TestSimpleStatsExtractor implements SimpleStatsExtractor {
 
     private final FileFormat format;
     private final RowType rowType;
-    private final FieldStatsCollector.Factory[] stats;
+    private final SimpleColStatsCollector.Factory[] stats;
 
-    public TestTableStatsExtractor(
-            FileFormat format, RowType rowType, FieldStatsCollector.Factory[] stats) {
+    public TestSimpleStatsExtractor(
+            FileFormat format, RowType rowType, SimpleColStatsCollector.Factory[] stats) {
         this.format = format;
         this.rowType = rowType;
         this.stats = stats;
@@ -59,18 +59,18 @@ public class TestTableStatsExtractor implements TableStatsExtractor {
     }
 
     @Override
-    public FieldStats[] extract(FileIO fileIO, Path path) throws IOException {
+    public SimpleColStats[] extract(FileIO fileIO, Path path) throws IOException {
         return extractWithFileInfo(fileIO, path).getLeft();
     }
 
     @Override
-    public Pair<FieldStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path)
+    public Pair<SimpleColStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path)
             throws IOException {
         IdentityObjectSerializer serializer = new IdentityObjectSerializer(rowType);
         FormatReaderFactory readerFactory = format.createReaderFactory(rowType);
         List<InternalRow> records = readListFromFile(fileIO, path, serializer, readerFactory);
 
-        TableStatsCollector statsCollector = new TableStatsCollector(rowType, stats);
+        SimpleStatsCollector statsCollector = new SimpleStatsCollector(rowType, stats);
         for (InternalRow record : records) {
             statsCollector.collect(record);
         }

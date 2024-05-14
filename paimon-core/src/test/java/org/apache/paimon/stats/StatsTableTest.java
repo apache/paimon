@@ -74,7 +74,7 @@ public class StatsTableTest extends TableTestBase {
         ManifestFileMeta manifest = manifestList.read(manifestListFile).get(0);
 
         // should have partition stats
-        BinaryTableStats partitionStats = manifest.partitionStats();
+        SimpleStats partitionStats = manifest.partitionStats();
         assertThat(partitionStats.minValues().getInt(0)).isEqualTo(1);
         assertThat(partitionStats.maxValues().getInt(0)).isEqualTo(2);
 
@@ -82,7 +82,7 @@ public class StatsTableTest extends TableTestBase {
         ManifestFile manifestFile = store.manifestFileFactory().create();
         DataFileMeta file =
                 manifestFile.read(manifest.fileName(), manifest.fileSize()).get(0).file();
-        BinaryTableStats recordStats = file.valueStats();
+        SimpleStats recordStats = file.valueStats();
         assertThat(recordStats.minValues().isNullAt(0)).isTrue();
         assertThat(recordStats.minValues().isNullAt(1)).isTrue();
         assertThat(recordStats.minValues().isNullAt(2)).isTrue();

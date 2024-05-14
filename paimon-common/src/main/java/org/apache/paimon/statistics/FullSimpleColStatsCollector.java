@@ -19,21 +19,33 @@
 package org.apache.paimon.statistics;
 
 import org.apache.paimon.data.serializer.Serializer;
-import org.apache.paimon.format.FieldStats;
+import org.apache.paimon.format.SimpleColStats;
 
-/** The none stats collector which report nothing. */
-public class NoneFieldStatsCollector extends AbstractFieldStatsCollector {
-
-    @Override
-    public void collect(Object field, Serializer<Object> fieldSerializer) {}
+/** The full stats collector which will report null count, min value, max value if available. */
+public class FullSimpleColStatsCollector extends AbstractSimpleColStatsCollector {
 
     @Override
-    public FieldStats result() {
-        return new FieldStats(null, null, null);
+    public void collect(Object field, Serializer<Object> fieldSerializer) {
+        if (field == null) {
+            nullCount++;
+            return;
+        }
+
+        // TODO use comparator for not comparable types and extract this logic to a util class
+        if (!(field instanceof Comparable)) {
+            return;
+        }
+        Comparable<Object> c = (Comparable<Object>) field;
+        if (minValue == null || c.compareTo(minValue) < 0) {
+            minValue = fieldSerializer.copy(c);
+        }
+        if (maxValue == null || c.compareTo(maxValue) > 0) {
+            maxValue = fieldSerializer.copy(c);
+        }
     }
 
     @Override
-    public FieldStats convert(FieldStats source) {
-        return new FieldStats(null, null, null);
+    public SimpleColStats convert(SimpleColStats source) {
+        return source;
     }
 }

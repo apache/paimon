@@ -30,7 +30,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.statistics.FieldStatsCollector;
+import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.CharType;
@@ -62,8 +62,8 @@ import java.util.stream.IntStream;
 import static org.apache.paimon.types.DataTypeChecks.getPrecision;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link TableStatsExtractor}. */
-public abstract class TableFieldStatsExtractorTest {
+/** Tests for {@link SimpleStatsExtractor}. */
+public abstract class SimpleColStatsExtractorTest {
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -75,10 +75,10 @@ public abstract class TableFieldStatsExtractorTest {
         FileFormat format = createFormat();
         RowType rowType = rowType();
         int count = rowType().getFieldCount();
-        FieldStatsCollector.Factory[] stats =
+        SimpleColStatsCollector.Factory[] stats =
                 IntStream.range(0, count)
-                        .mapToObj(p -> FieldStatsCollector.from(mode))
-                        .toArray(FieldStatsCollector.Factory[]::new);
+                        .mapToObj(p -> SimpleColStatsCollector.from(mode))
+                        .toArray(SimpleColStatsCollector.Factory[]::new);
 
         FormatWriterFactory writerFactory = format.createWriterFactory(rowType);
         Path path = new Path(tempDir.toString() + "/test");
@@ -91,22 +91,22 @@ public abstract class TableFieldStatsExtractorTest {
         }
         writer.finish();
 
-        TableStatsCollector collector = new TableStatsCollector(rowType, stats);
+        SimpleStatsCollector collector = new SimpleStatsCollector(rowType, stats);
         for (GenericRow row : data) {
             collector.collect(row);
         }
-        FieldStats[] expected = collector.extract();
+        SimpleColStats[] expected = collector.extract();
 
-        TableStatsExtractor extractor = format.createStatsExtractor(rowType, stats).get();
+        SimpleStatsExtractor extractor = format.createStatsExtractor(rowType, stats).get();
         assertThat(extractor).isNotNull();
-        FieldStats[] actual = extractor.extract(fileIO, path);
+        SimpleColStats[] actual = extractor.extract(fileIO, path);
         for (int i = 0; i < expected.length; i++) {
             expected[i] = regenerate(expected[i], rowType.getTypeAt(i));
         }
         assertThat(actual).isEqualTo(expected);
     }
 
-    protected FieldStats regenerate(FieldStats stats, DataType type) {
+    protected SimpleColStats regenerate(SimpleColStats stats, DataType type) {
         return stats;
     }
 

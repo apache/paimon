@@ -23,7 +23,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.stats.BinaryTableStats;
+import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.source.DataSplit;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -153,7 +153,7 @@ public class PrimaryKeyFileMetaFilterTest extends FileMetaFilterTestBase {
     }
 
     @Override
-    protected BinaryTableStats getTableValueStats(DataFileMeta fileMeta) {
+    protected SimpleStats getTableValueStats(DataFileMeta fileMeta) {
         throw new UnsupportedOperationException();
     }
 }

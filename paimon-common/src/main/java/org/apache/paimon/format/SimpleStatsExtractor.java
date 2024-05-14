@@ -16,21 +16,33 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.statistics;
+package org.apache.paimon.format;
 
-import org.apache.paimon.format.FieldStats;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.utils.Pair;
 
-/** Abstract base stats collector. */
-public abstract class AbstractFieldStatsCollector implements FieldStatsCollector {
+import java.io.IOException;
 
-    protected Object minValue;
+/** Extracts statistics directly from file. */
+public interface SimpleStatsExtractor {
 
-    protected Object maxValue;
+    SimpleColStats[] extract(FileIO fileIO, Path path) throws IOException;
 
-    protected long nullCount;
+    Pair<SimpleColStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path)
+            throws IOException;
 
-    @Override
-    public FieldStats result() {
-        return new FieldStats(minValue, maxValue, nullCount);
+    /** File info fetched from physical file. */
+    class FileInfo {
+
+        private final long rowCount;
+
+        public FileInfo(long rowCount) {
+            this.rowCount = rowCount;
+        }
+
+        public long getRowCount() {
+            return rowCount;
+        }
     }
 }

@@ -20,7 +20,7 @@ package org.apache.paimon.statistics;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.serializer.Serializer;
-import org.apache.paimon.format.FieldStats;
+import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.utils.Preconditions;
 
 import java.util.regex.Pattern;
@@ -29,7 +29,7 @@ import java.util.regex.Pattern;
  * The truncate stats collector which will report null count, truncated min/max value. Currently,
  * truncation only performs on the {@link BinaryString} value.
  */
-public class TruncateFieldStatsCollector extends AbstractFieldStatsCollector {
+public class TruncateSimpleColStatsCollector extends AbstractSimpleColStatsCollector {
 
     public static final Pattern TRUNCATE_PATTERN = Pattern.compile("TRUNCATE\\((\\d+)\\)");
 
@@ -37,7 +37,7 @@ public class TruncateFieldStatsCollector extends AbstractFieldStatsCollector {
 
     private boolean failed = false;
 
-    public TruncateFieldStatsCollector(int length) {
+    public TruncateSimpleColStatsCollector(int length) {
         Preconditions.checkArgument(length > 0, "Truncate length should larger than zero.");
         this.length = length;
     }
@@ -72,21 +72,21 @@ public class TruncateFieldStatsCollector extends AbstractFieldStatsCollector {
     }
 
     @Override
-    public FieldStats convert(FieldStats source) {
-        Object min = truncateMin(source.minValue());
-        Object max = truncateMax(source.maxValue());
+    public SimpleColStats convert(SimpleColStats source) {
+        Object min = truncateMin(source.min());
+        Object max = truncateMax(source.max());
         if (max == null) {
-            return new FieldStats(null, null, source.nullCount());
+            return new SimpleColStats(null, null, source.nullCount());
         }
-        return new FieldStats(min, max, source.nullCount());
+        return new SimpleColStats(min, max, source.nullCount());
     }
 
     @Override
-    public FieldStats result() {
+    public SimpleColStats result() {
         if (failed) {
-            return new FieldStats(null, null, nullCount);
+            return new SimpleColStats(null, null, nullCount);
         }
-        return new FieldStats(minValue, maxValue, nullCount);
+        return new SimpleColStats(minValue, maxValue, nullCount);
     }
 
     /** @return a truncated value less or equal than the old value. */

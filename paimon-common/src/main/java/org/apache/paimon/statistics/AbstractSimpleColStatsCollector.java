@@ -18,21 +18,19 @@
 
 package org.apache.paimon.statistics;
 
-import org.apache.paimon.data.serializer.Serializer;
-import org.apache.paimon.format.FieldStats;
+import org.apache.paimon.format.SimpleColStats;
 
-/** The counts stats collector, which will only report null count stats. */
-public class CountsFieldStatsCollector extends AbstractFieldStatsCollector {
+/** Abstract base stats collector. */
+public abstract class AbstractSimpleColStatsCollector implements SimpleColStatsCollector {
 
-    @Override
-    public void collect(Object field, Serializer<Object> serializer) {
-        if (field == null) {
-            nullCount++;
-        }
-    }
+    protected Object minValue;
+
+    protected Object maxValue;
+
+    protected long nullCount;
 
     @Override
-    public FieldStats convert(FieldStats source) {
-        return new FieldStats(null, null, source.nullCount());
+    public SimpleColStats result() {
+        return new SimpleColStats(minValue, maxValue, nullCount);
     }
 }

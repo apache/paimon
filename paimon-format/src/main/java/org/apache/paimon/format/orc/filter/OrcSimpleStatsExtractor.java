@@ -21,12 +21,12 @@ package org.apache.paimon.format.orc.filter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
-import org.apache.paimon.format.FieldStats;
-import org.apache.paimon.format.TableStatsExtractor;
+import org.apache.paimon.format.SimpleColStats;
+import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.format.orc.OrcReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.statistics.FieldStatsCollector;
+import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.RowType;
@@ -51,13 +51,14 @@ import java.sql.Date;
 import java.util.List;
 import java.util.stream.IntStream;
 
-/** {@link TableStatsExtractor} for orc files. */
-public class OrcTableStatsExtractor implements TableStatsExtractor {
+/** {@link SimpleStatsExtractor} for orc files. */
+public class OrcSimpleStatsExtractor implements SimpleStatsExtractor {
 
     private final RowType rowType;
-    private final FieldStatsCollector.Factory[] statsCollectors;
+    private final SimpleColStatsCollector.Factory[] statsCollectors;
 
-    public OrcTableStatsExtractor(RowType rowType, FieldStatsCollector.Factory[] statsCollectors) {
+    public OrcSimpleStatsExtractor(
+            RowType rowType, SimpleColStatsCollector.Factory[] statsCollectors) {
         this.rowType = rowType;
         this.statsCollectors = statsCollectors;
         Preconditions.checkArgument(
@@ -66,12 +67,12 @@ public class OrcTableStatsExtractor implements TableStatsExtractor {
     }
 
     @Override
-    public FieldStats[] extract(FileIO fileIO, Path path) throws IOException {
+    public SimpleColStats[] extract(FileIO fileIO, Path path) throws IOException {
         return extractWithFileInfo(fileIO, path).getLeft();
     }
 
     @Override
-    public Pair<FieldStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path)
+    public Pair<SimpleColStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path)
             throws IOException {
         try (Reader reader = OrcReaderFactory.createReader(new Configuration(), fileIO, path)) {
             long rowCount = reader.getNumberOfRows();
@@ -81,7 +82,7 @@ public class OrcTableStatsExtractor implements TableStatsExtractor {
             List<String> columnNames = schema.getFieldNames();
             List<TypeDescription> columnTypes = schema.getChildren();
 
-            FieldStatsCollector[] collectors = FieldStatsCollector.create(statsCollectors);
+            SimpleColStatsCollector[] collectors = SimpleColStatsCollector.create(statsCollectors);
 
             return Pair.of(
                     IntStream.range(0, rowType.getFieldCount())
@@ -91,7 +92,7 @@ public class OrcTableStatsExtractor implements TableStatsExtractor {
                                         int fieldIdx = columnNames.indexOf(field.name());
                                         if (fieldIdx == -1) {
                                             return collectors[i].convert(
-                                                    new FieldStats(null, null, null));
+                                                    new SimpleColStats(null, null, null));
                                         } else {
                                             int colId = columnTypes.get(fieldIdx).getId();
                                             return toFieldStats(
@@ -101,17 +102,20 @@ public class OrcTableStatsExtractor implements TableStatsExtractor {
                                                     collectors[i]);
                                         }
                                     })
-                            .toArray(FieldStats[]::new),
+                            .toArray(SimpleColStats[]::new),
                     new FileInfo(rowCount));
         }
     }
 
-    private FieldStats toFieldStats(
-            DataField field, ColumnStatistics stats, long rowCount, FieldStatsCollector collector) {
+    private SimpleColStats toFieldStats(
+            DataField field,
+            ColumnStatistics stats,
+            long rowCount,
+            SimpleColStatsCollector collector) {
         long nullCount = rowCount - stats.getNumberOfValues();
         if (nullCount == rowCount) {
             // all nulls
-            return collector.convert(new FieldStats(null, null, nullCount));
+            return collector.convert(new SimpleColStats(null, null, nullCount));
         }
         Preconditions.checkState(
                 (nullCount > 0) == stats.hasNull(),
@@ -121,14 +125,14 @@ public class OrcTableStatsExtractor implements TableStatsExtractor {
                         + stats.hasNull()
                         + "!");
 
-        FieldStats fieldStats;
+        SimpleColStats fieldStats;
         switch (field.type().getTypeRoot()) {
             case CHAR:
             case VARCHAR:
                 assertStatsClass(field, stats, StringColumnStatistics.class);
                 StringColumnStatistics stringStats = (StringColumnStatistics) stats;
                 fieldStats =
-                        new FieldStats(
+                        new SimpleColStats(
                                 BinaryString.fromString(stringStats.getMinimum()),
                                 BinaryString.fromString(stringStats.getMaximum()),
                                 nullCount);
@@ -137,7 +141,7 @@ public class OrcTableStatsExtractor implements TableStatsExtractor {
                 assertStatsClass(field, stats, BooleanColumnStatistics.class);
                 BooleanColumnStatistics boolStats = (BooleanColumnStatistics) stats;
                 fieldStats =
-                        new FieldStats(
+                        new SimpleColStats(
                                 boolStats.getFalseCount() == 0,
                                 boolStats.getTrueCount() != 0,
                                 nullCount);
@@ -149,7 +153,7 @@ public class OrcTableStatsExtractor implements TableStatsExtractor {
                 int precision = decimalType.getPrecision();
                 int scale = decimalType.getScale();
                 fieldStats =
-                        new FieldStats(
+                        new SimpleColStats(
                                 Decimal.fromBigDecimal(
                                         decimalStats.getMinimum().bigDecimalValue(),
                                         precision,
@@ -164,7 +168,7 @@ public class OrcTableStatsExtractor implements TableStatsExtractor {
                 assertStatsClass(field, stats, IntegerColumnStatistics.class);
                 IntegerColumnStatistics byteStats = (IntegerColumnStatistics) stats;
                 fieldStats =
-                        new FieldStats(
+                        new SimpleColStats(
                                 (byte) byteStats.getMinimum(),
                                 (byte) byteStats.getMaximum(),
                                 nullCount);
@@ -173,7 +177,7 @@ public class OrcTableStatsExtractor implements TableStatsExtractor {
                 assertStatsClass(field, stats, IntegerColumnStatistics.class);
                 IntegerColumnStatistics shortStats = (IntegerColumnStatistics) stats;
                 fieldStats =
-                        new FieldStats(
+                        new SimpleColStats(
                                 (short) shortStats.getMinimum(),
                                 (short) shortStats.getMaximum(),
                                 nullCount);
@@ -183,7 +187,7 @@ public class OrcTableStatsExtractor implements TableStatsExtractor {
                 assertStatsClass(field, stats, IntegerColumnStatistics.class);
                 IntegerColumnStatistics intStats = (IntegerColumnStatistics) stats;
                 fieldStats =
-                        new FieldStats(
+                        new SimpleColStats(
                                 Long.valueOf(intStats.getMinimum()).intValue(),
                                 Long.valueOf(intStats.getMaximum()).intValue(),
                                 nullCount);
@@ -192,13 +196,14 @@ public class OrcTableStatsExtractor implements TableStatsExtractor {
                 assertStatsClass(field, stats, IntegerColumnStatistics.class);
                 IntegerColumnStatistics longStats = (IntegerColumnStatistics) stats;
                 fieldStats =
-                        new FieldStats(longStats.getMinimum(), longStats.getMaximum(), nullCount);
+                        new SimpleColStats(
+                                longStats.getMinimum(), longStats.getMaximum(), nullCount);
                 break;
             case FLOAT:
                 assertStatsClass(field, stats, DoubleColumnStatistics.class);
                 DoubleColumnStatistics floatStats = (DoubleColumnStatistics) stats;
                 fieldStats =
-                        new FieldStats(
+                        new SimpleColStats(
                                 (float) floatStats.getMinimum(),
                                 (float) floatStats.getMaximum(),
                                 nullCount);
@@ -207,14 +212,14 @@ public class OrcTableStatsExtractor implements TableStatsExtractor {
                 assertStatsClass(field, stats, DoubleColumnStatistics.class);
                 DoubleColumnStatistics doubleStats = (DoubleColumnStatistics) stats;
                 fieldStats =
-                        new FieldStats(
+                        new SimpleColStats(
                                 doubleStats.getMinimum(), doubleStats.getMaximum(), nullCount);
                 break;
             case DATE:
                 assertStatsClass(field, stats, DateColumnStatistics.class);
                 DateColumnStatistics dateStats = (DateColumnStatistics) stats;
                 fieldStats =
-                        new FieldStats(
+                        new SimpleColStats(
                                 DateTimeUtils.toInternal(
                                         new Date(dateStats.getMinimum().getTime())),
                                 DateTimeUtils.toInternal(
@@ -226,13 +231,13 @@ public class OrcTableStatsExtractor implements TableStatsExtractor {
                 assertStatsClass(field, stats, TimestampColumnStatistics.class);
                 TimestampColumnStatistics timestampStats = (TimestampColumnStatistics) stats;
                 fieldStats =
-                        new FieldStats(
+                        new SimpleColStats(
                                 Timestamp.fromSQLTimestamp(timestampStats.getMinimum()),
                                 Timestamp.fromSQLTimestamp(timestampStats.getMaximum()),
                                 nullCount);
                 break;
             default:
-                fieldStats = new FieldStats(null, null, nullCount);
+                fieldStats = new SimpleColStats(null, null, nullCount);
         }
         return collector.convert(fieldStats);
     }

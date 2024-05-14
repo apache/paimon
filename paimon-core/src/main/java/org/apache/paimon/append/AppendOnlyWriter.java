@@ -37,7 +37,7 @@ import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.reader.RecordReaderIterator;
-import org.apache.paimon.statistics.FieldStatsCollector;
+import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.IOUtils;
@@ -77,7 +77,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     private final String fileCompression;
     private final String spillCompression;
     private SinkWriter sinkWriter;
-    private final FieldStatsCollector.Factory[] statsCollectors;
+    private final SimpleColStatsCollector.Factory[] statsCollectors;
     private final IOManager ioManager;
     private final FileIndexOptions fileIndexOptions;
 
@@ -101,7 +101,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             boolean spillable,
             String fileCompression,
             String spillCompression,
-            FieldStatsCollector.Factory[] statsCollectors,
+            SimpleColStatsCollector.Factory[] statsCollectors,
             MemorySize maxDiskSize,
             FileIndexOptions fileIndexOptions) {
         this.fileIO = fileIO;

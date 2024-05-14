@@ -36,28 +36,29 @@ import java.util.function.Function;
 
 import static org.apache.paimon.schema.SchemaEvolutionUtil.createIndexCastMapping;
 
-/** Converters to create field stats array serializer. */
-public class FieldStatsConverters {
+/** Converters to create col stats array serializer. */
+public class SimpleStatsConverters {
+
     private final Function<Long, List<DataField>> schemaFields;
     private final long tableSchemaId;
     private final List<DataField> tableDataFields;
-    private final ConcurrentMap<Long, FieldStatsArraySerializer> serializers;
     private final AtomicReference<List<DataField>> tableFields;
+    private final ConcurrentMap<Long, SimpleStatsConverter> converters;
 
-    public FieldStatsConverters(Function<Long, List<DataField>> schemaFields, long tableSchemaId) {
+    public SimpleStatsConverters(Function<Long, List<DataField>> schemaFields, long tableSchemaId) {
         this.schemaFields = schemaFields;
         this.tableSchemaId = tableSchemaId;
         this.tableDataFields = schemaFields.apply(tableSchemaId);
-        this.serializers = new ConcurrentHashMap<>();
         this.tableFields = new AtomicReference<>();
+        this.converters = new ConcurrentHashMap<>();
     }
 
-    public FieldStatsArraySerializer getOrCreate(long dataSchemaId) {
-        return serializers.computeIfAbsent(
+    public SimpleStatsConverter getOrCreate(long dataSchemaId) {
+        return converters.computeIfAbsent(
                 dataSchemaId,
                 id -> {
                     if (tableSchemaId == id) {
-                        return new FieldStatsArraySerializer(new RowType(schemaFields.apply(id)));
+                        return new SimpleStatsConverter(new RowType(schemaFields.apply(id)));
                     }
 
                     // Get atomic schema fields.
@@ -67,8 +68,8 @@ public class FieldStatsConverters {
                     IndexCastMapping indexCastMapping =
                             createIndexCastMapping(schemaTableFields, dataFields);
                     @Nullable int[] indexMapping = indexCastMapping.getIndexMapping();
-                    // Create field stats array serializer with schema evolution
-                    return new FieldStatsArraySerializer(
+                    // Create col stats array serializer with schema evolution
+                    return new SimpleStatsConverter(
                             new RowType(dataFields),
                             indexMapping,
                             indexCastMapping.getCastMapping());

@@ -19,15 +19,15 @@
 package org.apache.paimon.statistics;
 
 import org.apache.paimon.data.serializer.Serializer;
-import org.apache.paimon.format.FieldStats;
+import org.apache.paimon.format.SimpleColStats;
 
 import java.util.Arrays;
 import java.util.regex.Matcher;
 
-import static org.apache.paimon.statistics.TruncateFieldStatsCollector.TRUNCATE_PATTERN;
+import static org.apache.paimon.statistics.TruncateSimpleColStatsCollector.TRUNCATE_PATTERN;
 
-/** The mode of the field stats. */
-public interface FieldStatsCollector {
+/** The mode of the col stats. */
+public interface SimpleColStatsCollector {
 
     /**
      * collect stats from the field.
@@ -37,24 +37,24 @@ public interface FieldStatsCollector {
      */
     void collect(Object field, Serializer<Object> fieldSerializer);
 
-    /** @return The collected field stats. */
-    FieldStats result();
+    /** @return The collected col stats. */
+    SimpleColStats result();
 
     /**
-     * Convert the field stats according to the strategy.
+     * Convert the col stats according to the strategy.
      *
-     * @param source The source field stats, extracted from the file.
-     * @return The converted field stats.
+     * @param source The source col stats, extracted from the file.
+     * @return The converted col stats.
      */
-    FieldStats convert(FieldStats source);
+    SimpleColStats convert(SimpleColStats source);
 
-    /** Factory to create {@link FieldStatsCollector}. */
+    /** Factory to create {@link SimpleColStatsCollector}. */
     interface Factory {
-        FieldStatsCollector create();
+        SimpleColStatsCollector create();
     }
 
-    static FieldStatsCollector[] create(FieldStatsCollector.Factory[] factories) {
-        FieldStatsCollector[] collectors = new FieldStatsCollector[factories.length];
+    static SimpleColStatsCollector[] create(SimpleColStatsCollector.Factory[] factories) {
+        SimpleColStatsCollector[] collectors = new SimpleColStatsCollector[factories.length];
         for (int i = 0; i < factories.length; i++) {
             collectors[i] = factories[i].create();
         }
@@ -65,24 +65,25 @@ public interface FieldStatsCollector {
         String upper = option.toUpperCase();
         switch (upper) {
             case "NONE":
-                return NoneFieldStatsCollector::new;
+                return NoneSimpleColStatsCollector::new;
             case "FULL":
-                return FullFieldStatsCollector::new;
+                return FullSimpleColStatsCollector::new;
             case "COUNTS":
-                return CountsFieldStatsCollector::new;
+                return CountsSimpleColStatsCollector::new;
             default:
                 Matcher matcher = TRUNCATE_PATTERN.matcher(upper);
                 if (matcher.matches()) {
                     String length = matcher.group(1);
-                    return () -> new TruncateFieldStatsCollector(Integer.parseInt(length));
+                    return () -> new TruncateSimpleColStatsCollector(Integer.parseInt(length));
                 }
                 throw new IllegalArgumentException("Unexpected option: " + option);
         }
     }
 
-    static FieldStatsCollector.Factory[] createFullStatsFactories(int numFields) {
-        FieldStatsCollector.Factory[] factories = new FieldStatsCollector.Factory[numFields];
-        Arrays.fill(factories, (FieldStatsCollector.Factory) FullFieldStatsCollector::new);
+    static SimpleColStatsCollector.Factory[] createFullStatsFactories(int numFields) {
+        SimpleColStatsCollector.Factory[] factories =
+                new SimpleColStatsCollector.Factory[numFields];
+        Arrays.fill(factories, (SimpleColStatsCollector.Factory) FullSimpleColStatsCollector::new);
         return factories;
     }
 }

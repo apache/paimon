@@ -41,7 +41,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.stats.StatsTestUtils.newTableStats;
+import static org.apache.paimon.stats.StatsTestUtils.newSimpleStats;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link IntervalPartition}. */
@@ -173,8 +173,8 @@ public class IntervalPartitionTest {
                 25,
                 minKey,
                 maxKey,
-                newTableStats(left, right),
-                StatsTestUtils.newEmptyTableStats(), // not used
+                newSimpleStats(left, right),
+                StatsTestUtils.newEmptySimpleStats(), // not used
                 0,
                 24,
                 0,

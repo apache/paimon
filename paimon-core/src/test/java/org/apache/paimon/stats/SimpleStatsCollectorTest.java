@@ -21,10 +21,10 @@ package org.apache.paimon.stats;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.format.FieldStats;
-import org.apache.paimon.format.TableStatsCollector;
-import org.apache.paimon.statistics.FieldStatsCollector;
-import org.apache.paimon.statistics.FullFieldStatsCollector;
+import org.apache.paimon.format.SimpleColStats;
+import org.apache.paimon.format.SimpleStatsCollector;
+import org.apache.paimon.statistics.FullSimpleColStatsCollector;
+import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
@@ -36,47 +36,47 @@ import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link TableStatsCollector}. */
-public class TableStatsCollectorTest {
+/** Tests for {@link SimpleStatsCollector}. */
+public class SimpleStatsCollectorTest {
 
     @Test
     public void testCollect() {
         RowType rowType =
                 RowType.of(new IntType(), new VarCharType(10), new ArrayType(new IntType()));
-        TableStatsCollector collector =
-                new TableStatsCollector(
+        SimpleStatsCollector collector =
+                new SimpleStatsCollector(
                         rowType,
                         IntStream.range(0, rowType.getFieldCount())
                                 .mapToObj(
                                         i ->
-                                                (FieldStatsCollector.Factory)
-                                                        FullFieldStatsCollector::new)
-                                .toArray(FieldStatsCollector.Factory[]::new));
+                                                (SimpleColStatsCollector.Factory)
+                                                        FullSimpleColStatsCollector::new)
+                                .toArray(SimpleColStatsCollector.Factory[]::new));
 
         collector.collect(
                 GenericRow.of(
                         1, BinaryString.fromString("Paimon"), new GenericArray(new int[] {1, 10})));
         assertThat(collector.extract())
                 .isEqualTo(
-                        new FieldStats[] {
-                            new FieldStats(1, 1, 0L),
-                            new FieldStats(
+                        new SimpleColStats[] {
+                            new SimpleColStats(1, 1, 0L),
+                            new SimpleColStats(
                                     BinaryString.fromString("Paimon"),
                                     BinaryString.fromString("Paimon"),
                                     0L),
-                            new FieldStats(null, null, 0L)
+                            new SimpleColStats(null, null, 0L)
                         });
 
         collector.collect(GenericRow.of(3, null, new GenericArray(new int[] {3, 30})));
         assertThat(collector.extract())
                 .isEqualTo(
-                        new FieldStats[] {
-                            new FieldStats(1, 3, 0L),
-                            new FieldStats(
+                        new SimpleColStats[] {
+                            new SimpleColStats(1, 3, 0L),
+                            new SimpleColStats(
                                     BinaryString.fromString("Paimon"),
                                     BinaryString.fromString("Paimon"),
                                     1L),
-                            new FieldStats(null, null, 0L)
+                            new SimpleColStats(null, null, 0L)
                         });
 
         collector.collect(
@@ -86,25 +86,25 @@ public class TableStatsCollectorTest {
                         new GenericArray(new int[] {2, 20})));
         assertThat(collector.extract())
                 .isEqualTo(
-                        new FieldStats[] {
-                            new FieldStats(1, 3, 1L),
-                            new FieldStats(
+                        new SimpleColStats[] {
+                            new SimpleColStats(1, 3, 1L),
+                            new SimpleColStats(
                                     BinaryString.fromString("Apache"),
                                     BinaryString.fromString("Paimon"),
                                     1L),
-                            new FieldStats(null, null, 0L)
+                            new SimpleColStats(null, null, 0L)
                         });
 
         collector.collect(GenericRow.of(2, BinaryString.fromString("Batch"), null));
         assertThat(collector.extract())
                 .isEqualTo(
-                        new FieldStats[] {
-                            new FieldStats(1, 3, 1L),
-                            new FieldStats(
+                        new SimpleColStats[] {
+                            new SimpleColStats(1, 3, 1L),
+                            new SimpleColStats(
                                     BinaryString.fromString("Apache"),
                                     BinaryString.fromString("Paimon"),
                                     1L),
-                            new FieldStats(null, null, 1L)
+                            new SimpleColStats(null, null, 1L)
                         });
     }
 }

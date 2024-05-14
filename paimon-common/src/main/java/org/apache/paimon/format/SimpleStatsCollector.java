@@ -21,43 +21,45 @@ package org.apache.paimon.format;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.data.serializer.Serializer;
-import org.apache.paimon.statistics.FieldStatsCollector;
-import org.apache.paimon.statistics.NoneFieldStatsCollector;
+import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
+import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import java.util.Arrays;
 
-import static org.apache.paimon.statistics.FieldStatsCollector.createFullStatsFactories;
+import static org.apache.paimon.statistics.SimpleColStatsCollector.createFullStatsFactories;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Collector to extract statistics of each fields from a series of records. */
-public class TableStatsCollector {
+/** Collector to extract statistics of each column from a series of records. */
+public class SimpleStatsCollector {
 
     private final RowDataToObjectArrayConverter converter;
-    private final FieldStatsCollector[] statsCollectors;
+    private final SimpleColStatsCollector[] statsCollectors;
     private final Serializer<Object>[] fieldSerializers;
     private final boolean isDisabled;
 
-    public TableStatsCollector(RowType rowType) {
+    public SimpleStatsCollector(RowType rowType) {
         this(rowType, createFullStatsFactories(rowType.getFieldCount()));
     }
 
-    public TableStatsCollector(RowType rowType, FieldStatsCollector.Factory[] collectorFactory) {
+    public SimpleStatsCollector(
+            RowType rowType, SimpleColStatsCollector.Factory[] collectorFactory) {
         int numFields = rowType.getFieldCount();
         checkArgument(
                 numFields == collectorFactory.length,
                 "numFields %s should equal to stats length %s.",
                 numFields,
                 collectorFactory.length);
-        this.statsCollectors = FieldStatsCollector.create(collectorFactory);
+        this.statsCollectors = SimpleColStatsCollector.create(collectorFactory);
         this.converter = new RowDataToObjectArrayConverter(rowType);
         this.fieldSerializers = new Serializer[numFields];
         for (int i = 0; i < numFields; i++) {
             fieldSerializers[i] = InternalSerializers.create(rowType.getTypeAt(i));
         }
         this.isDisabled =
-                Arrays.stream(statsCollectors).allMatch(p -> p instanceof NoneFieldStatsCollector);
+                Arrays.stream(statsCollectors)
+                        .allMatch(p -> p instanceof NoneSimpleColStatsCollector);
     }
 
     public boolean isDisabled() {
@@ -73,14 +75,14 @@ public class TableStatsCollector {
     public void collect(InternalRow row) {
         Object[] objects = converter.convert(row);
         for (int i = 0; i < row.getFieldCount(); i++) {
-            FieldStatsCollector collector = statsCollectors[i];
+            SimpleColStatsCollector collector = statsCollectors[i];
             Object obj = objects[i];
             collector.collect(obj, fieldSerializers[i]);
         }
     }
 
-    public FieldStats[] extract() {
-        FieldStats[] stats = new FieldStats[this.statsCollectors.length];
+    public SimpleColStats[] extract() {
+        SimpleColStats[] stats = new SimpleColStats[this.statsCollectors.length];
         for (int i = 0; i < stats.length; i++) {
             stats[i] = this.statsCollectors[i].result();
         }

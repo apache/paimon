@@ -21,10 +21,10 @@ package org.apache.paimon.io;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.format.TableStatsCollector;
-import org.apache.paimon.statistics.FieldStatsCollector;
-import org.apache.paimon.statistics.FullFieldStatsCollector;
-import org.apache.paimon.stats.FieldStatsArraySerializer;
+import org.apache.paimon.format.SimpleStatsCollector;
+import org.apache.paimon.statistics.FullSimpleColStatsCollector;
+import org.apache.paimon.statistics.SimpleColStatsCollector;
+import org.apache.paimon.stats.SimpleStatsConverter;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -102,28 +102,28 @@ public class DataFileTestDataGenerator {
     }
 
     private Data createDataFile(List<KeyValue> kvs, int level, BinaryRow partition, int bucket) {
-        TableStatsCollector keyStatsCollector =
-                new TableStatsCollector(
+        SimpleStatsCollector keyStatsCollector =
+                new SimpleStatsCollector(
                         TestKeyValueGenerator.KEY_TYPE,
                         IntStream.range(0, TestKeyValueGenerator.KEY_TYPE.getFieldCount())
                                 .mapToObj(
                                         i ->
-                                                (FieldStatsCollector.Factory)
-                                                        FullFieldStatsCollector::new)
-                                .toArray(FieldStatsCollector.Factory[]::new));
-        TableStatsCollector valueStatsCollector =
-                new TableStatsCollector(
+                                                (SimpleColStatsCollector.Factory)
+                                                        FullSimpleColStatsCollector::new)
+                                .toArray(SimpleColStatsCollector.Factory[]::new));
+        SimpleStatsCollector valueStatsCollector =
+                new SimpleStatsCollector(
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE,
                         IntStream.range(0, TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFieldCount())
                                 .mapToObj(
                                         i ->
-                                                (FieldStatsCollector.Factory)
-                                                        FullFieldStatsCollector::new)
-                                .toArray(FieldStatsCollector.Factory[]::new));
-        FieldStatsArraySerializer keyStatsSerializer =
-                new FieldStatsArraySerializer(TestKeyValueGenerator.KEY_TYPE);
-        FieldStatsArraySerializer valueStatsSerializer =
-                new FieldStatsArraySerializer(TestKeyValueGenerator.DEFAULT_ROW_TYPE);
+                                                (SimpleColStatsCollector.Factory)
+                                                        FullSimpleColStatsCollector::new)
+                                .toArray(SimpleColStatsCollector.Factory[]::new));
+        SimpleStatsConverter keyStatsSerializer =
+                new SimpleStatsConverter(TestKeyValueGenerator.KEY_TYPE);
+        SimpleStatsConverter valueStatsSerializer =
+                new SimpleStatsConverter(TestKeyValueGenerator.DEFAULT_ROW_TYPE);
 
         long totalSize = 0;
         BinaryRow minKey = null;

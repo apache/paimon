@@ -19,12 +19,11 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.stats.BinaryTableStats;
-import org.apache.paimon.stats.FieldStatsArraySerializer;
+import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
@@ -44,6 +43,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
+import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.SerializationUtils.newBytesType;
 import static org.apache.paimon.utils.SerializationUtils.newStringType;
@@ -51,10 +51,6 @@ import static org.apache.paimon.utils.SerializationUtils.newStringType;
 /** Metadata of a data file. */
 public class DataFileMeta {
 
-    // Append only data files don't have any key columns and meaningful level value. it will use
-    // the following dummy values.
-    public static final BinaryTableStats EMPTY_KEY_STATS =
-            new BinaryTableStats(EMPTY_ROW, EMPTY_ROW, BinaryArray.fromLongArray(new Long[0]));
     public static final BinaryRow EMPTY_MIN_KEY = EMPTY_ROW;
     public static final BinaryRow EMPTY_MAX_KEY = EMPTY_ROW;
     public static final int DUMMY_LEVEL = 0;
@@ -67,8 +63,8 @@ public class DataFileMeta {
 
     private final BinaryRow minKey;
     private final BinaryRow maxKey;
-    private final BinaryTableStats keyStats;
-    private final BinaryTableStats valueStats;
+    private final SimpleStats keyStats;
+    private final SimpleStats valueStats;
 
     private final long minSequenceNumber;
     private final long maxSequenceNumber;
@@ -91,7 +87,7 @@ public class DataFileMeta {
             String fileName,
             long fileSize,
             long rowCount,
-            BinaryTableStats rowStats,
+            SimpleStats rowStats,
             long minSequenceNumber,
             long maxSequenceNumber,
             long schemaId) {
@@ -111,7 +107,7 @@ public class DataFileMeta {
             String fileName,
             long fileSize,
             long rowCount,
-            BinaryTableStats rowStats,
+            SimpleStats rowStats,
             long minSequenceNumber,
             long maxSequenceNumber,
             long schemaId,
@@ -123,7 +119,7 @@ public class DataFileMeta {
                 rowCount,
                 EMPTY_MIN_KEY,
                 EMPTY_MAX_KEY,
-                EMPTY_KEY_STATS,
+                EMPTY_STATS,
                 rowStats,
                 minSequenceNumber,
                 maxSequenceNumber,
@@ -141,8 +137,8 @@ public class DataFileMeta {
             long rowCount,
             BinaryRow minKey,
             BinaryRow maxKey,
-            BinaryTableStats keyStats,
-            BinaryTableStats valueStats,
+            SimpleStats keyStats,
+            SimpleStats valueStats,
             long minSequenceNumber,
             long maxSequenceNumber,
             long schemaId,
@@ -173,8 +169,8 @@ public class DataFileMeta {
             long rowCount,
             BinaryRow minKey,
             BinaryRow maxKey,
-            BinaryTableStats keyStats,
-            BinaryTableStats valueStats,
+            SimpleStats keyStats,
+            SimpleStats valueStats,
             long minSequenceNumber,
             long maxSequenceNumber,
             long schemaId,
@@ -236,11 +232,11 @@ public class DataFileMeta {
         return maxKey;
     }
 
-    public BinaryTableStats keyStats() {
+    public SimpleStats keyStats() {
         return keyStats;
     }
 
-    public BinaryTableStats valueStats() {
+    public SimpleStats valueStats() {
         return valueStats;
     }
 
@@ -418,8 +414,8 @@ public class DataFileMeta {
         fields.add(new DataField(2, "_ROW_COUNT", new BigIntType(false)));
         fields.add(new DataField(3, "_MIN_KEY", newBytesType(false)));
         fields.add(new DataField(4, "_MAX_KEY", newBytesType(false)));
-        fields.add(new DataField(5, "_KEY_STATS", FieldStatsArraySerializer.schema()));
-        fields.add(new DataField(6, "_VALUE_STATS", FieldStatsArraySerializer.schema()));
+        fields.add(new DataField(5, "_KEY_STATS", SimpleStatsConverter.schema()));
+        fields.add(new DataField(6, "_VALUE_STATS", SimpleStatsConverter.schema()));
         fields.add(new DataField(7, "_MIN_SEQUENCE_NUMBER", new BigIntType(false)));
         fields.add(new DataField(8, "_MAX_SEQUENCE_NUMBER", new BigIntType(false)));
         fields.add(new DataField(9, "_SCHEMA_ID", new BigIntType(false)));

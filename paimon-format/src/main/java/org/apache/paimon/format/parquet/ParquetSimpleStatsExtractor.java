@@ -21,11 +21,11 @@ package org.apache.paimon.format.parquet;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
-import org.apache.paimon.format.FieldStats;
-import org.apache.paimon.format.TableStatsExtractor;
+import org.apache.paimon.format.SimpleColStats;
+import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.statistics.FieldStatsCollector;
+import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.LocalZonedTimestampType;
@@ -51,14 +51,14 @@ import java.util.stream.IntStream;
 
 import static org.apache.paimon.format.parquet.ParquetUtil.assertStatsClass;
 
-/** {@link TableStatsExtractor} for parquet files. */
-public class ParquetTableStatsExtractor implements TableStatsExtractor {
+/** {@link SimpleStatsExtractor} for parquet files. */
+public class ParquetSimpleStatsExtractor implements SimpleStatsExtractor {
 
     private final RowType rowType;
-    private final FieldStatsCollector.Factory[] statsCollectors;
+    private final SimpleColStatsCollector.Factory[] statsCollectors;
 
-    public ParquetTableStatsExtractor(
-            RowType rowType, FieldStatsCollector.Factory[] statsCollectors) {
+    public ParquetSimpleStatsExtractor(
+            RowType rowType, SimpleColStatsCollector.Factory[] statsCollectors) {
         this.rowType = rowType;
         this.statsCollectors = statsCollectors;
         Preconditions.checkArgument(
@@ -67,16 +67,16 @@ public class ParquetTableStatsExtractor implements TableStatsExtractor {
     }
 
     @Override
-    public FieldStats[] extract(FileIO fileIO, Path path) throws IOException {
+    public SimpleColStats[] extract(FileIO fileIO, Path path) throws IOException {
         return extractWithFileInfo(fileIO, path).getLeft();
     }
 
     @Override
-    public Pair<FieldStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path)
+    public Pair<SimpleColStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path)
             throws IOException {
         Pair<Map<String, Statistics<?>>, FileInfo> statsPair =
                 ParquetUtil.extractColumnStats(fileIO, path);
-        FieldStatsCollector[] collectors = FieldStatsCollector.create(statsCollectors);
+        SimpleColStatsCollector[] collectors = SimpleColStatsCollector.create(statsCollectors);
         return Pair.of(
                 IntStream.range(0, rowType.getFieldCount())
                         .mapToObj(
@@ -87,28 +87,28 @@ public class ParquetTableStatsExtractor implements TableStatsExtractor {
                                             statsPair.getLeft().get(field.name()),
                                             collectors[i]);
                                 })
-                        .toArray(FieldStats[]::new),
+                        .toArray(SimpleColStats[]::new),
                 statsPair.getRight());
     }
 
-    private FieldStats toFieldStats(
-            DataField field, Statistics<?> stats, FieldStatsCollector collector) {
+    private SimpleColStats toFieldStats(
+            DataField field, Statistics<?> stats, SimpleColStatsCollector collector) {
         if (stats == null) {
-            return new FieldStats(null, null, null);
+            return new SimpleColStats(null, null, null);
         }
         long nullCount = stats.getNumNulls();
         if (!stats.hasNonNullValue()) {
-            return collector.convert(new FieldStats(null, null, nullCount));
+            return collector.convert(new SimpleColStats(null, null, nullCount));
         }
 
-        FieldStats fieldStats;
+        SimpleColStats fieldStats;
         switch (field.type().getTypeRoot()) {
             case CHAR:
             case VARCHAR:
                 assertStatsClass(field, stats, BinaryStatistics.class);
                 BinaryStatistics stringStats = (BinaryStatistics) stats;
                 fieldStats =
-                        new FieldStats(
+                        new SimpleColStats(
                                 BinaryString.fromString(stringStats.minAsString()),
                                 BinaryString.fromString(stringStats.maxAsString()),
                                 nullCount);
@@ -116,7 +116,7 @@ public class ParquetTableStatsExtractor implements TableStatsExtractor {
             case BOOLEAN:
                 assertStatsClass(field, stats, BooleanStatistics.class);
                 BooleanStatistics boolStats = (BooleanStatistics) stats;
-                fieldStats = new FieldStats(boolStats.getMin(), boolStats.getMax(), nullCount);
+                fieldStats = new SimpleColStats(boolStats.getMin(), boolStats.getMax(), nullCount);
                 break;
             case DECIMAL:
                 PrimitiveType primitive = stats.type();
@@ -131,14 +131,14 @@ public class ParquetTableStatsExtractor implements TableStatsExtractor {
                 assertStatsClass(field, stats, IntStatistics.class);
                 IntStatistics byteStats = (IntStatistics) stats;
                 fieldStats =
-                        new FieldStats(
+                        new SimpleColStats(
                                 (byte) byteStats.getMin(), (byte) byteStats.getMax(), nullCount);
                 break;
             case SMALLINT:
                 assertStatsClass(field, stats, IntStatistics.class);
                 IntStatistics shortStats = (IntStatistics) stats;
                 fieldStats =
-                        new FieldStats(
+                        new SimpleColStats(
                                 (short) shortStats.getMin(),
                                 (short) shortStats.getMax(),
                                 nullCount);
@@ -149,7 +149,7 @@ public class ParquetTableStatsExtractor implements TableStatsExtractor {
                 assertStatsClass(field, stats, IntStatistics.class);
                 IntStatistics intStats = (IntStatistics) stats;
                 fieldStats =
-                        new FieldStats(
+                        new SimpleColStats(
                                 Long.valueOf(intStats.getMin()).intValue(),
                                 Long.valueOf(intStats.getMax()).intValue(),
                                 nullCount);
@@ -157,17 +157,19 @@ public class ParquetTableStatsExtractor implements TableStatsExtractor {
             case BIGINT:
                 assertStatsClass(field, stats, LongStatistics.class);
                 LongStatistics longStats = (LongStatistics) stats;
-                fieldStats = new FieldStats(longStats.getMin(), longStats.getMax(), nullCount);
+                fieldStats = new SimpleColStats(longStats.getMin(), longStats.getMax(), nullCount);
                 break;
             case FLOAT:
                 assertStatsClass(field, stats, FloatStatistics.class);
                 FloatStatistics floatStats = (FloatStatistics) stats;
-                fieldStats = new FieldStats(floatStats.getMin(), floatStats.getMax(), nullCount);
+                fieldStats =
+                        new SimpleColStats(floatStats.getMin(), floatStats.getMax(), nullCount);
                 break;
             case DOUBLE:
                 assertStatsClass(field, stats, DoubleStatistics.class);
                 DoubleStatistics doubleStats = (DoubleStatistics) stats;
-                fieldStats = new FieldStats(doubleStats.getMin(), doubleStats.getMax(), nullCount);
+                fieldStats =
+                        new SimpleColStats(doubleStats.getMin(), doubleStats.getMax(), nullCount);
                 break;
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 fieldStats = toTimestampStats(stats, ((TimestampType) field.type()).getPrecision());
@@ -178,26 +180,26 @@ public class ParquetTableStatsExtractor implements TableStatsExtractor {
                                 stats, ((LocalZonedTimestampType) field.type()).getPrecision());
                 break;
             default:
-                fieldStats = new FieldStats(null, null, nullCount);
+                fieldStats = new SimpleColStats(null, null, nullCount);
         }
         return collector.convert(fieldStats);
     }
 
-    private FieldStats toTimestampStats(Statistics<?> stats, int precision) {
+    private SimpleColStats toTimestampStats(Statistics<?> stats, int precision) {
         if (precision <= 3) {
             LongStatistics longStats = (LongStatistics) stats;
-            return new FieldStats(
+            return new SimpleColStats(
                     Timestamp.fromEpochMillis(longStats.getMin()),
                     Timestamp.fromEpochMillis(longStats.getMax()),
                     stats.getNumNulls());
         } else if (precision <= 6) {
             LongStatistics longStats = (LongStatistics) stats;
-            return new FieldStats(
+            return new SimpleColStats(
                     Timestamp.fromMicros(longStats.getMin()),
                     Timestamp.fromMicros(longStats.getMax()),
                     stats.getNumNulls());
         } else {
-            return new FieldStats(null, null, stats.getNumNulls());
+            return new SimpleColStats(null, null, stats.getNumNulls());
         }
     }
 
@@ -205,7 +207,7 @@ public class ParquetTableStatsExtractor implements TableStatsExtractor {
      * Parquet cannot provide statistics for decimal fields directly, but we can extract them from
      * primitive statistics.
      */
-    private FieldStats convertStatsToDecimalFieldStats(
+    private SimpleColStats convertStatsToDecimalFieldStats(
             PrimitiveType primitive,
             DataField field,
             Statistics<?> stats,
@@ -217,7 +219,7 @@ public class ParquetTableStatsExtractor implements TableStatsExtractor {
             case FIXED_LEN_BYTE_ARRAY:
                 assertStatsClass(field, stats, BinaryStatistics.class);
                 BinaryStatistics decimalStats = (BinaryStatistics) stats;
-                return new FieldStats(
+                return new SimpleColStats(
                         Decimal.fromBigDecimal(
                                 new BigDecimal(new BigInteger(decimalStats.getMinBytes()), scale),
                                 precision,
@@ -230,19 +232,19 @@ public class ParquetTableStatsExtractor implements TableStatsExtractor {
             case INT64:
                 assertStatsClass(field, stats, LongStatistics.class);
                 LongStatistics longStats = (LongStatistics) stats;
-                return new FieldStats(
+                return new SimpleColStats(
                         Decimal.fromUnscaledLong(longStats.getMin(), precision, scale),
                         Decimal.fromUnscaledLong(longStats.getMax(), precision, scale),
                         nullCount);
             case INT32:
                 assertStatsClass(field, stats, IntStatistics.class);
                 IntStatistics intStats = (IntStatistics) stats;
-                return new FieldStats(
+                return new SimpleColStats(
                         Decimal.fromUnscaledLong(intStats.getMin(), precision, scale),
                         Decimal.fromUnscaledLong(intStats.getMax(), precision, scale),
                         nullCount);
             default:
-                return new FieldStats(null, null, nullCount);
+                return new SimpleColStats(null, null, nullCount);
         }
     }
 }

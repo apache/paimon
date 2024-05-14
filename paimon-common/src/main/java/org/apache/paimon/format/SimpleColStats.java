@@ -22,28 +22,35 @@ import javax.annotation.Nullable;
 
 import java.util.Objects;
 
-/** Statistics for each field. */
-public class FieldStats {
+/**
+ * A simple column statistics, supports the following stats.
+ *
+ * <ul>
+ *   <li>min: the minimum value of the column
+ *   <li>max: the maximum value of the column
+ *   <li>nullCount: the number of nulls
+ * </ul>
+ */
+public class SimpleColStats {
 
-    @Nullable private final Object minValue;
-    @Nullable private final Object maxValue;
+    @Nullable private final Object min;
+    @Nullable private final Object max;
     private final Long nullCount;
 
-    public FieldStats(
-            @Nullable Object minValue, @Nullable Object maxValue, @Nullable Long nullCount) {
-        this.minValue = minValue;
-        this.maxValue = maxValue;
+    public SimpleColStats(@Nullable Object min, @Nullable Object max, @Nullable Long nullCount) {
+        this.min = min;
+        this.max = max;
         this.nullCount = nullCount;
     }
 
     @Nullable
-    public Object minValue() {
-        return minValue;
+    public Object min() {
+        return min;
     }
 
     @Nullable
-    public Object maxValue() {
-        return maxValue;
+    public Object max() {
+        return max;
     }
 
     @Nullable
@@ -53,22 +60,22 @@ public class FieldStats {
 
     @Override
     public boolean equals(Object o) {
-        if (!(o instanceof FieldStats)) {
+        if (!(o instanceof SimpleColStats)) {
             return false;
         }
-        FieldStats that = (FieldStats) o;
-        return Objects.equals(minValue, that.minValue)
-                && Objects.equals(maxValue, that.maxValue)
+        SimpleColStats that = (SimpleColStats) o;
+        return Objects.equals(min, that.min)
+                && Objects.equals(max, that.max)
                 && Objects.equals(nullCount, that.nullCount);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(minValue, maxValue, nullCount);
+        return Objects.hash(min, max, nullCount);
     }
 
     @Override
     public String toString() {
-        return String.format("{%s, %s, %d}", minValue, maxValue, nullCount);
+        return String.format("{%s, %s, %d}", min, max, nullCount);
     }
 }

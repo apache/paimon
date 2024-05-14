@@ -30,7 +30,7 @@ import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
-import org.apache.paimon.format.FieldStats;
+import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
@@ -45,19 +45,19 @@ import java.util.List;
 
 import static org.apache.paimon.utils.SerializationUtils.newBytesType;
 
-/** Serializer for array of {@link FieldStats}. */
-public class FieldStatsArraySerializer {
+/** Converter for array of {@link SimpleColStats}. */
+public class SimpleStatsConverter {
 
     private final InternalRowSerializer serializer;
 
     @Nullable private final int[] indexMapping;
     @Nullable private final CastFieldGetter[] castFieldGetters;
 
-    public FieldStatsArraySerializer(RowType type) {
+    public SimpleStatsConverter(RowType type) {
         this(type, null, null);
     }
 
-    public FieldStatsArraySerializer(
+    public SimpleStatsConverter(
             RowType type,
             @Nullable int[] indexMapping,
             @Nullable CastFieldGetter[] castFieldGetters) {
@@ -67,17 +67,17 @@ public class FieldStatsArraySerializer {
         this.castFieldGetters = castFieldGetters;
     }
 
-    public BinaryTableStats toBinary(FieldStats[] stats) {
+    public SimpleStats toBinary(SimpleColStats[] stats) {
         int rowFieldCount = stats.length;
         GenericRow minValues = new GenericRow(rowFieldCount);
         GenericRow maxValues = new GenericRow(rowFieldCount);
         Long[] nullCounts = new Long[rowFieldCount];
         for (int i = 0; i < rowFieldCount; i++) {
-            minValues.setField(i, stats[i].minValue());
-            maxValues.setField(i, stats[i].maxValue());
+            minValues.setField(i, stats[i].min());
+            maxValues.setField(i, stats[i].max());
             nullCounts[i] = stats[i].nullCount();
         }
-        return new BinaryTableStats(
+        return new SimpleStats(
                 serializer.toBinaryRow(minValues).copy(),
                 serializer.toBinaryRow(maxValues).copy(),
                 BinaryArray.fromLongArray(nullCounts));
@@ -117,7 +117,7 @@ public class FieldStatsArraySerializer {
     }
 
     private static RowType toAllFieldsNullableRowType(RowType rowType) {
-        // as stated in RollingFile.Writer#finish, field stats are not collected currently so
+        // as stated in RollingFile.Writer#finish, col stats are not collected currently so
         // min/max values are all nulls
         return RowType.builder()
                 .fields(

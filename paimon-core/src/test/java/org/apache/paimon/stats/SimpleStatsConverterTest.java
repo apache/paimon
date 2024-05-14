@@ -36,8 +36,8 @@ import java.util.Collections;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link FieldStatsArraySerializer}. */
-public class FieldStatsArraySerializerTest {
+/** Tests for {@link SimpleStatsConverter}. */
+public class SimpleStatsConverterTest {
 
     @Test
     public void testFromBinary() {
@@ -73,20 +73,20 @@ public class FieldStatsArraySerializerTest {
                 SchemaEvolutionUtil.createIndexCastMapping(
                         tableSchema.fields(), dataSchema.fields());
         int[] indexMapping = indexCastMapping.getIndexMapping();
-        FieldStatsArraySerializer serializer =
-                new FieldStatsArraySerializer(
+        SimpleStatsConverter serializer =
+                new SimpleStatsConverter(
                         tableSchema.logicalRowType(),
                         indexMapping,
                         indexCastMapping.getCastMapping());
         BinaryRow minRowData = row(1, 2, 3, 4);
         BinaryRow maxRowData = row(100, 99, 98, 97);
         Long[] nullCounts = new Long[] {1L, 0L, 10L, 100L};
-        BinaryTableStats dataTableStats =
-                new BinaryTableStats(minRowData, maxRowData, BinaryArray.fromLongArray(nullCounts));
+        SimpleStats stats =
+                new SimpleStats(minRowData, maxRowData, BinaryArray.fromLongArray(nullCounts));
 
-        InternalRow min = serializer.evolution(dataTableStats.minValues());
-        InternalRow max = serializer.evolution(dataTableStats.maxValues());
-        InternalArray nulls = serializer.evolution(dataTableStats.nullCounts(), 1000L);
+        InternalRow min = serializer.evolution(stats.minValues());
+        InternalRow max = serializer.evolution(stats.maxValues());
+        InternalArray nulls = serializer.evolution(stats.nullCounts(), 1000L);
 
         checkFieldStats(min, max, nulls, 0, 2, 99, 0L);
         checkFieldStats(min, max, nulls, 1, 4, 97, 100L);

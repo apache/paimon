@@ -16,32 +16,23 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format;
+package org.apache.paimon.statistics;
 
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.utils.Pair;
+import org.apache.paimon.data.serializer.Serializer;
+import org.apache.paimon.format.SimpleColStats;
 
-import java.io.IOException;
+/** The counts stats collector, which will only report null count stats. */
+public class CountsSimpleColStatsCollector extends AbstractSimpleColStatsCollector {
 
-/** Extracts statistics directly from file. */
-public interface TableStatsExtractor {
-
-    FieldStats[] extract(FileIO fileIO, Path path) throws IOException;
-
-    Pair<FieldStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path) throws IOException;
-
-    /** File info fetched from physical file. */
-    class FileInfo {
-
-        private long rowCount;
-
-        public FileInfo(long rowCount) {
-            this.rowCount = rowCount;
+    @Override
+    public void collect(Object field, Serializer<Object> serializer) {
+        if (field == null) {
+            nullCount++;
         }
+    }
 
-        public long getRowCount() {
-            return rowCount;
-        }
+    @Override
+    public SimpleColStats convert(SimpleColStats source) {
+        return new SimpleColStats(null, null, source.nullCount());
     }
 }

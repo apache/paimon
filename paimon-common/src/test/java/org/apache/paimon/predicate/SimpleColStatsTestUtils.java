@@ -20,18 +20,18 @@ package org.apache.paimon.predicate;
 
 import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.format.FieldStats;
+import org.apache.paimon.format.SimpleColStats;
 
-/** Utils for testing with {@link FieldStats}. */
-public class FieldStatsUtils {
+/** Utils for testing with {@link SimpleColStats}. */
+public class SimpleColStatsTestUtils {
 
-    public static boolean test(Predicate predicate, long rowCount, FieldStats[] fieldStats) {
+    public static boolean test(Predicate predicate, long rowCount, SimpleColStats[] fieldStats) {
         Object[] min = new Object[fieldStats.length];
         Object[] max = new Object[fieldStats.length];
         Long[] nullCounts = new Long[fieldStats.length];
         for (int i = 0; i < fieldStats.length; i++) {
-            min[i] = fieldStats[i].minValue();
-            max[i] = fieldStats[i].maxValue();
+            min[i] = fieldStats[i].min();
+            max[i] = fieldStats[i].max();
             nullCounts[i] = fieldStats[i].nullCount();
         }
 

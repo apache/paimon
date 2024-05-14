@@ -35,7 +35,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
-import static org.apache.paimon.stats.StatsTestUtils.newTableStats;
+import static org.apache.paimon.stats.StatsTestUtils.newSimpleStats;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link ManifestCommittableSerializer}. */
@@ -109,8 +109,8 @@ public class ManifestCommittableSerializerTest {
                 1,
                 row(0),
                 row(0),
-                newTableStats(0, 1),
-                newTableStats(0, 1),
+                newSimpleStats(0, 1),
+                newSimpleStats(0, 1),
                 0,
                 1,
                 0,

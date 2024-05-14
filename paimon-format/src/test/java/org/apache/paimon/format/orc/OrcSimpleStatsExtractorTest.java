@@ -16,38 +16,39 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.parquet;
+package org.apache.paimon.format.orc;
 
-import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.format.TableFieldStatsExtractorTest;
+import org.apache.paimon.format.SimpleColStatsExtractorTest;
+import org.apache.paimon.format.orc.filter.OrcSimpleStatsExtractor;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
-import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.SmallIntType;
+import org.apache.paimon.types.TimeType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 
-/** Tests for {@link ParquetTableStatsExtractor}. */
-public class ParquetTableStatsExtractorTest extends TableFieldStatsExtractorTest {
+/** Tests for {@link OrcSimpleStatsExtractor}. */
+public class OrcSimpleStatsExtractorTest extends SimpleColStatsExtractorTest {
 
     @Override
     protected FileFormat createFormat() {
-        return FileFormat.fromIdentifier("parquet", new Options());
+        return FileFormat.fromIdentifier("orc", new Options());
     }
 
     @Override
@@ -66,12 +67,13 @@ public class ParquetTableStatsExtractorTest extends TableFieldStatsExtractorTest
                         new FloatType(),
                         new DoubleType(),
                         new DecimalType(5, 2),
-                        new DecimalType(15, 2),
                         new DecimalType(38, 18),
                         new DateType(),
+                        new TimeType(),
                         new TimestampType(3),
-                        new TimestampType(6),
-                        new TimestampType(9),
+                        new LocalZonedTimestampType(3),
+                        // orc reader & writer currently cannot preserve a high precision timestamp
+                        // new TimestampType(9),
                         new ArrayType(new IntType()),
                         new MapType(new VarCharType(8), new VarCharType(8)),
                         new MultisetType(new VarCharType(8)))
@@ -79,25 +81,7 @@ public class ParquetTableStatsExtractorTest extends TableFieldStatsExtractorTest
     }
 
     @Override
-    protected FieldStats regenerate(FieldStats stats, DataType type) {
-        switch (type.getTypeRoot()) {
-            case TIMESTAMP_WITHOUT_TIME_ZONE:
-                TimestampType timestampType = (TimestampType) type;
-                if (timestampType.getPrecision() > 6) {
-                    return new FieldStats(null, null, stats.nullCount());
-                }
-                break;
-            case ARRAY:
-            case MAP:
-            case MULTISET:
-            case ROW:
-                return new FieldStats(null, null, null);
-        }
-        return stats;
-    }
-
-    @Override
     protected String fileCompression() {
-        return "SNAPPY";
+        return "LZ4";
     }
 }
