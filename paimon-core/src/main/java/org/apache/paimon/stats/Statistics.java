@@ -27,6 +27,7 @@ import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.OptionalUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -48,6 +49,7 @@ import java.util.OptionalLong;
  * </ul>
  */
 @Experimental
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class Statistics {
 
     // ID of the snapshot this statistics collected from

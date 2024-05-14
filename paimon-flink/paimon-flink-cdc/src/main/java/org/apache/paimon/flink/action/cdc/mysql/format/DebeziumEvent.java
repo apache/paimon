@@ -21,6 +21,7 @@ package org.apache.paimon.flink.action.cdc.mysql.format;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
@@ -36,6 +37,7 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 /** Debezium Event Records Entity. */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class DebeziumEvent {
 
     private static final String FIELD_PAYLOAD = "payload";
