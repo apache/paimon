@@ -109,10 +109,14 @@ public class TagAutoCreation {
                 return false;
             }
 
+            Long watermark = latestSnapshot.watermark();
+            if (watermark == null) {
+                return false;
+            }
+
             LocalDateTime snapshotTime =
                     LocalDateTime.ofInstant(
-                            Instant.ofEpochMilli(latestSnapshot.watermark()),
-                            ZoneId.systemDefault());
+                            Instant.ofEpochMilli(watermark), ZoneId.systemDefault());
 
             return isAfterOrEqual(LocalDateTime.now().minus(idlenessTimeout), snapshotTime);
         } else if (timeExtractor instanceof ProcessTimeExtractor) {

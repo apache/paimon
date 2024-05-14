@@ -143,7 +143,7 @@ public class Snapshot {
     protected final long timeMillis;
 
     @JsonProperty(FIELD_LOG_OFFSETS)
-    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
     @Nullable
     protected final Map<Integer, Long> logOffsets;
 
@@ -171,7 +171,7 @@ public class Snapshot {
     // null if there is no watermark in new committing, and the previous snapshot does not have a
     // watermark
     @JsonProperty(FIELD_WATERMARK)
-    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @JsonInclude(value = JsonInclude.Include.CUSTOM, valueFilter = WatermarkFilter.class)
     @Nullable
     protected final Long watermark;
 
@@ -515,5 +515,19 @@ public class Snapshot {
 
         /** Collect statistics. */
         ANALYZE
+    }
+
+    /** Json Filter for watermark field. */
+    public static class WatermarkFilter {
+
+        @Override
+        public boolean equals(Object obj) {
+            if (!(obj instanceof Long)) {
+                return true;
+            }
+
+            long watermark = (long) obj;
+            return watermark == Long.MIN_VALUE;
+        }
     }
 }
