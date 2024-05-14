@@ -316,6 +316,7 @@ public class Snapshot {
     }
 
     @JsonGetter(FIELD_LOG_OFFSETS)
+    @Nullable
     public Map<Integer, Long> logOffsets() {
         return logOffsets;
     }

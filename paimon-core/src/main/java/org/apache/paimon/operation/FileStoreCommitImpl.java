@@ -793,7 +793,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 oldMetas.addAll(previousManifests);
                 // read the last snapshot to complete the bucket's offsets when logOffsets does not
                 // contain all buckets
-                latestSnapshot.logOffsets().forEach(logOffsets::putIfAbsent);
+                Map<Integer, Long> latestLogOffsets = latestSnapshot.logOffsets();
+                if (latestLogOffsets != null) {
+                    latestLogOffsets.forEach(logOffsets::putIfAbsent);
+                }
                 Long latestWatermark = latestSnapshot.watermark();
                 if (latestWatermark != null) {
                     currentWatermark =
