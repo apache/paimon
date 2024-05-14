@@ -246,7 +246,9 @@ public class HiveMigrator implements Migrator {
             List<FieldSchema> partitionFields,
             Map<String, String> hiveTableOptions) {
         HashMap<String, String> paimonOptions = new HashMap<>(this.options);
-        paimonOptions.put(CoreOptions.BUCKET.key(), "-1");
+        if (!paimonOptions.containsKey(CoreOptions.BUCKET.key())) {
+            paimonOptions.put(CoreOptions.BUCKET.key(), "-1");
+        }
         // for compatible with hive comment system
         if (hiveTableOptions.get("comment") != null) {
             paimonOptions.put("hive.comment", hiveTableOptions.get("comment"));
