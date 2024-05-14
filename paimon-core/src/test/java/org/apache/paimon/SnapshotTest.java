@@ -96,6 +96,18 @@ class SnapshotTest {
                                 + "  \"schemaId\" : 0,\n"
                                 + "  \"commitIdentifier\" : 0,\n"
                                 + "  \"commitKind\" : \"APPEND\",\n"
+                                + "  \"timeMillis\" : 1234\n"
+                                + "}");
+        assertThat(snapshot.toJson()).doesNotContain("watermark");
+
+        snapshot =
+                Snapshot.fromJson(
+                        "{\n"
+                                + "  \"version\" : 3,\n"
+                                + "  \"id\" : 5,\n"
+                                + "  \"schemaId\" : 0,\n"
+                                + "  \"commitIdentifier\" : 0,\n"
+                                + "  \"commitKind\" : \"APPEND\",\n"
                                 + "  \"timeMillis\" : 1234,\n"
                                 + "  \"watermark\" : 121312312\n"
                                 + "}");
