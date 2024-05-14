@@ -153,8 +153,7 @@ public class MultiTablesCompactorSink implements Serializable {
             createCommitterFactory() {
         Map<String, String> dynamicOptions = options.toMap();
         dynamicOptions.put(CoreOptions.WRITE_ONLY.key(), "false");
-        return (user, metricGroup) ->
-                new StoreMultiCommitter(catalogLoader, user, metricGroup, true, dynamicOptions);
+        return context -> new StoreMultiCommitter(catalogLoader, context, true, dynamicOptions);
     }
 
     protected CommittableStateManager<WrappedManifestCommittable> createCommittableStateManager() {

@@ -233,7 +233,7 @@ public abstract class FlinkSink<T> implements Serializable {
                         true,
                         options.get(SINK_COMMITTER_OPERATOR_CHAINING),
                         commitUser,
-                        createCommitterFactory(streamingCheckpointEnabled),
+                        createCommitterFactory(),
                         createCommittableStateManager());
         if (options.get(SINK_AUTO_TAG_FOR_SAVEPOINT)) {
             committerOperator =
@@ -310,8 +310,7 @@ public abstract class FlinkSink<T> implements Serializable {
     protected abstract OneInputStreamOperator<T, Committable> createWriteOperator(
             StoreSinkWrite.Provider writeProvider, String commitUser);
 
-    protected abstract Committer.Factory<Committable, ManifestCommittable> createCommitterFactory(
-            boolean streamingCheckpointEnabled);
+    protected abstract Committer.Factory<Committable, ManifestCommittable> createCommitterFactory();
 
     protected abstract CommittableStateManager<ManifestCommittable> createCommittableStateManager();
 
