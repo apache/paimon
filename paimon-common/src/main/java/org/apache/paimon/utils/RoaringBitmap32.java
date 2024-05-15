@@ -23,6 +23,7 @@ import org.roaringbitmap.RoaringBitmap;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
+import java.util.Objects;
 
 /** A compressed bitmap for 32-bit integer. */
 public class RoaringBitmap32 {
@@ -66,5 +67,17 @@ public class RoaringBitmap32 {
 
     public void deserialize(DataInput in) throws IOException {
         roaringBitmap.deserialize(in);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        RoaringBitmap32 that = (RoaringBitmap32) o;
+        return Objects.equals(this.roaringBitmap, that.roaringBitmap);
     }
 }
