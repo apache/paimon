@@ -43,6 +43,7 @@ import static org.apache.paimon.flink.utils.MultiTablesCompactorUtil.compactOpti
  * table with multi bucket such as dynamic or fixed bucket table.
  */
 public class MultiAwareBucketTableScan extends MultiTableScanBase<Tuple2<Split, String>> {
+
     protected transient Map<Identifier, BucketsTable> tablesMap;
     protected transient Map<Identifier, StreamTableScan> scansMap;
 

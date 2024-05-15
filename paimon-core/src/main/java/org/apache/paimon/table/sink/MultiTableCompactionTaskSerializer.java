@@ -38,6 +38,7 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 /** Serializer for {@link MultiTableAppendOnlyCompactionTask}. */
 public class MultiTableCompactionTaskSerializer
         implements VersionedSerializer<MultiTableAppendOnlyCompactionTask> {
+
     private static final int CURRENT_VERSION = 1;
 
     private final DataFileMetaSerializer dataFileSerializer;

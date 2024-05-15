@@ -47,7 +47,7 @@ public class CombinedAwareStreamingSourceFunction
         extends CombinedCompactorSourceFunction<Tuple2<Split, String>> {
 
     private final long monitorInterval;
-    private transient MultiTableScanBase<Tuple2<Split, String>> tableScanLogic;
+    private transient MultiTableScanBase<Tuple2<Split, String>> tableScan;
 
     public CombinedAwareStreamingSourceFunction(
             Catalog.Loader catalogLoader,
@@ -62,7 +62,7 @@ public class CombinedAwareStreamingSourceFunction
     @Override
     public void open(Configuration parameters) throws Exception {
         super.open(parameters);
-        tableScanLogic =
+        tableScan =
                 new MultiAwareBucketTableScan(
                         catalogLoader,
                         includingPattern,
@@ -76,7 +76,7 @@ public class CombinedAwareStreamingSourceFunction
     @Override
     void scanTable() throws Exception {
         while (isRunning.get()) {
-            MultiTableScanBase.ScanResult scanResult = tableScanLogic.scanTable(ctx);
+            MultiTableScanBase.ScanResult scanResult = tableScan.scanTable(ctx);
             if (scanResult == FINISHED) {
                 return;
             }

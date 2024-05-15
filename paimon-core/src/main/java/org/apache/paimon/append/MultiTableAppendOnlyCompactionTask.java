@@ -27,6 +27,7 @@ import java.util.Objects;
 
 /** Compaction task for multi table . */
 public class MultiTableAppendOnlyCompactionTask extends AppendOnlyCompactionTask {
+
     private final Identifier tableIdentifier;
 
     public MultiTableAppendOnlyCompactionTask(

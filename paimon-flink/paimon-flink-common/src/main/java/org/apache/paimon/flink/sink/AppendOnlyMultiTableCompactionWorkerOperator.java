@@ -25,6 +25,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.compact.UnawareBucketCompactor;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.ExecutorThreadFactory;
 
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
@@ -128,17 +129,41 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
 
     @Override
     public void close() throws Exception {
+        List<Exception> exceptions = new ArrayList<>();
+
         if (lazyCompactExecutor != null) {
-            // ignore runnable tasks in queue
-            lazyCompactExecutor.shutdownNow();
-            if (!lazyCompactExecutor.awaitTermination(120, TimeUnit.SECONDS)) {
+            try {
+                lazyCompactExecutor.shutdownNow();
+                if (!lazyCompactExecutor.awaitTermination(120, TimeUnit.SECONDS)) {
+                    LOG.warn(
+                            "Executors shutdown timeout, there may be some files that aren't deleted correctly");
+                }
+            } catch (Exception e) {
                 LOG.warn(
-                        "Executors shutdown timeout, there may be some files aren't deleted correctly");
+                        String.format(
+                                "Fail to stop the compaction executor. Reason: %s, please check the thread stack of append-only-compact-worker.",
+                                e.getMessage()),
+                        e);
+                exceptions.add(e);
             }
 
-            for (UnawareBucketCompactor compactor : compactorContainer.values()) {
-                compactor.close();
+            for (Map.Entry<Identifier, UnawareBucketCompactor> compactorEntry :
+                    compactorContainer.entrySet()) {
+                try {
+                    UnawareBucketCompactor compactor = compactorEntry.getValue();
+                    compactor.close();
+                } catch (Exception e) {
+                    Identifier id = compactorEntry.getKey();
+                    LOG.warn(
+                            String.format(
+                                    "Fail to roll back the compactor of %s. Reason: %s",
+                                    id, e.getMessage()),
+                            e);
+                    exceptions.add(e);
+                }
             }
         }
+
+        ExceptionUtils.throwMultiException(exceptions);
     }
 }

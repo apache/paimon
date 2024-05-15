@@ -49,6 +49,7 @@ import static org.apache.paimon.flink.utils.MultiTablesCompactorUtil.shouldCompa
  *     </ol>
  */
 public abstract class MultiTableScanBase<T> {
+
     private static final Logger LOG = LoggerFactory.getLogger(MultiTableScanBase.class);
     protected final Pattern includingPattern;
     protected final Pattern excludingPattern;

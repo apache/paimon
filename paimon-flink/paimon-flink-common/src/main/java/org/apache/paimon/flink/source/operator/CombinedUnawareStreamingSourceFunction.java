@@ -41,8 +41,9 @@ import static org.apache.paimon.flink.compact.MultiTableScanBase.ScanResult.IS_E
  */
 public class CombinedUnawareStreamingSourceFunction
         extends CombinedCompactorSourceFunction<MultiTableAppendOnlyCompactionTask> {
+
     private final long monitorInterval;
-    private MultiTableScanBase<MultiTableAppendOnlyCompactionTask> tableScanLogic;
+    private MultiTableScanBase<MultiTableAppendOnlyCompactionTask> tableScan;
 
     public CombinedUnawareStreamingSourceFunction(
             Catalog.Loader catalogLoader,
@@ -57,7 +58,7 @@ public class CombinedUnawareStreamingSourceFunction
     @Override
     public void open(Configuration parameters) throws Exception {
         super.open(parameters);
-        tableScanLogic =
+        tableScan =
                 new MultiUnawareBucketTableScan(
                         catalogLoader,
                         includingPattern,
@@ -71,7 +72,7 @@ public class CombinedUnawareStreamingSourceFunction
     @Override
     void scanTable() throws Exception {
         while (isRunning.get()) {
-            MultiTableScanBase.ScanResult scanResult = tableScanLogic.scanTable(ctx);
+            MultiTableScanBase.ScanResult scanResult = tableScan.scanTable(ctx);
             if (scanResult == FINISHED) {
                 return;
             }

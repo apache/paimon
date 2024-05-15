@@ -47,10 +47,11 @@ import static org.apache.paimon.flink.compact.MultiTableScanBase.ScanResult.IS_E
 /** It is responsible for monitoring compactor source of aware bucket table in batch mode. */
 public class CombinedAwareBatchSourceFunction
         extends CombinedCompactorSourceFunction<Tuple2<Split, String>> {
+
     private static final Logger LOGGER =
             LoggerFactory.getLogger(CombinedAwareBatchSourceFunction.class);
 
-    private MultiTableScanBase<Tuple2<Split, String>> tableScanLogic;
+    private MultiTableScanBase<Tuple2<Split, String>> tableScan;
 
     public CombinedAwareBatchSourceFunction(
             Catalog.Loader catalogLoader,
@@ -63,7 +64,7 @@ public class CombinedAwareBatchSourceFunction
     @Override
     public void open(Configuration parameters) throws Exception {
         super.open(parameters);
-        tableScanLogic =
+        tableScan =
                 new MultiAwareBucketTableScan(
                         catalogLoader,
                         includingPattern,
@@ -76,7 +77,7 @@ public class CombinedAwareBatchSourceFunction
     @Override
     void scanTable() throws Exception {
         if (isRunning.get()) {
-            MultiTableScanBase.ScanResult scanResult = tableScanLogic.scanTable(ctx);
+            MultiTableScanBase.ScanResult scanResult = tableScan.scanTable(ctx);
             if (scanResult == FINISHED) {
                 return;
             }

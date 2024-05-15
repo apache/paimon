@@ -38,6 +38,7 @@ import java.util.stream.Collectors;
 
 /** The Compactor of unaware bucket table to execute {@link AppendOnlyCompactionTask}. */
 public class UnawareBucketCompactor {
+
     private final FileStoreTable table;
     private final String commitUser;
 
