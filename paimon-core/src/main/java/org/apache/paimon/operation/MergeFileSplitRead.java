@@ -116,7 +116,16 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         return this;
     }
 
-    public MergeFileSplitRead withValueProjection(@Nullable int[][] projectedFields) {
+    public Comparator<InternalRow> keyComparator() {
+        return keyComparator;
+    }
+
+    public MergeSorter mergeSorter() {
+        return mergeSorter;
+    }
+
+    @Override
+    public MergeFileSplitRead withProjection(@Nullable int[][] projectedFields) {
         if (projectedFields == null) {
             return this;
         }
@@ -160,11 +169,13 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         return this;
     }
 
+    @Override
     public MergeFileSplitRead withIOManager(IOManager ioManager) {
         this.mergeSorter.setIOManager(ioManager);
         return this;
     }
 
+    @Override
     public MergeFileSplitRead forceKeepDelete() {
         this.forceKeepDelete = true;
         return this;
@@ -211,75 +222,24 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
 
     @Override
     public RecordReader<KeyValue> createReader(DataSplit split) throws IOException {
-        RecordReader<KeyValue> reader = createReaderWithoutOuterProjection(split);
-        if (outerProjection != null) {
-            ProjectedRow projectedRow = ProjectedRow.from(outerProjection);
-            reader = reader.transform(kv -> kv.replaceValue(projectedRow.replaceRow(kv.value())));
+        if (!split.beforeFiles().isEmpty()) {
+            throw new IllegalArgumentException("This read cannot accept split with before files.");
         }
-        return reader;
-    }
 
-    private RecordReader<KeyValue> createReaderWithoutOuterProjection(DataSplit split)
-            throws IOException {
-        if (split.beforeFiles().isEmpty()) {
-            if (split.isStreaming() || split.convertToRawFiles().isPresent()) {
-                return noMergeRead(
-                        split.partition(),
-                        split.bucket(),
-                        split.dataFiles(),
-                        split.deletionFiles().orElse(null),
-                        split.isStreaming());
-            } else {
-                return projectKey(
-                        mergeRead(
-                                split.partition(),
-                                split.bucket(),
-                                split.dataFiles(),
-                                null,
-                                forceKeepDelete));
-            }
-        } else if (split.isStreaming()) {
-            // streaming concat read
-            return ConcatRecordReader.create(
-                    () ->
-                            new ReverseReader(
-                                    noMergeRead(
-                                            split.partition(),
-                                            split.bucket(),
-                                            split.beforeFiles(),
-                                            split.beforeDeletionFiles().orElse(null),
-                                            true)),
-                    () ->
-                            noMergeRead(
-                                    split.partition(),
-                                    split.bucket(),
-                                    split.dataFiles(),
-                                    split.deletionFiles().orElse(null),
-                                    true));
+        if (split.isStreaming() || split.convertToRawFiles().isPresent()) {
+            return createNoMergeReader(
+                    split.partition(),
+                    split.bucket(),
+                    split.dataFiles(),
+                    split.deletionFiles().orElse(null),
+                    split.isStreaming());
         } else {
-            // batch diff read
-            return projectKey(
-                    DiffReader.readDiff(
-                            mergeRead(
-                                    split.partition(),
-                                    split.bucket(),
-                                    split.beforeFiles(),
-                                    split.beforeDeletionFiles().orElse(null),
-                                    false),
-                            mergeRead(
-                                    split.partition(),
-                                    split.bucket(),
-                                    split.dataFiles(),
-                                    split.deletionFiles().orElse(null),
-                                    false),
-                            keyComparator,
-                            createUdsComparator(),
-                            mergeSorter,
-                            forceKeepDelete));
+            return createMergeReader(
+                    split.partition(), split.bucket(), split.dataFiles(), null, forceKeepDelete);
         }
     }
 
-    private RecordReader<KeyValue> mergeRead(
+    public RecordReader<KeyValue> createMergeReader(
             BinaryRow partition,
             int bucket,
             List<DataFileMeta> files,
@@ -316,10 +276,10 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
             reader = new DropDeleteReader(reader);
         }
 
-        return reader;
+        return projectOuter(projectKey(reader));
     }
 
-    private RecordReader<KeyValue> noMergeRead(
+    public RecordReader<KeyValue> createNoMergeReader(
             BinaryRow partition,
             int bucket,
             List<DataFileMeta> files,
@@ -344,7 +304,8 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
                                 file.schemaId(), fileName, file.fileSize(), file.level());
                     });
         }
-        return ConcatRecordReader.create(suppliers);
+
+        return projectOuter(ConcatRecordReader.create(suppliers));
     }
 
     private Optional<String> changelogFile(DataFileMeta fileMeta) {
@@ -365,8 +326,16 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         return reader.transform(kv -> kv.replaceKey(projectedRow.replaceRow(kv.key())));
     }
 
+    private RecordReader<KeyValue> projectOuter(RecordReader<KeyValue> reader) {
+        if (outerProjection != null) {
+            ProjectedRow projectedRow = ProjectedRow.from(outerProjection);
+            reader = reader.transform(kv -> kv.replaceValue(projectedRow.replaceRow(kv.value())));
+        }
+        return reader;
+    }
+
     @Nullable
-    private UserDefinedSeqComparator createUdsComparator() {
+    public UserDefinedSeqComparator createUdsComparator() {
         return UserDefinedSeqComparator.create(
                 readerFactoryBuilder.projectedValueType(), sequenceFields);
     }
