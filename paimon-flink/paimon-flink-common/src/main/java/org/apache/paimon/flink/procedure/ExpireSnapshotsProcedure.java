@@ -19,7 +19,12 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.table.ExpireSnapshots;
+import org.apache.paimon.utils.DateTimeUtils;
 
+import org.apache.flink.table.annotation.ArgumentHint;
+import org.apache.flink.table.annotation.DataTypeHint;
+import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 /** A procedure to expire snapshots. */
@@ -30,10 +35,49 @@ public class ExpireSnapshotsProcedure extends ProcedureBase {
         return "expire_snapshots";
     }
 
-    public String[] call(ProcedureContext procedureContext, String tableId, int retainMax)
+    @ProcedureHint(
+            argument = {
+                @ArgumentHint(name = "table", type = @DataTypeHint("STRING"), isOptional = false),
+                @ArgumentHint(
+                        name = "retain_max",
+                        type = @DataTypeHint("INTEGER"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "retain_min",
+                        type = @DataTypeHint("INTEGER"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "older_than",
+                        type = @DataTypeHint(value = "STRING"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "max_deletes",
+                        type = @DataTypeHint("INTEGER"),
+                        isOptional = true)
+            })
+    public String[] call(
+            ProcedureContext procedureContext,
+            String tableId,
+            Integer retainMax,
+            Integer retainMin,
+            String olderThanStr,
+            Integer maxDeletes)
             throws Catalog.TableNotExistException {
-        return new String[] {
-            table(tableId).newExpireSnapshots().retainMax(retainMax).expire() + ""
-        };
+        ExpireSnapshots expireSnapshots = table(tableId).newExpireSnapshots();
+        if (retainMax != null) {
+            expireSnapshots.retainMax(retainMax);
+        }
+        if (retainMin != null) {
+            expireSnapshots.retainMin(retainMin);
+        }
+        if (olderThanStr != null) {
+            expireSnapshots.olderThanMills(
+                    DateTimeUtils.parseTimestampData(olderThanStr, 3, DateTimeUtils.LOCAL_TZ)
+                            .getMillisecond());
+        }
+        if (maxDeletes != null) {
+            expireSnapshots.maxDeletes(maxDeletes);
+        }
+        return new String[] {expireSnapshots.expire() + ""};
     }
 }
