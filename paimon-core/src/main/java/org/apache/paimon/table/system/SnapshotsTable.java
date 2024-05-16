@@ -26,6 +26,9 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.predicate.Equal;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.LeafPredicateExtractor;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
@@ -46,6 +49,8 @@ import org.apache.paimon.utils.SerializationUtils;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -140,19 +145,13 @@ public class SnapshotsTable implements ReadonlyTable {
 
         @Override
         public InnerTableScan withFilter(Predicate predicate) {
-            // TODO
+            // do filter in read
             return this;
         }
 
         @Override
         public Plan innerPlan() {
-            long rowCount;
-            try {
-                rowCount = new SnapshotManager(fileIO, location).snapshotCount();
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-            return () -> Collections.singletonList(new SnapshotsSplit(rowCount, location));
+            return () -> Collections.singletonList(new SnapshotsSplit(location));
         }
     }
 
@@ -160,17 +159,16 @@ public class SnapshotsTable implements ReadonlyTable {
 
         private static final long serialVersionUID = 1L;
 
-        private final long rowCount;
         private final Path location;
 
-        private SnapshotsSplit(long rowCount, Path location) {
+        private SnapshotsSplit(Path location) {
             this.location = location;
-            this.rowCount = rowCount;
         }
 
         @Override
         public long rowCount() {
-            return rowCount;
+            // dummy 1, just 1 parallelism
+            return 1;
         }
 
         @Override
@@ -195,6 +193,7 @@ public class SnapshotsTable implements ReadonlyTable {
 
         private final FileIO fileIO;
         private int[][] projection;
+        @Nullable private Long specificSnapshot;
 
         public SnapshotsRead(FileIO fileIO) {
             this.fileIO = fileIO;
@@ -202,7 +201,15 @@ public class SnapshotsTable implements ReadonlyTable {
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
-            // TODO
+            if (predicate == null) {
+                return this;
+            }
+
+            LeafPredicate snapshotPred =
+                    predicate.visit(LeafPredicateExtractor.INSTANT).get("snapshot_id");
+            if (snapshotPred.function() instanceof Equal) {
+                specificSnapshot = (Long) snapshotPred.literals().get(0);
+            }
             return this;
         }
 
@@ -222,8 +229,13 @@ public class SnapshotsTable implements ReadonlyTable {
             if (!(split instanceof SnapshotsSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
-            Path location = ((SnapshotsSplit) split).location;
-            Iterator<Snapshot> snapshots = new SnapshotManager(fileIO, location).snapshots();
+            SnapshotManager snapshotManager =
+                    new SnapshotManager(fileIO, ((SnapshotsSplit) split).location);
+            Iterator<Snapshot> snapshots =
+                    specificSnapshot != null
+                            ? Collections.singletonList(snapshotManager.snapshot(specificSnapshot))
+                                    .iterator()
+                            : snapshotManager.snapshots();
             Iterator<InternalRow> rows = Iterators.transform(snapshots, this::toRow);
             if (projection != null) {
                 rows =
