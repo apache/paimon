@@ -167,7 +167,7 @@ public class FilesTable implements ReadonlyTable {
             }
 
             Map<String, LeafPredicate> leafPredicates =
-                    pushdown.visit(LeafPredicateExtractor.INSTANT);
+                    pushdown.visit(LeafPredicateExtractor.INSTANCE);
             this.partitionPredicate = leafPredicates.get("partition");
             this.bucketPredicate = leafPredicates.get("bucket");
             this.levelPredicate = leafPredicates.get("level");

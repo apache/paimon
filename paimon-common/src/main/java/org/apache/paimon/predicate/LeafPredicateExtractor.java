@@ -25,7 +25,7 @@ import java.util.Map;
 /** Extract leaf predicate for field names. */
 public class LeafPredicateExtractor implements PredicateVisitor<Map<String, LeafPredicate>> {
 
-    public static final LeafPredicateExtractor INSTANT = new LeafPredicateExtractor();
+    public static final LeafPredicateExtractor INSTANCE = new LeafPredicateExtractor();
 
     @Override
     public Map<String, LeafPredicate> visit(LeafPredicate predicate) {
