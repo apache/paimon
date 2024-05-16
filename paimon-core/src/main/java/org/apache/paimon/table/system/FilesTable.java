@@ -28,8 +28,8 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.LeafPredicateExtractor;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -162,25 +162,15 @@ public class FilesTable implements ReadonlyTable {
 
         @Override
         public InnerTableScan withFilter(Predicate pushdown) {
-            List<Predicate> predicates = PredicateBuilder.splitAnd(pushdown);
-            for (Predicate predicate : predicates) {
-                if (predicate instanceof LeafPredicate) {
-                    LeafPredicate leaf = (LeafPredicate) predicate;
-                    switch (leaf.fieldName()) {
-                        case "partition":
-                            this.partitionPredicate = leaf;
-                            break;
-                        case "bucket":
-                            this.bucketPredicate = leaf;
-                            break;
-                        case "level":
-                            this.levelPredicate = leaf;
-                            break;
-                        default:
-                            break;
-                    }
-                }
+            if (pushdown == null) {
+                return this;
             }
+
+            Map<String, LeafPredicate> leafPredicates =
+                    pushdown.visit(LeafPredicateExtractor.INSTANCE);
+            this.partitionPredicate = leafPredicates.get("partition");
+            this.bucketPredicate = leafPredicates.get("bucket");
+            this.levelPredicate = leafPredicates.get("level");
             return this;
         }
 
