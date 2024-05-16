@@ -19,18 +19,18 @@
 package org.apache.paimon.flink.source.operator;
 
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.compact.MultiAwareBucketTableScan;
+import org.apache.paimon.flink.compact.MultiTableScanBase;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.Split;
-import org.apache.paimon.table.source.StreamTableScan;
 
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.typeutils.TupleTypeInfo;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -39,65 +39,54 @@ import org.apache.flink.table.data.RowData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
-/** It is responsible for monitoring compactor source in batch mode. */
-public class MultiTablesBatchCompactorSourceFunction extends MultiTablesCompactorSourceFunction {
+import static org.apache.paimon.flink.compact.MultiTableScanBase.ScanResult.FINISHED;
+import static org.apache.paimon.flink.compact.MultiTableScanBase.ScanResult.IS_EMPTY;
 
-    private static final Logger LOG =
-            LoggerFactory.getLogger(MultiTablesBatchCompactorSourceFunction.class);
+/** It is responsible for monitoring compactor source of aware bucket table in batch mode. */
+public class CombinedAwareBatchSourceFunction
+        extends CombinedCompactorSourceFunction<Tuple2<Split, String>> {
 
-    public MultiTablesBatchCompactorSourceFunction(
+    private static final Logger LOGGER =
+            LoggerFactory.getLogger(CombinedAwareBatchSourceFunction.class);
+
+    private MultiTableScanBase<Tuple2<Split, String>> tableScan;
+
+    public CombinedAwareBatchSourceFunction(
             Catalog.Loader catalogLoader,
             Pattern includingPattern,
             Pattern excludingPattern,
-            Pattern databasePattern,
-            long monitorInterval) {
-        super(
-                catalogLoader,
-                includingPattern,
-                excludingPattern,
-                databasePattern,
-                false,
-                monitorInterval);
+            Pattern databasePattern) {
+        super(catalogLoader, includingPattern, excludingPattern, databasePattern, false);
     }
 
     @Override
-    public void run(SourceContext<Tuple2<Split, String>> ctx) throws Exception {
-        this.ctx = ctx;
-        if (isRunning) {
-            boolean isEmpty;
-            synchronized (ctx.getCheckpointLock()) {
-                if (!isRunning) {
-                    return;
-                }
-                try {
-                    // batch mode do not need check for new tables
-                    List<Tuple2<Split, String>> splits = new ArrayList<>();
-                    for (Map.Entry<Identifier, StreamTableScan> entry : scansMap.entrySet()) {
-                        Identifier identifier = entry.getKey();
-                        StreamTableScan scan = entry.getValue();
-                        splits.addAll(
-                                scan.plan().splits().stream()
-                                        .map(split -> new Tuple2<>(split, identifier.getFullName()))
-                                        .collect(Collectors.toList()));
-                    }
+    public void open(Configuration parameters) throws Exception {
+        super.open(parameters);
+        tableScan =
+                new MultiAwareBucketTableScan(
+                        catalogLoader,
+                        includingPattern,
+                        excludingPattern,
+                        databasePattern,
+                        isStreaming,
+                        isRunning);
+    }
 
-                    isEmpty = splits.isEmpty();
-                    splits.forEach(ctx::collect);
-
-                } catch (EndOfScanException esf) {
-                    LOG.info("Catching EndOfStreamException, the stream is finished.");
-                    return;
-                }
+    @Override
+    void scanTable() throws Exception {
+        if (isRunning.get()) {
+            MultiTableScanBase.ScanResult scanResult = tableScan.scanTable(ctx);
+            if (scanResult == FINISHED) {
+                return;
             }
-            if (isEmpty) {
-                throw new Exception(
-                        "No splits were collected. Please ensure there are tables detected after pattern matching");
+            if (scanResult == IS_EMPTY) {
+                // Currently, in the combined mode, there are two scan tasks for the table of two
+                // different bucket type (multi bucket & unaware bucket) running concurrently.
+                // There will be a situation that there is only one task compaction , therefore this
+                // should not be thrown exception here.
+                LOGGER.info("No file were collected for the table of aware-bucket");
             }
         }
     }
@@ -109,15 +98,10 @@ public class MultiTablesBatchCompactorSourceFunction extends MultiTablesCompacto
             Catalog.Loader catalogLoader,
             Pattern includingPattern,
             Pattern excludingPattern,
-            Pattern databasePattern,
-            long monitorInterval) {
-        MultiTablesBatchCompactorSourceFunction function =
-                new MultiTablesBatchCompactorSourceFunction(
-                        catalogLoader,
-                        includingPattern,
-                        excludingPattern,
-                        databasePattern,
-                        monitorInterval);
+            Pattern databasePattern) {
+        CombinedAwareBatchSourceFunction function =
+                new CombinedAwareBatchSourceFunction(
+                        catalogLoader, includingPattern, excludingPattern, databasePattern);
         StreamSource<Tuple2<Split, String>, ?> sourceOperator = new StreamSource<>(function);
         TupleTypeInfo<Tuple2<Split, String>> tupleTypeInfo =
                 new TupleTypeInfo<>(
