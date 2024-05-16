@@ -81,6 +81,7 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
         dataFileSerializer.serializeList(message.compactIncrement().compactAfter(), view);
         dataFileSerializer.serializeList(message.compactIncrement().changelogFiles(), view);
         indexEntrySerializer.serializeList(message.indexIncrement().newIndexFiles(), view);
+        indexEntrySerializer.serializeList(message.indexIncrement().deletedIndexFiles(), view);
     }
 
     @Override

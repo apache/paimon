@@ -191,7 +191,9 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 partitionType.getFieldCount() > 0 && options.dynamicPartitionOverwrite(),
                 newKeyComparator(),
                 options.branch(),
-                newStatsFileHandler());
+                newStatsFileHandler(),
+                // false only if it's append table which bucket = -1
+                !schema.primaryKeys().isEmpty() || options.bucket() != -1);
     }
 
     @Override
