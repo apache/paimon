@@ -207,7 +207,7 @@ public class SnapshotsTable implements ReadonlyTable {
 
             LeafPredicate snapshotPred =
                     predicate.visit(LeafPredicateExtractor.INSTANT).get("snapshot_id");
-            if (snapshotPred.function() instanceof Equal) {
+            if (snapshotPred != null && snapshotPred.function() instanceof Equal) {
                 specificSnapshot = (Long) snapshotPred.literals().get(0);
             }
             return this;
