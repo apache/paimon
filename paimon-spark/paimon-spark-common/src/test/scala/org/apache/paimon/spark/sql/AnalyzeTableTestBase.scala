@@ -59,6 +59,7 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
 
     spark.sql(s"INSERT INTO T VALUES ('1', 'a', 1, 1)")
     spark.sql(s"INSERT INTO T VALUES ('2', 'aaa', 1, 2)")
+    Assertions.assertEquals(0, spark.sql("select * from `T$statistics`").count())
 
     spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS")
 
@@ -68,6 +69,13 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     checkAnswer(
       spark.sql("SELECT snapshot_id, schema_id, mergedRecordCount, colstat from `T$statistics`"),
       Row(2, 0, 2, "{ }"))
+  }
+
+  test("Paimon analyze: analyze table without snapshot") {
+    spark.sql(s"CREATE TABLE T (id STRING, name STRING)")
+    spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS")
+    spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS FOR ALL COLUMNS")
+    Assertions.assertEquals(0, spark.sql("select * from `T$statistics`").count())
   }
 
   test("Paimon analyze: analyze no scan") {

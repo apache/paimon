@@ -54,6 +54,9 @@ case class PaimonAnalyzeTableColumnCommand(
   override def run(sparkSession: SparkSession): Seq[Row] = {
     val relation = DataSourceV2Relation.create(v2Table, Some(catalog), Some(identifier))
     val currentSnapshot = table.snapshotManager().latestSnapshot()
+    if (currentSnapshot == null) {
+      return Seq.empty[Row]
+    }
 
     // compute stats
     val attributes = getColumnsToAnalyze(relation, columnNames, allColumns)

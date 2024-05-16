@@ -25,6 +25,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.reader.EmptyRecordReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.FileStoreTable;
@@ -53,6 +54,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
@@ -204,16 +206,22 @@ public class StatisticTable implements ReadonlyTable {
             if (!(split instanceof StatisticTable.StatisticSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
-            Statistics statistics = dataTable.statistics().get();
-            Iterator<Statistics> statisticsIterator =
-                    Collections.singletonList(statistics).iterator();
-            Iterator<InternalRow> rows = Iterators.transform(statisticsIterator, this::toRow);
-            if (projection != null) {
-                rows =
-                        Iterators.transform(
-                                rows, row -> ProjectedRow.from(projection).replaceRow(row));
+
+            Optional<Statistics> statisticsOptional = dataTable.statistics();
+            if (statisticsOptional.isPresent()) {
+                Statistics statistics = statisticsOptional.get();
+                Iterator<Statistics> statisticsIterator =
+                        Collections.singletonList(statistics).iterator();
+                Iterator<InternalRow> rows = Iterators.transform(statisticsIterator, this::toRow);
+                if (projection != null) {
+                    rows =
+                            Iterators.transform(
+                                    rows, row -> ProjectedRow.from(projection).replaceRow(row));
+                }
+                return new IteratorRecordReader<>(rows);
+            } else {
+                return new EmptyRecordReader<>();
             }
-            return new IteratorRecordReader<>(rows);
         }
 
         private InternalRow toRow(Statistics statistics) {
