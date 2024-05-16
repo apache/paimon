@@ -125,6 +125,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     private final StatsFileHandler statsFileHandler;
 
+    // This flag only is used for deletion vectors.
+    private final boolean autoMergeIndexFiles;
+
     public FileStoreCommitImpl(
             FileIO fileIO,
             SchemaManager schemaManager,
@@ -143,7 +146,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             boolean dynamicPartitionOverwrite,
             @Nullable Comparator<InternalRow> keyComparator,
             String branchName,
-            StatsFileHandler statsFileHandler) {
+            StatsFileHandler statsFileHandler,
+            boolean autoMergeIndexFiles) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.commitUser = commitUser;
@@ -166,6 +170,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.ignoreEmptyCommit = true;
         this.commitMetrics = null;
         this.statsFileHandler = statsFileHandler;
+        this.autoMergeIndexFiles = autoMergeIndexFiles;
     }
 
     @Override
@@ -633,6 +638,24 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                                 "Unknown index type: " + f.indexType());
                                 }
                             });
+            commitMessage
+                    .indexIncrement()
+                    .deletedIndexFiles()
+                    .forEach(
+                            f -> {
+                                if (f.indexType().equals(DELETION_VECTORS_INDEX)) {
+                                    compactDvIndexFiles.add(
+                                            new IndexManifestEntry(
+                                                    FileKind.DELETE,
+                                                    commitMessage.partition(),
+                                                    commitMessage.bucket(),
+                                                    f));
+                                } else {
+                                    throw new RuntimeException(
+                                            "This index type is not supported to delete: "
+                                                    + f.indexType());
+                                }
+                            });
         }
     }
 
@@ -831,7 +854,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
 
             // write new index manifest
-            String indexManifest = indexManifestFile.merge(previousIndexManifest, indexFiles);
+            String indexManifest =
+                    indexManifestFile.writeIndexFiles(
+                            previousIndexManifest, indexFiles, autoMergeIndexFiles);
             if (!Objects.equals(indexManifest, previousIndexManifest)) {
                 newIndexManifest = indexManifest;
             }
