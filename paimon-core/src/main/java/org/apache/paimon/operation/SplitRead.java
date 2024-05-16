@@ -18,9 +18,13 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.utils.IOFunction;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 
@@ -31,8 +35,48 @@ import java.io.IOException;
  */
 public interface SplitRead<T> {
 
-    SplitRead<T> withFilter(Predicate predicate);
+    SplitRead<T> forceKeepDelete();
+
+    SplitRead<T> withIOManager(@Nullable IOManager ioManager);
+
+    SplitRead<T> withProjection(@Nullable int[][] projectedFields);
+
+    SplitRead<T> withFilter(@Nullable Predicate predicate);
 
     /** Create a {@link RecordReader} from split. */
     RecordReader<T> createReader(DataSplit split) throws IOException;
+
+    static <L, R> SplitRead<R> convert(
+            SplitRead<L> read, IOFunction<DataSplit, RecordReader<R>> convertedFactory) {
+        return new SplitRead<R>() {
+            @Override
+            public SplitRead<R> forceKeepDelete() {
+                read.forceKeepDelete();
+                return this;
+            }
+
+            @Override
+            public SplitRead<R> withIOManager(@Nullable IOManager ioManager) {
+                read.withIOManager(ioManager);
+                return this;
+            }
+
+            @Override
+            public SplitRead<R> withProjection(@Nullable int[][] projectedFields) {
+                read.withProjection(projectedFields);
+                return this;
+            }
+
+            @Override
+            public SplitRead<R> withFilter(@Nullable Predicate predicate) {
+                read.withFilter(predicate);
+                return this;
+            }
+
+            @Override
+            public RecordReader<R> createReader(DataSplit split) throws IOException {
+                return convertedFactory.apply(split);
+            }
+        };
+    }
 }
