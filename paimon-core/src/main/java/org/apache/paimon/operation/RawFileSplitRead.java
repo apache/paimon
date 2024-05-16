@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
 import org.apache.paimon.deletionvectors.DeletionVector;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatKey;
 import org.apache.paimon.format.FormatReaderContext;
@@ -98,6 +99,17 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         this.projection = Projection.range(0, rowType.getFieldCount()).toNestedIndexes();
     }
 
+    @Override
+    public SplitRead<InternalRow> forceKeepDelete() {
+        return this;
+    }
+
+    @Override
+    public SplitRead<InternalRow> withIOManager(@Nullable IOManager ioManager) {
+        return this;
+    }
+
+    @Override
     public RawFileSplitRead withProjection(int[][] projectedFields) {
         if (projectedFields != null) {
             projection = projectedFields;

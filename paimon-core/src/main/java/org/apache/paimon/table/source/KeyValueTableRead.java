@@ -23,14 +23,22 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.RawFileSplitRead;
+import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.utils.LazyField;
+import org.apache.paimon.table.source.splitread.IncrementalChangelogReadProvider;
+import org.apache.paimon.table.source.splitread.IncrementalDiffReadProvider;
+import org.apache.paimon.table.source.splitread.MergeFileSplitReadProvider;
+import org.apache.paimon.table.source.splitread.RawFileSplitReadProvider;
+import org.apache.paimon.table.source.splitread.SplitReadProvider;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.function.Supplier;
 
 /**
@@ -38,8 +46,7 @@ import java.util.function.Supplier;
  */
 public final class KeyValueTableRead extends AbstractDataTableRead<KeyValue> {
 
-    private final LazyField<MergeFileSplitRead> mergeRead;
-    private final LazyField<RawFileSplitRead> batchRawRead;
+    private final List<SplitReadProvider> readProviders;
 
     private int[][] projection = null;
     private boolean forceKeepDelete = false;
@@ -51,65 +58,54 @@ public final class KeyValueTableRead extends AbstractDataTableRead<KeyValue> {
             Supplier<RawFileSplitRead> batchRawReadSupplier,
             TableSchema schema) {
         super(schema);
-        this.mergeRead = new LazyField<>(() -> createMergeRead(mergeReadSupplier));
-        this.batchRawRead = new LazyField<>(() -> createBatchRawRead(batchRawReadSupplier));
+        this.readProviders =
+                Arrays.asList(
+                        new RawFileSplitReadProvider(batchRawReadSupplier, this::assignValues),
+                        new MergeFileSplitReadProvider(mergeReadSupplier, this::assignValues),
+                        new IncrementalChangelogReadProvider(mergeReadSupplier, this::assignValues),
+                        new IncrementalDiffReadProvider(mergeReadSupplier, this::assignValues));
     }
 
-    private MergeFileSplitRead createMergeRead(Supplier<MergeFileSplitRead> readSupplier) {
-        MergeFileSplitRead read =
-                readSupplier
-                        .get()
-                        .withKeyProjection(new int[0][])
-                        .withValueProjection(projection)
-                        .withFilter(predicate)
-                        .withIOManager(ioManager);
+    private List<SplitRead<InternalRow>> initialized() {
+        List<SplitRead<InternalRow>> readers = new ArrayList<>();
+        for (SplitReadProvider readProvider : readProviders) {
+            if (readProvider.initialized()) {
+                readers.add(readProvider.getOrCreate());
+            }
+        }
+        return readers;
+    }
+
+    private void assignValues(SplitRead<InternalRow> read) {
         if (forceKeepDelete) {
             read = read.forceKeepDelete();
         }
-        return read;
-    }
-
-    private RawFileSplitRead createBatchRawRead(Supplier<RawFileSplitRead> readSupplier) {
-        return readSupplier.get().withProjection(projection).withFilter(predicate);
+        read.withProjection(projection).withFilter(predicate).withIOManager(ioManager);
     }
 
     @Override
     public void projection(int[][] projection) {
-        if (mergeRead.initialized()) {
-            mergeRead.get().withValueProjection(projection);
-        }
-        if (batchRawRead.initialized()) {
-            batchRawRead.get().withProjection(projection);
-        }
+        initialized().forEach(r -> r.withProjection(projection));
         this.projection = projection;
     }
 
     @Override
     public InnerTableRead forceKeepDelete() {
-        if (mergeRead.initialized()) {
-            mergeRead.get().forceKeepDelete();
-        }
+        initialized().forEach(SplitRead::forceKeepDelete);
         this.forceKeepDelete = true;
         return this;
     }
 
     @Override
     protected InnerTableRead innerWithFilter(Predicate predicate) {
-        if (mergeRead.initialized()) {
-            mergeRead.get().withFilter(predicate);
-        }
-        if (batchRawRead.initialized()) {
-            batchRawRead.get().withFilter(predicate);
-        }
+        initialized().forEach(r -> r.withFilter(predicate));
         this.predicate = predicate;
         return this;
     }
 
     @Override
     public TableRead withIOManager(IOManager ioManager) {
-        if (mergeRead.initialized()) {
-            mergeRead.get().withIOManager(ioManager);
-        }
+        initialized().forEach(r -> r.withIOManager(ioManager));
         this.ioManager = ioManager;
         return this;
     }
@@ -117,11 +113,16 @@ public final class KeyValueTableRead extends AbstractDataTableRead<KeyValue> {
     @Override
     public RecordReader<InternalRow> reader(Split split) throws IOException {
         DataSplit dataSplit = (DataSplit) split;
-        if (!forceKeepDelete && !dataSplit.isStreaming() && split.convertToRawFiles().isPresent()) {
-            return batchRawRead.get().createReader(dataSplit);
+        for (SplitReadProvider readProvider : readProviders) {
+            if (readProvider.match(dataSplit, forceKeepDelete)) {
+                return readProvider.getOrCreate().createReader(dataSplit);
+            }
         }
 
-        RecordReader<KeyValue> reader = mergeRead.get().createReader(dataSplit);
+        throw new RuntimeException("Should not happen.");
+    }
+
+    public static RecordReader<InternalRow> unwrap(RecordReader<KeyValue> reader) {
         return new RecordReader<InternalRow>() {
 
             @Nullable

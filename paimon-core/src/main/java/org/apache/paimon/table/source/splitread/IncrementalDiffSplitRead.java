@@ -16,15 +16,24 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.operation;
+package org.apache.paimon.table.source.splitread;
 
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.data.serializer.InternalSerializers;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
+import org.apache.paimon.operation.MergeFileSplitRead;
+import org.apache.paimon.operation.SplitRead;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.KeyValueTableRead;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.FieldsComparator;
+import org.apache.paimon.utils.ProjectedRow;
 
 import javax.annotation.Nullable;
 
@@ -34,13 +43,73 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 
-/** A {@link RecordReader} util to read diff between before reader and after reader. */
-public class DiffReader {
+/** A {@link SplitRead} for batch incremental diff. */
+public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
 
     private static final int BEFORE_LEVEL = Integer.MIN_VALUE;
     private static final int AFTER_LEVEL = Integer.MAX_VALUE;
 
-    public static RecordReader<KeyValue> readDiff(
+    private final MergeFileSplitRead mergeRead;
+
+    private boolean forceKeepDelete = false;
+    @Nullable private int[][] projectedFields;
+
+    public IncrementalDiffSplitRead(MergeFileSplitRead mergeRead) {
+        this.mergeRead = mergeRead;
+    }
+
+    @Override
+    public SplitRead<InternalRow> forceKeepDelete() {
+        this.forceKeepDelete = true;
+        return this;
+    }
+
+    @Override
+    public SplitRead<InternalRow> withIOManager(@Nullable IOManager ioManager) {
+        mergeRead.withIOManager(ioManager);
+        return this;
+    }
+
+    @Override
+    public SplitRead<InternalRow> withProjection(@Nullable int[][] projectedFields) {
+        this.projectedFields = projectedFields;
+        return this;
+    }
+
+    @Override
+    public SplitRead<InternalRow> withFilter(@Nullable Predicate predicate) {
+        mergeRead.withFilter(predicate);
+        return this;
+    }
+
+    @Override
+    public RecordReader<InternalRow> createReader(DataSplit split) throws IOException {
+        RecordReader<KeyValue> reader =
+                readDiff(
+                        mergeRead.createMergeReader(
+                                split.partition(),
+                                split.bucket(),
+                                split.beforeFiles(),
+                                split.beforeDeletionFiles().orElse(null),
+                                false),
+                        mergeRead.createMergeReader(
+                                split.partition(),
+                                split.bucket(),
+                                split.dataFiles(),
+                                split.deletionFiles().orElse(null),
+                                false),
+                        mergeRead.keyComparator(),
+                        mergeRead.createUdsComparator(),
+                        mergeRead.mergeSorter(),
+                        forceKeepDelete);
+        if (projectedFields != null) {
+            ProjectedRow projectedRow = ProjectedRow.from(projectedFields);
+            reader = reader.transform(kv -> kv.replaceValue(projectedRow.replaceRow(kv.value())));
+        }
+        return KeyValueTableRead.unwrap(reader);
+    }
+
+    private static RecordReader<KeyValue> readDiff(
             RecordReader<KeyValue> beforeReader,
             RecordReader<KeyValue> afterReader,
             Comparator<InternalRow> keyComparator,
@@ -54,7 +123,7 @@ public class DiffReader {
                         () -> wrapLevelToReader(afterReader, AFTER_LEVEL)),
                 keyComparator,
                 userDefinedSeqComparator,
-                new DiffMerger(keepDelete));
+                new DiffMerger(keepDelete, InternalSerializers.create(sorter.valueType())));
     }
 
     private static RecordReader<KeyValue> wrapLevelToReader(
@@ -96,11 +165,15 @@ public class DiffReader {
     private static class DiffMerger implements MergeFunctionWrapper<KeyValue> {
 
         private final boolean keepDelete;
+        private final InternalRowSerializer serializer1;
+        private final InternalRowSerializer serializer2;
 
         private final List<KeyValue> kvs = new ArrayList<>();
 
-        public DiffMerger(boolean keepDelete) {
+        public DiffMerger(boolean keepDelete, InternalRowSerializer serializer) {
             this.keepDelete = keepDelete;
+            this.serializer1 = serializer;
+            this.serializer2 = serializer.duplicate();
         }
 
         @Override
@@ -128,13 +201,21 @@ public class DiffReader {
             } else if (kvs.size() == 2) {
                 KeyValue latest = kvs.get(1);
                 if (latest.level() == AFTER_LEVEL) {
-                    return latest;
+                    if (!valueEquals()) {
+                        return latest;
+                    }
                 }
             } else {
                 throw new IllegalArgumentException("Illegal kv number: " + kvs.size());
             }
 
             return null;
+        }
+
+        private boolean valueEquals() {
+            return serializer1
+                    .toBinaryRow(kvs.get(0).value())
+                    .equals(serializer2.toBinaryRow(kvs.get(1).value()));
         }
     }
 }
