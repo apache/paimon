@@ -226,7 +226,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
             throw new IllegalArgumentException("This read cannot accept split with before files.");
         }
 
-        if (split.isStreaming() || split.convertToRawFiles().isPresent()) {
+        if (split.isStreaming()) {
             return createNoMergeReader(
                     split.partition(),
                     split.bucket(),
@@ -235,7 +235,11 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
                     split.isStreaming());
         } else {
             return createMergeReader(
-                    split.partition(), split.bucket(), split.dataFiles(), null, forceKeepDelete);
+                    split.partition(),
+                    split.bucket(),
+                    split.dataFiles(),
+                    split.deletionFiles().orElse(null),
+                    forceKeepDelete);
         }
     }
 

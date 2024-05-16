@@ -45,7 +45,7 @@ public class RawFileSplitReadProvider implements SplitReadProvider {
 
     @Override
     public boolean match(DataSplit split, boolean forceKeepDelete) {
-        return !forceKeepDelete && !split.isStreaming() && split.convertToRawFiles().isPresent();
+        return !forceKeepDelete && !split.isStreaming() && split.rawConvertible();
     }
 
     @Override
