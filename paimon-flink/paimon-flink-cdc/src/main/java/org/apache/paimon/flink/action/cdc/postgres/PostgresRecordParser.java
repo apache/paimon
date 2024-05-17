@@ -225,24 +225,15 @@ public class PostgresRecordParser
             case "boolean":
                 return DataTypes.BOOLEAN();
             case "string":
+                int newLength = afterData.get(field.field()).asText().length();
                 if (paimonField == null) {
-                    return DataTypes.VARCHAR(afterData.get(field.field()).asText().length());
+                    return DataTypes.VARCHAR(newLength);
                 } else if (paimonField.type() instanceof VarCharType) {
                     int oldLength = ((VarCharType) paimonField.type()).getLength();
-                    int newLength = afterData.get(field.field()).asText().length();
-                    if (oldLength < newLength) {
-                        return DataTypes.VARCHAR(newLength);
-                    } else {
-                        return DataTypes.VARCHAR(oldLength);
-                    }
+                    return DataTypes.VARCHAR(Math.max(oldLength, newLength));
                 } else if (paimonField.type() instanceof CharType) {
                     int oldLength = ((CharType) paimonField.type()).getLength();
-                    int newLength = afterData.get(field.field()).asText().length();
-                    if (oldLength < newLength) {
-                        return DataTypes.CHAR(newLength);
-                    } else {
-                        return DataTypes.CHAR(oldLength);
-                    }
+                    return DataTypes.CHAR(Math.max(oldLength, newLength));
                 }
                 return DataTypes.STRING();
             case "bytes":
