@@ -279,7 +279,7 @@ public class ContinuousFileSplitEnumerator
     }
 
     protected SplitAssigner createSplitAssigner(BucketMode bucketMode) {
-        return bucketMode == BucketMode.UNAWARE
+        return bucketMode == BucketMode.BUCKET_UNAWARE
                 ? new FIFOSplitAssigner(Collections.emptyList())
                 : new PreAssignSplitAssigner(1, context, Collections.emptyList());
     }

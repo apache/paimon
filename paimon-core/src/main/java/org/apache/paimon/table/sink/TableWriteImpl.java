@@ -168,7 +168,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         keyAndBucketExtractor.setRecord(record.row());
         return new SinkRecord(
                 record.partition(),
-                bucketMode == BucketMode.UNAWARE ? -1 : record.bucket(),
+                bucketMode == BucketMode.BUCKET_UNAWARE ? -1 : record.bucket(),
                 keyAndBucketExtractor.logPrimaryKey(),
                 record.row());
     }

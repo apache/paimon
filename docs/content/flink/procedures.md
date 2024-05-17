@@ -215,15 +215,28 @@ All available procedures are listed below.
    <tr>
       <td>expire_snapshots</td>
       <td>
-         -- expires snapshot<br/>
-         CALL sys.expire_snapshots('identifier', retainMax)<br/><br/>
+         -- for Flink 1.18<br/>
+         CALL sys.expire_snapshots(table, retain_max)<br/><br/>
+         -- for Flink 1.19 and later<br/>
+         CALL sys.expire_snapshots(table, retain_max, retain_min, older_than, max_deletes)<br/><br/>
       </td>
       <td>
          To expire snapshots. Argument:
-            <li>identifier: the target table identifier. Cannot be empty.</li>
-            <li>retainMax: the maximum number of completed snapshots to retain.</li>
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>retain_max: the maximum number of completed snapshots to retain.</li>
+            <li>retain_min: the minimum number of completed snapshots to retain.</li>
+            <li>order_than: timestamp before which snapshots will be removed.</li>
+            <li>max_deletes: the maximum number of snapshots that can be deleted at once.</li>
       </td>
-      <td>CALL sys.expire_snapshots('default.T', 2)</td>
+      <td>
+         -- for Flink 1.18<br/><br/>
+         CALL sys.expire_snapshots('default.T', 2)<br/><br/>
+         -- for Flink 1.19 and later<br/><br/>
+         CALL sys.expire_snapshots(`table` => 'default.T', retain_max => 2)<br/><br/>
+         CALL sys.expire_snapshots(`table` => 'default.T', older_than => '2024-01-01 12:00:00')<br/><br/>
+         CALL sys.expire_snapshots(`table` => 'default.T', older_than => '2024-01-01 12:00:00', retain_min => 10)<br/><br/>
+         CALL sys.expire_snapshots(`table` => 'default.T', older_than => '2024-01-01 12:00:00', max_deletes => 10)<br/><br/>
+      </td>
    </tr>
    </tbody>
 </table>

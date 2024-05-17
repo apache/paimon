@@ -51,6 +51,7 @@ class BranchActionITCase extends ActionITCaseBase {
                         rowType,
                         Collections.emptyList(),
                         Collections.singletonList("k"),
+                        Collections.emptyList(),
                         Collections.emptyMap());
 
         StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
@@ -95,6 +96,7 @@ class BranchActionITCase extends ActionITCaseBase {
                         rowType,
                         Collections.emptyList(),
                         Collections.singletonList("k"),
+                        Collections.emptyList(),
                         Collections.emptyMap());
 
         StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
@@ -136,6 +138,7 @@ class BranchActionITCase extends ActionITCaseBase {
                         rowType,
                         Collections.emptyList(),
                         Collections.singletonList("k"),
+                        Collections.emptyList(),
                         Collections.emptyMap());
 
         StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);

@@ -46,7 +46,7 @@ public class ContinuousFileStoreSource extends FlinkSource {
 
     public ContinuousFileStoreSource(
             ReadBuilder readBuilder, Map<String, String> options, @Nullable Long limit) {
-        this(readBuilder, options, limit, BucketMode.FIXED);
+        this(readBuilder, options, limit, BucketMode.HASH_FIXED);
     }
 
     public ContinuousFileStoreSource(

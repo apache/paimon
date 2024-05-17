@@ -28,8 +28,8 @@ import org.apache.paimon.disk.ExternalBuffer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.RowBuffer;
 import org.apache.paimon.fileindex.FileIndexOptions;
-import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
@@ -38,7 +38,7 @@ import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.stats.FieldStatsArraySerializer;
+import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
@@ -70,6 +70,7 @@ import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.io.DataFileMeta.getMaxSequenceNumber;
+import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test the correctness for {@link AppendOnlyWriter}. */
@@ -82,8 +83,7 @@ public class AppendOnlyWriterTest {
                             new DataType[] {new IntType(), new VarCharType(), new VarCharType()},
                             new String[] {"id", "name", "dt"})
                     .build();
-    private static final FieldStatsArraySerializer STATS_SERIALIZER =
-            new FieldStatsArraySerializer(SCHEMA);
+    private static final SimpleStatsConverter STATS_SERIALIZER = new SimpleStatsConverter(SCHEMA);
 
     @TempDir public java.nio.file.Path tempDir;
     public DataFilePathFactory pathFactory;
@@ -129,10 +129,10 @@ public class AppendOnlyWriterTest {
         assertThat(meta.rowCount()).isEqualTo(1L);
         assertThat(meta.minKey()).isEqualTo(EMPTY_ROW);
         assertThat(meta.maxKey()).isEqualTo(EMPTY_ROW);
-        assertThat(meta.keyStats()).isEqualTo(DataFileMeta.EMPTY_KEY_STATS);
+        assertThat(meta.keyStats()).isEqualTo(EMPTY_STATS);
 
-        FieldStats[] expected =
-                new FieldStats[] {
+        SimpleColStats[] expected =
+                new SimpleColStats[] {
                     initStats(1, 1, 0), initStats("AAA", "AAA", 0), initStats(PART, PART, 0)
                 };
         assertThat(meta.valueStats()).isEqualTo(STATS_SERIALIZER.toBinary(expected));
@@ -190,10 +190,10 @@ public class AppendOnlyWriterTest {
             assertThat(meta.rowCount()).isEqualTo(100L);
             assertThat(meta.minKey()).isEqualTo(EMPTY_ROW);
             assertThat(meta.maxKey()).isEqualTo(EMPTY_ROW);
-            assertThat(meta.keyStats()).isEqualTo(DataFileMeta.EMPTY_KEY_STATS);
+            assertThat(meta.keyStats()).isEqualTo(EMPTY_STATS);
 
-            FieldStats[] expected =
-                    new FieldStats[] {
+            SimpleColStats[] expected =
+                    new SimpleColStats[] {
                         initStats(start, end - 1, 0),
                         initStats(String.format("%03d", start), String.format("%03d", end - 1), 0),
                         initStats(PART, PART, 0)
@@ -231,12 +231,12 @@ public class AppendOnlyWriterTest {
             assertThat(meta.rowCount()).isEqualTo(1000L);
             assertThat(meta.minKey()).isEqualTo(EMPTY_ROW);
             assertThat(meta.maxKey()).isEqualTo(EMPTY_ROW);
-            assertThat(meta.keyStats()).isEqualTo(DataFileMeta.EMPTY_KEY_STATS);
+            assertThat(meta.keyStats()).isEqualTo(EMPTY_STATS);
 
             int min = id * 1000;
             int max = id * 1000 + 999;
-            FieldStats[] expected =
-                    new FieldStats[] {
+            SimpleColStats[] expected =
+                    new SimpleColStats[] {
                         initStats(min, max, 0),
                         initStats(String.format("%03d", min), String.format("%03d", max), 0),
                         initStats(PART, PART, 0)
@@ -502,12 +502,12 @@ public class AppendOnlyWriterTest {
         writer.close();
     }
 
-    private FieldStats initStats(Integer min, Integer max, long nullCount) {
-        return new FieldStats(min, max, nullCount);
+    private SimpleColStats initStats(Integer min, Integer max, long nullCount) {
+        return new SimpleColStats(min, max, nullCount);
     }
 
-    private FieldStats initStats(String min, String max, long nullCount) {
-        return new FieldStats(
+    private SimpleColStats initStats(String min, String max, long nullCount) {
+        return new SimpleColStats(
                 BinaryString.fromString(min), BinaryString.fromString(max), nullCount);
     }
 
@@ -623,7 +623,7 @@ public class AppendOnlyWriterTest {
                 toCompact.stream().mapToLong(DataFileMeta::fileSize).sum(),
                 toCompact.stream().mapToLong(DataFileMeta::rowCount).sum(),
                 STATS_SERIALIZER.toBinary(
-                        new FieldStats[] {
+                        new SimpleColStats[] {
                             initStats(
                                     toCompact.get(0).valueStats().minValues().getInt(0),
                                     toCompact.get(size - 1).valueStats().maxValues().getInt(0),

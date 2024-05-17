@@ -21,10 +21,13 @@ package org.apache.paimon.utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 
 import static java.util.Arrays.asList;
 
@@ -123,6 +126,17 @@ public final class IOUtils {
             toRead -= ret;
             off += ret;
         }
+    }
+
+    public static String readUTF8Fully(final InputStream in) throws IOException {
+        BufferedReader reader =
+                new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
+        StringBuilder builder = new StringBuilder();
+        String line;
+        while ((line = reader.readLine()) != null) {
+            builder.append(line);
+        }
+        return builder.toString();
     }
 
     // ------------------------------------------------------------------------

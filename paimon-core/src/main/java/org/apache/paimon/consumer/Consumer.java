@@ -24,6 +24,7 @@ import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.io.IOException;
@@ -31,6 +32,7 @@ import java.io.UncheckedIOException;
 import java.util.Optional;
 
 /** Consumer which contains next snapshot. */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class Consumer {
 
     private static final String FIELD_NEXT_SNAPSHOT = "nextSnapshot";

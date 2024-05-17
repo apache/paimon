@@ -66,7 +66,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
 
     @Override
     public BucketMode bucketMode() {
-        return options.bucket() == -1 ? BucketMode.UNAWARE : BucketMode.FIXED;
+        return options.bucket() == -1 ? BucketMode.BUCKET_UNAWARE : BucketMode.HASH_FIXED;
     }
 
     @Override
@@ -116,7 +116,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 new ScanBucketFilter(bucketKeyType) {
                     @Override
                     public void pushdown(Predicate predicate) {
-                        if (bucketMode() != BucketMode.FIXED) {
+                        if (bucketMode() != BucketMode.HASH_FIXED) {
                             return;
                         }
 

@@ -48,7 +48,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
                                                 + "WITH ('bucket' = '-1', 'bucket-key' = 'id')"))
                 .hasRootCauseInstanceOf(RuntimeException.class)
                 .hasRootCauseMessage(
-                        "Cannot define 'bucket-key' in unaware or dynamic bucket mode.");
+                        "Cannot define 'bucket-key' with bucket -1, please specify a bucket number.");
     }
 
     @Test
@@ -262,9 +262,9 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     @Override
     protected List<String> ddl() {
         return Arrays.asList(
-                "CREATE TABLE IF NOT EXISTS append_table (id INT, data STRING) WITH ('bucket' = '1')",
-                "CREATE TABLE IF NOT EXISTS part_table (id INT, data STRING, dt STRING) PARTITIONED BY (dt) WITH ('bucket' = '1')",
-                "CREATE TABLE IF NOT EXISTS complex_table (id INT, data MAP<INT, INT>) WITH ('bucket' = '1')");
+                "CREATE TABLE IF NOT EXISTS append_table (id INT, data STRING) WITH ('bucket' = '1', 'bucket-key'='id')",
+                "CREATE TABLE IF NOT EXISTS part_table (id INT, data STRING, dt STRING) PARTITIONED BY (dt) WITH ('bucket' = '1', 'bucket-key'='id')",
+                "CREATE TABLE IF NOT EXISTS complex_table (id INT, data MAP<INT, INT>) WITH ('bucket' = '1', 'bucket-key'='id')");
     }
 
     private void testRejectChanges(RowKind kind) {

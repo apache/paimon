@@ -183,6 +183,7 @@ public class DropPartitionActionITCase extends ActionITCaseBase {
                         hasPk
                                 ? Arrays.asList("partKey0", "partKey1", "dt")
                                 : Collections.emptyList(),
+                        hasPk ? Collections.emptyList() : Collections.singletonList("dt"),
                         new HashMap<>());
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamWriteBuilder streamWriteBuilder =

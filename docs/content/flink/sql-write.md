@@ -206,3 +206,33 @@ DELETE FROM my_table WHERE currency = 'UNKNOWN';
 {{< /tab >}}
 
 {{< /tabs >}}
+
+## Partition Mark Done
+
+For partitioned tables, each partition may need to be scheduled to trigger downstream batch computation. Therefore,
+it is necessary to choose this timing to indicate that it is ready for scheduling and to minimize the amount of data
+drift during scheduling. We call this process: "Partition Mark Done".
+
+Example to mark done:
+```sql
+CREATE TABLE my_partitioned_table (
+    f0 INT,
+    f1 INT,
+    f2 INT,
+    ...
+    dt STRING
+) PARTITIONED BY (dt) WITH (
+    'partition.timestamp-formatter'='yyyyMMdd',
+    'partition.timestamp-pattern'='$dt',
+    'partition.time-interval'='1 d',
+    'partition.idle-time-to-done'='15 m'
+);
+```
+
+1. Firstly, you need to define the time parser of the partition and the time interval between partitions in order to
+   determine when the partition can be properly marked done.
+2. Secondly, you need to define idle-time, which determines how long it takes for the partition to have no new data,
+   and then it will be marked as done.
+3. Thirdly, by default, partition mark done will create _SUCCESS file, the content of _SUCCESS file is a json, contains
+   `creationTime` and `modificationTime`, they can help you understand if there is any delayed data. You can also
+   configure other actions.

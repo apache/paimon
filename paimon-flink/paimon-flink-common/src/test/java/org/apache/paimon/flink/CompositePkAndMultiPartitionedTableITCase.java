@@ -103,6 +103,7 @@ public class CompositePkAndMultiPartitionedTableITCase extends AbstractTestBase 
                                 "dt STRING",
                                 "hh STRING"),
                         Arrays.asList("from_currency", "to_currency", "dt", "hh"),
+                        Collections.emptyList(),
                         Arrays.asList("dt", "hh"));
 
         insertIntoFromTable(temporaryTable, table);
@@ -282,6 +283,7 @@ public class CompositePkAndMultiPartitionedTableITCase extends AbstractTestBase 
                                 "rate_by_to_currency DOUBLE",
                                 "dt STRING"),
                         Arrays.asList("from_currency", "to_currency", "dt"),
+                        Collections.emptyList(),
                         Collections.singletonList("dt"),
                         staticPartitionOverwrite);
 
@@ -327,6 +329,7 @@ public class CompositePkAndMultiPartitionedTableITCase extends AbstractTestBase 
                                 "rate_by_to_currency DOUBLE",
                                 "dt STRING"),
                         Arrays.asList("from_currency", "to_currency", "dt"),
+                        Collections.emptyList(),
                         Collections.singletonList("dt"));
 
         insertIntoFromTable(temporaryTable, table);
@@ -428,6 +431,7 @@ public class CompositePkAndMultiPartitionedTableITCase extends AbstractTestBase 
                                 "to_currency STRING",
                                 "rate_by_to_currency DOUBLE"),
                         Arrays.asList("from_currency", "to_currency"),
+                        Collections.emptyList(),
                         Collections.emptyList());
 
         insertIntoFromTable(temporaryTable, table);
@@ -512,6 +516,7 @@ public class CompositePkAndMultiPartitionedTableITCase extends AbstractTestBase 
                 createTable(
                         Arrays.asList("currency STRING", "rate BIGINT", "dt STRING", "hh STRING"),
                         Arrays.asList("currency", "dt", "hh"),
+                        Collections.emptyList(),
                         Arrays.asList("dt", "hh"));
 
         insertIntoFromTable(temporaryTable, table);
@@ -601,6 +606,7 @@ public class CompositePkAndMultiPartitionedTableITCase extends AbstractTestBase 
                 createTable(
                         Arrays.asList("currency STRING", "rate BIGINT", "dt STRING", "hh STRING"),
                         Collections.emptyList(),
+                        Collections.singletonList("currency"),
                         Arrays.asList("dt", "hh"),
                         staticPartitionOverwrite);
 
@@ -633,6 +639,7 @@ public class CompositePkAndMultiPartitionedTableITCase extends AbstractTestBase 
                 createTable(
                         Arrays.asList("currency STRING", "rate BIGINT", "dt STRING", "hh STRING"),
                         Collections.emptyList(),
+                        Collections.singletonList("currency"),
                         Arrays.asList("dt", "hh"));
 
         insertIntoFromTable(temporaryTable, table);

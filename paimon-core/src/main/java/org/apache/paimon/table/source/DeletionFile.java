@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
 
@@ -26,8 +27,11 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Deletion file for data file, the first 4 bytes are length, should, the following is the bitmap
@@ -135,5 +139,32 @@ public class DeletionFile {
     @Override
     public String toString() {
         return String.format("{path = %s, offset = %d, length = %d}", path, offset, length);
+    }
+
+    static Factory emptyFactory() {
+        return fileName -> Optional.empty();
+    }
+
+    public static Factory factory(
+            List<DataFileMeta> files, @Nullable List<DeletionFile> deletionFiles) {
+        if (deletionFiles == null) {
+            return emptyFactory();
+        }
+        Map<String, DeletionFile> fileToDeletion = new HashMap<>();
+        for (int i = 0; i < files.size(); i++) {
+            DeletionFile deletionFile = deletionFiles.get(i);
+            if (deletionFile != null) {
+                fileToDeletion.put(files.get(i).fileName(), deletionFile);
+            }
+        }
+        return fileName -> {
+            DeletionFile deletionFile = fileToDeletion.get(fileName);
+            return Optional.ofNullable(deletionFile);
+        };
+    }
+
+    /** Interface to create {@link DeletionFile}. */
+    public interface Factory {
+        Optional<DeletionFile> create(String fileName) throws IOException;
     }
 }

@@ -114,11 +114,11 @@ public class CdcSinkBuilder<T> {
 
         BucketMode bucketMode = dataTable.bucketMode();
         switch (bucketMode) {
-            case FIXED:
+            case HASH_FIXED:
                 return buildForFixedBucket(parsed);
-            case DYNAMIC:
+            case HASH_DYNAMIC:
                 return new CdcDynamicBucketSink((FileStoreTable) table).build(parsed, parallelism);
-            case UNAWARE:
+            case BUCKET_UNAWARE:
                 return buildForUnawareBucket(parsed);
             default:
                 throw new UnsupportedOperationException("Unsupported bucket mode: " + bucketMode);

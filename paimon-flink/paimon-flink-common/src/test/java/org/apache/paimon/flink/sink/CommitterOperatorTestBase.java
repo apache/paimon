@@ -95,6 +95,7 @@ public abstract class CommitterOperatorTestBase {
         Options conf = new Options();
         conf.set(CoreOptions.PATH, tablePath.toString());
         conf.setString("bucket", "1");
+        conf.setString("bucket-key", "a");
         setOptions.accept(conf);
         SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
         schemaManager.createTable(

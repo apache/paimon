@@ -26,9 +26,9 @@ import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.stats.BinaryTableStats;
-import org.apache.paimon.stats.FieldStatsArraySerializer;
-import org.apache.paimon.stats.FieldStatsConverters;
+import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.stats.SimpleStatsConverter;
+import org.apache.paimon.stats.SimpleStatsConverters;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -42,7 +42,7 @@ import java.util.Map;
 /** {@link FileStoreScan} for {@link AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
-    private final FieldStatsConverters fieldStatsConverters;
+    private final SimpleStatsConverters simpleStatsConverters;
 
     private final boolean fileIndexReadEnabled;
 
@@ -76,8 +76,8 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                 checkNumOfBuckets,
                 scanManifestParallelism,
                 branchName);
-        this.fieldStatsConverters =
-                new FieldStatsConverters(sid -> scanTableSchema(sid).fields(), schema.id());
+        this.simpleStatsConverters =
+                new SimpleStatsConverters(sid -> scanTableSchema(sid).fields(), schema.id());
         this.fileIndexReadEnabled = fileIndexReadEnabled;
     }
 
@@ -94,9 +94,9 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
             return true;
         }
 
-        FieldStatsArraySerializer serializer =
-                fieldStatsConverters.getOrCreate(entry.file().schemaId());
-        BinaryTableStats stats = entry.file().valueStats();
+        SimpleStatsConverter serializer =
+                simpleStatsConverters.getOrCreate(entry.file().schemaId());
+        SimpleStats stats = entry.file().valueStats();
 
         return filter.test(
                         entry.file().rowCount(),
@@ -122,7 +122,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
         Predicate dataPredicate =
                 dataFilterMapping.computeIfAbsent(
                         entry.file().schemaId(),
-                        id -> fieldStatsConverters.convertFilter(entry.file().schemaId(), filter));
+                        id -> simpleStatsConverters.convertFilter(entry.file().schemaId(), filter));
 
         try (FileIndexPredicate predicate =
                 new FileIndexPredicate(embeddedIndexBytes, dataRowType)) {

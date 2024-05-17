@@ -23,10 +23,10 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.data.serializer.Serializer;
-import org.apache.paimon.format.FieldStats;
+import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.statistics.FullFieldStatsCollector;
+import org.apache.paimon.statistics.FullSimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
@@ -105,12 +105,12 @@ public interface PartitionPredicate {
             this.fieldNum = partitionType.getFieldCount();
             @SuppressWarnings("unchecked")
             Serializer<Object>[] serializers = new Serializer[fieldNum];
-            FullFieldStatsCollector[] collectors = new FullFieldStatsCollector[fieldNum];
+            FullSimpleColStatsCollector[] collectors = new FullSimpleColStatsCollector[fieldNum];
             min = new Predicate[fieldNum];
             max = new Predicate[fieldNum];
             for (int i = 0; i < fieldNum; i++) {
                 serializers[i] = InternalSerializers.create(partitionType.getTypeAt(i));
-                collectors[i] = new FullFieldStatsCollector();
+                collectors[i] = new FullSimpleColStatsCollector();
             }
             for (BinaryRow part : partitions) {
                 Object[] fields = converter.convert(part);
@@ -120,9 +120,9 @@ public interface PartitionPredicate {
             }
             PredicateBuilder builder = new PredicateBuilder(partitionType);
             for (int i = 0; i < collectors.length; i++) {
-                FieldStats stats = collectors[i].result();
-                min[i] = builder.greaterOrEqual(i, stats.minValue());
-                max[i] = builder.lessOrEqual(i, stats.maxValue());
+                SimpleColStats stats = collectors[i].result();
+                min[i] = builder.greaterOrEqual(i, stats.min());
+                max[i] = builder.lessOrEqual(i, stats.max());
             }
         }
 

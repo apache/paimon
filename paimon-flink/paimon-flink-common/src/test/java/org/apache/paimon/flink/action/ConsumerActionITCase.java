@@ -56,6 +56,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                         rowType,
                         Collections.emptyList(),
                         Collections.singletonList("pk1"),
+                        Collections.emptyList(),
                         Collections.emptyMap());
 
         StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);

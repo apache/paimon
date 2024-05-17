@@ -34,6 +34,8 @@ import java.time.format.DateTimeParseException;
 import java.time.format.ResolverStyle;
 import java.time.format.SignStyle;
 import java.time.temporal.ChronoField;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -90,7 +92,11 @@ public class PartitionTimeExtractor {
         this.formatter = formatter;
     }
 
-    public LocalDateTime extract(List<String> partitionKeys, List<Object> partitionValues) {
+    public LocalDateTime extract(LinkedHashMap<String, String> spec) {
+        return extract(new ArrayList<>(spec.keySet()), new ArrayList<>(spec.values()));
+    }
+
+    public LocalDateTime extract(List<String> partitionKeys, List<?> partitionValues) {
         LocalDateTime dateTime = null;
         try {
             String timestampString;

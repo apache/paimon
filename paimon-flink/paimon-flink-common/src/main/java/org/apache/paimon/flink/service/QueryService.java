@@ -43,7 +43,7 @@ public class QueryService {
                 "Query Service only supports streaming mode.");
 
         FileStoreTable storeTable = (FileStoreTable) table;
-        if (storeTable.bucketMode() != BucketMode.FIXED
+        if (storeTable.bucketMode() != BucketMode.HASH_FIXED
                 || storeTable.schema().primaryKeys().isEmpty()) {
             throw new UnsupportedOperationException(
                     "The bucket mode of "

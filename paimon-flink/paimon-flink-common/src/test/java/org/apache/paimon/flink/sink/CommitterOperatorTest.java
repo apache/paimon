@@ -561,7 +561,9 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
 
         StreamTableCommit commit = table.newCommit(initialCommitUser);
         OperatorMetricGroup metricGroup = UnregisteredMetricsGroup.createOperatorMetricGroup();
-        StoreCommitter committer = new StoreCommitter(commit, metricGroup);
+        StoreCommitter committer =
+                new StoreCommitter(
+                        table, commit, Committer.createContext("", metricGroup, true, false, null));
         committer.commit(Collections.singletonList(manifestCommittable));
         CommitterMetrics metrics = committer.getCommitterMetrics();
         assertThat(metrics.getNumBytesOutCounter().getCount()).isEqualTo(285);
@@ -728,10 +730,13 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                 true,
                 true,
                 commitUser == null ? initialCommitUser : commitUser,
-                (user, metricGroup) ->
+                context ->
                         new StoreCommitter(
-                                table.newStreamWriteBuilder().withCommitUser(user).newCommit(),
-                                metricGroup),
+                                table,
+                                table.newStreamWriteBuilder()
+                                        .withCommitUser(context.commitUser())
+                                        .newCommit(),
+                                context),
                 committableStateManager);
     }
 
@@ -745,10 +750,13 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                 true,
                 true,
                 commitUser == null ? initialCommitUser : commitUser,
-                (user, metricGroup) ->
+                context ->
                         new StoreCommitter(
-                                table.newStreamWriteBuilder().withCommitUser(user).newCommit(),
-                                metricGroup),
+                                table,
+                                table.newStreamWriteBuilder()
+                                        .withCommitUser(context.commitUser())
+                                        .newCommit(),
+                                context),
                 committableStateManager) {
             @Override
             public void initializeState(StateInitializationContext context) throws Exception {

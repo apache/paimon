@@ -35,7 +35,7 @@ import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.RowDataRollingFileWriter;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.reader.RecordReaderIterator;
-import org.apache.paimon.statistics.FieldStatsCollector;
+import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.RowType;
@@ -53,8 +53,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
-
-import static org.apache.paimon.io.DataFileMeta.getMaxSequenceNumber;
 
 /** {@link FileStoreWrite} for {@link AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> {
@@ -74,12 +72,12 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
     private final boolean useWriteBuffer;
     private final boolean spillable;
     private final MemorySize maxDiskSize;
-    private final FieldStatsCollector.Factory[] statsCollectors;
+    private final SimpleColStatsCollector.Factory[] statsCollectors;
     private final FileIndexOptions fileIndexOptions;
 
     private boolean forceBufferSpill = false;
     private boolean skipCompaction;
-    private BucketMode bucketMode = BucketMode.FIXED;
+    private BucketMode bucketMode = BucketMode.HASH_FIXED;
 
     public AppendOnlyFileStoreWrite(
             FileIO fileIO,
@@ -119,12 +117,12 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
             BinaryRow partition,
             int bucket,
             List<DataFileMeta> restoredFiles,
+            long restoredMaxSeqNumber,
             @Nullable CommitIncrement restoreIncrement,
             ExecutorService compactExecutor,
             @Nullable DeletionVectorsMaintainer ignore) {
         // let writer and compact manager hold the same reference
         // and make restore files mutable to update
-        long maxSequenceNumber = getMaxSequenceNumber(restoredFiles);
         DataFilePathFactory factory = pathFactory.createDataFilePathFactory(partition, bucket);
         CompactManager compactManager =
                 skipCompaction
@@ -147,7 +145,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                 fileFormat,
                 targetFileSize,
                 rowType,
-                maxSequenceNumber,
+                restoredMaxSeqNumber,
                 compactManager,
                 bucketReader(partition, bucket),
                 commitForceCompact,
@@ -209,7 +207,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
         // AppendOnlyFileStoreWrite is sensitive with bucket mode. It will act difference in
         // unaware-bucket mode (no compaction and force empty-writer).
         this.bucketMode = bucketMode;
-        if (bucketMode == BucketMode.UNAWARE) {
+        if (bucketMode == BucketMode.BUCKET_UNAWARE) {
             super.withIgnorePreviousFiles(true);
             skipCompaction = true;
         }
@@ -219,7 +217,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
     @Override
     public void withIgnorePreviousFiles(boolean ignorePrevious) {
         // in unaware bucket mode, we need all writers to be empty
-        super.withIgnorePreviousFiles(ignorePrevious || bucketMode == BucketMode.UNAWARE);
+        super.withIgnorePreviousFiles(ignorePrevious || bucketMode == BucketMode.BUCKET_UNAWARE);
     }
 
     @Override

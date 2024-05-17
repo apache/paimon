@@ -339,6 +339,41 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "Allow sink committer and writer operator to be chained together");
 
+    public static final ConfigOption<Duration> PARTITION_IDLE_TIME_TO_DONE =
+            key("partition.idle-time-to-done")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Set a time duration when a partition has no new data after this time duration, "
+                                    + "mark the done status to indicate that the data is ready.");
+
+    public static final ConfigOption<Duration> PARTITION_TIME_INTERVAL =
+            key("partition.time-interval")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "You can specify time interval for partition, for example, "
+                                    + "daily partition is '1 d', hourly partition is '1 h'.");
+
+    public static final ConfigOption<String> PARTITION_MARK_DONE_ACTION =
+            key("partition.mark-done-action")
+                    .stringType()
+                    .defaultValue("success-file")
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "Action to mark a partition done is to notify the downstream application that the partition"
+                                                    + " has finished writing, the partition is ready to be read.")
+                                    .linebreak()
+                                    .text("1. 'success-file': add '_success' file to directory.")
+                                    .linebreak()
+                                    .text(
+                                            "2. 'done-partition': add 'xxx.done' partition to metastore.")
+                                    .linebreak()
+                                    .text(
+                                            "Both can be configured at the same time: 'done-partition,success-file'.")
+                                    .build());
+
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();
         final List<ConfigOption<?>> list = new ArrayList<>(fields.length);

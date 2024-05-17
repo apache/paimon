@@ -106,7 +106,6 @@ public class HiveWriteITCase {
         String tablePath = String.format("%s/test_db.db/%s", path, tableNameNotNull);
         Options conf = new Options();
         conf.set(CatalogOptions.WAREHOUSE, path);
-        conf.set(CoreOptions.BUCKET, 2);
         conf.set(
                 CoreOptions.FILE_FORMAT,
                 fileFormatType == null ? CoreOptions.FILE_FORMAT_AVRO : fileFormatType.toString());

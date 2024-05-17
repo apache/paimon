@@ -429,3 +429,14 @@ USE invalid_alter_bucket;
 CREATE TABLE t (
     k INT PRIMARY KEY
 );
+
+-- ################################################################################
+--  testInvalidAlterBucket
+-- ################################################################################
+
+CREATE DATABASE write_only_and_schema_evolution;
+USE write_only_and_schema_evolution;
+CREATE TABLE t (
+    k INT PRIMARY KEY,
+    v1 VARCHAR(10)
+);

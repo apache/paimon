@@ -88,9 +88,11 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
             RowType rowType,
             List<String> partitionKeys,
             List<String> primaryKeys,
+            List<String> bucketKeys,
             Map<String, String> options)
             throws Exception {
-        return createFileStoreTable(tableName, rowType, partitionKeys, primaryKeys, options);
+        return createFileStoreTable(
+                tableName, rowType, partitionKeys, primaryKeys, bucketKeys, options);
     }
 
     protected FileStoreTable createFileStoreTable(
@@ -98,6 +100,7 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
             RowType rowType,
             List<String> partitionKeys,
             List<String> primaryKeys,
+            List<String> bucketKeys,
             Map<String, String> options)
             throws Exception {
         Identifier identifier = Identifier.create(database, tableName);
@@ -105,6 +108,9 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
         Map<String, String> newOptions = new HashMap<>(options);
         if (!newOptions.containsKey("bucket")) {
             newOptions.put("bucket", "1");
+        }
+        if (!bucketKeys.isEmpty()) {
+            newOptions.put("bucket-key", String.join(",", bucketKeys));
         }
         catalog.createTable(
                 identifier,
