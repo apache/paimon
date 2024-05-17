@@ -83,8 +83,10 @@ public class CdcActionCommonUtils {
         for (DataField field : sourceTableFields) {
             int idx = paimonSchema.fieldNames().indexOf(field.name());
             if (idx < 0) {
-                LOG.info("Cannot find field '{}' in Paimon table.", field.name());
-                return false;
+                LOG.info(
+                        "New fields '{}' found in source table, will be synchronized to Paimon table.",
+                        field.name());
+                return true;
             }
             DataType type = paimonSchema.fields().get(idx).type();
             if (UpdatedDataFieldsProcessFunction.canConvert(type, field.type())

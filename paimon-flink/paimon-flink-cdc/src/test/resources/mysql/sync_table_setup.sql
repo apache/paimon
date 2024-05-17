@@ -323,12 +323,14 @@ CREATE TABLE test_exist_column_comment_change (
     PRIMARY KEY (pk)
 );
 
-CREATE TABLE test_exist_column_type_length_change (
-    pk INT,
-    c1 DATE,
-    c2 VARCHAR(10) not null,
-    PRIMARY KEY (pk)
+CREATE TABLE test_exist_column_alter (
+   pk INT,
+   a BIGINT,
+   b VARCHAR(30),
+   c INT,
+   PRIMARY KEY (pk)
 );
+
 
 -- ################################################################################
 --  testSyncShard

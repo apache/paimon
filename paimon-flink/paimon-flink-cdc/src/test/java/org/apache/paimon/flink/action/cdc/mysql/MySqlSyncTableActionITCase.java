@@ -33,7 +33,6 @@ import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -1368,37 +1367,42 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testColumnTypeLengthChangeInExistingTable() throws Exception {
+    public void testColumnAlterInExistingTableWhenStartJob() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put("bucket", "1");
         options.put("sink.parallelism", "1");
 
         RowType rowType =
                 RowType.builder()
-                        .field("pk", DataTypes.INT().notNull(), "pk comment")
-                        .field("c1", DataTypes.DATE(), "c1 comment")
-                        .field("c2", DataTypes.VARCHAR(10).notNull(), "c2 comment")
+                        .field("pk", DataTypes.INT().notNull())
+                        .field("a", DataTypes.BIGINT())
+                        .field("b", DataTypes.VARCHAR(20))
                         .build();
 
         createFileStoreTable(
                 rowType, Collections.emptyList(), Collections.singletonList("pk"), options);
 
-        // Alter column type length
-        try (Statement statement = getStatement()) {
-            statement.executeUpdate("USE " + DATABASE_NAME);
-            statement.executeUpdate(
-                    "ALTER TABLE test_exist_column_type_length_change MODIFY COLUMN c2 varchar(20)");
-        }
-
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", DATABASE_NAME);
-        mySqlConfig.put("table-name", "test_exist_column_type_length_change");
+        mySqlConfig.put("table-name", "test_exist_column_alter");
 
         MySqlSyncTableAction action =
                 syncTableActionBuilder(mySqlConfig)
                         .withPrimaryKeys("pk")
                         .withTableConfig(getBasicTableConfig())
                         .build();
-        Assertions.assertDoesNotThrow(() -> runActionWithDefaultEnv(action));
+
+        runActionWithDefaultEnv(action);
+
+        FileStoreTable table = getFileStoreTable();
+
+        Map<String, DataField> actual =
+                table.schema().fields().stream()
+                        .collect(Collectors.toMap(DataField::name, Function.identity()));
+
+        assertThat(actual.get("pk").type()).isEqualTo(DataTypes.INT().notNull());
+        assertThat(actual.get("a").type()).isEqualTo(DataTypes.BIGINT());
+        assertThat(actual.get("b").type()).isEqualTo(DataTypes.VARCHAR(30));
+        assertThat(actual.get("c").type()).isEqualTo(DataTypes.INT());
     }
 }

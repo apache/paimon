@@ -159,7 +159,7 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                 Supplier<String> errMsg =
                         incompatibleMessage(table.schema(), tableInfo, identifier);
                 if (shouldMonitorTable(table.schema(), fromMySql, errMsg)) {
-                    table = alterTableOptions(identifier, table);
+                    table = alterTableSchema(identifier, table, fromMySql);
                     tables.add(table);
                     monitoredTables.addAll(tableInfo.identifiers());
                 } else {
