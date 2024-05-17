@@ -416,7 +416,6 @@ public interface SchemaChange extends Serializable {
             LAST
         }
 
-        // Existing factory methods
         public static Move first(String fieldName) {
             return new Move(fieldName, null, MoveType.FIRST);
         }
@@ -425,12 +424,10 @@ public interface SchemaChange extends Serializable {
             return new Move(fieldName, referenceFieldName, MoveType.AFTER);
         }
 
-        // New factory method for BEFORE
         public static Move before(String fieldName, String referenceFieldName) {
             return new Move(fieldName, referenceFieldName, MoveType.BEFORE);
         }
 
-        // New factory method for LAST
         public static Move last(String fieldName) {
             return new Move(fieldName, null, MoveType.LAST);
         }
