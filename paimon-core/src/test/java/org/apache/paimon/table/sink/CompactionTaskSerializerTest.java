@@ -19,6 +19,8 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.append.AppendOnlyCompactionTask;
+import org.apache.paimon.append.MultiTableAppendOnlyCompactionTask;
+import org.apache.paimon.catalog.Identifier;
 
 import org.junit.jupiter.api.Test;
 
@@ -28,7 +30,7 @@ import static org.apache.paimon.manifest.ManifestCommittableSerializerTest.rando
 import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link CompactionTaskSerializer}. */
+/** Tests for {@link CompactionTaskSerializer} and {@link MultiTableCompactionTaskSerializer}. */
 public class CompactionTaskSerializerTest {
 
     @Test
@@ -39,6 +41,21 @@ public class CompactionTaskSerializerTest {
 
         byte[] bytes = serializer.serialize(task);
         AppendOnlyCompactionTask task1 = serializer.deserialize(serializer.getVersion(), bytes);
+        assertThat(task).isEqualTo(task1);
+    }
+
+    @Test
+    public void testMultiTableCompactionTaskSerializer() throws IOException {
+        MultiTableCompactionTaskSerializer serializer = new MultiTableCompactionTaskSerializer();
+        MultiTableAppendOnlyCompactionTask task =
+                new MultiTableAppendOnlyCompactionTask(
+                        row(0),
+                        randomNewFilesIncrement().newFiles(),
+                        Identifier.create("db", "table"));
+
+        byte[] bytes = serializer.serialize(task);
+        MultiTableAppendOnlyCompactionTask task1 =
+                serializer.deserialize(serializer.getVersion(), bytes);
         assertThat(task).isEqualTo(task1);
     }
 }

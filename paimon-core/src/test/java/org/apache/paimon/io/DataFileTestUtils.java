@@ -25,6 +25,8 @@ import org.apache.paimon.stats.StatsTestUtils;
 
 import java.util.Collections;
 
+import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
+
 /** Utils for {@link DataFileMeta}. */
 public class DataFileTestUtils {
 
@@ -43,7 +45,7 @@ public class DataFileTestUtils {
                 0L,
                 DataFileMeta.EMPTY_MIN_KEY,
                 DataFileMeta.EMPTY_MAX_KEY,
-                DataFileMeta.EMPTY_KEY_STATS,
+                EMPTY_STATS,
                 null,
                 minSeq,
                 maxSeq,
@@ -62,8 +64,8 @@ public class DataFileTestUtils {
                 0,
                 DataFileMeta.EMPTY_MIN_KEY,
                 DataFileMeta.EMPTY_MAX_KEY,
-                StatsTestUtils.newEmptyTableStats(),
-                StatsTestUtils.newEmptyTableStats(),
+                StatsTestUtils.newEmptySimpleStats(),
+                StatsTestUtils.newEmptySimpleStats(),
                 0,
                 0,
                 0,

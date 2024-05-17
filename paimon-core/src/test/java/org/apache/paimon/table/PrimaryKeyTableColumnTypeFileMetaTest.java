@@ -25,9 +25,9 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.stats.BinaryTableStats;
-import org.apache.paimon.stats.FieldStatsArraySerializer;
-import org.apache.paimon.stats.FieldStatsConverters;
+import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.stats.SimpleStatsConverter;
+import org.apache.paimon.stats.SimpleStatsConverters;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataField;
 
@@ -61,15 +61,15 @@ public class PrimaryKeyTableColumnTypeFileMetaTest extends ColumnTypeFileMetaTes
     }
 
     @Override
-    protected BinaryTableStats getTableValueStats(DataFileMeta fileMeta) {
+    protected SimpleStats getTableValueStats(DataFileMeta fileMeta) {
         return fileMeta.keyStats();
     }
 
-    /** We can only validate field stats of primary keys in changelog with key table. */
+    /** We can only validate col stats of primary keys in changelog with key table. */
     @Override
     protected void validateStatsField(List<DataFileMeta> fileMetaList) {
         for (DataFileMeta fileMeta : fileMetaList) {
-            BinaryTableStats stats = getTableValueStats(fileMeta);
+            SimpleStats stats = getTableValueStats(fileMeta);
             assertThat(stats.maxValues().getFieldCount()).isEqualTo(4);
             for (int i = 0; i < 4; i++) {
                 assertThat(stats.minValues().isNullAt(i)).isFalse();
@@ -122,10 +122,10 @@ public class PrimaryKeyTableColumnTypeFileMetaTest extends ColumnTypeFileMetaTes
             List<DataFileMeta> fileMetaList) {
         Function<Long, List<DataField>> schemaFields =
                 id -> tableSchemas.get(id).logicalTrimmedPrimaryKeysType().getFields();
-        FieldStatsConverters converters = new FieldStatsConverters(schemaFields, schemaId);
+        SimpleStatsConverters converters = new SimpleStatsConverters(schemaFields, schemaId);
         for (DataFileMeta fileMeta : fileMetaList) {
-            BinaryTableStats stats = getTableValueStats(fileMeta);
-            FieldStatsArraySerializer serializer = converters.getOrCreate(fileMeta.schemaId());
+            SimpleStats stats = getTableValueStats(fileMeta);
+            SimpleStatsConverter serializer = converters.getOrCreate(fileMeta.schemaId());
             InternalRow min = serializer.evolution(stats.minValues());
             InternalRow max = serializer.evolution(stats.maxValues());
             assertThat(min.getFieldCount()).isEqualTo(4);

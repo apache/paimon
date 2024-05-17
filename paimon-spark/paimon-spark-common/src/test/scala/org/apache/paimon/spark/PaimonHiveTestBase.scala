@@ -34,6 +34,8 @@ class PaimonHiveTestBase extends PaimonSparkTestBase {
 
   protected lazy val testHiveMetastore: TestHiveMetastore = new TestHiveMetastore
 
+  protected val sparkCatalogName: String = "spark_catalog"
+
   protected val paimonHiveCatalogName: String = "paimon_hive"
 
   protected val hiveDbName: String = "test_hive"
@@ -46,7 +48,7 @@ class PaimonHiveTestBase extends PaimonSparkTestBase {
     super.sparkConf
       .set("spark.sql.warehouse.dir", tempHiveDBDir.getCanonicalPath)
       .set("spark.sql.catalogImplementation", "hive")
-      .set("spark.sql.catalog.spark_catalog", "org.apache.paimon.spark.SparkGenericCatalog")
+      .set(s"spark.sql.catalog.$sparkCatalogName", "org.apache.paimon.spark.SparkGenericCatalog")
       .set(s"spark.sql.catalog.$paimonHiveCatalogName", classOf[SparkCatalog].getName)
       .set(s"spark.sql.catalog.$paimonHiveCatalogName.metastore", "hive")
       .set(s"spark.sql.catalog.$paimonHiveCatalogName.warehouse", tempHiveDBDir.getCanonicalPath)
@@ -56,13 +58,13 @@ class PaimonHiveTestBase extends PaimonSparkTestBase {
   override protected def beforeAll(): Unit = {
     testHiveMetastore.start(hivePort)
     super.beforeAll()
-    spark.sql(s"USE spark_catalog")
+    spark.sql(s"USE $sparkCatalogName")
     spark.sql(s"CREATE DATABASE IF NOT EXISTS $hiveDbName")
   }
 
   override protected def afterAll(): Unit = {
     try {
-      spark.sql(s"USE spark_catalog")
+      spark.sql(s"USE $sparkCatalogName")
       spark.sql("USE default")
       spark.sql(s"DROP DATABASE $hiveDbName CASCADE")
     } finally {
@@ -73,7 +75,7 @@ class PaimonHiveTestBase extends PaimonSparkTestBase {
 
   /** Default is spark_catalog */
   override protected def beforeEach(): Unit = {
-    spark.sql(s"USE spark_catalog")
+    spark.sql(s"USE $sparkCatalogName")
     spark.sql(s"USE $hiveDbName")
   }
 }

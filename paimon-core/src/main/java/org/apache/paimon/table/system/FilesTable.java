@@ -28,14 +28,14 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.LeafPredicateExtractor;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.stats.BinaryTableStats;
-import org.apache.paimon.stats.FieldStatsArraySerializer;
-import org.apache.paimon.stats.FieldStatsConverters;
+import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.stats.SimpleStatsConverter;
+import org.apache.paimon.stats.SimpleStatsConverters;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
@@ -162,25 +162,15 @@ public class FilesTable implements ReadonlyTable {
 
         @Override
         public InnerTableScan withFilter(Predicate pushdown) {
-            List<Predicate> predicates = PredicateBuilder.splitAnd(pushdown);
-            for (Predicate predicate : predicates) {
-                if (predicate instanceof LeafPredicate) {
-                    LeafPredicate leaf = (LeafPredicate) predicate;
-                    switch (leaf.fieldName()) {
-                        case "partition":
-                            this.partitionPredicate = leaf;
-                            break;
-                        case "bucket":
-                            this.bucketPredicate = leaf;
-                            break;
-                        case "level":
-                            this.levelPredicate = leaf;
-                            break;
-                        default:
-                            break;
-                    }
-                }
+            if (pushdown == null) {
+                return this;
             }
+
+            Map<String, LeafPredicate> leafPredicates =
+                    pushdown.visit(LeafPredicateExtractor.INSTANCE);
+            this.partitionPredicate = leafPredicates.get("partition");
+            this.bucketPredicate = leafPredicates.get("bucket");
+            this.levelPredicate = leafPredicates.get("level");
             return this;
         }
 
@@ -314,8 +304,8 @@ public class FilesTable implements ReadonlyTable {
             List<Iterator<InternalRow>> iteratorList = new ArrayList<>();
             // dataFilePlan.snapshotId indicates there's no files in the table, use the newest
             // schema id directly
-            FieldStatsConverters fieldStatsConverters =
-                    new FieldStatsConverters(
+            SimpleStatsConverters simpleStatsConverters =
+                    new SimpleStatsConverters(
                             sid -> schemaManager.schema(sid).fields(), storeTable.schema().id());
 
             RowDataToObjectArrayConverter partitionConverter =
@@ -353,7 +343,7 @@ public class FilesTable implements ReadonlyTable {
                                                 keyConverters,
                                                 file,
                                                 storeTable.getSchemaFieldStats(file),
-                                                fieldStatsConverters)));
+                                                simpleStatsConverters)));
             }
             Iterator<InternalRow> rows = Iterators.concat(iteratorList.iterator());
             if (projection != null) {
@@ -369,10 +359,10 @@ public class FilesTable implements ReadonlyTable {
                 RowDataToObjectArrayConverter partitionConverter,
                 Function<Long, RowDataToObjectArrayConverter> keyConverters,
                 DataFileMeta dataFileMeta,
-                BinaryTableStats tableStats,
-                FieldStatsConverters fieldStatsConverters) {
+                SimpleStats stats,
+                SimpleStatsConverters simpleStatsConverters) {
             StatsLazyGetter statsGetter =
-                    new StatsLazyGetter(tableStats, dataFileMeta, fieldStatsConverters);
+                    new StatsLazyGetter(stats, dataFileMeta, simpleStatsConverters);
             @SuppressWarnings("unchecked")
             Supplier<Object>[] fields =
                     new Supplier[] {
@@ -423,36 +413,32 @@ public class FilesTable implements ReadonlyTable {
 
     private static class StatsLazyGetter {
 
-        private final BinaryTableStats tableStats;
+        private final SimpleStats stats;
         private final DataFileMeta file;
-        private final FieldStatsConverters fieldStatsConverters;
+        private final SimpleStatsConverters simpleStatsConverters;
 
         private Map<String, Long> lazyNullValueCounts;
         private Map<String, Object> lazyLowerValueBounds;
         private Map<String, Object> lazyUpperValueBounds;
 
         private StatsLazyGetter(
-                BinaryTableStats tableStats,
-                DataFileMeta file,
-                FieldStatsConverters fieldStatsConverters) {
-            this.tableStats = tableStats;
+                SimpleStats stats, DataFileMeta file, SimpleStatsConverters simpleStatsConverters) {
+            this.stats = stats;
             this.file = file;
-            this.fieldStatsConverters = fieldStatsConverters;
+            this.simpleStatsConverters = simpleStatsConverters;
         }
 
         private void initialize() {
-            FieldStatsArraySerializer serializer =
-                    fieldStatsConverters.getOrCreate(file.schemaId());
+            SimpleStatsConverter serializer = simpleStatsConverters.getOrCreate(file.schemaId());
             // Create value stats
-            InternalRow min = serializer.evolution(tableStats.minValues());
-            InternalRow max = serializer.evolution(tableStats.maxValues());
-            InternalArray nullCounts =
-                    serializer.evolution(tableStats.nullCounts(), file.rowCount());
+            InternalRow min = serializer.evolution(stats.minValues());
+            InternalRow max = serializer.evolution(stats.maxValues());
+            InternalArray nullCounts = serializer.evolution(stats.nullCounts(), file.rowCount());
             lazyNullValueCounts = new TreeMap<>();
             lazyLowerValueBounds = new TreeMap<>();
             lazyUpperValueBounds = new TreeMap<>();
             for (int i = 0; i < min.getFieldCount(); i++) {
-                DataField field = fieldStatsConverters.tableDataFields().get(i);
+                DataField field = simpleStatsConverters.tableDataFields().get(i);
                 String name = field.name();
                 DataType type = field.type();
                 lazyNullValueCounts.put(

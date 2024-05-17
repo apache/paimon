@@ -26,6 +26,7 @@ import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.OptionalUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -50,6 +51,7 @@ import java.util.OptionalLong;
  * @param <T> col internal data type
  */
 @Experimental
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class ColStats<T> {
 
     private static final String FIELD_COL_ID = "colId";

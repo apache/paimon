@@ -20,6 +20,7 @@ package org.apache.paimon.spark.catalog;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.spark.SparkProcedures;
+import org.apache.paimon.spark.SparkSource;
 import org.apache.paimon.spark.analysis.NoSuchProcedureException;
 import org.apache.paimon.spark.procedure.Procedure;
 import org.apache.paimon.spark.procedure.ProcedureBuilder;
@@ -48,5 +49,9 @@ public abstract class SparkBaseCatalog
             }
         }
         throw new NoSuchProcedureException(identifier);
+    }
+
+    public boolean usePaimon(String provider) {
+        return provider == null || SparkSource.NAME().equalsIgnoreCase(provider);
     }
 }

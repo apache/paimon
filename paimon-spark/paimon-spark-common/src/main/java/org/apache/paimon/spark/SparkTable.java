@@ -20,10 +20,13 @@ package org.apache.paimon.spark;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.spark.schema.PaimonMetadataColumn$;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 
+import org.apache.spark.sql.connector.catalog.MetadataColumn;
+import org.apache.spark.sql.connector.catalog.SupportsMetadataColumns;
 import org.apache.spark.sql.connector.catalog.SupportsRead;
 import org.apache.spark.sql.connector.catalog.SupportsWrite;
 import org.apache.spark.sql.connector.catalog.TableCapability;
@@ -49,6 +52,7 @@ public class SparkTable
         implements org.apache.spark.sql.connector.catalog.Table,
                 SupportsRead,
                 SupportsWrite,
+                SupportsMetadataColumns,
                 PaimonPartitionManagement {
 
     private final Table table;
@@ -134,5 +138,12 @@ public class SparkTable
         }
         SparkTable that = (SparkTable) o;
         return Objects.equals(table, that.table);
+    }
+
+    @Override
+    public MetadataColumn[] metadataColumns() {
+        return new MetadataColumn[] {
+            PaimonMetadataColumn$.MODULE$.FILE_PATH(), PaimonMetadataColumn$.MODULE$.ROW_INDEX()
+        };
     }
 }

@@ -27,9 +27,9 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.stats.BinaryTableStats;
-import org.apache.paimon.stats.FieldStatsArraySerializer;
-import org.apache.paimon.stats.FieldStatsConverters;
+import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.stats.SimpleStatsConverter;
+import org.apache.paimon.stats.SimpleStatsConverters;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -42,8 +42,8 @@ import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
 /** {@link FileStoreScan} for {@link KeyValueFileStore}. */
 public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
-    private final FieldStatsConverters fieldKeyStatsConverters;
-    private final FieldStatsConverters fieldValueStatsConverters;
+    private final SimpleStatsConverters fieldKeyStatsConverters;
+    private final SimpleStatsConverters fieldValueStatsConverters;
 
     private Predicate keyFilter;
     private Predicate valueFilter;
@@ -78,11 +78,11 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                 scanManifestParallelism,
                 branchName);
         this.fieldKeyStatsConverters =
-                new FieldStatsConverters(
+                new SimpleStatsConverters(
                         sid -> keyValueFieldsExtractor.keyFields(scanTableSchema(sid)),
                         schema.id());
         this.fieldValueStatsConverters =
-                new FieldStatsConverters(
+                new SimpleStatsConverters(
                         sid -> keyValueFieldsExtractor.valueFields(scanTableSchema(sid)),
                         schema.id());
         this.deletionVectorsEnabled = deletionVectorsEnabled;
@@ -104,8 +104,8 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     @Override
     protected boolean filterByStats(ManifestEntry entry) {
         Predicate filter = null;
-        FieldStatsArraySerializer serializer = null;
-        BinaryTableStats stats = null;
+        SimpleStatsConverter serializer = null;
+        SimpleStats stats = null;
         if ((deletionVectorsEnabled || mergeEngine == FIRST_ROW)
                 && entry.level() > 0
                 && valueFilter != null) {
@@ -165,9 +165,9 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     }
 
     private boolean filterByValueFilter(ManifestEntry entry) {
-        FieldStatsArraySerializer serializer =
+        SimpleStatsConverter serializer =
                 fieldValueStatsConverters.getOrCreate(entry.file().schemaId());
-        BinaryTableStats stats = entry.file().valueStats();
+        SimpleStats stats = entry.file().valueStats();
         return valueFilter.test(
                 entry.file().rowCount(),
                 serializer.evolution(stats.minValues()),

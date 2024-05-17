@@ -45,10 +45,12 @@ streaming jobs to write records to a `'partial-update'` table. Please refer to t
 
 ## Dedicated Compaction Job
 
-By default, Paimon writers will perform compaction as needed during writing records. This is sufficient for most use cases, but there are two downsides:
+By default, Paimon writers will perform compaction as needed during writing records. This is sufficient for most use cases.
 
-* This may result in unstable write throughput because throughput might temporarily drop when performing a compaction.
-* Compaction will mark some data files as "deleted" (not really deleted, see [expiring snapshots]({{< ref "maintenance/manage-snapshots#expiring-snapshots" >}}) for more info). If multiple writers mark the same file, a conflict will occur when committing the changes. Paimon will automatically resolve the conflict, but this may result in job restarts.
+Compaction will mark some data files as "deleted" (not really deleted, see 
+[expiring snapshots]({{< ref "maintenance/manage-snapshots#expiring-snapshots" >}}) for more info).
+If multiple writers mark the same file, a conflict will occur when committing the changes. Paimon will automatically
+resolve the conflict, but this may result in job restarts.
 
 To avoid these downsides, users can also choose to skip compactions in writers, and run a dedicated job only for compaction. As compactions are performed only by the dedicated job, writers can continuously write records without pausing and no conflicts will ever occur.
 
@@ -229,7 +231,7 @@ For more usage of the compact_database action, see
 ## Sort Compact
 
 If your table is configured with [dynamic bucket primary key table]({{< ref "primary-key-table/data-distribution#dynamic-bucket" >}})
-or [unaware bucket append table]({{< ref "append-table/append-scalable-table" >}}) ,
+or [append table]({{< ref "append-table/append-table" >}}) ,
 you can trigger a compact with specified column sort to speed up queries.
 
 ```bash  

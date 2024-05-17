@@ -79,7 +79,7 @@ public class CdcMultiplexRecordChannelComputer implements ChannelComputer<CdcMul
                         return null;
                     }
 
-                    if (table.bucketMode() != BucketMode.FIXED) {
+                    if (table.bucketMode() != BucketMode.HASH_FIXED) {
                         throw new UnsupportedOperationException(
                                 String.format(
                                         "Combine mode Sink only supports FIXED bucket mode, but %s is %s",

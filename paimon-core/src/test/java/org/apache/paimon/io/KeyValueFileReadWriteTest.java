@@ -26,8 +26,8 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.deletionvectors.DeletionVector;
-import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.FlushingFileFormat;
+import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.FileStatus;
@@ -359,7 +359,7 @@ public class KeyValueFileReadWriteTest {
         assertThat(actual.get(actual.size() - 1).maxKey()).isEqualTo(expected.maxKey());
 
         // check stats
-        FieldStats[] keyStats = convertWithoutSchemaEvolution(expected.keyStats(), KEY_TYPE);
+        SimpleColStats[] keyStats = convertWithoutSchemaEvolution(expected.keyStats(), KEY_TYPE);
         for (int i = 0; i < KEY_TYPE.getFieldCount(); i++) {
             int idx = i;
             StatsTestUtils.checkRollingFileStats(

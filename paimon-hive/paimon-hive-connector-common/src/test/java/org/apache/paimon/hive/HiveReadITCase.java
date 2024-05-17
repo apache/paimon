@@ -120,7 +120,6 @@ public class HiveReadITCase extends HiveTestBase {
 
         Options conf = new Options();
         conf.set(CatalogOptions.WAREHOUSE, path);
-        conf.set(CoreOptions.BUCKET, 2);
         conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
         RowType.Builder rowType = RowType.builder();
         rowType.field("col1", DataTypes.INT());

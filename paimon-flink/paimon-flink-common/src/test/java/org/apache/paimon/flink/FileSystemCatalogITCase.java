@@ -71,15 +71,18 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
     @Test
     public void testWriteRead() throws Exception {
         tEnv.useCatalog("fs");
-        tEnv.executeSql("CREATE TABLE T (a STRING, b STRING, c STRING) WITH ('bucket' = '1')");
+        tEnv.executeSql(
+                "CREATE TABLE T (a STRING, b STRING, c STRING) WITH ('bucket' = '1', 'bucket-key' = 'a')");
         innerTestWriteRead();
     }
 
     @Test
     public void testRenameTable() throws Exception {
         tEnv.useCatalog("fs");
-        tEnv.executeSql("CREATE TABLE t1 (a INT) WITH ('bucket' = '1')").await();
-        tEnv.executeSql("CREATE TABLE t2 (a INT) WITH ('bucket' = '1')").await();
+        tEnv.executeSql("CREATE TABLE t1 (a INT) WITH ('bucket' = '1', 'bucket-key' = 'a')")
+                .await();
+        tEnv.executeSql("CREATE TABLE t2 (a INT) WITH ('bucket' = '1', 'bucket-key' = 'a')")
+                .await();
         tEnv.executeSql("INSERT INTO t1 VALUES(1),(2)").await();
         // the source table do not exist.
         assertThatThrownBy(() -> tEnv.executeSql("ALTER TABLE t3 RENAME TO t4"))

@@ -19,6 +19,8 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.StringUtils;
 
 import java.io.Serializable;
@@ -108,5 +110,9 @@ public class Identifier implements Serializable {
     @Override
     public String toString() {
         return "Identifier{" + "database='" + database + '\'' + ", table='" + table + '\'' + '}';
+    }
+
+    public static RowType schema() {
+        return RowType.builder().fields(DataTypes.STRING(), DataTypes.STRING()).build();
     }
 }

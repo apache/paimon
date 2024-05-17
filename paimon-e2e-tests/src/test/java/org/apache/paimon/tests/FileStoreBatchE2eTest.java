@@ -86,16 +86,13 @@ public class FileStoreBatchE2eTest extends E2eTestBase {
                         + "    person VARCHAR,\n"
                         + "    category VARCHAR,\n"
                         + "    price INT\n"
-                        + ") PARTITIONED BY (dt, hr) WITH (\n"
-                        + "    'bucket' = '3',\n"
-                        + "    'scan.infer-parallelism' = 'false'\n"
-                        + ");";
+                        + ") PARTITIONED BY (dt, hr);";
 
         // prepare test data
         writeSharedFile(testDataSourceFile, String.join("\n", data));
 
         // insert data into paimon
-        runSql(
+        runBatchSql(
                 "INSERT INTO ts_table SELECT * FROM test_source;",
                 catalogDdl,
                 useCatalogCmd,
@@ -103,7 +100,7 @@ public class FileStoreBatchE2eTest extends E2eTestBase {
                 paimonDdl);
 
         // test #1: read all data from paimon
-        runSql(
+        runBatchSql(
                 "INSERT INTO result1 SELECT * FROM ts_table;",
                 catalogDdl,
                 useCatalogCmd,
@@ -131,7 +128,7 @@ public class FileStoreBatchE2eTest extends E2eTestBase {
         clearCurrentResults();
 
         // test #2: partition filter
-        runSql(
+        runBatchSql(
                 "INSERT INTO result2 SELECT * FROM ts_table WHERE dt > '20211110' AND hr < '09';",
                 catalogDdl,
                 useCatalogCmd,
@@ -147,7 +144,7 @@ public class FileStoreBatchE2eTest extends E2eTestBase {
         clearCurrentResults();
 
         // test #3: value filter
-        runSql(
+        runBatchSql(
                 "INSERT INTO result3 SELECT * FROM ts_table WHERE person = 'Alice' AND category = 'Food';",
                 catalogDdl,
                 useCatalogCmd,
@@ -163,7 +160,7 @@ public class FileStoreBatchE2eTest extends E2eTestBase {
         clearCurrentResults();
 
         // test #4: aggregation
-        runSql(
+        runBatchSql(
                 "SET 'table.exec.resource.default-parallelism' = '1';\n"
                         + "INSERT INTO result4 SELECT dt, category, sum(price) AS total FROM ts_table GROUP BY dt, category;",
                 catalogDdl,
@@ -176,14 +173,5 @@ public class FileStoreBatchE2eTest extends E2eTestBase {
                 "20211111, Drink, 520",
                 "20211111, Food, 480");
         clearCurrentResults();
-    }
-
-    private void runSql(String sql, String... ddls) throws Exception {
-        runSql(
-                "SET 'execution.runtime-mode' = 'batch';\n"
-                        + "SET 'table.dml-sync' = 'true';\n"
-                        + String.join("\n", ddls)
-                        + "\n"
-                        + sql);
     }
 }
