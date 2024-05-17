@@ -323,7 +323,7 @@ public class SchemaManagerTest {
                 fields.get(0).id(),
                 "The field id should remain as 2 after moving f2 to the first position");
         Assertions.assertEquals(
-                fields.get(0).name(), "f2 should be moved to the first position", "f2");
+                fields.get(0).name(), "f2", "f2 should be moved to the first position");
 
         // Reset fields to initial state
         fields =
