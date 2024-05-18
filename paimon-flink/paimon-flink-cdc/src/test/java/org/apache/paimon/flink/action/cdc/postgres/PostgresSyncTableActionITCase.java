@@ -20,6 +20,7 @@ package org.apache.paimon.flink.action.cdc.postgres;
 
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -38,6 +39,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -795,6 +798,50 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
         assertThat(action.catalogConfig()).containsEntry("catalog-key", "catalog-value");
         assertThat(action.tableConfig())
                 .containsExactlyEntriesOf(Collections.singletonMap("table-key", "table-value"));
+    }
+
+    @Test
+    @Timeout(60)
+    public void testColumnAlterInExistingTableWhenStartJob() throws Exception {
+        String tableName = "test_exist_column_alter";
+        Map<String, String> options = new HashMap<>();
+        options.put("bucket", "1");
+        options.put("sink.parallelism", "1");
+
+        RowType rowType =
+                RowType.builder()
+                        .field("pk", DataTypes.INT().notNull())
+                        .field("a", DataTypes.BIGINT())
+                        .field("b", DataTypes.VARCHAR(20))
+                        .build();
+
+        createFileStoreTable(
+                rowType,
+                Collections.emptyList(),
+                Collections.singletonList("pk"),
+                Collections.emptyList(),
+                options);
+
+        Map<String, String> postgresConfig = getBasicPostgresConfig();
+        postgresConfig.put(PostgresSourceOptions.DATABASE_NAME.key(), DATABASE_NAME);
+        postgresConfig.put(PostgresSourceOptions.SCHEMA_NAME.key(), SCHEMA_NAME);
+        postgresConfig.put(PostgresSourceOptions.TABLE_NAME.key(), tableName);
+
+        PostgresSyncTableAction action =
+                syncTableActionBuilder(postgresConfig).withPrimaryKeys("pk").build();
+
+        runActionWithDefaultEnv(action);
+
+        FileStoreTable table = getFileStoreTable();
+
+        Map<String, DataField> actual =
+                table.schema().fields().stream()
+                        .collect(Collectors.toMap(DataField::name, Function.identity()));
+
+        assertThat(actual.get("pk").type()).isEqualTo(DataTypes.INT().notNull());
+        assertThat(actual.get("a").type()).isEqualTo(DataTypes.BIGINT());
+        assertThat(actual.get("b").type()).isEqualTo(DataTypes.VARCHAR(30));
+        assertThat(actual.get("c").type()).isEqualTo(DataTypes.INT());
     }
 
     private FileStoreTable getFileStoreTable() throws Exception {
