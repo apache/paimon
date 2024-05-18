@@ -86,17 +86,17 @@ public class CdcActionCommonUtils {
                 LOG.info(
                         "New fields '{}' found in source table, will be synchronized to Paimon table.",
                         field.name());
-                return true;
-            }
-            DataType type = paimonSchema.fields().get(idx).type();
-            if (UpdatedDataFieldsProcessFunction.canConvert(type, field.type())
-                    != UpdatedDataFieldsProcessFunction.ConvertAction.CONVERT) {
-                LOG.info(
-                        "Cannot convert field '{}' from source table type '{}' to Paimon type '{}'.",
-                        field.name(),
-                        field.type(),
-                        type);
-                return false;
+            } else {
+                DataType type = paimonSchema.fields().get(idx).type();
+                if (UpdatedDataFieldsProcessFunction.canConvert(type, field.type())
+                        != UpdatedDataFieldsProcessFunction.ConvertAction.CONVERT) {
+                    LOG.info(
+                            "Cannot convert field '{}' from source table type '{}' to Paimon type '{}'.",
+                            field.name(),
+                            field.type(),
+                            type);
+                    return false;
+                }
             }
         }
         return true;
