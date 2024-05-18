@@ -1388,7 +1388,11 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         .build();
 
         createFileStoreTable(
-                rowType, Collections.emptyList(), Collections.singletonList("pk"), options);
+                rowType,
+                Collections.emptyList(),
+                Collections.singletonList("pk"),
+                Collections.emptyList(),
+                options);
 
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", DATABASE_NAME);
@@ -1412,7 +1416,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         assertThat(actual.get("a").type()).isEqualTo(DataTypes.BIGINT());
         assertThat(actual.get("b").type()).isEqualTo(DataTypes.VARCHAR(30));
         assertThat(actual.get("c").type()).isEqualTo(DataTypes.INT());
-      
+    }
+
     public void testWriteOnlyAndSchemaEvolution() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "write_only_and_schema_evolution");
