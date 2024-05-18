@@ -1355,8 +1355,6 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "test_exist_column_comment_change");
 
-        // Flink cdc 2.3 does not support collecting field comments, and existing paimon table field
-        // comments will not be changed.
         MySqlSyncTableAction action =
                 syncTableActionBuilder(mySqlConfig)
                         .withPrimaryKeys("pk")
@@ -1368,8 +1366,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         Map<String, DataField> actual =
                 table.schema().fields().stream()
                         .collect(Collectors.toMap(DataField::name, Function.identity()));
-        assertThat(actual.get("pk").description()).isEqualTo("pk comment");
-        assertThat(actual.get("c1").description()).isEqualTo("c1 comment");
+        assertThat(actual.get("pk").description()).isEqualTo("pk new_comment");
+        assertThat(actual.get("c1").description()).isEqualTo("c1 new_comment");
         assertThat(actual.get("c2").description()).isEqualTo("c2 comment");
     }
 
