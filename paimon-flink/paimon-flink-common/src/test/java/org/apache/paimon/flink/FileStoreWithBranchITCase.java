@@ -16,30 +16,28 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table;
+package org.apache.paimon.flink;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.table.source.snapshot.SnapshotReader;
-import org.apache.paimon.utils.BranchManager;
-import org.apache.paimon.utils.SnapshotManager;
-import org.apache.paimon.utils.TagManager;
+import org.apache.paimon.flink.sink.FixedBucketSink;
+import org.apache.paimon.flink.source.ContinuousFileStoreSource;
+import org.apache.paimon.flink.source.StaticFileStoreSource;
 
-/** A {@link Table} for data. */
-public interface DataTable extends InnerTable {
+import org.apache.flink.testutils.junit.extensions.parameterized.ParameterizedTestExtension;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.extension.ExtendWith;
 
-    SnapshotReader newSnapshotReader();
+/**
+ * ITCase for {@link StaticFileStoreSource}, {@link ContinuousFileStoreSource} and {@link
+ * FixedBucketSink}.
+ */
+@ExtendWith(ParameterizedTestExtension.class)
+public class FileStoreWithBranchITCase extends FileStoreITCase {
+    public FileStoreWithBranchITCase(boolean isBatch) {
+        super(isBatch);
+    }
 
-    CoreOptions coreOptions();
-
-    SnapshotManager snapshotManager();
-
-    TagManager tagManager();
-
-    BranchManager branchManager();
-
-    Path location();
-
-    FileIO fileIO();
+    @BeforeAll
+    public static void before() {
+        branch = "testBranch";
+    }
 }

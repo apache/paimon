@@ -95,12 +95,6 @@ public class PrivilegedFileStore<T> implements FileStore<T> {
     }
 
     @Override
-    public FileStoreScan newScan(String branchName) {
-        privilegeChecker.assertCanSelect(identifier);
-        return wrapped.newScan(branchName);
-    }
-
-    @Override
     public ManifestList.Factory manifestListFactory() {
         return wrapped.manifestListFactory();
     }
@@ -142,12 +136,6 @@ public class PrivilegedFileStore<T> implements FileStore<T> {
     public FileStoreCommit newCommit(String commitUser) {
         privilegeChecker.assertCanInsert(identifier);
         return wrapped.newCommit(commitUser);
-    }
-
-    @Override
-    public FileStoreCommit newCommit(String commitUser, String branchName) {
-        privilegeChecker.assertCanInsert(identifier);
-        return wrapped.newCommit(commitUser, branchName);
     }
 
     @Override

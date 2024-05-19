@@ -33,6 +33,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.utils.BlockingIterator;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.FailingFileIO;
 
 import org.apache.flink.api.common.functions.MapFunction;
@@ -62,6 +63,7 @@ import org.apache.flink.testutils.junit.extensions.parameterized.Parameters;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.extension.ExtendWith;
 
@@ -76,6 +78,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static org.apache.paimon.CoreOptions.BRANCH;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
@@ -125,9 +128,16 @@ public class FileStoreITCase extends AbstractTestBase {
 
     private final StreamExecutionEnvironment env;
 
+    protected static String branch;
+
     public FileStoreITCase(boolean isBatch) {
         this.isBatch = isBatch;
         this.env = isBatch ? buildBatchEnv() : buildStreamEnv();
+    }
+
+    @BeforeAll
+    public static void before() {
+        branch = BranchManager.DEFAULT_MAIN_BRANCH;
     }
 
     @Parameters(name = "isBatch-{0}")
@@ -468,7 +478,7 @@ public class FileStoreITCase extends AbstractTestBase {
                         "");
         return retryArtificialException(
                 () -> {
-                    new SchemaManager(LocalFileIO.create(), tablePath).createTable(schema);
+                    new SchemaManager(LocalFileIO.create(), tablePath, branch).createTable(schema);
                     return FileStoreTableFactory.create(LocalFileIO.create(), options);
                 });
     }
@@ -484,6 +494,7 @@ public class FileStoreITCase extends AbstractTestBase {
             options.set(PATH, FailingFileIO.getFailingPath(failingName, temporaryPath));
         }
         options.set(FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
+        options.set(BRANCH, branch);
         return options;
     }
 

@@ -335,7 +335,8 @@ public abstract class AbstractCatalog implements Catalog {
             }
             return table;
         } else {
-            return getDataTable(identifier);
+            Table table = getDataTable(identifier);
+            return table;
         }
     }
 

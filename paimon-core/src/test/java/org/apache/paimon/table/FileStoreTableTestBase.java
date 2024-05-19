@@ -1019,22 +1019,22 @@ public abstract class FileStoreTableTestBase {
         // verify test-tag in test-branch is equal to snapshot 2
         Snapshot branchTag =
                 Snapshot.fromPath(
-                        new TraceableFileIO(), tagManager.branchTagPath("test-branch", "test-tag"));
+                        new TraceableFileIO(),
+                        tagManager.copyWithBranch("test-branch").tagPath("test-tag"));
         assertThat(branchTag.equals(snapshot2)).isTrue();
 
         // verify snapshot in test-branch is equal to snapshot 2
-        SnapshotManager snapshotManager = new SnapshotManager(new TraceableFileIO(), tablePath);
+        SnapshotManager snapshotManager =
+                new SnapshotManager(new TraceableFileIO(), tablePath, "test-branch");
         Snapshot branchSnapshot =
-                Snapshot.fromPath(
-                        new TraceableFileIO(),
-                        snapshotManager.branchSnapshotPath("test-branch", 2));
+                Snapshot.fromPath(new TraceableFileIO(), snapshotManager.snapshotPath(2));
         assertThat(branchSnapshot.equals(snapshot2)).isTrue();
 
         // verify schema in test-branch is equal to schema 0
-        SchemaManager schemaManager = new SchemaManager(new TraceableFileIO(), tablePath);
+        SchemaManager schemaManager =
+                new SchemaManager(new TraceableFileIO(), tablePath, "test-branch");
         TableSchema branchSchema =
-                SchemaManager.fromPath(
-                        new TraceableFileIO(), schemaManager.branchSchemaPath("test-branch", 0));
+                SchemaManager.fromPath(new TraceableFileIO(), schemaManager.toSchemaPath(0));
         TableSchema schema0 = schemaManager.schema(0);
         assertThat(branchSchema.equals(schema0)).isTrue();
     }
@@ -1312,9 +1312,10 @@ public abstract class FileStoreTableTestBase {
 
         generateBranch(table);
 
+        FileStoreTable tableBranch = createFileStoreTable(BRANCH_NAME);
         // Write data to branch1
-        try (StreamTableWrite write = table.newWrite(commitUser);
-                StreamTableCommit commit = table.newCommit(commitUser, BRANCH_NAME)) {
+        try (StreamTableWrite write = tableBranch.newWrite(commitUser);
+                StreamTableCommit commit = tableBranch.newCommit(commitUser)) {
             write.write(rowData(2, 20, 200L));
             commit.commit(1, write.prepareCommit(false, 2));
         }
@@ -1330,16 +1331,16 @@ public abstract class FileStoreTableTestBase {
         // Validate data in branch1
         assertThat(
                         getResult(
-                                table.newRead(),
-                                toSplits(table.newSnapshotReader(BRANCH_NAME).read().dataSplits()),
+                                tableBranch.newRead(),
+                                toSplits(tableBranch.newSnapshotReader().read().dataSplits()),
                                 BATCH_ROW_TO_STRING))
                 .containsExactlyInAnyOrder(
                         "0|0|0|binary|varbinary|mapKey:mapVal|multiset",
                         "2|20|200|binary|varbinary|mapKey:mapVal|multiset");
 
         // Write two rows data to branch1 again
-        try (StreamTableWrite write = table.newWrite(commitUser);
-                StreamTableCommit commit = table.newCommit(commitUser, BRANCH_NAME)) {
+        try (StreamTableWrite write = tableBranch.newWrite(commitUser);
+                StreamTableCommit commit = tableBranch.newCommit(commitUser)) {
             write.write(rowData(3, 30, 300L));
             write.write(rowData(4, 40, 400L));
             commit.commit(2, write.prepareCommit(false, 3));
@@ -1356,8 +1357,8 @@ public abstract class FileStoreTableTestBase {
         // Verify data in branch1
         assertThat(
                         getResult(
-                                table.newRead(),
-                                toSplits(table.newSnapshotReader(BRANCH_NAME).read().dataSplits()),
+                                tableBranch.newRead(),
+                                toSplits(tableBranch.newSnapshotReader().read().dataSplits()),
                                 BATCH_ROW_TO_STRING))
                 .containsExactlyInAnyOrder(
                         "0|0|0|binary|varbinary|mapKey:mapVal|multiset",
@@ -1446,12 +1447,23 @@ public abstract class FileStoreTableTestBase {
         return createFileStoreTable(conf -> conf.set(BUCKET, numOfBucket));
     }
 
+    protected FileStoreTable createFileStoreTable(String branch, int numOfBucket) throws Exception {
+        return createFileStoreTable(branch, conf -> conf.set(BUCKET, numOfBucket));
+    }
+
+    protected FileStoreTable createFileStoreTable(String branch) throws Exception {
+        return createFileStoreTable(branch, 1);
+    }
+
     protected FileStoreTable createFileStoreTable() throws Exception {
         return createFileStoreTable(1);
     }
 
     protected abstract FileStoreTable createFileStoreTable(Consumer<Options> configure)
             throws Exception;
+
+    protected abstract FileStoreTable createFileStoreTable(
+            String branch, Consumer<Options> configure) throws Exception;
 
     protected abstract FileStoreTable overwriteTestFileStoreTable() throws Exception;
 
@@ -1571,10 +1583,11 @@ public abstract class FileStoreTableTestBase {
         assertThat(branchManager.branchExists(BRANCH_NAME)).isTrue();
 
         // Verify branch1 and the main branch have the same data
+        FileStoreTable tableBranch = createFileStoreTable(BRANCH_NAME);
         assertThat(
                         getResult(
-                                table.newRead(),
-                                toSplits(table.newSnapshotReader(BRANCH_NAME).read().dataSplits()),
+                                tableBranch.newRead(),
+                                toSplits(tableBranch.newSnapshotReader().read().dataSplits()),
                                 BATCH_ROW_TO_STRING))
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
     }

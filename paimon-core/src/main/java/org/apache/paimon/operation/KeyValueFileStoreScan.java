@@ -62,7 +62,6 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             int numOfBuckets,
             boolean checkNumOfBuckets,
             Integer scanManifestParallelism,
-            String branchName,
             boolean deletionVectorsEnabled,
             MergeEngine mergeEngine) {
         super(
@@ -75,8 +74,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                 manifestListFactory,
                 numOfBuckets,
                 checkNumOfBuckets,
-                scanManifestParallelism,
-                branchName);
+                scanManifestParallelism);
         this.fieldKeyStatsConverters =
                 new SimpleStatsConverters(
                         sid -> keyValueFieldsExtractor.keyFields(scanTableSchema(sid)),

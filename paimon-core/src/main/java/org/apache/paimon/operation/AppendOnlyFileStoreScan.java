@@ -62,7 +62,6 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
             int numOfBuckets,
             boolean checkNumOfBuckets,
             Integer scanManifestParallelism,
-            String branchName,
             boolean fileIndexReadEnabled) {
         super(
                 partitionType,
@@ -74,8 +73,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                 manifestListFactory,
                 numOfBuckets,
                 checkNumOfBuckets,
-                scanManifestParallelism,
-                branchName);
+                scanManifestParallelism);
         this.simpleStatsConverters =
                 new SimpleStatsConverters(sid -> scanTableSchema(sid).fields(), schema.id());
         this.fileIndexReadEnabled = fileIndexReadEnabled;
