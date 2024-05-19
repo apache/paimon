@@ -63,8 +63,6 @@ public interface FileStore<T> extends Serializable {
 
     FileStoreScan newScan();
 
-    FileStoreScan newScan(String branchName);
-
     ManifestList.Factory manifestListFactory();
 
     ManifestFile.Factory manifestFileFactory();
@@ -80,8 +78,6 @@ public interface FileStore<T> extends Serializable {
     FileStoreWrite<T> newWrite(String commitUser, ManifestCacheFilter manifestFilter);
 
     FileStoreCommit newCommit(String commitUser);
-
-    FileStoreCommit newCommit(String commitUser, String branchName);
 
     SnapshotDeletion newSnapshotDeletion();
 

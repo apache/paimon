@@ -133,11 +133,6 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     }
 
     @Override
-    public SnapshotReader newSnapshotReader(String branchName) {
-        return new AuditLogDataReader(dataTable.newSnapshotReader(branchName));
-    }
-
-    @Override
     public InnerTableScan newScan() {
         return new AuditLogBatchScan(dataTable.newScan());
     }

@@ -503,12 +503,6 @@ public abstract class SchemaEvolutionTableTestBase {
         }
 
         @Override
-        public Optional<TableSchema> latest(String branchName) {
-            // for compatibility test
-            return latest();
-        }
-
-        @Override
         public List<TableSchema> listAll() {
             return new ArrayList<>(tableSchemas.values());
         }

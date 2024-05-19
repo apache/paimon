@@ -68,12 +68,6 @@ public class PrivilegedFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public SnapshotReader newSnapshotReader(String branchName) {
-        privilegeChecker.assertCanSelect(identifier);
-        return wrapped.newSnapshotReader(branchName);
-    }
-
-    @Override
     public CoreOptions coreOptions() {
         return wrapped.coreOptions();
     }
@@ -268,12 +262,6 @@ public class PrivilegedFileStoreTable implements FileStoreTable {
     public TableCommitImpl newCommit(String commitUser) {
         privilegeChecker.assertCanInsert(identifier);
         return wrapped.newCommit(commitUser);
-    }
-
-    @Override
-    public TableCommitImpl newCommit(String commitUser, String branchName) {
-        privilegeChecker.assertCanInsert(identifier);
-        return wrapped.newCommit(commitUser, branchName);
     }
 
     @Override

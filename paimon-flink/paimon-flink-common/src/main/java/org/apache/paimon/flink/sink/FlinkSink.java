@@ -235,6 +235,7 @@ public abstract class FlinkSink<T> implements Serializable {
                         commitUser,
                         createCommitterFactory(),
                         createCommittableStateManager());
+
         if (options.get(SINK_AUTO_TAG_FOR_SAVEPOINT)) {
             committerOperator =
                     new AutoTagForSavepointCommitterOperator<>(
