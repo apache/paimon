@@ -61,7 +61,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
     import sparkSession.implicits._
 
     val rowKindColIdx = SparkRowUtils.getFieldIndex(data.schema, ROW_KIND_COL)
-    checkArgument(
+    assert(
       rowKindColIdx == -1 || rowKindColIdx == data.schema.length - 1,
       "Row kind column should be the last field.")
 
