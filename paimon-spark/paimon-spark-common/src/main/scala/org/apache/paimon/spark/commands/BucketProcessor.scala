@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.data.{InternalRow => PaimonInternalRow}
-import org.apache.paimon.index.{HashBucketAssigner, SimpleHashBucketAssigner}
+import org.apache.paimon.index.HashBucketAssigner
 import org.apache.paimon.spark.SparkRow
 import org.apache.paimon.spark.util.EncoderUtils
 import org.apache.paimon.table.FileStoreTable
@@ -76,7 +76,7 @@ case class CommonBucketProcessor(
       override def next(): Row = {
         val row = rowIterator.next
         val sparkInternalRow = encoderGroup.rowToInternal(row)
-        sparkInternalRow.setInt(bucketColIndex, getBucketId((new SparkRow(rowType, row))))
+        sparkInternalRow.setInt(bucketColIndex, getBucketId(new SparkRow(rowType, row)))
         encoderGroup.internalToRow(sparkInternalRow)
       }
     }
@@ -88,7 +88,6 @@ case class DynamicBucketProcessor(
     bucketColIndex: Int,
     numSparkPartitions: Int,
     numAssigners: Int,
-    isBootstrap: Boolean,
     encoderGroup: EncoderSerDeGroup
 ) extends BucketProcessor {
 
@@ -98,12 +97,7 @@ case class DynamicBucketProcessor(
 
   def processPartition(rowIterator: Iterator[Row]): Iterator[Row] = {
     val rowPartitionKeyExtractor = new RowPartitionKeyExtractor(fileStoreTable.schema)
-    val assigner = if (isBootstrap) {
-      new SimpleHashBucketAssigner(
-        numAssigners,
-        TaskContext.getPartitionId(),
-        targetBucketRowNumber)
-    } else {
+    val assigner =
       new HashBucketAssigner(
         fileStoreTable.snapshotManager(),
         commitUser,
@@ -113,7 +107,6 @@ case class DynamicBucketProcessor(
         TaskContext.getPartitionId(),
         targetBucketRowNumber
       )
-    }
 
     new Iterator[Row]() {
       override def hasNext: Boolean = rowIterator.hasNext
@@ -126,23 +119,6 @@ case class DynamicBucketProcessor(
         val bucket = assigner.assign(partition, hash)
         val sparkInternalRow = encoderGroup.rowToInternal(row)
         sparkInternalRow.setInt(bucketColIndex, bucket)
-        encoderGroup.internalToRow(sparkInternalRow)
-      }
-    }
-  }
-}
-
-case class UnawareBucketProcessor(bucketColIndex: Int, encoderGroup: EncoderSerDeGroup)
-  extends BucketProcessor {
-
-  def processPartition(rowIterator: Iterator[Row]): Iterator[Row] = {
-    new Iterator[Row] {
-      override def hasNext: Boolean = rowIterator.hasNext
-
-      override def next(): Row = {
-        val row = rowIterator.next
-        val sparkInternalRow = encoderGroup.rowToInternal(row)
-        sparkInternalRow.setInt(bucketColIndex, 0)
         encoderGroup.internalToRow(sparkInternalRow)
       }
     }

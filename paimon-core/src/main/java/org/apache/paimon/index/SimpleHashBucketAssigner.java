@@ -18,11 +18,13 @@
 
 package org.apache.paimon.index;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.utils.Int2ShortHashMap;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 /** When we need to overwrite the table, we should use this to avoid loading index. */
 public class SimpleHashBucketAssigner implements BucketAssigner {
@@ -42,14 +44,23 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
 
     @Override
     public int assign(BinaryRow partition, int hash) {
-        SimplePartitionIndex index =
-                this.partitionIndex.computeIfAbsent(partition, p -> new SimplePartitionIndex());
+        SimplePartitionIndex index = partitionIndex.get(partition);
+        if (index == null) {
+            partition = partition.copy();
+            index = new SimplePartitionIndex();
+            this.partitionIndex.put(partition, index);
+        }
         return index.assign(hash);
     }
 
     @Override
     public void prepareCommit(long commitIdentifier) {
         // do nothing
+    }
+
+    @VisibleForTesting
+    Set<BinaryRow> currentPartitions() {
+        return partitionIndex.keySet();
     }
 
     /** Simple partition bucket hash assigner. */
