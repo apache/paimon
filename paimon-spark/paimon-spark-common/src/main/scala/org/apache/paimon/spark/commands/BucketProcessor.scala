@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.data.{InternalRow => PaimonInternalRow}
-import org.apache.paimon.index.HashBucketAssigner
+import org.apache.paimon.index.{HashBucketAssigner, SimpleHashBucketAssigner}
 import org.apache.paimon.spark.SparkRow
 import org.apache.paimon.spark.util.EncoderUtils
 import org.apache.paimon.table.FileStoreTable
@@ -88,6 +88,7 @@ case class DynamicBucketProcessor(
     bucketColIndex: Int,
     numSparkPartitions: Int,
     numAssigners: Int,
+    isBootstrap: Boolean,
     encoderGroup: EncoderSerDeGroup
 ) extends BucketProcessor {
 
@@ -97,15 +98,22 @@ case class DynamicBucketProcessor(
 
   def processPartition(rowIterator: Iterator[Row]): Iterator[Row] = {
     val rowPartitionKeyExtractor = new RowPartitionKeyExtractor(fileStoreTable.schema)
-    val assigner = new HashBucketAssigner(
-      fileStoreTable.snapshotManager(),
-      commitUser,
-      fileStoreTable.store.newIndexFileHandler,
-      numSparkPartitions,
-      numAssigners,
-      TaskContext.getPartitionId(),
-      targetBucketRowNumber
-    )
+    val assigner = if (isBootstrap) {
+      new SimpleHashBucketAssigner(
+        numAssigners,
+        TaskContext.getPartitionId(),
+        targetBucketRowNumber)
+    } else {
+      new HashBucketAssigner(
+        fileStoreTable.snapshotManager(),
+        commitUser,
+        fileStoreTable.store.newIndexFileHandler,
+        numSparkPartitions,
+        numAssigners,
+        TaskContext.getPartitionId(),
+        targetBucketRowNumber
+      )
+    }
 
     new Iterator[Row]() {
       override def hasNext: Boolean = rowIterator.hasNext

@@ -45,12 +45,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
 
   private lazy val rowType = table.rowType()
 
-  private lazy val bucketMode = table match {
-    case fileStoreTable: FileStoreTable =>
-      fileStoreTable.bucketMode
-    case _ =>
-      BucketMode.HASH_FIXED
-  }
+  private lazy val bucketMode = table.bucketMode
 
   private lazy val primaryKeyCols = tableSchema.trimmedPrimaryKeys().asScala
 
@@ -153,15 +148,20 @@ case class PaimonSparkWriter(table: FileStoreTable) {
             withInitBucketCol,
             numParallelism,
             numAssigners)
+
+        val bootstrap = table.snapshotManager().latestSnapshot() == null
         val dynamicBucketProcessor =
           DynamicBucketProcessor(
             table,
             bucketColIdx,
             numParallelism,
             numAssigners,
+            bootstrap,
             encoderGroupWithBucketCol)
-        repartitionByPartitionsAndBucket(
-          partitioned.mapPartitions(dynamicBucketProcessor.processPartition)(encoderWithBucketCOl))
+
+        val assigned =
+          partitioned.mapPartitions(dynamicBucketProcessor.processPartition)(encoderWithBucketCOl)
+        if (bootstrap) assigned else repartitionByPartitionsAndBucket(assigned)
 
       case BucketMode.BUCKET_UNAWARE =>
         assert(primaryKeyCols.isEmpty, "Only append table can support unaware bucket.")
