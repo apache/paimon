@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.types.RowType
 
@@ -28,4 +29,6 @@ private[spark] trait WithFileStoreTable {
   def withPrimaryKeys: Boolean = !table.primaryKeys().isEmpty
 
   def rowType: RowType = table.rowType()
+
+  def coreOptions: CoreOptions = table.coreOptions()
 }

@@ -38,7 +38,7 @@ import org.apache.spark.sql.catalyst.plans.logical.{Filter, SupportsSubquery}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.lit
 
-import java.util.UUID
+import java.util.{Collections, UUID}
 
 import scala.collection.JavaConverters._
 
@@ -119,6 +119,13 @@ case class DeleteFromPaimonTableCommand(
   }
 
   def performNonPrimaryKeyDelete(sparkSession: SparkSession): Seq[CommitMessage] = {
+    import sparkSession.implicits._
+
+    val pathFactory = table.store().pathFactory()
+    val fileIO = table.fileIO()
+    val store = table.store()
+    val lastSnapshotId = table.snapshotManager().latestSnapshotId
+
     // Step1: the candidate data splits which are filtered by Paimon Predicate.
     val candidateDataSplits = findCandidateDataSplits(condition, relation.output)
     val fileNameToMeta: Map[String, SparkDataFileMeta] = candidateFileMap(candidateDataSplits)
@@ -126,7 +133,11 @@ case class DeleteFromPaimonTableCommand(
     val deletionVectorsEnabled = new CoreOptions(table.options()).deletionVectorsEnabled()
     if (deletionVectorsEnabled) {
       // Step2: collect all the deletion vectors that marks the deleted rows.
-      val dataFileAndDeletionFile = fileNameToMeta.map {
+      val deletionFiles = candidateDataSplits
+        .flatMap(dataSplit => dataSplit.deletionFiles().orElse(Collections.emptyList()).asScala)
+        .filter(_ != null)
+        .asJava
+      val dataFileToDeletionFile = fileNameToMeta.map {
         case (file, dataFileMeta) =>
           (
             file,
@@ -134,16 +145,42 @@ case class DeleteFromPaimonTableCommand(
               dataFileMeta.partition,
               dataFileMeta.bucket,
               dataFileMeta.deletionFile))
-      }.toArray
+      }
+
+      val dvIndexFileMaintainer =
+        table.store().newIndexFileHandler().createDVIndexFileMaintainer(deletionFiles)
       val deletionVectors = collectDeletionVectors(
         candidateDataSplits,
-        dataFileAndDeletionFile,
+        dataFileToDeletionFile,
         condition,
         relation,
         sparkSession)
 
-      // Step3: write these deletion vectors.
-      writer.persistDeletionVectors(deletionVectors)
+      try {
+        deletionVectors.cache()
+        val touchedDeletionFiles = deletionVectors
+          .collect()
+          .flatMap(sdv => dataFileToDeletionFile(sdv.relativePath(pathFactory)).deletionFile)
+          .toList
+        dvIndexFileMaintainer.notifyDeletionFiles(touchedDeletionFiles.asJava)
+
+        if (coreOptions.bucket() == -1) {
+          // bucket == -1
+          val indexEntries = dvIndexFileMaintainer.writeUnchangedDeletionVector().asScala
+          val rewriteIndexCommitMsg = writer.buildCommitMessageFromIndexManifestEntry(indexEntries)
+
+          // Step3: write these deletion vectors.
+          val newIndexCommitMsg = writer.persistDeletionVectors(deletionVectors)
+
+          rewriteIndexCommitMsg ++ newIndexCommitMsg
+        } else {
+          // bucket != -1
+          writer.persistDeletionVectors0(deletionVectors)
+        }
+      } finally {
+        deletionVectors.unpersist()
+      }
+
     } else {
       // Step2: extract out the exactly files, which must have at least one record to be updated.
       val touchedFilePaths =
@@ -155,10 +192,8 @@ case class DeleteFromPaimonTableCommand(
       }
 
       // Step4: build a dataframe that contains the unchanged data, and write out them.
-      val touchedDataSplits = SparkDataFileMeta.convertToDataSplits(
-        touchedFiles,
-        rawConvertible = true,
-        table.store().pathFactory())
+      val touchedDataSplits =
+        SparkDataFileMeta.convertToDataSplits(touchedFiles, rawConvertible = true, pathFactory)
       val toRewriteScanRelation = Filter(
         Not(condition),
         Compatibility.createDataSourceV2ScanRelation(

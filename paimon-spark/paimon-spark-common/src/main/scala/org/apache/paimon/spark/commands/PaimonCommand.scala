@@ -140,12 +140,13 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
 
   protected def collectDeletionVectors(
       candidateDataSplits: Seq[DataSplit],
-      dataFileAndDeletionFile: Array[(String, SparkDeletionFile)],
+      dataFileToDeletionFile: Map[String, SparkDeletionFile],
       condition: Expression,
       relation: DataSourceV2Relation,
       sparkSession: SparkSession): Dataset[SparkDeletionVector] = {
     import sparkSession.implicits._
 
+    val dataFileAndDeletionFile = dataFileToDeletionFile.toArray
     val metadataCols = Seq(FILE_PATH, ROW_INDEX)
     val metadataProj = metadataCols.map(_.toAttribute)
     val scan = PaimonSplitScan(table, candidateDataSplits.toArray, metadataCols)
@@ -174,8 +175,8 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
             dv.delete(iter.next()._2)
           }
           val locationURI = location.toUri
-          val relativeFilePath = locationURI.relativize(new URI(filePath))
-          val deletionFile = fileNameToDeletionFile(relativeFilePath.toString)
+          val relativeFilePath = locationURI.relativize(new URI(filePath)).toString
+          val deletionFile = fileNameToDeletionFile(relativeFilePath)
           deletionFile.deletionFile match {
             case Some(deletionFile) =>
               dv.merge(DeletionVector.read(fileIO, deletionFile))
@@ -189,6 +190,7 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
       }
   }
 
+  /** Notice that, the key is a relative path, not just the file name. */
   protected def candidateFileMap(
       candidateDataSplits: Seq[DataSplit]): Map[String, SparkDataFileMeta] = {
     val totalBuckets = table.coreOptions().bucket()

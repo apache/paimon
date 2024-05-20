@@ -34,116 +34,111 @@ class DeletionVectorTest extends PaimonSparkTestBase {
 
   import testImplicits._
 
-  test("Paimon DeletionVector: delete for append non-partitioned table") {
-    withTable("T") {
-      spark.sql(s"""
-                   |CREATE TABLE T (id INT, name STRING)
-                   |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'bucket'=1)
-                   |""".stripMargin)
-      val table = loadTable("T")
-      val location = table.location().toUri.toString
-      val dvMaintainerFactory =
-        new DeletionVectorsMaintainer.Factory(table.store().newIndexFileHandler())
+  bucketModes.foreach {
+    bucket =>
+      test(
+        s"Paimon DeletionVector: delete for append non-partitioned table with bucket = $bucket") {
+        withTable("T") {
+          spark.sql(s"""
+                       |CREATE TABLE T (id INT, name STRING)
+                       |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'bucket' = '$bucket')
+                       |""".stripMargin)
 
-      spark.sql("INSERT INTO T VALUES (1, 'a'), (2, 'b'), (3, 'c')")
-      val deletionVectors1 = getLatestDeletionVectors(table, dvMaintainerFactory)
-      Assertions.assertEquals(0, deletionVectors1.size)
+          val table = loadTable("T")
+          val dvMaintainerFactory =
+            new DeletionVectorsMaintainer.Factory(table.store().newIndexFileHandler())
 
-      val cond1 = "id = 2"
-      val rowMetaInfo1 = getFilePathAndRowIndex(cond1)
+          spark.sql("INSERT INTO T VALUES (1, 'a'), (2, 'b')")
+          val deletionVectors1 = getLatestDeletionVectors(table, dvMaintainerFactory)
+          Assertions.assertEquals(0, deletionVectors1.size)
 
-      spark.sql("select id, __paimon_file_path, __paimon_row_index from T").show(false)
+          val cond1 = "id = 2"
+          val rowMetaInfo1 = getFilePathAndRowIndex(cond1)
+          spark.sql(s"DELETE FROM T WHERE $cond1")
+          checkAnswer(spark.sql(s"SELECT * from T ORDER BY id"), Row(1, "a") :: Nil)
+          val deletionVectors2 = getLatestDeletionVectors(table, dvMaintainerFactory)
+          Assertions.assertEquals(1, deletionVectors2.size)
+          deletionVectors2
+            .foreach {
+              case (filePath, dv) =>
+                rowMetaInfo1(filePath).foreach(index => Assertions.assertTrue(dv.isDeleted(index)))
+            }
 
-      spark.sql(s"DELETE FROM T WHERE $cond1")
-      checkAnswer(spark.sql(s"SELECT * from T ORDER BY id"), Row(1, "a") :: Row(3, "c") :: Nil)
-      val deletionVectors2 = getLatestDeletionVectors(table, dvMaintainerFactory)
-      Assertions.assertEquals(1, deletionVectors2.size)
-      deletionVectors2
-        .foreach {
-          case (filePath, dv) =>
-            rowMetaInfo1(filePath).foreach(index => Assertions.assertTrue(dv.isDeleted(index)))
+          spark.sql("INSERT INTO T VALUES (2, 'bb'), (3, 'c'), (4, 'd')")
+          checkAnswer(
+            spark.sql(s"SELECT * from T ORDER BY id"),
+            Row(1, "a") :: Row(2, "bb") :: Row(3, "c") :: Row(4, "d") :: Nil)
+          val deletionVectors3 = getLatestDeletionVectors(table, dvMaintainerFactory)
+          Assertions.assertTrue(deletionVectors2 == deletionVectors3)
+
+          val cond2 = "id % 2 = 1"
+          spark.sql(s"DELETE FROM T WHERE $cond2")
+          checkAnswer(spark.sql(s"SELECT * from T ORDER BY id"), Row(2, "bb") :: Row(4, "d") :: Nil)
         }
-
-//      spark.sql("INSERT INTO T VALUES (2, 'bb'), (4, 'd')")
-//      checkAnswer(
-//        spark.sql(s"SELECT * from T ORDER BY id"),
-//        Row(1, "a") :: Row(2, "bb") :: Row(3, "c") :: Row(4, "d") :: Nil)
-//      val deletionVectors3 = getLatestDeletionVectors(table, dvMaintainerFactory)
-//      Assertions.assertTrue(deletionVectors2 == deletionVectors3)
-
-      val cond2 = "id = 3"
-      val rowMetaInfo2 = getFilePathAndRowIndex(cond2)
-      spark.sql(s"DELETE FROM T WHERE $cond2")
-      checkAnswer(spark.sql(s"SELECT * from T ORDER BY id"), Row(1, "a") :: Nil)
-      val deletionVectors4 = getLatestDeletionVectors(table, dvMaintainerFactory)
-      Assertions.assertTrue(rowMetaInfo2.keys.toArray.sameElements(deletionVectors4.keys))
-      deletionVectors4
-        .foreach {
-          case (filePath, dv) =>
-            rowMetaInfo2(filePath).foreach(index => Assertions.assertTrue(dv.isDeleted(index)))
-        }
-    }
+      }
   }
 
-  test("Paimon DeletionVector: delete for append partitioned table") {
-    withTable("T") {
-      spark.sql(s"""
-                   |CREATE TABLE T (id INT, name STRING, pt STRING)
-                   |PARTITIONED BY(pt)
-                   |TBLPROPERTIES ('deletion-vectors.enabled' = 'true')
-                   |""".stripMargin)
-      val table = loadTable("T")
-      val location = table.location().toUri.toString
-      val dvMaintainerFactory =
-        new DeletionVectorsMaintainer.Factory(table.store().newIndexFileHandler())
+  bucketModes.foreach {
+    bucket =>
+      test(s"Paimon DeletionVector: delete for append partitioned table with bucket = $bucket") {
+        withTable("T") {
+          spark.sql(s"""
+                       |CREATE TABLE T (id INT, name STRING, pt STRING)
+                       |PARTITIONED BY(pt)
+                       |TBLPROPERTIES ('deletion-vectors.enabled' = 'true')
+                       |""".stripMargin)
 
-      spark.sql(
-        "INSERT INTO T VALUES (1, 'a', '2024'), (2, 'b', '2024'), (3, 'c', '2025'), (4, 'd', '2025')")
-      val deletionVectors1 = getLatestDeletionVectors(table, dvMaintainerFactory)
-      Assertions.assertEquals(0, deletionVectors1.size)
+          val table = loadTable("T")
+          val dvMaintainerFactory =
+            new DeletionVectorsMaintainer.Factory(table.store().newIndexFileHandler())
 
-      val cond1 = "id = 2"
-      val rowMetaInfo1 = getFilePathAndRowIndex(cond1)
+          spark.sql(
+            "INSERT INTO T VALUES (1, 'a', '2024'), (2, 'b', '2024'), (3, 'c', '2025'), (4, 'd', '2025')")
+          val deletionVectors1 = getLatestDeletionVectors(table, dvMaintainerFactory)
+          Assertions.assertEquals(0, deletionVectors1.size)
 
-      spark.sql("select id, __paimon_file_path, __paimon_row_index from T").show(false)
+          val cond1 = "id = 2"
+          val rowMetaInfo1 = getFilePathAndRowIndex(cond1)
+          spark.sql(s"DELETE FROM T WHERE $cond1")
+          checkAnswer(
+            spark.sql(s"SELECT * from T ORDER BY id"),
+            Row(1, "a", "2024") :: Row(3, "c", "2025") :: Row(4, "d", "2025") :: Nil)
+          val deletionVectors2 =
+            getLatestDeletionVectors(
+              table,
+              dvMaintainerFactory,
+              Seq(BinaryRow.singleColumn("2024"), BinaryRow.singleColumn("2025")))
+          Assertions.assertEquals(1, deletionVectors2.size)
+          deletionVectors2
+            .foreach {
+              case (filePath, dv) =>
+                rowMetaInfo1(filePath).foreach(index => Assertions.assertTrue(dv.isDeleted(index)))
+            }
 
-      spark.sql(s"DELETE FROM T WHERE $cond1")
-      checkAnswer(
-        spark.sql(s"SELECT * from T ORDER BY id"),
-        Row(1, "a", "2024") :: Row(3, "c", "2025") :: Row(4, "d", "2025") :: Nil)
-      val deletionVectors2 =
-        getLatestDeletionVectors(table, dvMaintainerFactory, BinaryRow.singleColumn("2024")) ++
-          getLatestDeletionVectors(table, dvMaintainerFactory, BinaryRow.singleColumn("2025"))
-      Assertions.assertEquals(1, deletionVectors2.size)
-      deletionVectors2
-        .foreach {
-          case (filePath, dv) =>
-            rowMetaInfo1(filePath).foreach(index => Assertions.assertTrue(dv.isDeleted(index)))
-
+          val cond2 = "id = 3"
+          val rowMetaInfo2 = rowMetaInfo1 ++ getFilePathAndRowIndex(cond2)
+          spark.sql(s"DELETE FROM T WHERE $cond2")
+          checkAnswer(
+            spark.sql(s"SELECT * from T ORDER BY id"),
+            Row(1, "a", "2024") :: Row(4, "d", "2025") :: Nil)
+          val deletionVectors3 =
+            getLatestDeletionVectors(
+              table,
+              dvMaintainerFactory,
+              Seq(BinaryRow.singleColumn("2024")))
+          Assertions.assertTrue(deletionVectors2 == deletionVectors3)
+          val deletionVectors4 =
+            getLatestDeletionVectors(
+              table,
+              dvMaintainerFactory,
+              Seq(BinaryRow.singleColumn("2024"), BinaryRow.singleColumn("2025")))
+          deletionVectors4
+            .foreach {
+              case (filePath, dv) =>
+                rowMetaInfo2(filePath).foreach(index => Assertions.assertTrue(dv.isDeleted(index)))
+            }
         }
-
-      //      spark.sql("INSERT INTO T VALUES (2, 'bb'), (4, 'd')")
-      //      checkAnswer(
-      //        spark.sql(s"SELECT * from T ORDER BY id"),
-      //        Row(1, "a") :: Row(2, "bb") :: Row(3, "c") :: Row(4, "d") :: Nil)
-      //      val deletionVectors3 = getLatestDeletionVectors(table, dvMaintainerFactory)
-      //      Assertions.assertTrue(deletionVectors2 == deletionVectors3)
-
-      val cond2 = "id = 3"
-      val rowMetaInfo2 = rowMetaInfo1 ++ getFilePathAndRowIndex(cond2)
-      spark.sql(s"DELETE FROM T WHERE $cond2")
-      checkAnswer(
-        spark.sql(s"SELECT * from T ORDER BY id"),
-        Row(1, "a", "2024") :: Row(4, "d", "2025") :: Nil)
-      val deletionVectors4 =
-        getLatestDeletionVectors(table, dvMaintainerFactory, BinaryRow.singleColumn("2024")) ++
-          getLatestDeletionVectors(table, dvMaintainerFactory, BinaryRow.singleColumn("2025"))
-      deletionVectors4
-        .foreach {
-          case (filePath, dv) =>
-            rowMetaInfo2(filePath).foreach(index => Assertions.assertTrue(dv.isDeleted(index)))
-        }
-    }
+      }
   }
 
   test("Paimon deletionVector: deletion vector write verification") {
@@ -302,13 +297,21 @@ class DeletionVectorTest extends PaimonSparkTestBase {
 
   private def getLatestDeletionVectors(
       table: FileStoreTable,
+      dvMaintainerFactory: DeletionVectorsMaintainer.Factory): Map[String, DeletionVector] = {
+    getLatestDeletionVectors(table, dvMaintainerFactory, Seq(BinaryRow.EMPTY_ROW))
+  }
+
+  private def getLatestDeletionVectors(
+      table: FileStoreTable,
       dvMaintainerFactory: DeletionVectorsMaintainer.Factory,
-      partition: BinaryRow = BinaryRow.EMPTY_ROW): Map[String, DeletionVector] = {
-    dvMaintainerFactory
-      .createOrRestore(table.snapshotManager().latestSnapshotId(), partition, 0)
-      .deletionVectors()
-      .asScala
-      .toMap
+      partitions: Seq[BinaryRow]): Map[String, DeletionVector] = {
+    partitions.flatMap {
+      partition =>
+        dvMaintainerFactory
+          .createOrRestore(table.snapshotManager().latestSnapshotId(), partition)
+          .deletionVectors()
+          .asScala
+    }.toMap
   }
 
   private def getFilePathAndRowIndex(condition: String): Map[String, Array[Long]] = {

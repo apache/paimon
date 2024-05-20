@@ -20,6 +20,7 @@ package org.apache.paimon.spark.commands
 
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.table.source.DeletionFile
+import org.apache.paimon.utils.{FileStorePathFactory, SerializationUtils}
 
 /**
  * This class will be used as Dataset's pattern type. So here use Array[Byte] instead of BinaryRow
@@ -29,6 +30,37 @@ case class SparkDeletionVector(
     partition: Array[Byte],
     bucket: Int,
     file: String,
-    deletionVector: Array[Byte])
+    deletionVector: Array[Byte]) {
+
+  def relativePath(fileStorePathFactory: FileStorePathFactory): String = {
+    fileStorePathFactory
+      .relativePartitionAndBucketPath(SerializationUtils.deserializeBinaryRow(partition), bucket)
+      .toUri
+      .toString + "/" + file
+  }
+}
+
+case class SparkDeletionVectors(
+    partitionAndBucket: String,
+    partition: Array[Byte],
+    bucket: Int,
+    fileAndDVs: List[(String, Array[Byte])]
+)
 
 case class SparkDeletionFile(partition: BinaryRow, bucket: Int, deletionFile: Option[DeletionFile])
+
+case class SparkDeletionFile0(path: String, offset: Long, length: Long, dataFile: String) {
+  def toDeletionFile: DeletionFile = {
+    new DeletionFile(path, offset, length, dataFile)
+  }
+}
+
+object SparkDeletionFile0 {
+  def apply(deletionFile: DeletionFile): SparkDeletionFile0 = {
+    SparkDeletionFile0(
+      deletionFile.path(),
+      deletionFile.offset(),
+      deletionFile.length(),
+      deletionFile.dataFile())
+  }
+}

@@ -51,7 +51,8 @@ public class HashIndexMaintainer implements IndexMaintainer<KeyValue> {
         IntHashSet hashcode = new IntHashSet();
         if (snapshotId != null) {
             Optional<IndexFileMeta> indexFile =
-                    fileHandler.scan(snapshotId, HashIndexFile.HASH_INDEX, partition, bucket);
+                    fileHandler.scanHashIndex(snapshotId, partition, bucket);
+
             if (indexFile.isPresent()) {
                 IndexFileMeta file = indexFile.get();
                 hashcode = new IntHashSet((int) file.rowCount());

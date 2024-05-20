@@ -50,11 +50,17 @@ public class DeletionFile implements Serializable {
     private final String path;
     private final long offset;
     private final long length;
+    private final transient String dataFile;
 
     public DeletionFile(String path, long offset, long length) {
+        this(path, offset, length, null);
+    }
+
+    public DeletionFile(String path, long offset, long length, String dataFile) {
         this.path = path;
         this.offset = offset;
         this.length = length;
+        this.dataFile = dataFile;
     }
 
     /** Path of the file. */
@@ -70,6 +76,10 @@ public class DeletionFile implements Serializable {
     /** Length of data in the file. */
     public long length() {
         return length;
+    }
+
+    public @Nullable String dataFile() {
+        return this.dataFile;
     }
 
     public static void serialize(DataOutputView out, @Nullable DeletionFile file)
