@@ -26,6 +26,8 @@ import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_C
 import org.apache.paimon.spark.util.SparkRowUtils
 import org.apache.paimon.table.{BucketMode, FileStoreTable}
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageSerializer, RowPartitionKeyExtractor}
+import org.apache.paimon.utils.Preconditions
+import org.apache.paimon.utils.Preconditions.checkArgument
 
 import org.apache.spark.{Partitioner, TaskContext}
 import org.apache.spark.sql.{DataFrame, Dataset, Row, SparkSession}
@@ -58,14 +60,14 @@ case class PaimonSparkWriter(table: FileStoreTable) {
     val sparkSession = data.sparkSession
     import sparkSession.implicits._
 
-    val dataSchema = SparkSystemColumns.filterSparkSystemColumns(data.schema)
     val rowKindColIdx = SparkRowUtils.getFieldIndex(data.schema, ROW_KIND_COL)
+    checkArgument(
+      rowKindColIdx == -1 || rowKindColIdx == data.schema.length - 1,
+      "Row kind column should be the last field.")
 
     // append _bucket_ column as placeholder
     val withInitBucketCol = data.withColumn(BUCKET_COL, lit(-1))
     val bucketColIdx = withInitBucketCol.schema.size - 1
-
-    val originEncoderGroup = EncoderSerDeGroup(dataSchema)
     val encoderGroupWithBucketCol = EncoderSerDeGroup(withInitBucketCol.schema)
 
     def newWrite(): SparkTableWrite = new SparkTableWrite(writeBuilder, rowType, rowKindColIdx)
@@ -95,11 +97,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
           {
             val write = newWrite()
             try {
-              iter.foreach(
-                row =>
-                  write.write(
-                    originEncoderGroup.internalToRow(encoderGroupWithBucketCol.rowToInternal(row)),
-                    row.getInt(bucketColIdx)))
+              iter.foreach(row => write.write(row, row.getInt(bucketColIdx)))
               write.finish().asScala
             } finally {
               write.close()
