@@ -92,7 +92,7 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
 
         private void loadNewBucket() {
             for (int i = 0; i < Short.MAX_VALUE; i++) {
-                if (i % numAssigners == assignId && !bucketInformation.containsKey(i)) {
+                if (isMyBucket(i) && !bucketInformation.containsKey(i)) {
                     currentBucket = i;
                     return;
                 }
@@ -100,5 +100,9 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
             throw new RuntimeException(
                     "Can't find a suitable bucket to assign, all the bucket are assigned?");
         }
+    }
+
+    private boolean isMyBucket(int bucket) {
+        return BucketAssigner.isMyBucket(bucket, numAssigners, assignId);
     }
 }
