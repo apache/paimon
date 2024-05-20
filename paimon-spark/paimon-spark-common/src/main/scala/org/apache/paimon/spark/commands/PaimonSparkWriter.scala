@@ -23,6 +23,7 @@ import org.apache.paimon.index.{BucketAssigner, SimpleHashBucketAssigner}
 import org.apache.paimon.spark.{SparkRow, SparkTableWrite}
 import org.apache.paimon.spark.schema.SparkSystemColumns
 import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
+import org.apache.paimon.spark.util.SparkRowUtils
 import org.apache.paimon.spark.util.SparkRowUtils.getFieldIndex
 import org.apache.paimon.table.{BucketMode, FileStoreTable}
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageSerializer, RowPartitionKeyExtractor}
@@ -59,15 +60,16 @@ case class PaimonSparkWriter(table: FileStoreTable) {
     import sparkSession.implicits._
 
     val dataSchema = SparkSystemColumns.filterSparkSystemColumns(data.schema)
-    val originEncoderGroup = EncoderSerDeGroup(dataSchema)
+    val rowKindColIdx = SparkRowUtils.getFieldIndex(data.schema, ROW_KIND_COL)
 
     // append _bucket_ column as placeholder
     val withInitBucketCol = data.withColumn(BUCKET_COL, lit(-1))
     val bucketColIdx = withInitBucketCol.schema.size - 1
+
+    val originEncoderGroup = EncoderSerDeGroup(dataSchema)
     val encoderGroupWithBucketCol = EncoderSerDeGroup(withInitBucketCol.schema)
 
-    def newWrite(): SparkTableWrite =
-      new SparkTableWrite(writeBuilder, rowType, getFieldIndex(data.schema, ROW_KIND_COL))
+    def newWrite(): SparkTableWrite = new SparkTableWrite(writeBuilder, rowType, rowKindColIdx)
 
     def writeWithoutBucket(): Dataset[Array[Byte]] = {
       data.mapPartitions {

@@ -97,16 +97,15 @@ case class DynamicBucketProcessor(
 
   def processPartition(rowIterator: Iterator[Row]): Iterator[Row] = {
     val rowPartitionKeyExtractor = new RowPartitionKeyExtractor(fileStoreTable.schema)
-    val assigner =
-      new HashBucketAssigner(
-        fileStoreTable.snapshotManager(),
-        commitUser,
-        fileStoreTable.store.newIndexFileHandler,
-        numSparkPartitions,
-        numAssigners,
-        TaskContext.getPartitionId(),
-        targetBucketRowNumber
-      )
+    val assigner = new HashBucketAssigner(
+      fileStoreTable.snapshotManager(),
+      commitUser,
+      fileStoreTable.store.newIndexFileHandler,
+      numSparkPartitions,
+      numAssigners,
+      TaskContext.getPartitionId(),
+      targetBucketRowNumber
+    )
 
     new Iterator[Row]() {
       override def hasNext: Boolean = rowIterator.hasNext
