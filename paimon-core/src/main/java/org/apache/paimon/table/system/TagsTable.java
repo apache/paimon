@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.system;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -26,11 +25,8 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerTableRead;
@@ -52,10 +48,8 @@ import org.apache.paimon.utils.TagManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -80,10 +74,9 @@ public class TagsTable implements ReadonlyTable {
                             new DataField(2, "schema_id", new BigIntType(false)),
                             new DataField(3, "commit_time", new TimestampType(false, 3)),
                             new DataField(4, "record_count", new BigIntType(true)),
-                            new DataField(5, "branches", SerializationUtils.newStringType(true)),
-                            new DataField(6, "create_time", new TimestampType(true, 3)),
+                            new DataField(5, "create_time", new TimestampType(true, 3)),
                             new DataField(
-                                    7, "time_retained", SerializationUtils.newStringType(true))));
+                                    6, "time_retained", SerializationUtils.newStringType(true))));
 
     private final FileIO fileIO;
     private final Path location;
@@ -140,6 +133,7 @@ public class TagsTable implements ReadonlyTable {
     }
 
     private static class TagsSplit implements Split {
+
         private static final long serialVersionUID = 1L;
 
         private final long rowCount;
@@ -205,28 +199,14 @@ public class TagsTable implements ReadonlyTable {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
             Path location = ((TagsSplit) split).location;
-            Options options = new Options();
-            options.set(CoreOptions.PATH, location.toUri().toString());
-            FileStoreTable table = FileStoreTableFactory.create(fileIO, options);
-            List<Pair<Tag, String>> tags = table.tagManager().tagObjects();
+            List<Pair<Tag, String>> tags = new TagManager(fileIO, location).tagObjects();
             Map<String, Tag> nameToSnapshot = new LinkedHashMap<>();
             for (Pair<Tag, String> tag : tags) {
                 nameToSnapshot.put(tag.getValue(), tag.getKey());
             }
-            Map<String, List<String>> tagBranches = new HashMap<>();
-            table.branchManager()
-                    .branches()
-                    .forEach(
-                            branch ->
-                                    tagBranches
-                                            .computeIfAbsent(
-                                                    branch.getCreatedFromTag(),
-                                                    key -> new ArrayList<>())
-                                            .add(branch.getBranchName()));
 
             Iterator<InternalRow> rows =
-                    Iterators.transform(
-                            nameToSnapshot.entrySet().iterator(), tag -> toRow(tag, tagBranches));
+                    Iterators.transform(nameToSnapshot.entrySet().iterator(), this::toRow);
             if (projection != null) {
                 rows =
                         Iterators.transform(
@@ -235,17 +215,14 @@ public class TagsTable implements ReadonlyTable {
             return new IteratorRecordReader<>(rows);
         }
 
-        private InternalRow toRow(
-                Map.Entry<String, Tag> snapshot, Map<String, List<String>> tagBranches) {
+        private InternalRow toRow(Map.Entry<String, Tag> snapshot) {
             Tag tag = snapshot.getValue();
-            List<String> branches = tagBranches.get(snapshot.getKey());
             return GenericRow.of(
                     BinaryString.fromString(snapshot.getKey()),
                     tag.id(),
                     tag.schemaId(),
                     Timestamp.fromLocalDateTime(DateTimeUtils.toLocalDateTime(tag.timeMillis())),
                     tag.totalRecordCount(),
-                    BinaryString.fromString(branches == null ? "[]" : branches.toString()),
                     Optional.ofNullable(tag.getTagCreateTime())
                             .map(Timestamp::fromLocalDateTime)
                             .orElse(null),
