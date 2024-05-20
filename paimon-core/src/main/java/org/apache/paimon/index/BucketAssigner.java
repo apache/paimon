@@ -27,6 +27,10 @@ public interface BucketAssigner {
 
     void prepareCommit(long commitIdentifier);
 
+    static boolean isMyBucket(int bucket, int numAssigners, int assignId) {
+        return bucket % numAssigners == assignId % numAssigners;
+    }
+
     static int computeHashKey(int partitionHash, int keyHash, int numChannels, int numAssigners) {
         int start = Math.abs(partitionHash % numChannels);
         int id = Math.abs(keyHash % numAssigners);
