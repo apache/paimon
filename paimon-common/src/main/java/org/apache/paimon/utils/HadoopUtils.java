@@ -47,6 +47,13 @@ public class HadoopUtils {
                     .defaultValue(HadoopConfigLoader.ALL)
                     .withDescription("Specifies the way of loading hadoop config.");
 
+    public static final ConfigOption<Boolean> HADOOP_LOAD_DEFAULT_CONFIG =
+            key("hadoop-load-default-config")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Specifies whether load the default configuration from core-default.xml、hdfs-default.xml, which may lead larger size for the serialization of table.");
+
     private static final String[] CONFIG_PREFIXES = {"hadoop."};
     public static final String HADOOP_HOME_ENV = "HADOOP_HOME";
     public static final String HADOOP_CONF_ENV = "HADOOP_CONF_DIR";
@@ -59,7 +66,11 @@ public class HadoopUtils {
         // Instantiate an HdfsConfiguration to load the hdfs-site.xml and hdfs-default.xml
         // from the classpath
 
-        Configuration result = new HdfsConfiguration();
+        Boolean loadDefaultConfig = options.get(HADOOP_LOAD_DEFAULT_CONFIG);
+        if (loadDefaultConfig) {
+            LOG.debug("Load the default value for configuration.");
+        }
+        Configuration result = new HdfsConfiguration(loadDefaultConfig);
         boolean foundHadoopConfiguration = false;
 
         // We need to load both core-site.xml and hdfs-site.xml to determine the default fs path and
