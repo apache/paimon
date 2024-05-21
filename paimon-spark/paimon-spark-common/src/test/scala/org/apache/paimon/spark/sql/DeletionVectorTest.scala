@@ -39,10 +39,16 @@ class DeletionVectorTest extends PaimonSparkTestBase {
       test(
         s"Paimon DeletionVector: delete for append non-partitioned table with bucket = $bucket") {
         withTable("T") {
-          spark.sql(s"""
-                       |CREATE TABLE T (id INT, name STRING)
-                       |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'bucket' = '$bucket')
-                       |""".stripMargin)
+          val bucketKey = if (bucket > 1) {
+            ", 'bucket-key' = 'id'"
+          } else {
+            ""
+          }
+          spark.sql(
+            s"""
+               |CREATE TABLE T (id INT, name STRING)
+               |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'bucket' = '$bucket' $bucketKey)
+               |""".stripMargin)
 
           val table = loadTable("T")
           val dvMaintainerFactory =
@@ -82,11 +88,17 @@ class DeletionVectorTest extends PaimonSparkTestBase {
     bucket =>
       test(s"Paimon DeletionVector: delete for append partitioned table with bucket = $bucket") {
         withTable("T") {
-          spark.sql(s"""
-                       |CREATE TABLE T (id INT, name STRING, pt STRING)
-                       |PARTITIONED BY(pt)
-                       |TBLPROPERTIES ('deletion-vectors.enabled' = 'true')
-                       |""".stripMargin)
+          val bucketKey = if (bucket > 1) {
+            ", 'bucket-key' = 'id'"
+          } else {
+            ""
+          }
+          spark.sql(
+            s"""
+               |CREATE TABLE T (id INT, name STRING, pt STRING)
+               |PARTITIONED BY(pt)
+               |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'bucket' = '$bucket' $bucketKey)
+               |""".stripMargin)
 
           val table = loadTable("T")
           val dvMaintainerFactory =
