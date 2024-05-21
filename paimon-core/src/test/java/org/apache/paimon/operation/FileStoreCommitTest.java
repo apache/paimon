@@ -757,7 +757,7 @@ public class FileStoreCommitTest {
                 .containsExactlyInAnyOrder(6, 8);
 
         // assert scan one bucket
-        Optional<IndexFileMeta> file = indexFileHandler.scan(snapshot.id(), HASH_INDEX, part1, 0);
+        Optional<IndexFileMeta> file = indexFileHandler.scanHashIndex(snapshot.id(), part1, 0);
         assertThat(file).isPresent();
         assertThat(indexFileHandler.readHashIndexList(file.get())).containsExactlyInAnyOrder(1, 4);
 
@@ -766,9 +766,9 @@ public class FileStoreCommitTest {
         store.overwriteData(
                 Collections.singletonList(record1), gen::getPartition, kv -> 0, new HashMap<>());
         snapshot = store.snapshotManager().latestSnapshot();
-        file = indexFileHandler.scan(snapshot.id(), HASH_INDEX, part1, 0);
+        file = indexFileHandler.scanHashIndex(snapshot.id(), part1, 0);
         assertThat(file).isEmpty();
-        file = indexFileHandler.scan(snapshot.id(), HASH_INDEX, part2, 2);
+        file = indexFileHandler.scanHashIndex(snapshot.id(), part2, 2);
         assertThat(file).isPresent();
 
         // overwrite all partitions
@@ -776,7 +776,7 @@ public class FileStoreCommitTest {
         store.overwriteData(
                 Collections.singletonList(record1), gen::getPartition, kv -> 0, new HashMap<>());
         snapshot = store.snapshotManager().latestSnapshot();
-        file = indexFileHandler.scan(snapshot.id(), HASH_INDEX, part2, 2);
+        file = indexFileHandler.scanHashIndex(snapshot.id(), part2, 2);
         assertThat(file).isEmpty();
     }
 

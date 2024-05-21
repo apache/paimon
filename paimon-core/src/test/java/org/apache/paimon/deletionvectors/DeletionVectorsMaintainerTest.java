@@ -56,8 +56,7 @@ public class DeletionVectorsMaintainerTest extends PrimaryKeyTableTestBase {
         assertThat(dvMaintainer.deletionVectorOf("f3")).isEmpty();
         List<IndexFileMeta> fileMetas = dvMaintainer.prepareCommit();
 
-        Map<String, DeletionVector> deletionVectors =
-                fileHandler.readAllDeletionVectors(fileMetas.get(0));
+        Map<String, DeletionVector> deletionVectors = fileHandler.readAllDeletionVectors(fileMetas);
         assertThat(deletionVectors.get("f1").isDeleted(1)).isTrue();
         assertThat(deletionVectors.get("f1").isDeleted(2)).isFalse();
         assertThat(deletionVectors.get("f2").isDeleted(1)).isFalse();
