@@ -719,12 +719,14 @@ public class FileStoreCommitTest {
                 indexFileHandler.scan(snapshot.id(), HASH_INDEX, part1);
         assertThat(part1Index.size()).isEqualTo(2);
 
-        assertThat(part1Index.get(0).bucket()).isEqualTo(0);
-        assertThat(indexFileHandler.readHashIndexList(part1Index.get(0).indexFile()))
+        IndexManifestEntry indexManifestEntry =
+                part1Index.stream().filter(entry -> entry.bucket() == 0).findAny().get();
+        assertThat(indexFileHandler.readHashIndexList(indexManifestEntry.indexFile()))
                 .containsExactlyInAnyOrder(1, 2, 5);
 
-        assertThat(part1Index.get(1).bucket()).isEqualTo(1);
-        assertThat(indexFileHandler.readHashIndexList(part1Index.get(1).indexFile()))
+        indexManifestEntry =
+                part1Index.stream().filter(entry -> entry.bucket() == 1).findAny().get();
+        assertThat(indexFileHandler.readHashIndexList(indexManifestEntry.indexFile()))
                 .containsExactlyInAnyOrder(6, 8);
 
         // assert part2
@@ -744,12 +746,14 @@ public class FileStoreCommitTest {
         part1Index = indexFileHandler.scan(snapshot.id(), HASH_INDEX, part1);
         assertThat(part1Index.size()).isEqualTo(2);
 
-        assertThat(part1Index.get(0).bucket()).isEqualTo(0);
-        assertThat(indexFileHandler.readHashIndexList(part1Index.get(0).indexFile()))
+        indexManifestEntry =
+                part1Index.stream().filter(entry -> entry.bucket() == 0).findAny().get();
+        assertThat(indexFileHandler.readHashIndexList(indexManifestEntry.indexFile()))
                 .containsExactlyInAnyOrder(1, 4);
 
-        assertThat(part1Index.get(1).bucket()).isEqualTo(1);
-        assertThat(indexFileHandler.readHashIndexList(part1Index.get(1).indexFile()))
+        indexManifestEntry =
+                part1Index.stream().filter(entry -> entry.bucket() == 1).findAny().get();
+        assertThat(indexFileHandler.readHashIndexList(indexManifestEntry.indexFile()))
                 .containsExactlyInAnyOrder(6, 8);
 
         // assert scan one bucket
