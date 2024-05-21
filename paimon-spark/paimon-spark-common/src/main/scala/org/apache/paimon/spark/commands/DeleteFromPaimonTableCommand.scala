@@ -136,13 +136,13 @@ case class DeleteFromPaimonTableCommand(
       val dataFileToDeletionFile = mutable.Map.empty[String, SparkDeletionFile]
       fileNameToMeta.foreach {
         case (relativePath, sdf) =>
+          dataFileToDeletionFile.put(
+            relativePath,
+            SparkDeletionFile(sdf.partition, sdf.bucket, sdf.deletionFile))
           sdf.deletionFile match {
             case Some(deletionFile) =>
               deletionFileWithDataFiles.append(
                 new DeletionFileWithDataFile(relativePath, deletionFile))
-              dataFileToDeletionFile.put(
-                relativePath,
-                SparkDeletionFile(sdf.partition, sdf.bucket, sdf.deletionFile))
             case None => None
           }
       }
