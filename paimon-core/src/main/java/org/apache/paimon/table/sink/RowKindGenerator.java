@@ -62,4 +62,8 @@ public class RowKindGenerator {
                 .map(field -> new RowKindGenerator(field, schema.logicalRowType()))
                 .orElse(null);
     }
+
+    public static RowKind getRowKind(@Nullable RowKindGenerator rowKindGenerator, InternalRow row) {
+        return rowKindGenerator == null ? row.getRowKind() : rowKindGenerator.generate(row);
+    }
 }
