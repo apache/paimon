@@ -22,6 +22,7 @@ import org.apache.paimon.table.source.DeletionFile;
 
 import java.util.Objects;
 
+/** a relative data file path and its associated DeletionFile object. */
 public class DeletionFileWithDataFile {
 
     private final String dataFile;
