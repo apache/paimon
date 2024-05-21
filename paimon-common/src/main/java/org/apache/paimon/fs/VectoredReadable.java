@@ -23,18 +23,15 @@ import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.function.IntFunction;
 
-/**
- * Stream that permits vectored reading.
- */
+/** Stream that permits vectored reading. */
 public interface VectoredReadable {
 
     /**
      * Read fully a list of file ranges asynchronously from this file.
      *
-     * <p> As a result of the call, each range will have FileRange.setData(CompletableFuture)
-     * called with a future that when complete will have a ByteBuffer with the
-     * data from the file's range.
+     * <p>As a result of the call, each range will have FileRange.setData(CompletableFuture) called
+     * with a future that when complete will have a ByteBuffer with the data from the file's range.
      */
-    void readVectored(List<? extends FileRange> ranges,
-                              IntFunction<ByteBuffer> allocate) throws IOException;
+    void readVectored(List<? extends FileRange> ranges, IntFunction<ByteBuffer> allocate)
+            throws IOException;
 }

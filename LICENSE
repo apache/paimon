@@ -209,6 +209,7 @@ Apache Software Foundation License 2.0
 --------------------------------------
 
 paimon-common/src/main/java/org/apache/paimon/fs/Path.java
+paimon-common/src/main/java/org/apache/paimon/fs/FileRange.java
 from http://hadoop.apache.org/ version 2.10.2
 
 paimon-common/src/main/java/org/apache/paimon/lookup/hash/HashLookupStoreWriter.java
@@ -258,6 +259,7 @@ from https://hive.apache.org/ version 3.1.0
 paimon-format/src/main/java/org/apache/orc/impl/PhysicalFsWriter.java
 paimon-format/src/main/java/org/apache/orc/impl/WriterImpl.java
 paimon-format/src/main/java/org/apache/orc/impl/ZstdCodec.java
+paimon-format/src/main/java/org/apache/orc/impl/RecordReaderUtils.java
 paimon-format/src/main/java/org/apache/orc/CompressionKind.java
 paimon-format/src/main/java/org/apache/orc/OrcConf.java
 paimon-format/src/main/java/org/apache/orc/OrcFile.java

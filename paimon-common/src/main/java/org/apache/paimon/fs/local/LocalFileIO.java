@@ -20,16 +20,22 @@ package org.apache.paimon.fs.local;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileRange;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.VectoredReadable;
 
+import java.io.EOFException;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.AsynchronousFileChannel;
+import java.nio.channels.CompletionHandler;
 import java.nio.channels.FileChannel;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.DirectoryNotEmptyException;
@@ -37,10 +43,15 @@ import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.IntFunction;
 
+import static org.apache.paimon.fs.FileRange.validateAndSortRanges;
 import static org.apache.paimon.fs.local.LocalFileIOLoader.SCHEME;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -233,12 +244,17 @@ public class LocalFileIO implements FileIO {
     }
 
     /** Local {@link SeekableInputStream}. */
-    public static class LocalSeekableInputStream extends SeekableInputStream {
+    public static class LocalSeekableInputStream extends SeekableInputStream
+            implements VectoredReadable {
 
+        private final File file;
         private final FileInputStream in;
         private final FileChannel channel;
 
+        private AsynchronousFileChannel asyncChannel = null;
+
         public LocalSeekableInputStream(File file) throws FileNotFoundException {
+            this.file = file;
             this.in = new FileInputStream(file);
             this.channel = in.getChannel();
         }
@@ -268,6 +284,91 @@ public class LocalFileIO implements FileIO {
         @Override
         public void close() throws IOException {
             in.close();
+            if (asyncChannel != null) {
+                asyncChannel.close();
+            }
+        }
+
+        AsynchronousFileChannel getAsyncChannel() throws IOException {
+            if (asyncChannel == null) {
+                synchronized (this) {
+                    asyncChannel =
+                            AsynchronousFileChannel.open(file.toPath(), StandardOpenOption.READ);
+                }
+            }
+            return asyncChannel;
+        }
+
+        @Override
+        public void readVectored(List<? extends FileRange> ranges, IntFunction<ByteBuffer> allocate)
+                throws IOException {
+            // Validate, but do not pass in a file length as it may change.
+            List<? extends FileRange> sortedRanges =
+                    validateAndSortRanges(ranges, Optional.empty());
+            // Set up all futures, so that we can use them if things fail
+            for (FileRange range : sortedRanges) {
+                range.setData(new CompletableFuture<>());
+            }
+            try {
+                AsynchronousFileChannel channel = getAsyncChannel();
+                ByteBuffer[] buffers = new ByteBuffer[sortedRanges.size()];
+                AsyncHandler asyncHandler = new AsyncHandler(channel, sortedRanges, buffers);
+                for (int i = 0; i < sortedRanges.size(); ++i) {
+                    FileRange range = sortedRanges.get(i);
+                    buffers[i] = allocate.apply(range.getLength());
+                    channel.read(buffers[i], range.getOffset(), i, asyncHandler);
+                }
+            } catch (IOException ioe) {
+                LOG.debug("Exception occurred during vectored read ", ioe);
+                for (FileRange range : sortedRanges) {
+                    range.getData().completeExceptionally(ioe);
+                }
+            }
+        }
+    }
+
+    /**
+     * A CompletionHandler that implements readFully and translates back into the form of
+     * CompletionHandler that our users expect.
+     */
+    static class AsyncHandler implements CompletionHandler<Integer, Integer> {
+        private final AsynchronousFileChannel channel;
+        private final List<? extends FileRange> ranges;
+        private final ByteBuffer[] buffers;
+
+        AsyncHandler(
+                AsynchronousFileChannel channel,
+                List<? extends FileRange> ranges,
+                ByteBuffer[] buffers) {
+            this.channel = channel;
+            this.ranges = ranges;
+            this.buffers = buffers;
+        }
+
+        @Override
+        public void completed(Integer result, Integer r) {
+            FileRange range = ranges.get(r);
+            ByteBuffer buffer = buffers[r];
+            if (result == -1) {
+                failed(new EOFException("Read past End of File"), r);
+            } else {
+                if (buffer.remaining() > 0) {
+                    // issue a read for the rest of the buffer
+                    // QQ: What if this fails? It has the same handler.
+                    channel.read(buffer, range.getOffset() + buffer.position(), r, this);
+                } else {
+                    // QQ: Why  is this required? I think because we don't want the
+                    // user to read data beyond limit.
+                    buffer.flip();
+                    range.getData().complete(buffer);
+                }
+            }
+        }
+
+        @Override
+        public void failed(Throwable exc, Integer r) {
+            LOG.debug("Failed while reading range {} ", r, exc);
+            ranges.get(r).getData().completeExceptionally(exc);
         }
     }
 
