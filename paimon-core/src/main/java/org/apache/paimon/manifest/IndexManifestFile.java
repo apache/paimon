@@ -23,6 +23,7 @@ import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.IndexManifestEntry.Identifier;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.ObjectsFile;
@@ -63,7 +64,7 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
     public String writeIndexFiles(
             @Nullable String previousIndexManifest,
             List<IndexManifestEntry> newIndexFiles,
-            boolean autoMergeForDV) {
+            BucketMode bucketMode) {
         if (newIndexFiles.isEmpty()) {
             return previousIndexManifest;
         }
@@ -80,7 +81,7 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
                 mergeByIdentifier(previous.getLeft(), current.getLeft());
 
         // Step2: get the dv index files;
-        if (autoMergeForDV) {
+        if (BucketMode.BUCKET_UNAWARE == bucketMode) {
             indexEntries.addAll(mergeByIdentifier(previous.getRight(), current.getRight()));
         } else {
             indexEntries.addAll(mergeByFileName(previous.getRight(), current.getRight()));

@@ -20,6 +20,7 @@ package org.apache.paimon.spark.commands
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.CoreOptions.MergeEngine
+import org.apache.paimon.deletionvectors.DeletionFileWithDataFile
 import org.apache.paimon.spark.PaimonSplitScan
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
@@ -30,7 +31,7 @@ import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage}
 import org.apache.paimon.types.RowKind
 import org.apache.paimon.utils.RowDataPartitionComputer
 
-import org.apache.spark.sql.{Row, SparkSession}
+import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.catalyst.expressions.{And, Expression, Not}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
@@ -41,6 +42,7 @@ import org.apache.spark.sql.functions.lit
 import java.util.{Collections, UUID}
 
 import scala.collection.JavaConverters._
+import scala.collection.mutable
 
 case class DeleteFromPaimonTableCommand(
     relation: DataSourceV2Relation,
@@ -122,36 +124,37 @@ case class DeleteFromPaimonTableCommand(
     import sparkSession.implicits._
 
     val pathFactory = table.store().pathFactory()
-    val fileIO = table.fileIO()
-    val store = table.store()
-    val lastSnapshotId = table.snapshotManager().latestSnapshotId
 
     // Step1: the candidate data splits which are filtered by Paimon Predicate.
     val candidateDataSplits = findCandidateDataSplits(condition, relation.output)
-    val fileNameToMeta: Map[String, SparkDataFileMeta] = candidateFileMap(candidateDataSplits)
+    val fileNameToMeta = candidateFileMap(candidateDataSplits)
 
     val deletionVectorsEnabled = new CoreOptions(table.options()).deletionVectorsEnabled()
     if (deletionVectorsEnabled) {
       // Step2: collect all the deletion vectors that marks the deleted rows.
-      val deletionFiles = candidateDataSplits
-        .flatMap(dataSplit => dataSplit.deletionFiles().orElse(Collections.emptyList()).asScala)
-        .filter(_ != null)
-        .asJava
-      val dataFileToDeletionFile = fileNameToMeta.map {
-        case (file, dataFileMeta) =>
-          (
-            file,
-            SparkDeletionFile(
-              dataFileMeta.partition,
-              dataFileMeta.bucket,
-              dataFileMeta.deletionFile))
+      val deletionFileWithDataFiles = mutable.ListBuffer.empty[DeletionFileWithDataFile]
+      val dataFileToDeletionFile = mutable.Map.empty[String, SparkDeletionFile]
+      fileNameToMeta.foreach {
+        case (relativePath, sdf) =>
+          sdf.deletionFile match {
+            case Some(deletionFile) =>
+              deletionFileWithDataFiles.append(
+                new DeletionFileWithDataFile(relativePath, deletionFile))
+              dataFileToDeletionFile.put(
+                relativePath,
+                SparkDeletionFile(sdf.partition, sdf.bucket, sdf.deletionFile))
+            case None => None
+          }
       }
 
       val dvIndexFileMaintainer =
-        table.store().newIndexFileHandler().createDVIndexFileMaintainer(deletionFiles)
+        table
+          .store()
+          .newIndexFileHandler()
+          .createDVIndexFileMaintainer(deletionFileWithDataFiles.asJava)
       val deletionVectors = collectDeletionVectors(
         candidateDataSplits,
-        dataFileToDeletionFile,
+        dataFileToDeletionFile.toMap,
         condition,
         relation,
         sparkSession)
@@ -160,7 +163,12 @@ case class DeleteFromPaimonTableCommand(
         deletionVectors.cache()
         val touchedDeletionFiles = deletionVectors
           .collect()
-          .flatMap(sdv => dataFileToDeletionFile(sdv.relativePath(pathFactory)).deletionFile)
+          .flatMap {
+            sdv =>
+              val relativePath = sdv.relativePath(pathFactory)
+              dataFileToDeletionFile(relativePath).deletionFile.map(
+                new DeletionFileWithDataFile(relativePath, _))
+          }
           .toList
         dvIndexFileMaintainer.notifyDeletionFiles(touchedDeletionFiles.asJava)
 

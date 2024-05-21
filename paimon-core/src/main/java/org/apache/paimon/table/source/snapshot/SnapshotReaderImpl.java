@@ -428,8 +428,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                             new DeletionFile(
                                     indexFileHandler.filePath(indexFileMeta).toString(),
                                     range.getKey(),
-                                    range.getValue(),
-                                    file.fileName()));
+                                    range.getValue()));
                     continue;
                 }
             }

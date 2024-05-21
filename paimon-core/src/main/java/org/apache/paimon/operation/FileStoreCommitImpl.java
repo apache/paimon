@@ -44,6 +44,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.stats.StatsFileHandler;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.RowType;
@@ -126,7 +127,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final StatsFileHandler statsFileHandler;
 
     // This flag only is used for deletion vectors.
-    private final boolean autoMergeIndexFiles;
+    private final BucketMode bucketMode;
 
     public FileStoreCommitImpl(
             FileIO fileIO,
@@ -147,7 +148,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable Comparator<InternalRow> keyComparator,
             String branchName,
             StatsFileHandler statsFileHandler,
-            boolean autoMergeIndexFiles) {
+            BucketMode bucketMode) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.commitUser = commitUser;
@@ -170,7 +171,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.ignoreEmptyCommit = true;
         this.commitMetrics = null;
         this.statsFileHandler = statsFileHandler;
-        this.autoMergeIndexFiles = autoMergeIndexFiles;
+        this.bucketMode = bucketMode;
     }
 
     @Override
@@ -859,7 +860,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             // write new index manifest
             String indexManifest =
                     indexManifestFile.writeIndexFiles(
-                            previousIndexManifest, indexFiles, autoMergeIndexFiles);
+                            previousIndexManifest, indexFiles, bucketMode);
             if (!Objects.equals(indexManifest, previousIndexManifest)) {
                 newIndexManifest = indexManifest;
             }

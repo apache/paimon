@@ -48,19 +48,3 @@ case class SparkDeletionVectors(
 )
 
 case class SparkDeletionFile(partition: BinaryRow, bucket: Int, deletionFile: Option[DeletionFile])
-
-case class SparkDeletionFile0(path: String, offset: Long, length: Long, dataFile: String) {
-  def toDeletionFile: DeletionFile = {
-    new DeletionFile(path, offset, length, dataFile)
-  }
-}
-
-object SparkDeletionFile0 {
-  def apply(deletionFile: DeletionFile): SparkDeletionFile0 = {
-    SparkDeletionFile0(
-      deletionFile.path(),
-      deletionFile.offset(),
-      deletionFile.length(),
-      deletionFile.dataFile())
-  }
-}

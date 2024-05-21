@@ -23,7 +23,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.index.IndexFile;
 import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PathFactory;
 
@@ -87,21 +86,21 @@ public class DeletionVectorsIndexFile extends IndexFile {
     }
 
     /** Reads deletion vectors from a list of DeletionFile which belong to a same index file. */
-    public Map<String, DeletionVector> readDeletionVector(List<DeletionFile> deletionFiles) {
+    public Map<String, DeletionVector> readDeletionVector(List<DeletionFileWithDataFile> ddFiles) {
         Map<String, DeletionVector> deletionVectors = new HashMap<>();
-        if (deletionFiles.isEmpty()) {
+        if (ddFiles.isEmpty()) {
             return deletionVectors;
         }
 
-        String indexFile = deletionFiles.get(0).path();
+        String indexFile = ddFiles.get(0).deletionFile().path();
         try (SeekableInputStream inputStream = fileIO.newInputStream(new Path(indexFile))) {
             checkVersion(inputStream);
-            for (DeletionFile deletionFile : deletionFiles) {
-                inputStream.seek(deletionFile.offset());
+            for (DeletionFileWithDataFile ddFile : ddFiles) {
+                inputStream.seek(ddFile.deletionFile().offset());
                 DataInputStream dataInputStream = new DataInputStream(inputStream);
                 deletionVectors.put(
-                        deletionFile.dataFile(),
-                        readDeletionVector(dataInputStream, (int) deletionFile.length()));
+                        ddFile.dataFile(),
+                        readDeletionVector(dataInputStream, (int) ddFile.deletionFile().length()));
             }
         } catch (Exception e) {
             throw new RuntimeException("Unable to read deletion vector from file: " + indexFile, e);

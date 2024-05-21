@@ -20,13 +20,13 @@ package org.apache.paimon.index;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.deletionvectors.DeletionFileWithDataFile;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVectorIndexFileMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
-import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.utils.IntIterator;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PathFactory;
@@ -189,7 +189,7 @@ public class IndexFileHandler {
     }
 
     public DeletionVectorIndexFileMaintainer createDVIndexFileMaintainer(
-            List<DeletionFile> deletionFiles) {
+            List<DeletionFileWithDataFile> deletionFiles) {
         return new DeletionVectorIndexFileMaintainer(this, deletionFiles);
     }
 

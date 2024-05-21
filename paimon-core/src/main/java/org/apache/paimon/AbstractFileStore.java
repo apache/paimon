@@ -192,8 +192,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 newKeyComparator(),
                 options.branch(),
                 newStatsFileHandler(),
-                // false only if it's append table which bucket = -1
-                !schema.primaryKeys().isEmpty() || options.bucket() != -1);
+                bucketMode());
     }
 
     @Override
