@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.lineage.LineageMetaFactory;
 import org.apache.paimon.operation.FileStoreCommit;
@@ -29,6 +30,7 @@ import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
@@ -48,6 +50,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
@@ -124,6 +127,17 @@ public abstract class AbstractCatalog implements Catalog {
         return catalogOptions.get(LOCK_ENABLED);
     }
 
+    protected List<String> listDatabases(Path warehouse) {
+        List<String> databases = new ArrayList<>();
+        for (FileStatus status : uncheck(() -> fileIO.listDirectories(warehouse))) {
+            Path path = status.getPath();
+            if (status.isDir() && isDatabase(path)) {
+                databases.add(database(path));
+            }
+        }
+        return databases;
+    }
+
     @Override
     public boolean databaseExists(String databaseName) {
         if (isSystemDatabase(databaseName)) {
@@ -138,9 +152,7 @@ public abstract class AbstractCatalog implements Catalog {
     @Override
     public void createDatabase(String name, boolean ignoreIfExists, Map<String, String> properties)
             throws DatabaseAlreadyExistException {
-        if (isSystemDatabase(name)) {
-            throw new ProcessSystemDatabaseException();
-        }
+        checkNotSystemDatabase(name);
         if (databaseExists(name)) {
             if (ignoreIfExists) {
                 return;
@@ -179,9 +191,7 @@ public abstract class AbstractCatalog implements Catalog {
     @Override
     public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
             throws DatabaseNotExistException, DatabaseNotEmptyException {
-        if (isSystemDatabase(name)) {
-            throw new ProcessSystemDatabaseException();
-        }
+        checkNotSystemDatabase(name);
         if (!databaseExists(name)) {
             if (ignoreIfNotExists) {
                 return;
@@ -210,7 +220,21 @@ public abstract class AbstractCatalog implements Catalog {
         return listTablesImpl(databaseName).stream().sorted().collect(Collectors.toList());
     }
 
+    protected List<String> listTablesImpl(Path databasePath) {
+        List<String> tables = new ArrayList<>();
+        for (FileStatus status : uncheck(() -> fileIO.listDirectories(databasePath))) {
+            if (status.isDir() && tableExists(status.getPath())) {
+                tables.add(status.getPath().getName());
+            }
+        }
+        return tables;
+    }
+
     protected abstract List<String> listTablesImpl(String databaseName);
+
+    protected boolean tableExists(Path tablePath) {
+        return !new SchemaManager(fileIO, tablePath).listAllIds().isEmpty();
+    }
 
     @Override
     public void dropTable(Identifier identifier, boolean ignoreIfNotExists)
@@ -396,7 +420,7 @@ public abstract class AbstractCatalog implements Catalog {
         return isSystemDatabase(identifier.getDatabaseName()) || isSpecifiedSystemTable(identifier);
     }
 
-    private void checkNotSystemTable(Identifier identifier, String method) {
+    protected void checkNotSystemTable(Identifier identifier, String method) {
         if (isSystemTable(identifier)) {
             throw new IllegalArgumentException(
                     String.format(
@@ -439,6 +463,13 @@ public abstract class AbstractCatalog implements Catalog {
         return SYSTEM_DATABASE_NAME.equals(database);
     }
 
+    /** Validate database cannot be a system database. */
+    protected void checkNotSystemDatabase(String database) {
+        if (isSystemDatabase(database)) {
+            throw new ProcessSystemDatabaseException();
+        }
+    }
+
     /** Validate database, table and field names must be lowercase when not case-sensitive. */
     public static void validateCaseInsensitive(
             boolean caseSensitive, String type, String... names) {
@@ -460,7 +491,7 @@ public abstract class AbstractCatalog implements Catalog {
                         type, illegalNames));
     }
 
-    private void validateIdentifierNameCaseInsensitive(Identifier identifier) {
+    protected void validateIdentifierNameCaseInsensitive(Identifier identifier) {
         validateCaseInsensitive(caseSensitive(), "Database", identifier.getDatabaseName());
         validateCaseInsensitive(caseSensitive(), "Table", identifier.getObjectName());
     }
@@ -479,7 +510,7 @@ public abstract class AbstractCatalog implements Catalog {
         validateFieldNameCaseInsensitive(fieldNames);
     }
 
-    private void validateFieldNameCaseInsensitive(List<String> fieldNames) {
+    protected void validateFieldNameCaseInsensitive(List<String> fieldNames) {
         validateCaseInsensitive(caseSensitive(), "Field", fieldNames);
     }
 
@@ -492,5 +523,22 @@ public abstract class AbstractCatalog implements Catalog {
                 String.format(
                         "The value of %s property should be %s.",
                         CoreOptions.AUTO_CREATE.key(), Boolean.FALSE));
+    }
+
+    private static boolean isDatabase(Path path) {
+        return path.getName().endsWith(DB_SUFFIX);
+    }
+
+    private static String database(Path path) {
+        String name = path.getName();
+        return name.substring(0, name.length() - DB_SUFFIX.length());
+    }
+
+    protected static <T> T uncheck(Callable<T> callable) {
+        try {
+            return callable.call();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 }

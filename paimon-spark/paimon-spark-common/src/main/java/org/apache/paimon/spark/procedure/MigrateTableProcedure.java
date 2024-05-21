@@ -81,7 +81,7 @@ public class MigrateTableProcedure extends BaseProcedure {
         String format = args.getString(0);
         String sourceTable = args.getString(1);
         String properties = args.isNullAt(2) ? null : args.getString(2);
-        boolean deleteNeed = args.isNullAt(3) ? true : args.getBoolean(3);
+        boolean deleteNeed = args.isNullAt(3) || args.getBoolean(3);
         String targetTable = args.isNullAt(4) ? null : args.getString(4);
 
         Identifier sourceTableId = Identifier.fromString(sourceTable);
