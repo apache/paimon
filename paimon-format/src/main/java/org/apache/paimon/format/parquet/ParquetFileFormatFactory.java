@@ -20,8 +20,8 @@ package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.options.Options;
-
 import org.apache.paimon.utils.StringUtils;
+
 import org.apache.parquet.hadoop.ParquetOutputFormat;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 
@@ -52,7 +52,8 @@ public class ParquetFileFormatFactory implements FileFormatFactory {
         if (!options.containsKey(compression)) {
             Properties properties = new Properties();
             options.addAllToProperties(properties);
-            // Append Only table use zstd compression default and other keep snappy for parquet file format
+            // Append Only table use zstd compression default and other keep snappy for parquet file
+            // format
             if (StringUtils.isBlank(options.get(MERGE_ENGINE.key()))) {
                 properties.setProperty(compression, CompressionCodecName.ZSTD.name());
             } else {
