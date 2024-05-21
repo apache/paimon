@@ -21,7 +21,9 @@ package org.apache.paimon.flink.action;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.sink.SortCompactSinkBuilder;
+import org.apache.paimon.flink.sorter.TableSortInfo;
 import org.apache.paimon.flink.sorter.TableSorter;
+import org.apache.paimon.flink.sorter.TableSorter.OrderType;
 import org.apache.paimon.flink.source.FlinkSourceBuilder;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -107,8 +109,32 @@ public class SortCompactAction extends CompactAction {
         }
 
         DataStream<RowData> source = sourceBuilder.env(env).sourceBounded(true).build();
-        TableSorter sorter =
-                TableSorter.getSorter(env, source, fileStoreTable, sortStrategy, orderColumns);
+        int localSampleMagnification =
+                ((FileStoreTable) table).coreOptions().getLocalSampleMagnification();
+        if (localSampleMagnification < 20) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "the config '%s=%d' should not be set too small,greater than or equal to 20 is needed.",
+                            CoreOptions.SORT_COMPACTION_SAMPLE_MAGNIFICATION.key(),
+                            localSampleMagnification));
+        }
+        String sinkParallelismValue =
+                table.options().get(FlinkConnectorOptions.SINK_PARALLELISM.key());
+        final int sinkParallelism =
+                sinkParallelismValue == null
+                        ? source.getParallelism()
+                        : Integer.parseInt(sinkParallelismValue);
+        TableSortInfo sortInfo =
+                new TableSortInfo.Builder()
+                        .setSortColumns(orderColumns)
+                        .setSortStrategy(OrderType.of(sortStrategy))
+                        .setSinkParallelism(sinkParallelism)
+                        .setLocalSampleSize(sinkParallelism * localSampleMagnification)
+                        .setGlobalSampleSize(sinkParallelism * 1000)
+                        .setRangeNumber(sinkParallelism * 10)
+                        .build();
+
+        TableSorter sorter = TableSorter.getSorter(env, source, fileStoreTable, sortInfo);
 
         new SortCompactSinkBuilder(fileStoreTable)
                 .forCompact(true)

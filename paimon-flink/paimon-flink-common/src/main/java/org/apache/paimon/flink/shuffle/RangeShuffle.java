@@ -164,7 +164,7 @@ public class RangeShuffle {
                                         new AssignRangeIndexOperator.RangePartitioner(rangeNum),
                                         new AssignRangeIndexOperator.Tuple2KeySelector<>()),
                                 StreamExchangeMode.BATCH),
-                        "REMOVE KEY",
+                        "REMOVE RANGE INDEX",
                         new RemoveRangeIndexOperator<>(),
                         input.getOutputType(),
                         outParallelism));
@@ -373,12 +373,16 @@ public class RangeShuffle {
 
         @Override
         public void processElement2(StreamRecord<Tuple2<T, RowData>> streamRecord) {
-            if (keyIndex == null || keyIndex.isEmpty()) {
-                throw new RuntimeException(
-                        "There should be one data from the first input. And boundaries should not be empty.");
+            if (keyIndex == null) {
+                throw new RuntimeException("There should be one data from the first input.");
             }
-            Tuple2<T, RowData> row = streamRecord.getValue();
-            collector.collect(new Tuple2<>(binarySearch(row.f0), row));
+            // If the range number is 1, the range index will be 0 for all records.
+            if (keyIndex.isEmpty()) {
+                collector.collect(new Tuple2<>(0, streamRecord.getValue()));
+            } else {
+                Tuple2<T, RowData> row = streamRecord.getValue();
+                collector.collect(new Tuple2<>(binarySearch(row.f0), row));
+            }
         }
 
         @Override
@@ -408,7 +412,7 @@ public class RangeShuffle {
             // key not found, but the low index is the target
             // bucket, since the boundaries are the upper bound
             return low > lastIndex
-                    ? keyIndex.get(lastIndex).getRight().get()
+                    ? (keyIndex.get(lastIndex).getRight().get() + 1)
                     : keyIndex.get(low).getRight().get();
         }
 
@@ -438,8 +442,8 @@ public class RangeShuffle {
             @Override
             public int partition(Integer key, int numPartitions) {
                 Preconditions.checkArgument(
-                        numPartitions < totalRangeNum,
-                        "Num of subPartitions should < totalRangeNum: " + totalRangeNum);
+                        numPartitions <= totalRangeNum,
+                        "Num of subPartitions should <= totalRangeNum: " + totalRangeNum);
                 int partition = key / (totalRangeNum / numPartitions);
                 return Math.min(numPartitions - 1, partition);
             }
