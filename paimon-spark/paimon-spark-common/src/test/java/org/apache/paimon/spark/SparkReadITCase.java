@@ -177,7 +177,8 @@ public class SparkReadITCase extends SparkReadTestBase {
         spark.sql("CREATE TABLE testCreateTableAs AS SELECT * FROM testCreateTable");
         List<Row> result = spark.sql("SELECT * FROM testCreateTableAs").collectAsList();
 
-        assertThat(result.stream().map(Row::toString)).containsExactlyInAnyOrder("[1,a,b]");
+        assertThat(result.stream().map(Row::toString))
+                .containsExactlyInAnyOrder("[1,a,b         ]");
 
         // partitioned table
         spark.sql(
@@ -224,11 +225,13 @@ public class SparkReadITCase extends SparkReadTestBase {
                                         + "  'file.format' = 'parquet',\n"
                                         + "  'path' = '%s')\n"
                                         + "]]",
-                                showCreateString("testTableAs", "a BIGINT", "b STRING", "c STRING"),
+                                showCreateString(
+                                        "testTableAs", "a BIGINT", "b VARCHAR(10)", "c CHAR(10)"),
                                 new Path(warehousePath, "default.db/testTableAs")));
         List<Row> resultProp = spark.sql("SELECT * FROM testTableAs").collectAsList();
 
-        assertThat(resultProp.stream().map(Row::toString)).containsExactlyInAnyOrder("[1,a,b]");
+        assertThat(resultProp.stream().map(Row::toString))
+                .containsExactlyInAnyOrder("[1,a,b         ]");
 
         // primary key
         spark.sql(

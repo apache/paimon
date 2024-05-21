@@ -290,7 +290,17 @@ All Spark's data types are available in package `org.apache.spark.sql.types`.
     </tr>
     <tr>
       <td><code>StringType</code></td>
-      <td><code>VarCharType</code>, <code>CharType</code></td>
+      <td><code>VarCharType(Integer.MAX_VALUE)</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>VarCharType(length)</code></td>
+      <td><code>VarCharType(length)</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>CharType(length)</code></td>
+      <td><code>CharType(length)</code></td>
       <td>true</td>
     </tr>
     <tr>
