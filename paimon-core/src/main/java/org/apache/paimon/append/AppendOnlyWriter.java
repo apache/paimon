@@ -39,11 +39,9 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.CommitIncrement;
-import org.apache.paimon.utils.IOUtils;
-import org.apache.paimon.utils.LongCounter;
-import org.apache.paimon.utils.Preconditions;
-import org.apache.paimon.utils.RecordWriter;
+import org.apache.paimon.utils.*;
+
+import org.apache.orc.CompressionKind;
 
 import javax.annotation.Nullable;
 
@@ -118,7 +116,10 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         this.compactBefore = new ArrayList<>();
         this.compactAfter = new ArrayList<>();
         this.seqNumCounter = new LongCounter(maxSequenceNumber + 1);
-        this.fileCompression = fileCompression;
+        this.fileCompression =
+                StringUtils.isBlank(fileCompression)
+                        ? CompressionKind.ZSTD.name()
+                        : fileCompression;
         this.spillCompression = spillCompression;
         this.ioManager = ioManager;
         this.statsCollectors = statsCollectors;
