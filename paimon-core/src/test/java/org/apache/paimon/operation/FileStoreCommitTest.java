@@ -719,11 +719,13 @@ public class FileStoreCommitTest {
                 indexFileHandler.scan(snapshot.id(), HASH_INDEX, part1);
         assertThat(part1Index.size()).isEqualTo(2);
 
-        IndexManifestEntry indexManifestEntry = part1Index.stream().filter( entry -> entry.bucket() == 0).findAny().get();
+        IndexManifestEntry indexManifestEntry =
+                part1Index.stream().filter(entry -> entry.bucket() == 0).findAny().get();
         assertThat(indexFileHandler.readHashIndexList(indexManifestEntry.indexFile()))
                 .containsExactlyInAnyOrder(1, 2, 5);
 
-        indexManifestEntry = part1Index.stream().filter( entry -> entry.bucket() == 1).findAny().get();
+        indexManifestEntry =
+                part1Index.stream().filter(entry -> entry.bucket() == 1).findAny().get();
         assertThat(indexFileHandler.readHashIndexList(indexManifestEntry.indexFile()))
                 .containsExactlyInAnyOrder(6, 8);
 
@@ -744,11 +746,13 @@ public class FileStoreCommitTest {
         part1Index = indexFileHandler.scan(snapshot.id(), HASH_INDEX, part1);
         assertThat(part1Index.size()).isEqualTo(2);
 
-        indexManifestEntry = part1Index.stream().filter( entry -> entry.bucket() == 0).findAny().get();
+        indexManifestEntry =
+                part1Index.stream().filter(entry -> entry.bucket() == 0).findAny().get();
         assertThat(indexFileHandler.readHashIndexList(indexManifestEntry.indexFile()))
                 .containsExactlyInAnyOrder(1, 4);
 
-        indexManifestEntry = part1Index.stream().filter( entry -> entry.bucket() == 1).findAny().get();
+        indexManifestEntry =
+                part1Index.stream().filter(entry -> entry.bucket() == 1).findAny().get();
         assertThat(indexFileHandler.readHashIndexList(indexManifestEntry.indexFile()))
                 .containsExactlyInAnyOrder(6, 8);
 
