@@ -129,7 +129,7 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
                         buildComputedColumns(computedColumnArgs, retrievedSchema.fields());
                 Schema paimonSchema = buildPaimonSchema(retrievedSchema);
                 assertSchemaCompatible(fileStoreTable.schema(), paimonSchema.fields());
-                alterTableSchema(identifier, fileStoreTable, paimonSchema);
+                fileStoreTable = alterTableSchema(identifier, fileStoreTable, paimonSchema);
             } catch (SchemaRetrievalException e) {
                 LOG.info(
                         "Failed to retrieve schema from record data but there exists specified Paimon table. "
