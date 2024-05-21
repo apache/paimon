@@ -608,7 +608,7 @@ public abstract class MergeTreeTestBase {
                 int outputLevel, boolean dropDelete, List<List<SortedRun>> sections)
                 throws Exception {
             RollingFileWriter<KeyValue, DataFileMeta> writer =
-                    writerFactory.createRollingMergeTreeFileWriter(outputLevel);
+                    writerFactory.createRollingMergeTreeFileWriter(outputLevel, true);
             RecordReader<KeyValue> reader =
                     MergeTreeReaders.readerForMergeTree(
                             sections,

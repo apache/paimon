@@ -128,7 +128,8 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
                     readerForMergeTree(sections, createMergeWrapper(outputLevel))
                             .toCloseableIterator();
             if (rewriteCompactFile) {
-                compactFileWriter = writerFactory.createRollingMergeTreeFileWriter(outputLevel);
+                compactFileWriter =
+                        writerFactory.createRollingMergeTreeFileWriter(outputLevel, true);
             }
             if (produceChangelog) {
                 changelogFileWriter = writerFactory.createRollingChangelogFileWriter(outputLevel);

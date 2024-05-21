@@ -28,6 +28,7 @@ import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.types.RowType;
@@ -68,6 +69,7 @@ public class KeyValueDataFileWriter
     private long minSeqNumber = Long.MAX_VALUE;
     private long maxSeqNumber = Long.MIN_VALUE;
     private long deleteRecordCount = 0;
+    private final boolean isCompact;
 
     public KeyValueDataFileWriter(
             FileIO fileIO,
@@ -80,7 +82,8 @@ public class KeyValueDataFileWriter
             long schemaId,
             int level,
             String compression,
-            CoreOptions options) {
+            CoreOptions options,
+            boolean isCompact) {
         super(
                 fileIO,
                 factory,
@@ -100,6 +103,7 @@ public class KeyValueDataFileWriter
         this.keyStatsConverter = new SimpleStatsConverter(keyType);
         this.valueStatsConverter = new SimpleStatsConverter(valueType);
         this.keySerializer = new InternalRowSerializer(keyType);
+        this.isCompact = isCompact;
     }
 
     @Override
@@ -170,6 +174,7 @@ public class KeyValueDataFileWriter
                 level,
                 deleteRecordCount,
                 // TODO: enable file filter for primary key table (e.g. deletion table).
-                null);
+                null,
+                isCompact ? FileSource.COMPACT : FileSource.APPEND);
     }
 }

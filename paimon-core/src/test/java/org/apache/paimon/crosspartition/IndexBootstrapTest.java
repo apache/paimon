@@ -24,6 +24,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.Table;
@@ -141,7 +142,8 @@ public class IndexBootstrapTest extends TableTestBase {
                                 .atZone(ZoneId.systemDefault())
                                 .toLocalDateTime()),
                 0L,
-                null);
+                null,
+                FileSource.APPEND);
     }
 
     private Pair<InternalRow, Integer> row(int pt, int col, int pk, int bucket) {

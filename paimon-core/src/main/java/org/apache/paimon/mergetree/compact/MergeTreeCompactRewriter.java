@@ -73,7 +73,7 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
     protected CompactResult rewriteCompaction(
             int outputLevel, boolean dropDelete, List<List<SortedRun>> sections) throws Exception {
         RollingFileWriter<KeyValue, DataFileMeta> writer =
-                writerFactory.createRollingMergeTreeFileWriter(outputLevel);
+                writerFactory.createRollingMergeTreeFileWriter(outputLevel, true);
         RecordReader<KeyValue> reader =
                 readerForMergeTree(sections, new ReducerMergeFunctionWrapper(mfFactory.create()));
         if (dropDelete) {

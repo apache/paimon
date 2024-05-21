@@ -40,7 +40,8 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
             LongCounter seqNumCounter,
             String fileCompression,
             SimpleColStatsCollector.Factory[] statsCollectors,
-            FileIndexOptions fileIndexOptions) {
+            FileIndexOptions fileIndexOptions,
+            boolean isCompact) {
         super(
                 () ->
                         new RowDataFileWriter(
@@ -57,7 +58,8 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
                                 seqNumCounter,
                                 fileCompression,
                                 statsCollectors,
-                                fileIndexOptions),
+                                fileIndexOptions,
+                                isCompact),
                 targetFileSize);
     }
 }

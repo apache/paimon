@@ -177,7 +177,8 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                             new LongCounter(toCompact.get(0).minSequenceNumber()),
                             fileCompression,
                             statsCollectors,
-                            fileIndexOptions);
+                            fileIndexOptions,
+                            true);
             try {
                 rewriter.write(bucketReader(partition, bucket).read(toCompact));
             } finally {

@@ -256,7 +256,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
                 seqNumCounter,
                 fileCompression,
                 statsCollectors,
-                fileIndexOptions);
+                fileIndexOptions,
+                false);
     }
 
     private void trySyncLatestCompaction(boolean blocking)
