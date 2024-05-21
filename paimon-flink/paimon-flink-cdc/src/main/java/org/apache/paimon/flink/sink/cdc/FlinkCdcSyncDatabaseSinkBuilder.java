@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
@@ -66,6 +67,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     private double committerCpu;
     @Nullable private MemorySize committerMemory;
     private boolean commitChaining;
+    private boolean commitSafeRecover;
 
     // Paimon catalog used to check and create tables. There will be two
     //     places where this catalog is used. 1) in processing function,
@@ -102,6 +104,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         this.committerCpu = options.get(FlinkConnectorOptions.SINK_COMMITTER_CPU);
         this.committerMemory = options.get(FlinkConnectorOptions.SINK_COMMITTER_MEMORY);
         this.commitChaining = options.get(FlinkConnectorOptions.SINK_COMMITTER_OPERATOR_CHAINING);
+        this.commitSafeRecover = options.get(CoreOptions.WRITE_ONLY);
         return this;
     }
 
@@ -163,7 +166,11 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
 
         FlinkCdcMultiTableSink sink =
                 new FlinkCdcMultiTableSink(
-                        catalogLoader, committerCpu, committerMemory, commitChaining);
+                        catalogLoader,
+                        committerCpu,
+                        committerMemory,
+                        commitChaining,
+                        commitSafeRecover);
         sink.sinkFrom(partitioned);
     }
 

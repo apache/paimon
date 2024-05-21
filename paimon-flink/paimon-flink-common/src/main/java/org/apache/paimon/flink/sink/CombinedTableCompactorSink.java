@@ -181,6 +181,7 @@ public class CombinedTableCompactorSink implements Serializable {
 
     protected CommittableStateManager<WrappedManifestCommittable> createCommittableStateManager() {
         return new RestoreAndFailCommittableStateManager<>(
-                () -> new VersionedSerializerWrapper<>(new WrappedManifestCommittableSerializer()));
+                () -> new VersionedSerializerWrapper<>(new WrappedManifestCommittableSerializer()),
+                true);
     }
 }

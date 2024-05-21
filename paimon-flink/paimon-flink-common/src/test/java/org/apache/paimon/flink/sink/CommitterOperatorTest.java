@@ -62,6 +62,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
@@ -85,8 +86,10 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
     public void testFailIntentionallyAfterRestore() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
+        boolean safeRecover = ThreadLocalRandom.current().nextBoolean();
+
         OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
-                createRecoverableTestHarness(table);
+                createRecoverableTestHarness(table, safeRecover);
         testHarness.open();
         StreamTableWrite write =
                 table.newStreamWriteBuilder().withCommitUser(initialCommitUser).newWrite();
@@ -108,14 +111,20 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
             // commit snapshot from state, fail intentionally
             testHarness.initializeState(snapshot);
             testHarness.open();
-            fail("Expecting intentional exception");
+            if (!safeRecover) {
+                fail("Expecting intentional exception");
+            }
         } catch (Exception e) {
-            assertThat(e)
-                    .hasMessageContaining(
-                            "This exception is intentionally thrown "
-                                    + "after committing the restored checkpoints. "
-                                    + "By restarting the job we hope that "
-                                    + "writers can start writing based on these new commits.");
+            if (safeRecover) {
+                fail("Expecting no intentional exception");
+            } else {
+                assertThat(e)
+                        .hasMessageContaining(
+                                "This exception is intentionally thrown "
+                                        + "after committing the restored checkpoints. "
+                                        + "By restarting the job we hope that "
+                                        + "writers can start writing based on these new commits.");
+            }
         }
         assertResults(table, "1, 10", "2, 20");
         testHarness.close();
@@ -582,7 +591,8 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                         new RestoreAndFailCommittableStateManager<>(
                                 () ->
                                         new VersionedSerializerWrapper<>(
-                                                new ManifestCommittableSerializer())));
+                                                new ManifestCommittableSerializer()),
+                                false));
         OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
                 createTestHarness(operator);
         testHarness.open();
@@ -673,6 +683,12 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
 
     protected OneInputStreamOperatorTestHarness<Committable, Committable>
             createRecoverableTestHarness(FileStoreTable table) throws Exception {
+        return createRecoverableTestHarness(table, false);
+    }
+
+    protected OneInputStreamOperatorTestHarness<Committable, Committable>
+            createRecoverableTestHarness(FileStoreTable table, boolean safeRecover)
+                    throws Exception {
         OneInputStreamOperator<Committable, Committable> operator =
                 createCommitterOperator(
                         table,
@@ -680,7 +696,8 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                         new RestoreAndFailCommittableStateManager<>(
                                 () ->
                                         new VersionedSerializerWrapper<>(
-                                                new ManifestCommittableSerializer())));
+                                                new ManifestCommittableSerializer()),
+                                safeRecover));
         return createTestHarness(operator);
     }
 

@@ -646,7 +646,8 @@ class StoreMultiCommitterTest {
                         new RestoreAndFailCommittableStateManager<>(
                                 () ->
                                         new VersionedSerializerWrapper<>(
-                                                new WrappedManifestCommittableSerializer())));
+                                                new WrappedManifestCommittableSerializer()),
+                                false));
         return createTestHarness(operator);
     }
 

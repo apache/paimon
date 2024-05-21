@@ -51,12 +51,20 @@ public class RestoreAndFailCommittableStateManager<GlobalCommitT>
     private final SerializableSupplier<SimpleVersionedSerializer<GlobalCommitT>>
             committableSerializer;
 
+    /**
+     * Does recover affect the state of the write node. If it is safe, there is no need to failover
+     * in recover.
+     */
+    private final boolean safeRecover;
+
     /** GlobalCommitT state of this job. Used to filter out previous successful commits. */
     private ListState<GlobalCommitT> streamingCommitterState;
 
     public RestoreAndFailCommittableStateManager(
-            SerializableSupplier<SimpleVersionedSerializer<GlobalCommitT>> committableSerializer) {
+            SerializableSupplier<SimpleVersionedSerializer<GlobalCommitT>> committableSerializer,
+            boolean safeRecover) {
         this.committableSerializer = committableSerializer;
+        this.safeRecover = safeRecover;
     }
 
     @Override
@@ -80,7 +88,7 @@ public class RestoreAndFailCommittableStateManager<GlobalCommitT>
     private void recover(List<GlobalCommitT> committables, Committer<?, GlobalCommitT> committer)
             throws Exception {
         int numCommitted = committer.filterAndCommit(committables);
-        if (numCommitted > 0) {
+        if (numCommitted > 0 && !safeRecover) {
             throw new RuntimeException(
                     "This exception is intentionally thrown "
                             + "after committing the restored checkpoints. "

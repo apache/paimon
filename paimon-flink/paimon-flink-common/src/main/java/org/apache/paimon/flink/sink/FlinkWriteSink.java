@@ -27,6 +27,8 @@ import javax.annotation.Nullable;
 
 import java.util.Map;
 
+import static org.apache.paimon.table.BucketMode.BUCKET_UNAWARE;
+
 /** A {@link FlinkSink} to write records. */
 public abstract class FlinkWriteSink<T> extends FlinkSink<T> {
 
@@ -57,6 +59,7 @@ public abstract class FlinkWriteSink<T> extends FlinkSink<T> {
     @Override
     protected CommittableStateManager<ManifestCommittable> createCommittableStateManager() {
         return new RestoreAndFailCommittableStateManager<>(
-                () -> new VersionedSerializerWrapper<>(new ManifestCommittableSerializer()));
+                () -> new VersionedSerializerWrapper<>(new ManifestCommittableSerializer()),
+                table.bucketMode() == BUCKET_UNAWARE || table.coreOptions().writeOnly());
     }
 }
