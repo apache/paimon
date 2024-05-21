@@ -21,10 +21,13 @@ package org.apache.paimon.format.parquet;
 import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.options.Options;
 
+import org.apache.paimon.utils.StringUtils;
 import org.apache.parquet.hadoop.ParquetOutputFormat;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 
 import java.util.Properties;
+
+import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 
 /** Factory to create {@link ParquetFileFormat}. */
 public class ParquetFileFormatFactory implements FileFormatFactory {
@@ -49,7 +52,12 @@ public class ParquetFileFormatFactory implements FileFormatFactory {
         if (!options.containsKey(compression)) {
             Properties properties = new Properties();
             options.addAllToProperties(properties);
-            properties.setProperty(compression, CompressionCodecName.SNAPPY.name());
+            // Append Only table use zstd compression default and other keep snappy for parquet file format
+            if (StringUtils.isBlank(options.get(MERGE_ENGINE.key()))) {
+                properties.setProperty(compression, CompressionCodecName.ZSTD.name());
+            } else {
+                properties.setProperty(compression, CompressionCodecName.SNAPPY.name());
+            }
             Options newOptions = new Options();
             properties.forEach((k, v) -> newOptions.setString(k.toString(), v.toString()));
             return newOptions;
