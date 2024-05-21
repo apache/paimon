@@ -44,6 +44,7 @@ import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.LongCounter;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.RecordWriter;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.orc.CompressionKind;
 
