@@ -25,7 +25,9 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
+import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.metastore.MetastoreClient;
@@ -40,9 +42,14 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableType;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.RowDataPartitionComputer;
 
 import org.apache.flink.table.hive.LegacyHiveClasses;
 import org.apache.hadoop.conf.Configuration;
@@ -72,15 +79,18 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTOREWAREHOUSE;
+import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.hive.HiveCatalogLock.acquireTimeout;
 import static org.apache.paimon.hive.HiveCatalogLock.checkMaxSleep;
 import static org.apache.paimon.hive.HiveCatalogOptions.HADOOP_CONF_DIR;
@@ -89,6 +99,7 @@ import static org.apache.paimon.hive.HiveCatalogOptions.IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalogOptions.LOCATION_IN_PROPERTIES;
 import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
+import static org.apache.paimon.utils.FileUtils.COMMON_IO_FORK_JOIN_POOL;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
 
@@ -422,7 +433,7 @@ public class HiveCatalog extends AbstractCatalog {
             client.alter_table(fromDB, fromTableName, table);
 
             Path fromPath = getDataTableLocation(fromTable);
-            if (new SchemaManager(fileIO, fromPath).listAllIds().size() > 0) {
+            if (!new SchemaManager(fileIO, fromPath).listAllIds().isEmpty()) {
                 // Rename the file system's table directory. Maintain consistency between tables in
                 // the file system and tables in the Hive Metastore.
                 Path toPath = getDataTableLocation(toTable);
@@ -469,6 +480,129 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     public boolean caseSensitive() {
         return false;
+    }
+
+    @Override
+    public void repairCatalog() throws DatabaseNotExistException {
+        FileSystemCatalog fileSystemCatalog = new FileSystemCatalog(fileIO, new Path(warehouse));
+        List<String> databases = fileSystemCatalog.listDatabases();
+        for (String database : databases) {
+            repairDatabase(database, fileSystemCatalog);
+        }
+    }
+
+    @Override
+    public void repairDatabase(String databaseName) throws DatabaseNotExistException {
+        repairDatabase(databaseName, new FileSystemCatalog(fileIO, new Path(warehouse)));
+    }
+
+    private void repairDatabase(String databaseName, FileSystemCatalog fileSystemCatalog)
+            throws DatabaseNotExistException {
+        if (!databaseExists(databaseName)) {
+            try {
+                createDatabase(databaseName, true);
+            } catch (DatabaseAlreadyExistException e) {
+                // ignore
+            }
+        }
+
+        List<String> tables = fileSystemCatalog.listTables(databaseName);
+
+        CompletableFuture<Void> allOf =
+                CompletableFuture.allOf(
+                        tables.stream()
+                                .map(table -> Identifier.create(databaseName, table))
+                                .map(
+                                        identifier ->
+                                                CompletableFuture.runAsync(
+                                                        () -> {
+                                                            try {
+                                                                repairTable(
+                                                                        identifier,
+                                                                        fileSystemCatalog);
+                                                            } catch (TableNotExistException e) {
+                                                                throw new RuntimeException(e);
+                                                            }
+                                                        },
+                                                        COMMON_IO_FORK_JOIN_POOL))
+                                .toArray(CompletableFuture[]::new));
+        allOf.join();
+    }
+
+    @Override
+    public void repairTable(Identifier identifier) throws TableNotExistException {
+        repairTable(identifier, new FileSystemCatalog(fileIO, new Path(warehouse)));
+    }
+
+    private void repairTable(Identifier identifier, FileSystemCatalog fileSystemCatalog)
+            throws TableNotExistException {
+        org.apache.paimon.table.Table paimonTable = fileSystemCatalog.getTable(identifier);
+
+        checkNotSystemTable(identifier, "repairTable");
+        validateIdentifierNameCaseInsensitive(identifier);
+        validateFieldNameCaseInsensitive(paimonTable.rowType().getFieldNames());
+
+        HashMap<String, String> newOptions = new HashMap<>(paimonTable.options());
+        if (!paimonTable.partitionKeys().isEmpty()) {
+            // set metastore.partitioned-table = true
+            newOptions.put(METASTORE_PARTITIONED_TABLE.key(), "true");
+        }
+
+        FileStoreTable dataTable = (FileStoreTable) paimonTable;
+        TableSchema tableSchema = dataTable.schema().copy(newOptions);
+        try {
+            try {
+                Table table =
+                        client.getTable(identifier.getDatabaseName(), identifier.getObjectName());
+                checkArgument(
+                        isPaimonTable(table) || LegacyHiveClasses.isPaimonTable(table),
+                        String.format(
+                                "Table %s is not a paimon table in hive metastore.",
+                                identifier.getFullName()));
+                updateHmsTablePars(table, tableSchema);
+                updateHmsTable(table, identifier, tableSchema);
+                client.alter_table(
+                        identifier.getDatabaseName(), identifier.getObjectName(), table, true);
+            } catch (NoSuchObjectException e) {
+                // hive table does not exist.
+                copyTableDefaultOptions(newOptions);
+                tableSchema = dataTable.schema().copy(newOptions);
+                Table table =
+                        newHmsTable(
+                                identifier,
+                                convertToPropertiesPrefixKey(tableSchema.options(), HIVE_PREFIX));
+                updateHmsTable(table, identifier, tableSchema);
+                client.createTable(table);
+            }
+
+            // repair partitions
+            repairPartition(paimonTable, identifier, tableSchema);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void repairPartition(
+            org.apache.paimon.table.Table paimonTable, Identifier identifier, TableSchema schema)
+            throws Exception {
+        if (!schema.partitionKeys().isEmpty()) {
+            MetastoreClient metastoreClient = metastoreClientFactory(identifier).get().create();
+
+            ReadBuilder readBuilder = paimonTable.newReadBuilder();
+            List<BinaryRow> partitions = readBuilder.newScan().listPartitions();
+            RowDataPartitionComputer partitionComputer =
+                    FileStorePathFactory.getPartitionComputer(
+                            schema.logicalPartitionType(),
+                            new CoreOptions(schema.options()).partitionDefaultName());
+            for (BinaryRow partition : partitions) {
+                LinkedHashMap<String, String> partitionSpec =
+                        partitionComputer.generatePartValues(
+                                Preconditions.checkNotNull(
+                                        partition,
+                                        "Partition row data is null. This is unexpected."));
+                metastoreClient.addPartition(partitionSpec);
+            }
+        }
     }
 
     @Override
@@ -523,7 +657,7 @@ public class HiveCatalog extends AbstractCatalog {
         sd.setSerdeInfo(serDeInfo);
 
         CoreOptions options = new CoreOptions(schema.options());
-        if (options.partitionedTableInMetastore() && schema.partitionKeys().size() > 0) {
+        if (options.partitionedTableInMetastore() && !schema.partitionKeys().isEmpty()) {
             Map<String, DataField> fieldMap =
                     schema.fields().stream()
                             .collect(Collectors.toMap(DataField::name, Function.identity()));

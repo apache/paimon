@@ -258,6 +258,18 @@ public interface Catalog extends AutoCloseable {
         return true;
     }
 
+    default void repairCatalog() throws DatabaseNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    default void repairDatabase(String databaseName) throws DatabaseNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    default void repairTable(Identifier identifier) throws TableNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
     /** Exception for trying to drop on a database that is not empty. */
     class DatabaseNotEmptyException extends Exception {
         private static final String MSG = "Database %s is not empty.";

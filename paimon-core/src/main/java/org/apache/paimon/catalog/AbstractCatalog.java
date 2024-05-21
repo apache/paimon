@@ -395,7 +395,7 @@ public abstract class AbstractCatalog implements Catalog {
         return isSystemDatabase(identifier.getDatabaseName()) || isSpecifiedSystemTable(identifier);
     }
 
-    private void checkNotSystemTable(Identifier identifier, String method) {
+    protected void checkNotSystemTable(Identifier identifier, String method) {
         if (isSystemTable(identifier)) {
             throw new IllegalArgumentException(
                     String.format(
@@ -459,7 +459,7 @@ public abstract class AbstractCatalog implements Catalog {
                         type, illegalNames));
     }
 
-    private void validateIdentifierNameCaseInsensitive(Identifier identifier) {
+    protected void validateIdentifierNameCaseInsensitive(Identifier identifier) {
         validateCaseInsensitive(caseSensitive(), "Database", identifier.getDatabaseName());
         validateCaseInsensitive(caseSensitive(), "Table", identifier.getObjectName());
     }
@@ -478,7 +478,7 @@ public abstract class AbstractCatalog implements Catalog {
         validateFieldNameCaseInsensitive(fieldNames);
     }
 
-    private void validateFieldNameCaseInsensitive(List<String> fieldNames) {
+    protected void validateFieldNameCaseInsensitive(List<String> fieldNames) {
         validateCaseInsensitive(caseSensitive(), "Field", fieldNames);
     }
 

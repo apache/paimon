@@ -90,7 +90,7 @@ public class CdcRecordUtils {
 
             int idx = fieldNames.indexOf(key);
             if (idx < 0) {
-                LOG.info("Field " + key + " not found. Waiting for schema update.");
+                LOG.info("Field {} not found. Waiting for schema update.", key);
                 return Optional.empty();
             }
 
@@ -105,11 +105,9 @@ public class CdcRecordUtils {
                 genericRow.setField(idx, TypeUtils.castFromCdcValueString(value, type));
             } catch (Exception e) {
                 LOG.info(
-                        "Failed to convert value "
-                                + value
-                                + " to type "
-                                + type
-                                + ". Waiting for schema update.",
+                        "Failed to convert value {} to type {}. Waiting for schema update.",
+                        value,
+                        type,
                         e);
                 return Optional.empty();
             }
