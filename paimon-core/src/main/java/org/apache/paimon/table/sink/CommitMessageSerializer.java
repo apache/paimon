@@ -125,6 +125,8 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
                         dataFileSerializer.deserializeList(view),
                         dataFileSerializer.deserializeList(view),
                         dataFileSerializer.deserializeList(view)),
-                new IndexIncrement(indexEntrySerializer.deserializeList(view)));
+                new IndexIncrement(
+                        indexEntrySerializer.deserializeList(view),
+                        indexEntrySerializer.deserializeList(view)));
     }
 }
