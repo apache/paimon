@@ -39,7 +39,11 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.*;
+import org.apache.paimon.utils.CommitIncrement;
+import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.LongCounter;
+import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.RecordWriter;
 
 import org.apache.orc.CompressionKind;
 
