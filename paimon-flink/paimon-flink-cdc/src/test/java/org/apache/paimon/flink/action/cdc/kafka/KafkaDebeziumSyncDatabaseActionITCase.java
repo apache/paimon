@@ -71,4 +71,10 @@ public class KafkaDebeziumSyncDatabaseActionITCase extends KafkaSyncDatabaseActi
     public void testIncludingAndExcludingTables() throws Exception {
         testIncludingAndExcludingTables(DEBEZIUM);
     }
+
+    @Test
+    @Timeout(60)
+    public void testMergeShards() throws Exception {
+        testMergeShards(DEBEZIUM);
+    }
 }

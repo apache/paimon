@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
+import org.apache.paimon.flink.action.MultipleParameterToolAdapter;
 import org.apache.paimon.flink.action.cdc.SyncDatabaseActionFactoryBase;
 
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.KAFKA_CONF;
@@ -27,6 +28,7 @@ public class KafkaSyncDatabaseActionFactory
         extends SyncDatabaseActionFactoryBase<KafkaSyncDatabaseAction> {
 
     public static final String IDENTIFIER = "kafka_sync_database";
+    private static final String MERGE_SHARDS = "merge_shards";
 
     @Override
     public String identifier() {
@@ -41,6 +43,13 @@ public class KafkaSyncDatabaseActionFactory
     @Override
     public KafkaSyncDatabaseAction createAction() {
         return new KafkaSyncDatabaseAction(warehouse, database, catalogConfig, cdcSourceConfig);
+    }
+
+    @Override
+    protected void withParams(MultipleParameterToolAdapter params, KafkaSyncDatabaseAction action) {
+        super.withParams(params, action);
+        action.mergeShards(
+                !params.has(MERGE_SHARDS) || Boolean.parseBoolean(params.get(MERGE_SHARDS)));
     }
 
     @Override
@@ -83,6 +92,13 @@ public class KafkaSyncDatabaseActionFactory
 
         System.out.println(
                 "--type_mapping is used to specify how to map MySQL type to Paimon type. Please see the doc for usage.");
+        System.out.println();
+
+        System.out.println(
+                "--merge_shards is default true, in this case, if some tables in different databases have the same name, "
+                        + "their schemas will be merged and their records will be synchronized into one Paimon table. "
+                        + "Otherwise, each table's records will be synchronized to a corresponding Paimon table, "
+                        + "and the Paimon table will be named to 'databaseName_tableName' to avoid potential name conflict.");
         System.out.println();
 
         System.out.println("kafka source conf syntax:");

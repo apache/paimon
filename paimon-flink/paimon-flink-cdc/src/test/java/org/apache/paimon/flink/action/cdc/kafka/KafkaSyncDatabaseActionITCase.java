@@ -496,6 +496,48 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         waitForResult(expected, table, rowType, getPrimaryKey(format));
     }
 
+    public void testMergeShards(String format) throws Exception {
+        final String topic = "merge-shards";
+        createTestTopic(topic, 1, 1);
+        writeRecordsToKafka(topic, "kafka/%s/database/mergeshards/%s-data-1.txt", format, format);
+
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
+        kafkaConfig.put(TOPIC.key(), topic);
+
+        KafkaSyncDatabaseAction action =
+                syncDatabaseActionBuilder(kafkaConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .mergeShards(false)
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        waitingTables(
+                "paimon_sync_database_merge_shard_1_t1", "paimon_sync_database_merge_shard_2_t1");
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                                getDataType(format),
+                                DataTypes.STRING(),
+                                DataTypes.STRING(),
+                                DataTypes.STRING()
+                        },
+                        new String[] {"id", "name", "description", "weight"});
+
+        waitForResult(
+                Arrays.asList("+I[101, scooter, Small 2-wheel scooter, 3.14]"),
+                getFileStoreTable("paimon_sync_database_merge_shard_1_t1"),
+                rowType,
+                getPrimaryKey(format));
+
+        waitForResult(
+                Arrays.asList("+I[102, car battery, 12V car battery, 8.1]"),
+                getFileStoreTable("paimon_sync_database_merge_shard_2_t1"),
+                rowType,
+                getPrimaryKey(format));
+    }
+
     private DataType getDataType(String format) {
         return format.equals("debezium") ? DataTypes.STRING() : DataTypes.STRING().notNull();
     }

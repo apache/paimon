@@ -576,4 +576,43 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                                         + "{databaseName=null, tableName=null, fields=[`k` STRING, `v0` STRING, `v1` STRING], "
                                         + "primaryKeys=[], cdcRecord=+I {v0=five, k=5, v1=50}}"));
     }
+
+    @Test
+    @Timeout(60)
+    public void testMergeShards() throws Exception {
+        final String topic = "merge-shards";
+        createTestTopic(topic, 1, 1);
+        writeRecordsToKafka(topic, "kafka/canal/database/mergeshards/canal-data-1.txt");
+
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
+        kafkaConfig.put(TOPIC.key(), topic);
+
+        KafkaSyncDatabaseAction action =
+                syncDatabaseActionBuilder(kafkaConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .mergeShards(false)
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        waitingTables("paimon_sync_database_merge_shard_1_t1","paimon_sync_database_merge_shard_2_t1");
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.INT()
+                        },
+                        new String[] {"k1", "v0", "v1"});
+        waitForResult(
+                Arrays.asList("+I[5, five, 50]"),
+                getFileStoreTable("paimon_sync_database_merge_shard_1_t1"),
+                rowType,
+                Collections.singletonList("k1"));
+
+        waitForResult(
+                Arrays.asList("+I[7, seven, 70]"),
+                getFileStoreTable("paimon_sync_database_merge_shard_2_t1"),
+                rowType,
+                Collections.singletonList("k1"));
+    }
 }
