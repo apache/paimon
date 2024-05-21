@@ -238,5 +238,23 @@ All available procedures are listed below.
          CALL sys.expire_snapshots(`table` => 'default.T', older_than => '2024-01-01 12:00:00', max_deletes => 10)<br/><br/>
       </td>
    </tr>
+    <tr>
+      <td>repair</td>
+      <td>
+         -- repair all databases and tables in catalog<br/>
+         CALL sys.repair()<br/><br/>
+         -- repair all tables in a specific database<br/>
+         CALL sys.repair('databaseName')<br/><br/>
+         -- repair a table<br/>
+         CALL sys.repair('databaseName.tableName')<br/><br/>
+      </td>
+      <td>
+         Synchronize information from the file system to Metastore. Argument:
+            <li>empty: all databases and tables in catalog.</li>
+            <li>databaseName : the target database name.</li>
+            <li>tableName: the target table identifier.</li>
+      </td>
+      <td>CALL sys.repair('test_db.T')</td>
+   </tr>
    </tbody>
 </table>

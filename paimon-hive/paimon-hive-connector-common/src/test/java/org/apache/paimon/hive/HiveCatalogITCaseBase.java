@@ -1167,6 +1167,115 @@ public abstract class HiveCatalogITCaseBase {
         insertSql.getJobClient().get().cancel();
     }
 
+    @Test
+    public void testRepairTable() throws Exception {
+        TableEnvironment fileCatalog = useFileCatalog();
+        // Database test_db exists in hive metastore
+        hiveShell.execute("use test_db");
+        // When the Hive table does not exist, specify the paimon table to create hive table in hive
+        // metastore.
+        tEnv.executeSql("CALL sys.repair('test_db.t_repair_hive')");
+
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t_repair_hive"))
+                .containsExactlyInAnyOrder("dt=2020-01-02/hh=09");
+
+        alterTableInFileSystem(fileCatalog);
+
+        // When the Hive table exists, specify the paimon table to update hive table in hive
+        // metastore.
+        tEnv.executeSql("CALL sys.repair('test_db.t_repair_hive')");
+        assertThat(
+                        hiveShell
+                                .executeQuery("DESC FORMATTED t_repair_hive")
+                                .contains("item_id\tbigint\titem id"))
+                .isTrue();
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t_repair_hive"))
+                .containsExactlyInAnyOrder("dt=2020-01-02/hh=09", "dt=2020-01-03/hh=10");
+    }
+
+    @Test
+    public void testRepairTableWithCustomLocation() throws Exception {
+        TableEnvironment fileCatalog = useFileCatalog();
+        // Database exists in hive metastore and uses custom location.
+        String databaseLocation = path + "test_db.db";
+        hiveShell.execute("CREATE DATABASE my_database\n" + "LOCATION '" + databaseLocation + "';");
+        hiveShell.execute("USE my_database");
+
+        // When the Hive table does not exist, specify the paimon table to create hive table in hive
+        // metastore.
+        tEnv.executeSql("CALL sys.repair('my_database.t_repair_hive')").await();
+
+        String tableLocation = databaseLocation + "/t_repair_hive";
+        assertThat(
+                        hiveShell
+                                .executeQuery("DESC FORMATTED t_repair_hive")
+                                .contains("Location:           \t" + tableLocation + "\tNULL"))
+                .isTrue();
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t_repair_hive"))
+                .containsExactlyInAnyOrder("dt=2020-01-02/hh=09");
+
+        alterTableInFileSystem(fileCatalog);
+
+        // When the Hive table exists, specify the paimon table to update hive table in hive
+        // metastore.
+        tEnv.executeSql("CALL sys.repair('my_database.t_repair_hive')");
+        assertThat(
+                        hiveShell
+                                .executeQuery("DESC FORMATTED t_repair_hive")
+                                .contains("Location:           \t" + tableLocation + "\tNULL"))
+                .isTrue();
+        assertThat(
+                        hiveShell
+                                .executeQuery("DESC FORMATTED t_repair_hive")
+                                .contains("item_id\tbigint\titem id"))
+                .isTrue();
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t_repair_hive"))
+                .containsExactlyInAnyOrder("dt=2020-01-02/hh=09", "dt=2020-01-03/hh=10");
+    }
+
+    /** Prepare to update a paimon table with a custom path in the paimon file system. */
+    private void alterTableInFileSystem(TableEnvironment tEnv) throws Exception {
+        tEnv.executeSql(
+                        "ALTER TABLE t_repair_hive ADD item_id BIGINT COMMENT 'item id' AFTER user_id")
+                .await();
+        tEnv.executeSql("INSERT INTO t_repair_hive VALUES(2, 1, 'click', '2020-01-03', '10')")
+                .await();
+    }
+
+    private TableEnvironment useFileCatalog() throws Exception {
+        String fileCatalog =
+                "CREATE CATALOG my_file WITH ( "
+                        + "'type' = 'paimon',\n"
+                        + "'warehouse' = '"
+                        + path
+                        + "' "
+                        + ")";
+        TableEnvironment tEnv =
+                TableEnvironmentImpl.create(
+                        EnvironmentSettings.newInstance().inBatchMode().build());
+        tEnv.executeSql(fileCatalog).await();
+
+        tEnv.executeSql("USE CATALOG my_file").await();
+
+        // Prepare a paimon table with a custom path in the paimon file system.
+        tEnv.executeSql("CREATE DATABASE IF NOT EXISTS test_db;").await();
+        tEnv.executeSql("USE test_db").await();
+        tEnv.executeSql(
+                        "CREATE TABLE t_repair_hive (\n"
+                                + "    user_id BIGINT,\n"
+                                + "    behavior STRING,\n"
+                                + "    dt STRING,\n"
+                                + "    hh STRING,\n"
+                                + "    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED\n"
+                                + ") PARTITIONED BY (dt, hh)"
+                                + " WITH (\n"
+                                + "'metastore.partitioned-table' = 'true'\n"
+                                + ");")
+                .await();
+        tEnv.executeSql("INSERT INTO t_repair_hive VALUES(1, 'login', '2020-01-02', '09')").await();
+        return tEnv;
+    }
+
     private void assertNoPrivilege(Executable executable) {
         Exception e = assertThrows(Exception.class, executable);
         if (e.getCause() != null) {
