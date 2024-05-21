@@ -258,11 +258,11 @@ public interface Catalog extends AutoCloseable {
         return true;
     }
 
-    default void repairCatalog() throws DatabaseNotExistException {
+    default void repairCatalog() {
         throw new UnsupportedOperationException();
     }
 
-    default void repairDatabase(String databaseName) throws DatabaseNotExistException {
+    default void repairDatabase(String databaseName) {
         throw new UnsupportedOperationException();
     }
 

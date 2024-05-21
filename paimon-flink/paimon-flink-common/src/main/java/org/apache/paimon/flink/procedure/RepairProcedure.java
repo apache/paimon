@@ -49,7 +49,7 @@ public class RepairProcedure extends ProcedureBase {
 
     public String[] call(ProcedureContext procedureContext)
             throws Catalog.TableNotExistException, Catalog.DatabaseNotExistException {
-        return call(procedureContext, "");
+        return call(procedureContext, null);
     }
 
     public String[] call(ProcedureContext procedureContext, String identifier)
