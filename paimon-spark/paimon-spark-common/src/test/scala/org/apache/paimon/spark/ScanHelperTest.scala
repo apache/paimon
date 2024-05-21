@@ -23,9 +23,11 @@ import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.io.DataFileMeta
 import org.apache.paimon.manifest.FileSource
 import org.apache.paimon.table.source.{DataSplit, Split}
+
 import org.junit.jupiter.api.Assertions
 
 import java.util.HashMap
+
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 
