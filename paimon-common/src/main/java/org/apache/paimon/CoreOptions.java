@@ -64,6 +64,7 @@ public class CoreOptions implements Serializable {
     public static final String FIELDS_PREFIX = "fields";
 
     public static final String AGG_FUNCTION = "aggregate-function";
+    public static final String DEFAULT_AGG_FUNCTION = "default-aggregate-function";
 
     public static final String IGNORE_RETRACT = "ignore-retract";
 
@@ -1151,6 +1152,12 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Time field for record level expire, it should be a seconds INT.");
 
+    public static final ConfigOption<String> FIELDS_DEFAULT_AGG_FUNC =
+            key(FIELDS_PREFIX + "." + DEFAULT_AGG_FUNCTION)
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("Default aggregate function of all fields for partial-update");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -1260,7 +1267,15 @@ public class CoreOptions implements Serializable {
         return fileFormat.toLowerCase();
     }
 
+    public String fieldsDefaultFunc() {
+        return options.get(FIELDS_DEFAULT_AGG_FUNC);
+    }
+
     public boolean definedAggFunc() {
+        if (options.contains(FIELDS_DEFAULT_AGG_FUNC)) {
+            return true;
+        }
+
         for (String key : options.toMap().keySet()) {
             if (key.startsWith(FIELDS_PREFIX) && key.endsWith(AGG_FUNCTION)) {
                 return true;

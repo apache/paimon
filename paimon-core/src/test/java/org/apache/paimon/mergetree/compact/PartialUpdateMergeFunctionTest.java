@@ -30,6 +30,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
 import org.junit.jupiter.api.Test;
 
+import static org.apache.paimon.CoreOptions.FIELDS_DEFAULT_AGG_FUNC;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -92,6 +93,34 @@ public class PartialUpdateMergeFunctionTest {
         validate(func, 1, 4, 4, 4, 5, 5, 5);
         add(func, RowKind.DELETE, 1, 1, 1, 6, 1, 1, 6);
         validate(func, 1, null, null, 6, null, null, 6);
+    }
+
+    @Test
+    public void testSequenceGroupDefaultAggFunc() {
+        Options options = new Options();
+        options.set("fields.f3.sequence-group", "f1,f2");
+        options.set("fields.f6.sequence-group", "f4,f5");
+        options.set(FIELDS_DEFAULT_AGG_FUNC, "last_non_null_value");
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
+        MergeFunction<KeyValue> func =
+                PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"))
+                        .create();
+        func.reset();
+        add(func, 1, 1, 1, 1, 1, 1, 1);
+        add(func, 1, 2, 2, 2, 2, 2, null);
+        validate(func, 1, 2, 2, 2, 1, 1, 1);
+        add(func, 1, 3, 3, 1, 3, 3, 3);
+        validate(func, 1, 2, 2, 2, 3, 3, 3);
+        add(func, 1, 4, null, 4, 5, null, 5);
+        validate(func, 1, 4, 2, 4, 5, 3, 5);
     }
 
     @Test
