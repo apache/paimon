@@ -41,6 +41,8 @@ import org.apache.paimon.utils.PartialRow;
 import org.apache.paimon.utils.TypeUtils;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
 
+import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -123,7 +125,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
                                         String.format(
                                                 "%s-lookup-refresh",
                                                 Thread.currentThread().getName())))
-                        : null;
+                        : MoreExecutors.newDirectExecutorService();
         this.cachedException = new AtomicReference<>();
         this.maxPendingSnapshotCount = options.get(LOOKUP_REFRESH_ASYNC_PENDING_SNAPSHOT_COUNT);
     }
@@ -196,33 +198,29 @@ public abstract class FullCacheLookupTable implements LookupTable {
             }
             doRefresh();
         } else {
-            if (refreshAsync) {
-                Future<?> currentFuture = null;
-                try {
-                    currentFuture =
-                            refreshExecutor.submit(
-                                    () -> {
-                                        try {
-                                            doRefresh();
-                                        } catch (Exception e) {
-                                            LOG.error(
-                                                    "Refresh lookup table {} failed",
-                                                    context.table.name(),
-                                                    e);
-                                            cachedException.set(e);
-                                        }
-                                    });
-                } catch (RejectedExecutionException ignored) {
-                    LOG.warn(
-                            "Add refresh task for lookup table {} failed",
-                            context.table.name(),
-                            ignored);
-                }
-                if (currentFuture != null) {
-                    refreshFuture = currentFuture;
-                }
-            } else {
-                doRefresh();
+            Future<?> currentFuture = null;
+            try {
+                currentFuture =
+                        refreshExecutor.submit(
+                                () -> {
+                                    try {
+                                        doRefresh();
+                                    } catch (Exception e) {
+                                        LOG.error(
+                                                "Refresh lookup table {} failed",
+                                                context.table.name(),
+                                                e);
+                                        cachedException.set(e);
+                                    }
+                                });
+            } catch (RejectedExecutionException ignored) {
+                LOG.warn(
+                        "Add refresh task for lookup table {} failed",
+                        context.table.name(),
+                        ignored);
+            }
+            if (currentFuture != null) {
+                refreshFuture = currentFuture;
             }
         }
     }
@@ -292,11 +290,12 @@ public abstract class FullCacheLookupTable implements LookupTable {
 
     @Override
     public void close() throws IOException {
-        stateFactory.close();
-        if (refreshExecutor != null) {
+        try {
+            stateFactory.close();
+            FileIOUtils.deleteDirectory(context.tempPath);
+        } finally {
             refreshExecutor.shutdown();
         }
-        FileIOUtils.deleteDirectory(context.tempPath);
     }
 
     /** Bulk loader for the table. */
