@@ -33,6 +33,7 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.ExpireSnapshots;
@@ -48,6 +49,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -330,7 +332,11 @@ public class ExpireSnapshotsTest {
 
     @Test
     public void testExpireWithTime() throws Exception {
-        ExpireSnapshots expire = store.newExpire(1, Integer.MAX_VALUE, 1000);
+        ExpireConfig.Builder builder = ExpireConfig.builder();
+        builder.snapshotRetainMin(1)
+                .snapshotRetainMax(Integer.MAX_VALUE)
+                .snapshotTimeRetain(Duration.ofMillis(1000));
+        ExpireSnapshots expire = store.newExpire(builder.build(), true);
 
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
@@ -339,8 +345,9 @@ public class ExpireSnapshotsTest {
         commit(5, allData, snapshotPositions);
         long expireMillis = System.currentTimeMillis();
         // expire twice to check for idempotence
-        expire.olderThanMills(expireMillis - 1000).expire();
-        expire.olderThanMills(expireMillis - 1000).expire();
+
+        expire.config(builder.snapshotTimeRetain(Duration.ofMillis(1000)).build()).expire();
+        expire.config(builder.snapshotTimeRetain(Duration.ofMillis(1000)).build()).expire();
 
         int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
         for (int i = 1; i <= latestSnapshotId; i++) {
@@ -402,8 +409,16 @@ public class ExpireSnapshotsTest {
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
         commit(10, allData, snapshotPositions);
-        ExpireSnapshots snapshot = store.newExpire(1, 2, Long.MAX_VALUE, true, true);
-        ExpireSnapshots changelog = store.newChangelogExpire(1, 3, Long.MAX_VALUE, true);
+        ExpireConfig config =
+                ExpireConfig.builder()
+                        .snapshotRetainMin(1)
+                        .snapshotRetainMax(2)
+                        .snapshotTimeRetain(Duration.ofMillis(Long.MAX_VALUE))
+                        .changelogRetainMax(3)
+                        .build();
+
+        ExpireSnapshots snapshot = store.newExpire(config, true);
+        ExpireSnapshots changelog = store.newChangelogExpire(config, true);
         // expire twice to check for idempotence
         snapshot.expire();
         snapshot.expire();

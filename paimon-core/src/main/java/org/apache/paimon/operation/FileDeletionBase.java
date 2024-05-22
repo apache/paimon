@@ -73,6 +73,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
 
     protected final Map<BinaryRow, Set<Integer>> deletionBuckets;
     protected final Executor ioExecutor;
+    protected boolean changelogDecoupled;
 
     /** Used to record which tag is cached in tagged snapshots list. */
     private int cachedTagIndex = -1;
@@ -114,6 +115,10 @@ public abstract class FileDeletionBase<T extends Snapshot> {
      * @param skippingSet manifests that should not be deleted
      */
     public abstract void cleanUnusedManifests(T snapshot, Set<String> skippingSet);
+
+    public void setChangelogDecoupled(boolean changelogDecoupled) {
+        this.changelogDecoupled = changelogDecoupled;
+    }
 
     /** Try to delete data directories that may be empty after data file deletion. */
     public void cleanDataDirectories() {

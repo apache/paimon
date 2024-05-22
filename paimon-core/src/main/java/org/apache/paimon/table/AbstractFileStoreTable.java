@@ -289,8 +289,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 snapshotManager(),
                 store().newSnapshotDeletion(),
                 store().newTagManager(),
-                coreOptions().snapshotExpireCleanEmptyDirectories(),
-                coreOptions().changelogLifecycleDecoupled());
+                coreOptions().snapshotExpireCleanEmptyDirectories());
     }
 
     @Override
@@ -309,23 +308,14 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         if (!options.writeOnly()) {
             boolean changelogDecoupled = options.changelogLifecycleDecoupled();
             ExpireSnapshots expireChangelog =
-                    newExpireChangelog()
-                            .maxDeletes(options.snapshotExpireLimit())
-                            .retainMin(options.changelogNumRetainMin())
-                            .retainMax(options.changelogNumRetainMax());
+                    newExpireChangelog().config(options.expireConfig().build());
             ExpireSnapshots expireSnapshots =
-                    newExpireSnapshots()
-                            .retainMax(options.snapshotNumRetainMax())
-                            .retainMin(options.snapshotNumRetainMin())
-                            .maxDeletes(options.snapshotExpireLimit());
-            long snapshotTimeRetain = options.snapshotTimeRetain().toMillis();
-            long changelogTimeRetain = options.changelogTimeRetain().toMillis();
+                    newExpireSnapshots().config(options.expireConfig().build());
             snapshotExpire =
                     () -> {
-                        long current = System.currentTimeMillis();
-                        expireSnapshots.olderThanMills(current - snapshotTimeRetain).expire();
+                        expireSnapshots.expire();
                         if (changelogDecoupled) {
-                            expireChangelog.olderThanMills(current - changelogTimeRetain).expire();
+                            expireChangelog.expire();
                         }
                     };
         }

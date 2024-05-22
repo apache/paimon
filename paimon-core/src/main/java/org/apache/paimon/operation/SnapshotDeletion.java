@@ -39,18 +39,14 @@ import java.util.function.Predicate;
 /** Delete snapshot files. */
 public class SnapshotDeletion extends FileDeletionBase<Snapshot> {
 
-    private final boolean changelogDecoupled;
-
     public SnapshotDeletion(
             FileIO fileIO,
             FileStorePathFactory pathFactory,
             ManifestFile manifestFile,
             ManifestList manifestList,
             IndexFileHandler indexFileHandler,
-            StatsFileHandler statsFileHandler,
-            boolean changelogDecoupled) {
+            StatsFileHandler statsFileHandler) {
         super(fileIO, pathFactory, manifestFile, manifestList, indexFileHandler, statsFileHandler);
-        this.changelogDecoupled = changelogDecoupled;
     }
 
     @Override
@@ -60,7 +56,6 @@ public class SnapshotDeletion extends FileDeletionBase<Snapshot> {
 
     @Override
     public void cleanUnusedManifests(Snapshot snapshot, Set<String> skippingSet) {
-        // delay clean the base and delta manifest lists when changelog decoupled enabled
         cleanUnusedManifests(snapshot, skippingSet, !changelogDecoupled);
     }
 

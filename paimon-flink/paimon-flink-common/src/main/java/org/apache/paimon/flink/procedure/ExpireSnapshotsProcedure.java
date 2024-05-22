@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.table.ExpireSnapshots;
 import org.apache.paimon.utils.DateTimeUtils;
 
@@ -26,6 +27,8 @@ import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
 import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
+
+import java.time.Duration;
 
 /** A procedure to expire snapshots. */
 public class ExpireSnapshotsProcedure extends ProcedureBase {
@@ -64,20 +67,24 @@ public class ExpireSnapshotsProcedure extends ProcedureBase {
             Integer maxDeletes)
             throws Catalog.TableNotExistException {
         ExpireSnapshots expireSnapshots = table(tableId).newExpireSnapshots();
+        ExpireConfig.Builder builder = ExpireConfig.builder();
         if (retainMax != null) {
-            expireSnapshots.retainMax(retainMax);
+            builder.snapshotRetainMax(retainMax);
         }
         if (retainMin != null) {
-            expireSnapshots.retainMin(retainMin);
+            builder.snapshotRetainMin(retainMin);
         }
         if (olderThanStr != null) {
-            expireSnapshots.olderThanMills(
-                    DateTimeUtils.parseTimestampData(olderThanStr, 3, DateTimeUtils.LOCAL_TZ)
-                            .getMillisecond());
+            builder.snapshotTimeRetain(
+                    Duration.ofMillis(
+                            System.currentTimeMillis()
+                                    - DateTimeUtils.parseTimestampData(
+                                                    olderThanStr, 3, DateTimeUtils.LOCAL_TZ)
+                                            .getMillisecond()));
         }
         if (maxDeletes != null) {
-            expireSnapshots.maxDeletes(maxDeletes);
+            builder.snapshotMaxDeletes(maxDeletes);
         }
-        return new String[] {expireSnapshots.expire() + ""};
+        return new String[] {expireSnapshots.config(builder.build()).expire() + ""};
     }
 }

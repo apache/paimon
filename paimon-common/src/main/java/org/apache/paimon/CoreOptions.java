@@ -27,6 +27,7 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.options.description.DescribedEnum;
@@ -1353,6 +1354,18 @@ public class CoreOptions implements Serializable {
 
     public boolean snapshotExpireCleanEmptyDirectories() {
         return options.get(SNAPSHOT_EXPIRE_CLEAN_EMPTY_DIRECTORIES);
+    }
+
+    public ExpireConfig.Builder expireConfig() {
+        return ExpireConfig.builder()
+                .snapshotRetainMax(snapshotNumRetainMax())
+                .snapshotRetainMin(snapshotNumRetainMin())
+                .snapshotTimeRetain(snapshotTimeRetain())
+                .snapshotMaxDeletes(snapshotExpireLimit())
+                .changelogRetainMax(options.getOptional(CHANGELOG_NUM_RETAINED_MAX).orElse(null))
+                .changelogRetainMin(options.getOptional(CHANGELOG_NUM_RETAINED_MIN).orElse(null))
+                .changelogTimeRetain(options.getOptional(CHANGELOG_TIME_RETAINED).orElse(null))
+                .changelogMaxDeletes(snapshotExpireLimit());
     }
 
     public int manifestMergeMinCount() {

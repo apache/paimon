@@ -23,6 +23,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.ChangelogDeletion;
+import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -47,10 +48,7 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
     private final boolean cleanEmptyDirectories;
     private final TagManager tagManager;
 
-    private long olderThanMills = 0;
-    public int retainMin = 1;
-    private int retainMax = Integer.MAX_VALUE;
-    private int maxDeletes = Integer.MAX_VALUE;
+    private ExpireConfig expireConfig;
 
     public ExpireChangelogImpl(
             SnapshotManager snapshotManager,
@@ -63,34 +61,22 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
                 new ConsumerManager(snapshotManager.fileIO(), snapshotManager.tablePath());
         this.cleanEmptyDirectories = cleanEmptyDirectories;
         this.changelogDeletion = changelogDeletion;
+        this.expireConfig = ExpireConfig.builder().build();
     }
 
     @Override
-    public ExpireChangelogImpl retainMax(int retainMax) {
-        this.retainMax = retainMax;
-        return this;
-    }
-
-    @Override
-    public ExpireChangelogImpl retainMin(int retainMin) {
-        this.retainMin = retainMin;
-        return this;
-    }
-
-    @Override
-    public ExpireChangelogImpl olderThanMills(long olderThanMills) {
-        this.olderThanMills = olderThanMills;
-        return this;
-    }
-
-    @Override
-    public ExpireChangelogImpl maxDeletes(int maxDeletes) {
-        this.maxDeletes = maxDeletes;
+    public ExpireSnapshots config(ExpireConfig expireConfig) {
+        this.expireConfig = expireConfig;
         return this;
     }
 
     @Override
     public int expire() {
+        int retainMax = expireConfig.getChangelogRetainMax();
+        int retainMin = expireConfig.getChangelogRetainMin();
+        int maxDeletes = expireConfig.getChangelogMaxDeletes();
+        long olderThanMills =
+                System.currentTimeMillis() - expireConfig.getChangelogTimeRetain().toMillis();
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         if (latestSnapshotId == null) {
             // no snapshot, nothing to expire
