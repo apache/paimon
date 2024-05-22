@@ -399,7 +399,6 @@ public class HiveCatalog extends AbstractCatalog {
                         convertToPropertiesPrefixKey(tableSchema.options(), HIVE_PREFIX));
         try {
             updateHmsTable(table, identifier, tableSchema);
-            table.getSd().unsetLocation();
             client.createTable(table);
         } catch (Exception e) {
             Path path = getDataTableLocation(identifier);
