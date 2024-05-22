@@ -20,9 +20,7 @@ package org.apache.paimon.fs;
 
 import java.io.EOFException;
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.util.List;
-import java.util.function.IntFunction;
 
 /** Stream that permits vectored reading. */
 public interface VectoredReadable {
@@ -59,9 +57,14 @@ public interface VectoredReadable {
         return 4 * 1024;
     }
 
-    /** The largest size that we should group ranges together as. */
-    default int maxReadSizeForVectorReads() {
+    /** The batch size of data read by a single parallelism. */
+    default int batchSizeForVectorReads() {
         return 1024 * 1024;
+    }
+
+    /** The read parallelism for vector reads. */
+    default int parallelismForVectorReads() {
+        return 4;
     }
 
     /**
@@ -70,8 +73,7 @@ public interface VectoredReadable {
      * <p>As a result of the call, each range will have FileRange.setData(CompletableFuture) called
      * with a future that when complete will have a ByteBuffer with the data from the file's range.
      */
-    default void readVectored(List<? extends FileRange> ranges, IntFunction<ByteBuffer> allocate)
-            throws IOException {
-        VectoredReadUtils.readVectored(this, ranges, allocate);
+    default void readVectored(List<? extends FileRange> ranges) throws IOException {
+        VectoredReadUtils.readVectored(this, ranges);
     }
 }

@@ -22,10 +22,8 @@ import org.apache.paimon.catalog.CatalogContext;
 
 import java.io.IOException;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ForkJoinPool;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 
 import static org.apache.paimon.utils.ThreadUtils.newDaemonThreadFactory;
 
@@ -33,13 +31,7 @@ import static org.apache.paimon.utils.ThreadUtils.newDaemonThreadFactory;
 public class FileIOUtils {
 
     public static final ExecutorService IO_THREAD_POOL =
-            new ThreadPoolExecutor(
-                    0,
-                    96,
-                    1,
-                    TimeUnit.MINUTES,
-                    new LinkedBlockingQueue<>(),
-                    newDaemonThreadFactory("IO-THREAD-POOL"));
+            Executors.newCachedThreadPool(newDaemonThreadFactory("IO-THREAD-POOL"));
 
     private static volatile ForkJoinPool scanIoForkJoinPool;
 

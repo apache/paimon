@@ -18,7 +18,6 @@
 
 package org.apache.paimon.fs;
 
-import java.nio.ByteBuffer;
 import java.util.concurrent.CompletableFuture;
 
 /* This file is based on source code from the Hadoop Project (http://hadoop.apache.org/), licensed by the Apache
@@ -35,10 +34,7 @@ public interface FileRange {
     int getLength();
 
     /** Get the future data for this range. */
-    CompletableFuture<ByteBuffer> getData();
-
-    /** Set a future for this range's data. */
-    void setData(CompletableFuture<ByteBuffer> data);
+    CompletableFuture<byte[]> getData();
 
     /**
      * Factory method to create a FileRange object.
@@ -54,19 +50,14 @@ public interface FileRange {
     /** An implementation for {@link FileRange}. */
     class FileRangeImpl implements FileRange {
 
-        private long offset;
-        private int length;
-        private CompletableFuture<ByteBuffer> reader;
+        private final long offset;
+        private final int length;
+        private final CompletableFuture<byte[]> reader;
 
-        /**
-         * Create.
-         *
-         * @param offset offset in file
-         * @param length length of data to read.
-         */
         public FileRangeImpl(long offset, int length) {
             this.offset = offset;
             this.length = length;
+            this.reader = new CompletableFuture<>();
         }
 
         @Override
@@ -79,27 +70,14 @@ public interface FileRange {
             return offset;
         }
 
-        public void setOffset(long offset) {
-            this.offset = offset;
-        }
-
         @Override
         public int getLength() {
             return length;
         }
 
-        public void setLength(int length) {
-            this.length = length;
-        }
-
         @Override
-        public CompletableFuture<ByteBuffer> getData() {
+        public CompletableFuture<byte[]> getData() {
             return reader;
-        }
-
-        @Override
-        public void setData(CompletableFuture<ByteBuffer> pReader) {
-            this.reader = pReader;
         }
     }
 }

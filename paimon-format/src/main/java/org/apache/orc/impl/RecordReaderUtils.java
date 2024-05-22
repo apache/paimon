@@ -45,7 +45,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.ExecutionException;
-import java.util.function.IntFunction;
 import java.util.function.Supplier;
 
 /* This file is based on source code from the ORC Project (http://orc.apache.org/), licensed by the Apache
@@ -398,8 +397,9 @@ public class RecordReaderUtils {
             return;
         }
 
-        IntFunction<ByteBuffer> allocate =
-                doForceDirect ? ByteBuffer::allocateDirect : ByteBuffer::allocate;
+        if (doForceDirect) {
+            throw new UnsupportedOperationException();
+        }
 
         List<FileRange> fileRanges = new ArrayList<>();
         Map<FileRange, BufferChunk> map = new HashMap<>();
@@ -412,12 +412,12 @@ public class RecordReaderUtils {
             }
             cur = (BufferChunk) cur.next;
         }
-        fileInputStream.readVectored(fileRanges, allocate);
+        fileInputStream.readVectored(fileRanges);
 
         for (FileRange r : fileRanges) {
             cur = map.get(r);
             try {
-                cur.setChunk(r.getData().get());
+                cur.setChunk(ByteBuffer.wrap(r.getData().get()));
             } catch (InterruptedException | ExecutionException e) {
                 throw new RuntimeException(e);
             }
