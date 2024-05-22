@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.append.AppendOnlyCompactionTask;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.table.sink.CompactionTaskSerializer;
 
 import org.junit.jupiter.api.Test;
@@ -76,6 +77,7 @@ public class CompactionTaskSimpleSerializerTest {
                 0,
                 0,
                 0L,
-                null);
+                null,
+                FileSource.APPEND);
     }
 }
