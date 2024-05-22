@@ -36,6 +36,9 @@ import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Pool;
 
+import org.apache.hadoop.hive.ql.exec.vector.ListColumnVector;
+import org.apache.hadoop.hive.ql.exec.vector.MapColumnVector;
+import org.apache.hadoop.hive.ql.exec.vector.StructColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.hadoop.hive.ql.io.sarg.SearchArgument;
 import org.apache.hadoop.hive.ql.io.sarg.SearchArgumentFactory;
@@ -184,8 +187,43 @@ public class OrcReaderFactory implements FormatReaderFactory {
             // no copying from the ORC column vectors to the Paimon columns vectors necessary,
             // because they point to the same data arrays internally design
             paimonColumnBatch.setNumRows(orcBatch.size);
+            handleAllNull();
             result.reset(rowNumber);
             return result;
+        }
+
+        private void handleAllNull() {
+            for (org.apache.hadoop.hive.ql.exec.vector.ColumnVector columnVector :
+                    orcVectorizedRowBatch.cols) {
+                // If the ColumnVector is complex type and ALL null, the TreeReader#nextVector
+                // won't set the isNull array for its fields, leading to invalid null check of the
+                // field ColumnVector. So here we handle this case.
+                if (columnVector.isRepeating && columnVector.isNull[0]) {
+                    recursivelySetAllNull(columnVector, columnVector.isNull);
+                }
+            }
+        }
+
+        private void recursivelySetAllNull(
+                org.apache.hadoop.hive.ql.exec.vector.ColumnVector columnVector, boolean[] isNull) {
+            columnVector.isRepeating = true;
+            columnVector.noNulls = false;
+            columnVector.isNull = isNull;
+
+            if (columnVector instanceof ListColumnVector) {
+                ListColumnVector listColumnVector = (ListColumnVector) columnVector;
+                recursivelySetAllNull(listColumnVector.child, columnVector.isNull);
+            } else if (columnVector instanceof MapColumnVector) {
+                MapColumnVector mapColumnVector = (MapColumnVector) columnVector;
+                recursivelySetAllNull(mapColumnVector.keys, isNull);
+                recursivelySetAllNull(mapColumnVector.values, isNull);
+            } else if (columnVector instanceof StructColumnVector) {
+                StructColumnVector structColumnVector = (StructColumnVector) columnVector;
+                for (org.apache.hadoop.hive.ql.exec.vector.ColumnVector field :
+                        structColumnVector.fields) {
+                    recursivelySetAllNull(field, columnVector.isNull);
+                }
+            }
         }
     }
 

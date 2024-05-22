@@ -18,13 +18,25 @@
 
 package org.apache.paimon.format.orc;
 
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.columnar.ArrayColumnVector;
+import org.apache.paimon.data.columnar.ColumnVector;
+import org.apache.paimon.data.columnar.MapColumnVector;
+import org.apache.paimon.data.columnar.RowColumnVector;
+import org.apache.paimon.data.columnar.VectorizedColumnBatch;
+import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatReaderContext;
+import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.OrcFormatReaderContext;
 import org.apache.paimon.format.orc.filter.OrcFilters;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.reader.VectorizedRecordIterator;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
@@ -45,6 +57,7 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -263,6 +276,92 @@ class OrcReaderFactoryTest {
 
         assertThat(cnt.get()).isEqualTo(6000);
         assertThat(nullCount.get()).isEqualTo(2000);
+    }
+
+    @Test
+    public void testReadAllNull(@TempDir java.nio.file.Path tmpDir) throws IOException {
+        int numRows = 2;
+
+        // ARRAY
+        RowType array =
+                RowType.builder().field("array_int", DataTypes.ARRAY(DataTypes.INT())).build();
+        Path tempPath = new Path(tmpDir.toUri() + UUID.randomUUID().toString() + ".orc");
+        VectorizedColumnBatch batch = createAllNullBatch(tempPath, array, numRows);
+        ArrayColumnVector arrayColumnVector = (ArrayColumnVector) batch.columns[0];
+        ColumnVector dataColumnVector = arrayColumnVector.getColumnVector();
+        for (int i = 0; i < numRows; i++) {
+            assertThat(arrayColumnVector.isNullAt(i)).isTrue();
+            assertThat(dataColumnVector.isNullAt(i)).isTrue();
+        }
+
+        // ARROW<ROW>
+        RowType arrayRow =
+                RowType.builder()
+                        .field("array_row", DataTypes.ARRAY(DataTypes.ROW(DataTypes.INT())))
+                        .build();
+        tempPath = new Path(tmpDir.toUri() + UUID.randomUUID().toString() + ".orc");
+        batch = createAllNullBatch(tempPath, arrayRow, numRows);
+        arrayColumnVector = (ArrayColumnVector) batch.columns[0];
+        RowColumnVector nestedRowColumnVector =
+                (RowColumnVector) arrayColumnVector.getColumnVector();
+        ColumnVector nestedColumnVector = nestedRowColumnVector.getBatch().columns[0];
+        for (int i = 0; i < numRows; i++) {
+            assertThat(arrayColumnVector.isNullAt(i)).isTrue();
+            assertThat(nestedRowColumnVector.isNullAt(i)).isTrue();
+            assertThat(nestedColumnVector.isNullAt(i)).isTrue();
+        }
+
+        // MAP
+        RowType map =
+                RowType.builder()
+                        .field("map", DataTypes.MAP(DataTypes.INT(), DataTypes.INT()))
+                        .build();
+        tempPath = new Path(tmpDir.toUri() + UUID.randomUUID().toString() + ".orc");
+        batch = createAllNullBatch(tempPath, map, numRows);
+        MapColumnVector mapColumnVector = (MapColumnVector) batch.columns[0];
+        ColumnVector keyColumnVector = mapColumnVector.getKeyColumnVector();
+        ColumnVector valueColumnVector = mapColumnVector.getValueColumnVector();
+        for (int i = 0; i < numRows; i++) {
+            assertThat(mapColumnVector.isNullAt(i)).isTrue();
+            assertThat(keyColumnVector.isNullAt(i)).isTrue();
+            assertThat(valueColumnVector.isNullAt(i)).isTrue();
+        }
+
+        // ROW
+        RowType row = RowType.builder().field("row", DataTypes.ROW(DataTypes.INT())).build();
+        tempPath = new Path(tmpDir.toUri() + UUID.randomUUID().toString() + ".orc");
+        batch = createAllNullBatch(tempPath, row, numRows);
+        RowColumnVector rowColumnVector = (RowColumnVector) batch.columns[0];
+        ColumnVector innerColumnVector = rowColumnVector.getBatch().columns[0];
+        for (int i = 0; i < numRows; i++) {
+            assertThat(mapColumnVector.isNullAt(i)).isTrue();
+            assertThat(innerColumnVector.isNullAt(i)).isTrue();
+        }
+    }
+
+    private VectorizedColumnBatch createAllNullBatch(Path tempPath, RowType rowType, int numRows)
+            throws IOException {
+        FileIO fileIO = LocalFileIO.create();
+
+        OrcFileFormat orc =
+                new OrcFileFormatFactory()
+                        .create(new FileFormatFactory.FormatContext(new Options(), 1024));
+
+        PositionOutputStream outputStream = fileIO.newOutputStream(tempPath, false);
+        FormatWriter writer = orc.createWriterFactory(rowType).create(outputStream, null);
+        for (int i = 0; i < numRows; i++) {
+            writer.addElement(GenericRow.of((Object) null));
+        }
+        writer.finish();
+        outputStream.close();
+
+        RecordReader<InternalRow> reader =
+                orc.createReaderFactory(rowType)
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO, tempPath, fileIO.getFileSize(tempPath)));
+
+        return ((VectorizedRecordIterator) reader.readBatch()).batch();
     }
 
     protected OrcReaderFactory createFormat(RowType formatType, int[] selectedFields) {
