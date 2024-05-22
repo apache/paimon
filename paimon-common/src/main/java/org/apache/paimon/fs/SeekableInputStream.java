@@ -57,6 +57,26 @@ public abstract class SeekableInputStream extends InputStream {
     public abstract int read(byte[] b, int off, int len) throws IOException;
 
     /**
+     * Reads up to <code>len</code> bytes of data from the input stream at the given <code>position
+     * </code> into an array of bytes. An attempt is made to read as many as <code>len</code> bytes,
+     * but a smaller number may be read. The number of bytes actually read is returned as an
+     * integer. The method will not change the current offset of this stream, and should be
+     * thread-safe. default implementation: use method <code>read</code>.
+     *
+     * @return
+     * @throws IOException
+     */
+    public int pread(long position, byte[] b, int off, int len) throws IOException {
+        synchronized (this) {
+            long currentPos = getPos();
+            seek(position);
+            int actualReadBytes = read(b, off, len);
+            seek(currentPos);
+            return actualReadBytes;
+        }
+    }
+
+    /**
      * Closes this input stream and releases any system resources associated with the stream.
      *
      * <p>The <code>close</code> method of <code>InputStream</code> does nothing.
