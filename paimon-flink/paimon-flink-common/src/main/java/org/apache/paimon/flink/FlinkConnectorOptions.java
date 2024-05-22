@@ -317,6 +317,13 @@ public class FlinkConnectorOptions {
                     .defaultValue(false)
                     .withDescription("Whether to refresh lookup table in an async thread.");
 
+    public static final ConfigOption<Integer> LOOKUP_REFRESH_ASYNC_PENDING_SNAPSHOT_COUNT =
+            ConfigOptions.key("lookup.refresh.async.pending-snapshot-count")
+                    .intType()
+                    .defaultValue(5)
+                    .withDescription(
+                            "If the pending snapshot count exceeds the threshold, lookup operator will refresh the table in sync.");
+
     public static final ConfigOption<Boolean> SINK_AUTO_TAG_FOR_SAVEPOINT =
             ConfigOptions.key("sink.savepoint.auto-tag")
                     .booleanType()

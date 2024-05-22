@@ -144,4 +144,9 @@ public class LookupStreamingReader {
         }
         return reader;
     }
+
+    @Nullable
+    public Long nextSnapshotId() {
+        return scan.checkpoint();
+    }
 }

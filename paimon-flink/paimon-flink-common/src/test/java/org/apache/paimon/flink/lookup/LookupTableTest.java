@@ -653,6 +653,19 @@ public class LookupTableTest extends TableTestBase {
         }
         assertThat(batchKeys).isEqualTo(insertKeys);
 
+        // Add 10 snapshots and refresh lookup table
+        for (int k = 0; k < 10; k++) {
+            try (BatchTableWrite write = writeBuilder.newWrite()) {
+                for (int i = 1; i <= 100; i++) {
+                    write.write(row(i, 11 * i, 111 * i), 0);
+                }
+                try (BatchTableCommit commit = writeBuilder.newCommit()) {
+                    commit.commit(write.prepareCommit());
+                }
+            }
+        }
+        table.refresh();
+
         table.close();
     }
 
