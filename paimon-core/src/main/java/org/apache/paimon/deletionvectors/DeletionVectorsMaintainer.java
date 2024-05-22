@@ -129,15 +129,12 @@ public class DeletionVectorsMaintainer {
 
         public DeletionVectorsMaintainer createOrRestore(
                 @Nullable Long snapshotId, BinaryRow partition, int bucket) {
-            IndexFileMeta indexFile =
+            List<IndexFileMeta> indexFiles =
                     snapshotId == null
-                            ? null
-                            : handler.scan(snapshotId, DELETION_VECTORS_INDEX, partition, bucket)
-                                    .orElse(null);
+                            ? Collections.emptyList()
+                            : handler.scan(snapshotId, DELETION_VECTORS_INDEX, partition, bucket);
             Map<String, DeletionVector> deletionVectors =
-                    indexFile == null
-                            ? new HashMap<>()
-                            : new HashMap<>(handler.readAllDeletionVectors(indexFile));
+                    new HashMap<>(handler.readAllDeletionVectors(indexFiles));
             return createOrRestore(deletionVectors);
         }
 

@@ -281,6 +281,10 @@ public class TableCommitImpl implements InnerTableCommit {
                         .map(IndexFileMeta::fileName)
                         .map(indexFileFactory::toPath)
                         .forEach(files::add);
+                msg.indexIncrement().deletedIndexFiles().stream()
+                        .map(IndexFileMeta::fileName)
+                        .map(indexFileFactory::toPath)
+                        .forEach(files::add);
             }
         }
 
