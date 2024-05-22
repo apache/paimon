@@ -32,6 +32,7 @@ import java.util.List;
 import static org.apache.paimon.index.IndexFileMetaSerializerTest.randomDeletionVectorIndexFile;
 import static org.assertj.core.api.Assertions.assertThat;
 
+/** Test for IndexManifestFileHandler. */
 public class IndexManifestFileHandlerTest {
 
     @TempDir java.nio.file.Path tempDir;

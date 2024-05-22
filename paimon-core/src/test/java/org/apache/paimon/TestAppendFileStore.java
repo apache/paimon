@@ -49,6 +49,7 @@ import java.util.UUID;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 
+/** Wrapper of AppendOnlyFileStore. */
 public class TestAppendFileStore extends AppendOnlyFileStore {
 
     private final String commitUser;
