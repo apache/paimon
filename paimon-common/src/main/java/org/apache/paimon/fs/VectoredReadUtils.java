@@ -31,6 +31,10 @@ import static java.util.Objects.requireNonNull;
 import static org.apache.paimon.fs.FileIOUtils.IO_THREAD_POOL;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
+/* This file is based on source code from the Hadoop Project (http://hadoop.apache.org/), licensed by the Apache
+ * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership. */
+
 /** Utils for {@link VectoredReadable}. */
 public class VectoredReadUtils {
 
@@ -47,7 +51,7 @@ public class VectoredReadUtils {
         }
 
         // TODO limit IO_THREAD_POOL? Too much parallelism will affect disk addressing
-        if (isOrderedDisjoint(sortedRanges, 1, readable.minSeekForVectorReads())) {
+        if (isOrderedDisjoint(sortedRanges, readable.minSeekForVectorReads())) {
             for (FileRange range : sortedRanges) {
                 ByteBuffer buffer = allocate.apply(range.getLength());
                 IO_THREAD_POOL.submit(() -> readSingleRange(readable, range, buffer));
@@ -68,7 +72,7 @@ public class VectoredReadUtils {
     }
 
     /**
-     * Read data from S3 for this range and populate the buffer.
+     * Read data for this range and populate the buffer.
      *
      * @param range range of data to read.
      * @param buffer buffer to fill.
@@ -84,6 +88,7 @@ public class VectoredReadUtils {
         try {
             long position = range.getOffset();
             int length = range.getLength();
+            // TODO support direct
             checkArgument(buffer.hasArray(), "Only support heap buffer now.");
             byte[] array = buffer.array();
             readable.preadFully(position, array, 0, length);
@@ -113,6 +118,7 @@ public class VectoredReadUtils {
 
             for (FileRange child : combinedFileRange.getUnderlying()) {
                 ByteBuffer buffer = allocate.apply(child.getLength());
+                // TODO support direct
                 checkArgument(buffer.hasArray(), "Only support heap buffer now.");
                 System.arraycopy(
                         total,
@@ -143,19 +149,15 @@ public class VectoredReadUtils {
      * </ul>
      *
      * @param input the list of input ranges.
-     * @param chunkSize the size of the chunks that the offset and end must align to.
      * @param minimumSeek the minimum distance between ranges.
      * @return true if we can use the input list as is.
      */
-    private static boolean isOrderedDisjoint(
-            List<? extends FileRange> input, int chunkSize, int minimumSeek) {
+    private static boolean isOrderedDisjoint(List<? extends FileRange> input, int minimumSeek) {
         long previous = -minimumSeek;
         for (FileRange range : input) {
             long offset = range.getOffset();
             long end = range.getOffset() + range.getLength();
-            if (offset % chunkSize != 0
-                    || end % chunkSize != 0
-                    || (offset - previous < minimumSeek)) {
+            if (offset - previous < minimumSeek) {
                 return false;
             }
             previous = end;
