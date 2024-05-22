@@ -21,9 +21,27 @@ package org.apache.paimon.fs;
 import org.apache.paimon.catalog.CatalogContext;
 
 import java.io.IOException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+
+import static org.apache.paimon.utils.ThreadUtils.newDaemonThreadFactory;
 
 /** Utils for {@link FileIO}. */
 public class FileIOUtils {
+
+    public static final ExecutorService IO_THREAD_POOL =
+            new ThreadPoolExecutor(
+                    0,
+                    96,
+                    1,
+                    TimeUnit.MINUTES,
+                    new LinkedBlockingQueue<>(),
+                    newDaemonThreadFactory("IO-THREAD-POOL"));
+
+    private static volatile ForkJoinPool scanIoForkJoinPool;
 
     public static FileIOLoader checkAccess(FileIOLoader fileIO, Path path, CatalogContext config)
             throws IOException {
