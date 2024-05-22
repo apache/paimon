@@ -851,8 +851,7 @@ public class FileStoreCommitTest {
 
     @Test
     public void testDVIndexFiles() throws Exception {
-        TestAppendFileStore store =
-                TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
 
         // commit 1
         CommitMessage commitMessage1 =
