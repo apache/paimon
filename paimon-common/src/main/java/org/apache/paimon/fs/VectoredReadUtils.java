@@ -64,8 +64,7 @@ public class VectoredReadUtils {
                         splitBatches.stream().map(FileRange::getData).collect(Collectors.toList());
                 CompletableFuture.allOf(futures.toArray(new CompletableFuture<?>[0]))
                         .thenAcceptAsync(
-                                unused -> copyToSingleRanges(combinedRange, futures),
-                                IO_THREAD_POOL);
+                                unused -> copyToFileRanges(combinedRange, futures), IO_THREAD_POOL);
             }
         }
     }
@@ -86,53 +85,43 @@ public class VectoredReadUtils {
         }
     }
 
-    private static void copyToSingleRanges(
+    private static void copyToFileRanges(
             CombinedRange combinedRange, List<CompletableFuture<byte[]>> futures) {
-        try {
-            List<byte[]> segments = new ArrayList<>(futures.size());
-            for (CompletableFuture<byte[]> future : futures) {
-                segments.add(future.join());
-            }
-            long offset = combinedRange.getOffset();
-            for (FileRange fileRange : combinedRange.underlying) {
-                byte[] buffer = new byte[fileRange.getLength()];
-                copyMultiBytesToBytes(
-                        segments,
-                        (int) (fileRange.getOffset() - offset),
-                        buffer,
-                        fileRange.getLength());
-                fileRange.getData().complete(buffer);
-            }
-        } catch (Throwable e) {
-            e.printStackTrace();
-            throw e;
+        List<byte[]> segments = new ArrayList<>(futures.size());
+        for (CompletableFuture<byte[]> future : futures) {
+            segments.add(future.join());
+        }
+        long offset = combinedRange.getOffset();
+        for (FileRange fileRange : combinedRange.underlying) {
+            byte[] buffer = new byte[fileRange.getLength()];
+            copyMultiBytesToBytes(
+                    segments,
+                    (int) (fileRange.getOffset() - offset),
+                    buffer,
+                    fileRange.getLength());
+            fileRange.getData().complete(buffer);
         }
     }
 
     private static void copyMultiBytesToBytes(
             List<byte[]> segments, int offset, byte[] bytes, int numBytes) {
-        try {
-            int remainSize = numBytes;
-            for (byte[] segment : segments) {
-                int remain = segment.length - offset;
-                if (remain > 0) {
-                    int nCopy = Math.min(remain, remainSize);
-                    System.arraycopy(segment, offset, bytes, numBytes - remainSize, nCopy);
-                    remainSize -= nCopy;
-                    // next new segment.
-                    offset = 0;
-                    if (remainSize == 0) {
-                        return;
-                    }
-                } else {
-                    // remain is negative, let's advance to next segment
-                    // now the offset = offset - segmentSize (-remain)
-                    offset = -remain;
+        int remainSize = numBytes;
+        for (byte[] segment : segments) {
+            int remain = segment.length - offset;
+            if (remain > 0) {
+                int nCopy = Math.min(remain, remainSize);
+                System.arraycopy(segment, offset, bytes, numBytes - remainSize, nCopy);
+                remainSize -= nCopy;
+                // next new segment.
+                offset = 0;
+                if (remainSize == 0) {
+                    return;
                 }
+            } else {
+                // remain is negative, let's advance to next segment
+                // now the offset = offset - segmentSize (-remain)
+                offset = -remain;
             }
-        } catch (Throwable e) {
-            e.printStackTrace();
-            throw e;
         }
     }
 
@@ -165,7 +154,6 @@ public class VectoredReadUtils {
 
     private static void validateRangeRequest(FileRange range) throws EOFException {
         requireNonNull(range, "range is null");
-
         checkArgument(range.getLength() >= 0, "length is negative in %s", range);
         if (range.getOffset() < 0) {
             throw new EOFException("position is negative in range " + range);
@@ -173,9 +161,9 @@ public class VectoredReadUtils {
     }
 
     private static List<? extends FileRange> sortRanges(List<? extends FileRange> input) {
-        final List<? extends FileRange> l = new ArrayList<>(input);
-        l.sort(Comparator.comparingLong(FileRange::getOffset));
-        return l;
+        List<? extends FileRange> ret = new ArrayList<>(input);
+        ret.sort(Comparator.comparingLong(FileRange::getOffset));
+        return ret;
     }
 
     private static List<CombinedRange> mergeSortedRanges(
