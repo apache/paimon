@@ -40,6 +40,7 @@ import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.DynamicBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.RowKeyExtractor;
+import org.apache.paimon.table.sink.RowKindGenerator;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.UnawareBucketRowKeyExtractor;
 import org.apache.paimon.table.source.InnerStreamTableScan;
@@ -576,6 +577,10 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 fileIO,
                 store().newSnapshotDeletion(),
                 store().newTagDeletion());
+    }
+
+    protected RowKindGenerator rowKindGenerator() {
+        return RowKindGenerator.create(schema(), store().options());
     }
 
     @Override
