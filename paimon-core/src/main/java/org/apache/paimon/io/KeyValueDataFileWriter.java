@@ -63,13 +63,13 @@ public class KeyValueDataFileWriter
     private final SimpleStatsConverter keyStatsConverter;
     private final SimpleStatsConverter valueStatsConverter;
     private final InternalRowSerializer keySerializer;
+    private final FileSource fileSource;
 
     private BinaryRow minKey = null;
     private InternalRow maxKey = null;
     private long minSeqNumber = Long.MAX_VALUE;
     private long maxSeqNumber = Long.MIN_VALUE;
     private long deleteRecordCount = 0;
-    private final boolean isCompact;
 
     public KeyValueDataFileWriter(
             FileIO fileIO,
@@ -83,7 +83,7 @@ public class KeyValueDataFileWriter
             int level,
             String compression,
             CoreOptions options,
-            boolean isCompact) {
+            FileSource fileSource) {
         super(
                 fileIO,
                 factory,
@@ -103,7 +103,7 @@ public class KeyValueDataFileWriter
         this.keyStatsConverter = new SimpleStatsConverter(keyType);
         this.valueStatsConverter = new SimpleStatsConverter(valueType);
         this.keySerializer = new InternalRowSerializer(keyType);
-        this.isCompact = isCompact;
+        this.fileSource = fileSource;
     }
 
     @Override
@@ -175,6 +175,6 @@ public class KeyValueDataFileWriter
                 deleteRecordCount,
                 // TODO: enable file filter for primary key table (e.g. deletion table).
                 null,
-                isCompact ? FileSource.COMPACT : FileSource.APPEND);
+                fileSource);
     }
 }

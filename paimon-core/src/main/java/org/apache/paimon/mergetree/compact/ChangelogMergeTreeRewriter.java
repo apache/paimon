@@ -26,6 +26,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.FileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.io.RollingFileWriter;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.SortedRun;
 import org.apache.paimon.utils.CloseableIterator;
@@ -129,7 +130,8 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
                             .toCloseableIterator();
             if (rewriteCompactFile) {
                 compactFileWriter =
-                        writerFactory.createRollingMergeTreeFileWriter(outputLevel, true);
+                        writerFactory.createRollingMergeTreeFileWriter(
+                                outputLevel, FileSource.COMPACT);
             }
             if (produceChangelog) {
                 changelogFileWriter = writerFactory.createRollingChangelogFileWriter(outputLevel);

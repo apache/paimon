@@ -33,6 +33,7 @@ import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.hash.HashLookupStoreFactory;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
@@ -286,7 +287,7 @@ public class LookupLevelsTest {
 
     private DataFileMeta newFile(int level, KeyValue... records) throws IOException {
         RollingFileWriter<KeyValue, DataFileMeta> writer =
-                createWriterFactory().createRollingMergeTreeFileWriter(level, false);
+                createWriterFactory().createRollingMergeTreeFileWriter(level, FileSource.APPEND);
         for (KeyValue kv : records) {
             writer.write(kv);
         }
