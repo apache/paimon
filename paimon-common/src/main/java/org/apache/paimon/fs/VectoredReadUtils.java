@@ -42,6 +42,10 @@ public class VectoredReadUtils {
 
     public static void readVectored(VectoredReadable readable, List<? extends FileRange> ranges)
             throws IOException {
+        if (ranges.isEmpty()) {
+            return;
+        }
+
         List<CombinedRange> combinedRanges =
                 mergeSortedRanges(validateAndSortRanges(ranges), readable.minSeekForVectorReads());
 
@@ -134,7 +138,6 @@ public class VectoredReadUtils {
 
     private static List<? extends FileRange> validateAndSortRanges(
             final List<? extends FileRange> input) throws EOFException {
-
         requireNonNull(input, "Null input list");
         checkArgument(!input.isEmpty(), "Empty input list");
         final List<? extends FileRange> sortedRanges;
