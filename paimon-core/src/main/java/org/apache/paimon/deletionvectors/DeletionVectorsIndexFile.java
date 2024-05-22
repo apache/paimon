@@ -31,7 +31,6 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -57,10 +56,6 @@ public class DeletionVectorsIndexFile extends IndexFile {
     public Map<String, DeletionVector> readAllDeletionVectors(IndexFileMeta fileMeta) {
         LinkedHashMap<String, Pair<Integer, Integer>> deletionVectorRanges =
                 fileMeta.deletionVectorsRanges();
-        if (deletionVectorRanges == null || deletionVectorRanges.isEmpty()) {
-            return Collections.emptyMap();
-        }
-
         String indexFileName = fileMeta.fileName();
         Map<String, DeletionVector> deletionVectors = new HashMap<>();
         Path filePath = pathFactory.toPath(indexFileName);
