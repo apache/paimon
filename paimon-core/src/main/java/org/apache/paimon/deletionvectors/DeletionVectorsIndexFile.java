@@ -36,6 +36,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.zip.CRC32;
 
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
+
 /** DeletionVectors index file. */
 public class DeletionVectorsIndexFile extends IndexFile {
 
@@ -56,6 +58,8 @@ public class DeletionVectorsIndexFile extends IndexFile {
     public Map<String, DeletionVector> readAllDeletionVectors(IndexFileMeta fileMeta) {
         LinkedHashMap<String, Pair<Integer, Integer>> deletionVectorRanges =
                 fileMeta.deletionVectorsRanges();
+        checkNotNull(deletionVectorRanges);
+
         String indexFileName = fileMeta.fileName();
         Map<String, DeletionVector> deletionVectors = new HashMap<>();
         Path filePath = pathFactory.toPath(indexFileName);

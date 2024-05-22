@@ -22,7 +22,6 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 
@@ -34,6 +33,7 @@ import java.util.Objects;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** IndexManifestFile Handler. */
 public class IndexManifestFileHandler {
@@ -53,7 +53,7 @@ public class IndexManifestFileHandler {
                         ? new ArrayList<>()
                         : indexManifestFile.read(previousIndexManifest);
         for (IndexManifestEntry entry : entries) {
-            Preconditions.checkArgument(entry.kind() == FileKind.ADD);
+            checkArgument(entry.kind() == FileKind.ADD);
         }
 
         Pair<List<IndexManifestEntry>, List<IndexManifestEntry>> previous =
@@ -129,13 +129,13 @@ public class IndexManifestFileHandler {
         }
     }
 
-    /** We combine the previous and new index files by {@link Identifier}. */
+    /** We combine the previous and new index files by {@link BucketIdentifier}. */
     static class CommonBucketCombiner implements IndexManifestFileCombiner {
 
         @Override
         public List<IndexManifestEntry> combine(
                 List<IndexManifestEntry> prevIndexFiles, List<IndexManifestEntry> newIndexFiles) {
-            Map<Identifier, IndexManifestEntry> indexEntries = new HashMap<>();
+            Map<BucketIdentifier, IndexManifestEntry> indexEntries = new HashMap<>();
             for (IndexManifestEntry entry : prevIndexFiles) {
                 indexEntries.put(identifier(entry), entry);
             }
@@ -151,15 +151,15 @@ public class IndexManifestFileHandler {
         }
     }
 
-    private static Identifier identifier(IndexManifestEntry indexManifestEntry) {
-        return new Identifier(
+    private static BucketIdentifier identifier(IndexManifestEntry indexManifestEntry) {
+        return new BucketIdentifier(
                 indexManifestEntry.partition(),
                 indexManifestEntry.bucket(),
                 indexManifestEntry.indexFile().indexType());
     }
 
-    /** The {@link Identifier} of a {@link IndexFileMeta}. */
-    public static class Identifier {
+    /** The {@link BucketIdentifier} of a {@link IndexFileMeta}. */
+    private static class BucketIdentifier {
 
         public final BinaryRow partition;
         public final int bucket;
@@ -167,7 +167,7 @@ public class IndexManifestFileHandler {
 
         private Integer hash;
 
-        private Identifier(BinaryRow partition, int bucket, String indexType) {
+        private BucketIdentifier(BinaryRow partition, int bucket, String indexType) {
             this.partition = partition;
             this.bucket = bucket;
             this.indexType = indexType;
@@ -181,7 +181,7 @@ public class IndexManifestFileHandler {
             if (o == null || getClass() != o.getClass()) {
                 return false;
             }
-            Identifier that = (Identifier) o;
+            BucketIdentifier that = (BucketIdentifier) o;
             return bucket == that.bucket
                     && Objects.equals(partition, that.partition)
                     && Objects.equals(indexType, that.indexType);
@@ -197,7 +197,7 @@ public class IndexManifestFileHandler {
 
         @Override
         public String toString() {
-            return "Identifier{"
+            return "BucketIdentifier{"
                     + "partition="
                     + partition
                     + ", bucket="
