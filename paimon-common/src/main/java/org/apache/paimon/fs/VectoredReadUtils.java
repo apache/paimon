@@ -49,15 +49,16 @@ public class VectoredReadUtils {
         List<CombinedRange> combinedRanges =
                 mergeSortedRanges(validateAndSortRanges(ranges), readable.minSeekForVectorReads());
 
+        int parallelism = readable.parallelismForVectorReads();
         BlockedDelegatingExecutor executor =
-                new BlockedDelegatingExecutor(IO_THREAD_POOL, readable.parallelismForVectorReads());
+                new BlockedDelegatingExecutor(IO_THREAD_POOL, parallelism);
         long batchSize = readable.batchSizeForVectorReads();
         for (CombinedRange combinedRange : combinedRanges) {
             if (combinedRange.getUnderlying().size() == 1) {
                 FileRange fileRange = combinedRange.getUnderlying().get(0);
                 executor.submit(() -> readSingleRange(readable, fileRange));
             } else {
-                List<FileRange> splitBatches = combinedRange.splitBatches(batchSize);
+                List<FileRange> splitBatches = combinedRange.splitBatches(batchSize, parallelism);
                 splitBatches.forEach(
                         range -> executor.submit(() -> readSingleRange(readable, range)));
                 List<CompletableFuture<byte[]>> futures =
@@ -202,10 +203,6 @@ public class VectoredReadUtils {
             return offset;
         }
 
-        public int getLength() {
-            return length;
-        }
-
         private void append(final FileRange range) {
             this.underlying.add(range);
             dataSize += range.getLength();
@@ -216,7 +213,7 @@ public class VectoredReadUtils {
         }
 
         public boolean merge(long otherOffset, long otherEnd, FileRange other, int minSeek) {
-            long end = this.getOffset() + this.getLength();
+            long end = this.getOffset() + length;
             long newEnd = Math.max(end, otherEnd);
             if (otherOffset - end >= minSeek) {
                 return false;
@@ -226,19 +223,25 @@ public class VectoredReadUtils {
             return true;
         }
 
-        private List<FileRange> splitBatches(long batchSize) {
+        private List<FileRange> splitBatches(long batchSize, int parallelism) {
+            long expectedSize = Math.max(batchSize, (length / parallelism) + 1);
             List<FileRange> splitBatches = new ArrayList<>();
             long offset = getOffset();
-            long end = offset + getLength();
+            long end = offset + length;
+
+            // split only when remain size exceeds twice the batchSize to avoid small File IO
+            long minRemain = Math.max(expectedSize, batchSize * 2);
+
             while (true) {
-                if (offset + batchSize * 2 > end) {
-                    // split only when remain size exceeds twice the batchSize to avoid small File
-                    // IO
-                    splitBatches.add(createFileRange(offset, (int) (end - offset)));
+                if (end < offset + minRemain) {
+                    int currentLen = (int) (end - offset);
+                    if (currentLen > 0) {
+                        splitBatches.add(createFileRange(offset, currentLen));
+                    }
                     break;
                 } else {
-                    splitBatches.add(createFileRange(offset, (int) batchSize));
-                    offset += batchSize;
+                    splitBatches.add(createFileRange(offset, (int) expectedSize));
+                    offset += expectedSize;
                 }
             }
             return splitBatches;
