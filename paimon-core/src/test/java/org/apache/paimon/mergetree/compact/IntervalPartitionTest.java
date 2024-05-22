@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.mergetree.SortedRun;
 import org.apache.paimon.stats.StatsTestUtils;
 
@@ -182,7 +183,8 @@ public class IntervalPartitionTest {
                 Collections.emptyList(),
                 Timestamp.fromEpochMillis(100000),
                 0L,
-                null);
+                null,
+                FileSource.APPEND);
     }
 
     private List<Map<SortedRun, Integer>> toMultiset(List<List<SortedRun>> sections) {

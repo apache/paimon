@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -187,6 +188,7 @@ public class AppendOnlyTableCompactionCoordinatorTest {
                 0,
                 0,
                 0L,
-                null);
+                null,
+                FileSource.APPEND);
     }
 }

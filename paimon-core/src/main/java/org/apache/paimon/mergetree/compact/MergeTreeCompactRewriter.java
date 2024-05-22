@@ -25,6 +25,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.FileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.io.RollingFileWriter;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.mergetree.DropDeleteReader;
 import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.MergeTreeReaders;
@@ -73,7 +74,7 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
     protected CompactResult rewriteCompaction(
             int outputLevel, boolean dropDelete, List<List<SortedRun>> sections) throws Exception {
         RollingFileWriter<KeyValue, DataFileMeta> writer =
-                writerFactory.createRollingMergeTreeFileWriter(outputLevel);
+                writerFactory.createRollingMergeTreeFileWriter(outputLevel, FileSource.COMPACT);
         RecordReader<KeyValue> reader =
                 readerForMergeTree(sections, new ReducerMergeFunctionWrapper(mfFactory.create()));
         if (dropDelete) {
