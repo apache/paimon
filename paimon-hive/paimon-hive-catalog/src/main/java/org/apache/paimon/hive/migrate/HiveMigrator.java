@@ -216,8 +216,13 @@ public class HiveMigrator implements Migrator {
 
     private void checkPrimaryKey() throws Exception {
         PrimaryKeysRequest primaryKeysRequest = new PrimaryKeysRequest(sourceDatabase, sourceTable);
-        if (!client.getPrimaryKeys(primaryKeysRequest).isEmpty()) {
-            throw new IllegalArgumentException("Can't migrate primary key table yet.");
+        try {
+            if (!client.getPrimaryKeys(primaryKeysRequest).isEmpty()) {
+                throw new IllegalArgumentException("Can't migrate primary key table yet.");
+            }
+        } catch (Exception e) {
+            LOG.warn(
+                    "Your Hive version is low which not support get_primary_keys, skip primary key check firstly!");
         }
     }
 
