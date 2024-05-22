@@ -84,7 +84,8 @@ public abstract class TableSorter {
         }
     }
 
-    enum OrderType {
+    /** The order type of table sort. */
+    public enum OrderType {
         ORDER("order"),
         ZORDER("zorder"),
         HILBERT("hilbert");
