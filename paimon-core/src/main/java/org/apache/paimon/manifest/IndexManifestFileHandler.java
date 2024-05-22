@@ -125,7 +125,7 @@ public class IndexManifestFileHandler {
         }
     }
 
-    /** We combine the previous and new index files by {@link IndexManifestEntry#identifier} */
+    /** We combine the previous and new index files by {@link IndexManifestEntry#identifier}. */
     static class CommonBucketCombiner implements IndexManifestFileCombiner {
 
         @Override
