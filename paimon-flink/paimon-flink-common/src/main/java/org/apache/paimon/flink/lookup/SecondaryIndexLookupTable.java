@@ -28,7 +28,6 @@ import org.apache.paimon.utils.TypeUtils;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 
 /** A {@link LookupTable} for primary key table which provides lookup by secondary key. */
@@ -74,40 +73,36 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
     }
 
     @Override
-    public void refresh(Iterator<InternalRow> incremental) throws IOException {
-        Predicate predicate = projectedPredicate();
-        while (incremental.hasNext()) {
-            InternalRow row = incremental.next();
-            primaryKeyRow.replaceRow(row);
+    protected void refreshRow(InternalRow row, Predicate predicate) throws IOException {
+        primaryKeyRow.replaceRow(row);
 
-            boolean previousFetched = false;
-            InternalRow previous = null;
-            if (userDefinedSeqComparator != null) {
+        boolean previousFetched = false;
+        InternalRow previous = null;
+        if (userDefinedSeqComparator != null) {
+            previous = tableState.get(primaryKeyRow);
+            previousFetched = true;
+            if (previous != null && userDefinedSeqComparator.compare(previous, row) > 0) {
+                return;
+            }
+        }
+
+        if (row.getRowKind() == RowKind.INSERT || row.getRowKind() == RowKind.UPDATE_AFTER) {
+            if (!previousFetched) {
                 previous = tableState.get(primaryKeyRow);
-                previousFetched = true;
-                if (previous != null && userDefinedSeqComparator.compare(previous, row) > 0) {
-                    continue;
-                }
+            }
+            if (previous != null) {
+                indexState.retract(secKeyRow.replaceRow(previous), primaryKeyRow);
             }
 
-            if (row.getRowKind() == RowKind.INSERT || row.getRowKind() == RowKind.UPDATE_AFTER) {
-                if (!previousFetched) {
-                    previous = tableState.get(primaryKeyRow);
-                }
-                if (previous != null) {
-                    indexState.retract(secKeyRow.replaceRow(previous), primaryKeyRow);
-                }
-
-                if (predicate == null || predicate.test(row)) {
-                    tableState.put(primaryKeyRow, row);
-                    indexState.add(secKeyRow.replaceRow(row), primaryKeyRow);
-                } else {
-                    tableState.delete(primaryKeyRow);
-                }
+            if (predicate == null || predicate.test(row)) {
+                tableState.put(primaryKeyRow, row);
+                indexState.add(secKeyRow.replaceRow(row), primaryKeyRow);
             } else {
                 tableState.delete(primaryKeyRow);
-                indexState.retract(secKeyRow.replaceRow(row), primaryKeyRow);
             }
+        } else {
+            tableState.delete(primaryKeyRow);
+            indexState.retract(secKeyRow.replaceRow(row), primaryKeyRow);
         }
     }
 
