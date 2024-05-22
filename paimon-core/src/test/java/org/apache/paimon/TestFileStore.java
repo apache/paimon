@@ -193,7 +193,7 @@ public class TestFileStore extends KeyValueFileStore {
         return new ExpireChangelogImpl(
                         snapshotManager(),
                         new TagManager(fileIO, options.path()),
-                        newSnapshotDeletion(),
+                        newChangelogDeletion(),
                         snapshotExpireCleanEmptyDirectories)
                 .retainMin(numRetainedMin)
                 .retainMax(numRetainedMax)

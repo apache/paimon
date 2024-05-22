@@ -28,6 +28,7 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.metastore.AddPartitionTagCallback;
 import org.apache.paimon.metastore.MetastoreClient;
+import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
@@ -198,6 +199,18 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     @Override
     public SnapshotDeletion newSnapshotDeletion() {
         return new SnapshotDeletion(
+                fileIO,
+                pathFactory(),
+                manifestFileFactory().create(),
+                manifestListFactory().create(),
+                newIndexFileHandler(),
+                newStatsFileHandler(),
+                options.changelogLifecycleDecoupled());
+    }
+
+    @Override
+    public ChangelogDeletion newChangelogDeletion() {
+        return new ChangelogDeletion(
                 fileIO,
                 pathFactory(),
                 manifestFileFactory().create(),

@@ -43,7 +43,7 @@ import java.util.Set;
 import java.util.function.Predicate;
 
 /** Delete tag files. */
-public class TagDeletion extends FileDeletionBase {
+public class TagDeletion extends FileDeletionBase<Snapshot> {
 
     private static final Logger LOG = LoggerFactory.getLogger(TagDeletion.class);
 

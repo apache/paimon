@@ -226,7 +226,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             }
 
             Snapshot snapshot = snapshotManager.snapshot(id);
-            snapshotDeletion.cleanUnusedManifests(snapshot, skippingSet, !changelogDecoupled);
+            snapshotDeletion.cleanUnusedManifests(snapshot, skippingSet);
             if (changelogDecoupled) {
                 commitChangelog(new Changelog(snapshot));
             }
