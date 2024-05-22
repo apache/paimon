@@ -22,7 +22,6 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.manifest.IndexManifestEntry;
 
 import javax.annotation.Nullable;
 
@@ -31,7 +30,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 
@@ -135,20 +133,6 @@ public class DeletionVectorsMaintainer {
                     snapshotId == null
                             ? Collections.emptyList()
                             : handler.scan(snapshotId, DELETION_VECTORS_INDEX, partition, bucket);
-            Map<String, DeletionVector> deletionVectors =
-                    new HashMap<>(handler.readAllDeletionVectors(indexFiles));
-            return createOrRestore(deletionVectors);
-        }
-
-        @VisibleForTesting
-        public DeletionVectorsMaintainer createOrRestore(
-                @Nullable Long snapshotId, BinaryRow partition) {
-            List<IndexFileMeta> indexFiles =
-                    snapshotId == null
-                            ? Collections.emptyList()
-                            : handler.scan(snapshotId, DELETION_VECTORS_INDEX, partition).stream()
-                                    .map(IndexManifestEntry::indexFile)
-                                    .collect(Collectors.toList());
             Map<String, DeletionVector> deletionVectors =
                     new HashMap<>(handler.readAllDeletionVectors(indexFiles));
             return createOrRestore(deletionVectors);

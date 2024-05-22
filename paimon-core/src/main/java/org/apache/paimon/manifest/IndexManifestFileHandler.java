@@ -33,7 +33,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 
-/** IndexManifestFile Handler */
+/** IndexManifestFile Handler. */
 public class IndexManifestFileHandler {
 
     private final IndexManifestFile indexManifestFile;

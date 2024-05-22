@@ -21,9 +21,12 @@ package org.apache.paimon.operation;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.TestFileStore;
 import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.deletionvectors.DeletionVector;
+import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.IndexFileHandler;
@@ -39,6 +42,8 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.ColStats;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.stats.StatsFileHandler;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
@@ -57,6 +62,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -841,6 +847,53 @@ public class FileStoreCommitTest {
         readStats = statsFileHandler.readStats();
         assertThat(readStats).isPresent();
         assertThat(readStats.get()).isEqualTo(fakeStats);
+    }
+
+    @Test
+    public void testDVIndexFiles() throws Exception {
+        TestAppendFileStore store =
+                TestAppendFileStore.createAppendStore(tempDir, Collections.emptyMap());
+
+        // commit 1
+        CommitMessage commitMessage1 =
+                store.writeDVIndexFiles(
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        Collections.singletonMap("f1", Arrays.asList(1, 3)));
+        CommitMessage commitMessage2 =
+                store.writeDVIndexFiles(
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        Collections.singletonMap("f2", Arrays.asList(2, 4)));
+        store.commit(commitMessage1, commitMessage2);
+
+        // assert 1
+        assertThat(store.scanDVIndexFiles(BinaryRow.EMPTY_ROW, 0).size()).isEqualTo(2);
+        DeletionVectorsMaintainer maintainer =
+                store.createOrRestoreDVMaintainer(BinaryRow.EMPTY_ROW, 0);
+        Map<String, DeletionVector> dvs = maintainer.deletionVectors();
+        assertThat(dvs.size()).isEqualTo(2);
+        assertThat(dvs.get("f2").isDeleted(2)).isTrue();
+        assertThat(dvs.get("f2").isDeleted(3)).isFalse();
+        assertThat(dvs.get("f2").isDeleted(4)).isTrue();
+
+        // commit 2
+        CommitMessage commitMessage3 =
+                store.writeDVIndexFiles(
+                        BinaryRow.EMPTY_ROW, 0, Collections.singletonMap("f2", Arrays.asList(3)));
+        CommitMessage commitMessage4 =
+                store.removeIndexFiles(
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        ((CommitMessageImpl) commitMessage1).indexIncrement().newIndexFiles());
+        store.commit(commitMessage3, commitMessage4);
+
+        // assert 2
+        assertThat(store.scanDVIndexFiles(BinaryRow.EMPTY_ROW, 0).size()).isEqualTo(2);
+        maintainer = store.createOrRestoreDVMaintainer(BinaryRow.EMPTY_ROW, 0);
+        dvs = maintainer.deletionVectors();
+        assertThat(dvs.size()).isEqualTo(2);
+        assertThat(dvs.get("f2").isDeleted(3)).isTrue();
     }
 
     private TestFileStore createStore(boolean failing) throws Exception {
