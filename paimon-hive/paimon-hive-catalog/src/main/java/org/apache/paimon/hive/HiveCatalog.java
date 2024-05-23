@@ -41,7 +41,9 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.TableType;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataField;
@@ -339,6 +341,22 @@ public class HiveCatalog extends AbstractCatalog {
                 && OUTPUT_FORMAT_CLASS_NAME.equals(table.getSd().getOutputFormat());
     }
 
+    @Override
+    public TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
+        if (!tableExists(identifier)) {
+            throw new TableNotExistException(identifier);
+        }
+        Path tableLocation = getDataTableLocation(identifier);
+        return getDataTableSchema(tableLocation);
+    }
+
+    private TableSchema getDataTableSchema(Path tableLocation) {
+        return new SchemaManager(fileIO, tableLocation)
+                .latest()
+                .orElseThrow(
+                        () -> new RuntimeException("There is no paimon table in " + tableLocation));
+    }
+
     private boolean usingExternalTable() {
         TableType tableType =
                 OptionsUtils.convertToEnum(
@@ -478,10 +496,8 @@ public class HiveCatalog extends AbstractCatalog {
 
     @Override
     public void repairDatabase(String databaseName) {
-        repairHmsDatabase(databaseName);
-
-        List<String> tables = listTables(databaseName, true);
-
+        Path databasePath = repairHmsDatabase(databaseName);
+        List<String> tables = listTablesImpl(databasePath);
         CompletableFuture<Void> allOf =
                 CompletableFuture.allOf(
                         tables.stream()
@@ -504,22 +520,16 @@ public class HiveCatalog extends AbstractCatalog {
         allOf.join();
     }
 
-    private void repairHmsDatabase(String databaseName) {
+    private Path repairHmsDatabase(String databaseName) {
         checkNotSystemDatabase(databaseName);
+        if (!databaseExistsImpl(databaseName)) {
+            createDatabaseImpl(databaseName, Collections.emptyMap());
+        }
+
         try {
             Database database = client.getDatabase(databaseName);
-            Path newPath = newDatabasePath(databaseName);
-            if (!locationHelper.getDatabaseLocation(database).equals(newPath.toUri().toString())) {
-                locationHelper.specifyDatabaseLocation(newPath, database);
-                client.alterDatabase(databaseName, database);
-            }
-        } catch (NoSuchObjectException e) {
-            try {
-                createDatabase(databaseName, true);
-            } catch (DatabaseAlreadyExistException e1) {
-                // ignore
-            }
-        } catch (TException e) {
+            return new Path(locationHelper.getDatabaseLocation(database));
+        } catch (Exception e) {
             throw new RuntimeException(
                     "Failed to determine if database "
                             + databaseName
@@ -533,10 +543,23 @@ public class HiveCatalog extends AbstractCatalog {
         checkNotSystemTable(identifier, "repairTable");
         validateIdentifierNameCaseInsensitive(identifier);
 
-        FileStoreTable paimonTable = getDataTable(identifier, true);
-        validateFieldNameCaseInsensitive(paimonTable.rowType().getFieldNames());
+        // Get paimon table from file system.
+        Path paimonTableLocation = getDataTableLocation(identifier);
+        TableSchema tableSchema = getDataTableSchema(paimonTableLocation);
+        validateFieldNameCaseInsensitive(tableSchema.fieldNames());
+        FileStoreTable paimonTable =
+                FileStoreTableFactory.create(
+                        fileIO,
+                        paimonTableLocation,
+                        tableSchema,
+                        new CatalogEnvironment(
+                                Lock.factory(
+                                        lockFactory().orElse(null),
+                                        lockContext().orElse(null),
+                                        identifier),
+                                super.metastoreClientFactory(identifier).orElse(null),
+                                lineageMetaFactory));
 
-        TableSchema tableSchema = paimonTable.schema();
         try {
             try {
                 Table table =

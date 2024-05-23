@@ -31,6 +31,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
@@ -314,6 +315,18 @@ public class JdbcCatalog extends AbstractCatalog {
         }
         SchemaManager schemaManager = getSchemaManager(identifier);
         schemaManager.commitChanges(changes);
+    }
+
+    @Override
+    protected TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
+        if (!tableExists(identifier)) {
+            throw new TableNotExistException(identifier);
+        }
+        Path tableLocation = getDataTableLocation(identifier);
+        return new SchemaManager(fileIO, tableLocation)
+                .latest()
+                .orElseThrow(
+                        () -> new RuntimeException("There is no paimon table in " + tableLocation));
     }
 
     @Override

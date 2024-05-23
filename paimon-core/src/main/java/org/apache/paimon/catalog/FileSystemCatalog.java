@@ -89,7 +89,7 @@ public class FileSystemCatalog extends AbstractCatalog {
 
     @Override
     protected List<String> listTablesImpl(String databaseName) {
-        return listTables(databaseName, true);
+        return listTablesImpl(newDatabasePath(databaseName));
     }
 
     @Override

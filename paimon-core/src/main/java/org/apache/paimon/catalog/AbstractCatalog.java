@@ -25,7 +25,6 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.lineage.LineageMetaFactory;
-import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
@@ -218,17 +217,12 @@ public abstract class AbstractCatalog implements Catalog {
             throw new DatabaseNotExistException(databaseName);
         }
 
-        return listTables(databaseName, false).stream().sorted().collect(Collectors.toList());
+        return listTablesImpl(databaseName).stream().sorted().collect(Collectors.toList());
     }
 
-    protected List<String> listTables(String databaseName, boolean ignoreMetastore) {
-        if (!ignoreMetastore) {
-            return listTablesImpl(databaseName);
-        }
-
+    protected List<String> listTablesImpl(Path databasePath) {
         List<String> tables = new ArrayList<>();
-        for (FileStatus status :
-                uncheck(() -> fileIO.listDirectories(newDatabasePath(databaseName)))) {
+        for (FileStatus status : uncheck(() -> fileIO.listDirectories(databasePath))) {
             if (status.isDir() && tableExists(status.getPath())) {
                 tables.add(status.getPath().getName());
             }
@@ -369,15 +363,8 @@ public abstract class AbstractCatalog implements Catalog {
         }
     }
 
-    protected FileStoreTable getDataTable(Identifier identifier) throws TableNotExistException {
-        return getDataTable(identifier, false);
-    }
-
-    protected FileStoreTable getDataTable(Identifier identifier, boolean ignoreIfMetastoreNotExists)
-            throws TableNotExistException {
-        TableSchema tableSchema = getDataTableSchema(identifier, ignoreIfMetastoreNotExists);
-        MetastoreClient.Factory metastoreClientFactory =
-                ignoreIfMetastoreNotExists ? null : metastoreClientFactory(identifier).orElse(null);
+    private FileStoreTable getDataTable(Identifier identifier) throws TableNotExistException {
+        TableSchema tableSchema = getDataTableSchema(identifier);
         return FileStoreTableFactory.create(
                 fileIO,
                 getDataTableLocation(identifier),
@@ -385,7 +372,7 @@ public abstract class AbstractCatalog implements Catalog {
                 new CatalogEnvironment(
                         Lock.factory(
                                 lockFactory().orElse(null), lockContext().orElse(null), identifier),
-                        metastoreClientFactory,
+                        metastoreClientFactory(identifier).orElse(null),
                         lineageMetaFactory));
     }
 
@@ -416,22 +403,8 @@ public abstract class AbstractCatalog implements Catalog {
         }
     }
 
-    protected TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
-        return getDataTableSchema(identifier, false);
-    }
-
-    protected TableSchema getDataTableSchema(
-            Identifier identifier, boolean ignoreIfMetastoreNotExists)
-            throws TableNotExistException {
-        if (!ignoreIfMetastoreNotExists && !tableExists(identifier)) {
-            throw new TableNotExistException(identifier);
-        }
-        Path tableLocation = getDataTableLocation(identifier);
-        return new SchemaManager(fileIO, tableLocation)
-                .latest()
-                .orElseThrow(
-                        () -> new RuntimeException("There is no paimon table in " + tableLocation));
-    }
+    protected abstract TableSchema getDataTableSchema(Identifier identifier)
+            throws TableNotExistException;
 
     @VisibleForTesting
     public Path getDataTableLocation(Identifier identifier) {
@@ -489,6 +462,7 @@ public abstract class AbstractCatalog implements Catalog {
         return SYSTEM_DATABASE_NAME.equals(database);
     }
 
+    /** Validate database cannot be a system database. */
     protected void checkNotSystemDatabase(String database) {
         if (isSystemDatabase(database)) {
             throw new ProcessSystemDatabaseException();
