@@ -1156,7 +1156,8 @@ public class CoreOptions implements Serializable {
             key(FIELDS_PREFIX + "." + DEFAULT_AGG_FUNCTION)
                     .stringType()
                     .noDefaultValue()
-                    .withDescription("Default aggregate function of all fields for partial-update");
+                    .withDescription(
+                            "Default aggregate function of all fields for partial-update and aggregate merge function");
 
     private final Options options;
 
