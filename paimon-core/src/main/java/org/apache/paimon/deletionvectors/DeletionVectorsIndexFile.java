@@ -33,6 +33,7 @@ import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.zip.CRC32;
 
@@ -79,6 +80,29 @@ public class DeletionVectorsIndexFile extends IndexFile {
                             + ", deletionVectorRanges: "
                             + deletionVectorRanges,
                     e);
+        }
+        return deletionVectors;
+    }
+
+    /** Reads deletion vectors from a list of DeletionFile which belong to a same index file. */
+    public Map<String, DeletionVector> readDeletionVector(List<DeletionFileWithDataFile> ddFiles) {
+        Map<String, DeletionVector> deletionVectors = new HashMap<>();
+        if (ddFiles.isEmpty()) {
+            return deletionVectors;
+        }
+
+        String indexFile = ddFiles.get(0).deletionFile().path();
+        try (SeekableInputStream inputStream = fileIO.newInputStream(new Path(indexFile))) {
+            checkVersion(inputStream);
+            for (DeletionFileWithDataFile ddFile : ddFiles) {
+                inputStream.seek(ddFile.deletionFile().offset());
+                DataInputStream dataInputStream = new DataInputStream(inputStream);
+                deletionVectors.put(
+                        ddFile.dataFile(),
+                        readDeletionVector(dataInputStream, (int) ddFile.deletionFile().length()));
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Unable to read deletion vector from file: " + indexFile, e);
         }
         return deletionVectors;
     }

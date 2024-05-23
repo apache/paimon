@@ -65,6 +65,18 @@ public class IndexFileHandler {
         this.deletionVectorsIndex = deletionVectorsIndex;
     }
 
+    public DeletionVectorsIndexFile deletionVectorsIndex() {
+        return this.deletionVectorsIndex;
+    }
+
+    public List<IndexManifestEntry> scan() {
+        Snapshot snapshot = snapshotManager.latestSnapshot();
+        if (snapshot == null || snapshot.indexManifest() == null) {
+            return Collections.emptyList();
+        }
+        return indexManifestFile.read(snapshot.indexManifest());
+    }
+
     public Optional<IndexFileMeta> scanHashIndex(long snapshotId, BinaryRow partition, int bucket) {
         List<IndexFileMeta> result = scan(snapshotId, HASH_INDEX, partition, bucket);
         if (result.size() > 1) {
