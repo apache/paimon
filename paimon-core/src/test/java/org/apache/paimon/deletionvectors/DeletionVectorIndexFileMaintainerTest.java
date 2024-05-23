@@ -40,6 +40,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/** Test for DeletionVectorIndexFileMaintainer. */
 public class DeletionVectorIndexFileMaintainerTest {
 
     @TempDir java.nio.file.Path tempDir;
