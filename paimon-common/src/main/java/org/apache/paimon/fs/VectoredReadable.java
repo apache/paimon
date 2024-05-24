@@ -54,7 +54,7 @@ public interface VectoredReadable {
 
     /** The smallest reasonable seek. */
     default int minSeekForVectorReads() {
-        return 4 * 1024;
+        return 256 * 1024;
     }
 
     /** The batch size of data read by a single parallelism. */

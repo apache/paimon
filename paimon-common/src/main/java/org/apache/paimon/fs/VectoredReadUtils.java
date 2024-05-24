@@ -18,7 +18,7 @@
 
 package org.apache.paimon.fs;
 
-import org.apache.paimon.utils.BlockedDelegatingExecutor;
+import org.apache.paimon.utils.BlockingExecutor;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -50,12 +50,11 @@ public class VectoredReadUtils {
                 mergeSortedRanges(validateAndSortRanges(ranges), readable.minSeekForVectorReads());
 
         int parallelism = readable.parallelismForVectorReads();
-        BlockedDelegatingExecutor executor =
-                new BlockedDelegatingExecutor(IO_THREAD_POOL, parallelism);
+        BlockingExecutor executor = new BlockingExecutor(IO_THREAD_POOL, parallelism);
         long batchSize = readable.batchSizeForVectorReads();
         for (CombinedRange combinedRange : combinedRanges) {
-            if (combinedRange.getUnderlying().size() == 1) {
-                FileRange fileRange = combinedRange.getUnderlying().get(0);
+            if (combinedRange.underlying.size() == 1) {
+                FileRange fileRange = combinedRange.underlying.get(0);
                 executor.submit(() -> readSingleRange(readable, fileRange));
             } else {
                 List<FileRange> splitBatches = combinedRange.splitBatches(batchSize, parallelism);
@@ -92,7 +91,7 @@ public class VectoredReadUtils {
         for (CompletableFuture<byte[]> future : futures) {
             segments.add(future.join());
         }
-        long offset = combinedRange.getOffset();
+        long offset = combinedRange.offset;
         for (FileRange fileRange : combinedRange.underlying) {
             byte[] buffer = new byte[fileRange.getLength()];
             copyMultiBytesToBytes(
@@ -199,26 +198,18 @@ public class VectoredReadUtils {
             append(original);
         }
 
-        public long getOffset() {
-            return offset;
-        }
-
         private void append(final FileRange range) {
             this.underlying.add(range);
             dataSize += range.getLength();
         }
 
-        public List<FileRange> getUnderlying() {
-            return underlying;
-        }
-
         public boolean merge(long otherOffset, long otherEnd, FileRange other, int minSeek) {
-            long end = this.getOffset() + length;
+            long end = offset + length;
             long newEnd = Math.max(end, otherEnd);
             if (otherOffset - end >= minSeek) {
                 return false;
             }
-            this.length = (int) (newEnd - this.getOffset());
+            this.length = (int) (newEnd - offset);
             append(other);
             return true;
         }
@@ -226,7 +217,7 @@ public class VectoredReadUtils {
         private List<FileRange> splitBatches(long batchSize, int parallelism) {
             long expectedSize = Math.max(batchSize, (length / parallelism) + 1);
             List<FileRange> splitBatches = new ArrayList<>();
-            long offset = getOffset();
+            long offset = this.offset;
             long end = offset + length;
 
             // split only when remain size exceeds twice the batchSize to avoid small File IO
