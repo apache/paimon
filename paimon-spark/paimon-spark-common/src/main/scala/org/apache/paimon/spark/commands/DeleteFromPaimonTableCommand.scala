@@ -20,7 +20,6 @@ package org.apache.paimon.spark.commands
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.CoreOptions.MergeEngine
-import org.apache.paimon.spark.{InsertInto, SparkTable}
 import org.apache.paimon.spark.PaimonSplitScan
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
@@ -28,6 +27,7 @@ import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.schema.SparkSystemColumns.ROW_KIND_COL
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage}
+import org.apache.paimon.table.source.DeletionFile
 import org.apache.paimon.types.RowKind
 import org.apache.paimon.utils.RowDataPartitionComputer
 
@@ -42,6 +42,7 @@ import org.apache.spark.sql.functions.lit
 import java.util.UUID
 
 import scala.collection.JavaConverters._
+import scala.collection.mutable
 
 case class DeleteFromPaimonTableCommand(
     relation: DataSourceV2Relation,
@@ -100,7 +101,7 @@ case class DeleteFromPaimonTableCommand(
         val commitMessages = if (usePrimaryKeyDelete()) {
           performPrimaryKeyDelete(sparkSession)
         } else {
-          performDeleteCopyOnWrite(sparkSession)
+          performNonPrimaryKeyDelete(sparkSession)
         }
         writer.commit(commitMessages)
       }
@@ -119,39 +120,101 @@ case class DeleteFromPaimonTableCommand(
     writer.write(df)
   }
 
-  def performDeleteCopyOnWrite(sparkSession: SparkSession): Seq[CommitMessage] = {
+  def performNonPrimaryKeyDelete(sparkSession: SparkSession): Seq[CommitMessage] = {
+    import sparkSession.implicits._
+
+    val pathFactory = table.store().pathFactory()
     // Step1: the candidate data splits which are filtered by Paimon Predicate.
     val candidateDataSplits = findCandidateDataSplits(condition, relation.output)
     val fileNameToMeta = candidateFileMap(candidateDataSplits)
 
-    // Step2: extract out the exactly files, which must have at least one record to be updated.
-    val touchedFilePaths = findTouchedFiles(candidateDataSplits, condition, relation, sparkSession)
+    val deletionVectorsEnabled = new CoreOptions(table.options()).deletionVectorsEnabled()
+    if (deletionVectorsEnabled) {
+      // Step2: collect all the deletion vectors that marks the deleted rows.
+      val dataFileToDeletionFiles = mutable.Map.empty[String, DeletionFile]
+      val dataFileToSparkDeletionFiles = mutable.Map.empty[String, SparkDeletionFile]
+      fileNameToMeta.foreach {
+        case (relativePath, sdf) =>
+          dataFileToSparkDeletionFiles.put(
+            relativePath,
+            SparkDeletionFile(sdf.partition, sdf.bucket, sdf.deletionFile))
+          sdf.deletionFile match {
+            case Some(deletionFile) =>
+              dataFileToDeletionFiles += ((relativePath, deletionFile))
+            case None => None
+          }
+      }
 
-    // Step3: the smallest range of data files that need to be rewritten.
-    val touchedFiles = touchedFilePaths.map {
-      file => fileNameToMeta.getOrElse(file, throw new RuntimeException(s"Missing file: $file"))
-    }
-
-    // Step4: build a dataframe that contains the unchanged data, and write out them.
-    val touchedDataSplits = SparkDataFileMeta.convertToDataSplits(
-      touchedFiles,
-      rawConvertible = true,
-      table.store().pathFactory())
-    val toRewriteScanRelation = Filter(
-      Not(condition),
-      Compatibility.createDataSourceV2ScanRelation(
+      val dvIndexFileMaintainer =
+        table
+          .store()
+          .newIndexFileHandler()
+          .createDVIndexFileMaintainer(dataFileToDeletionFiles.asJava)
+      val deletionVectors = collectDeletionVectors(
+        candidateDataSplits,
+        dataFileToSparkDeletionFiles.toMap,
+        condition,
         relation,
-        PaimonSplitScan(table, touchedDataSplits),
-        relation.output))
-    val data = createDataset(sparkSession, toRewriteScanRelation)
+        sparkSession)
 
-    // only write new files, should have no compaction
-    val addCommitMessage = writer.writeOnly().write(data)
+      try {
+        deletionVectors.cache()
+        val touchedDeletionFiles = deletionVectors
+          .collect()
+          .flatMap {
+            sdv =>
+              val relativePath = sdv.relativePath(pathFactory)
+              dataFileToSparkDeletionFiles(relativePath).deletionFile.map((relativePath, _))
+          }
+          .toMap
+        dvIndexFileMaintainer.notifyDeletionFiles(touchedDeletionFiles.asJava)
 
-    // Step5: convert the deleted files that need to be wrote to commit message.
-    val deletedCommitMessage = buildDeletedCommitMessage(touchedFiles)
+        if (coreOptions.bucket() == -1) {
+          // bucket == -1
+          val indexEntries = dvIndexFileMaintainer.writeUnchangedDeletionVector().asScala
+          val rewriteIndexCommitMsg = writer.buildCommitMessageFromIndexManifestEntry(indexEntries)
 
-    addCommitMessage ++ deletedCommitMessage
+          // Step3: write these deletion vectors.
+          val newIndexCommitMsg = writer.persistDeletionVectors(deletionVectors)
+
+          rewriteIndexCommitMsg ++ newIndexCommitMsg
+        } else {
+          // bucket != -1
+          writer.persistDeletionVectors0(deletionVectors)
+        }
+      } finally {
+        deletionVectors.unpersist()
+      }
+
+    } else {
+      // Step2: extract out the exactly files, which must have at least one record to be updated.
+      val touchedFilePaths =
+        findTouchedFiles(candidateDataSplits, condition, relation, sparkSession)
+
+      // Step3: the smallest range of data files that need to be rewritten.
+      val touchedFiles = touchedFilePaths.map {
+        file => fileNameToMeta.getOrElse(file, throw new RuntimeException(s"Missing file: $file"))
+      }
+
+      // Step4: build a dataframe that contains the unchanged data, and write out them.
+      val touchedDataSplits =
+        SparkDataFileMeta.convertToDataSplits(touchedFiles, rawConvertible = true, pathFactory)
+      val toRewriteScanRelation = Filter(
+        Not(condition),
+        Compatibility.createDataSourceV2ScanRelation(
+          relation,
+          PaimonSplitScan(table, touchedDataSplits),
+          relation.output))
+      val data = createDataset(sparkSession, toRewriteScanRelation)
+
+      // only write new files, should have no compaction
+      val addCommitMessage = writer.writeOnly().write(data)
+
+      // Step5: convert the deleted files that need to be wrote to commit message.
+      val deletedCommitMessage = buildDeletedCommitMessage(touchedFiles)
+
+      addCommitMessage ++ deletedCommitMessage
+    }
   }
 
 }

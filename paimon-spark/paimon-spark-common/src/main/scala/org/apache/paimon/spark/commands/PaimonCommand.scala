@@ -18,23 +18,26 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.deletionvectors.{BitmapDeletionVector, DeletionVector}
+import org.apache.paimon.fs.Path
 import org.apache.paimon.index.IndexFileMeta
 import org.apache.paimon.io.{CompactIncrement, DataFileMeta, DataIncrement, IndexIncrement}
 import org.apache.paimon.spark.{PaimonSplitScan, SparkFilterConverter}
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.commands.SparkDataFileMeta.convertToSparkDataFileMeta
+import org.apache.paimon.spark.schema.PaimonMetadataColumn._
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.types.RowType
-import org.apache.paimon.utils.Preconditions
+import org.apache.paimon.utils.SerializationUtils
 
+import org.apache.spark.sql.{Dataset, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
-import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
-import org.apache.spark.sql.catalyst.plans.logical.{Filter => FilterLogicalNode}
-import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2ScanRelation}
+import org.apache.spark.sql.catalyst.plans.logical.{Filter => FilterLogicalNode, Project}
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.input_file_name
 import org.apache.spark.sql.sources.{AlwaysTrue, And, EqualNullSafe, Filter}
 
@@ -135,6 +138,59 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
       .map(relativePath)
   }
 
+  protected def collectDeletionVectors(
+      candidateDataSplits: Seq[DataSplit],
+      dataFileToDeletionFile: Map[String, SparkDeletionFile],
+      condition: Expression,
+      relation: DataSourceV2Relation,
+      sparkSession: SparkSession): Dataset[SparkDeletionVector] = {
+    import sparkSession.implicits._
+
+    val dataFileAndDeletionFile = dataFileToDeletionFile.toArray
+    val metadataCols = Seq(FILE_PATH, ROW_INDEX)
+    val metadataProj = metadataCols.map(_.toAttribute)
+    val scan = PaimonSplitScan(table, candidateDataSplits.toArray, metadataCols)
+    val filteredRelation = {
+      Project(
+        metadataProj,
+        FilterLogicalNode(
+          condition,
+          Compatibility.createDataSourceV2ScanRelation(
+            relation,
+            scan,
+            relation.output ++ metadataProj)))
+    }
+
+    val fileIO = table.fileIO()
+    val location = table.location
+    createDataset(sparkSession, filteredRelation)
+      .select(FILE_PATH_COLUMN, ROW_INDEX_COLUMN)
+      .as[(String, Long)]
+      .groupByKey(_._1)
+      .mapGroups {
+        case (filePath, iter) =>
+          val fileNameToDeletionFile = dataFileAndDeletionFile.toMap
+          val dv = new BitmapDeletionVector()
+          while (iter.hasNext) {
+            dv.delete(iter.next()._2)
+          }
+          val locationURI = location.toUri
+          val relativeFilePath = locationURI.relativize(new URI(filePath)).toString
+          val deletionFile = fileNameToDeletionFile(relativeFilePath)
+          deletionFile.deletionFile match {
+            case Some(deletionFile) =>
+              dv.merge(DeletionVector.read(fileIO, deletionFile))
+            case None =>
+          }
+          SparkDeletionVector(
+            SerializationUtils.serializeBinaryRow(deletionFile.partition),
+            deletionFile.bucket,
+            new Path(filePath).getName,
+            dv.serializeToBytes())
+      }
+  }
+
+  /** Notice that, the key is a relative path, not just the file name. */
   protected def candidateFileMap(
       candidateDataSplits: Seq[DataSplit]): Map[String, SparkDataFileMeta] = {
     val totalBuckets = table.coreOptions().bucket()

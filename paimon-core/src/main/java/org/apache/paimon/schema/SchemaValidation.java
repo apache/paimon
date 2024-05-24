@@ -183,7 +183,7 @@ public class SchemaValidation {
                                         field));
 
         if (options.deletionVectorsEnabled()) {
-            validateForDeletionVectors(schema, options);
+            validateForDeletionVectors(options);
         }
     }
 
@@ -459,11 +459,7 @@ public class SchemaValidation {
         }
     }
 
-    private static void validateForDeletionVectors(TableSchema schema, CoreOptions options) {
-        checkArgument(
-                !schema.primaryKeys().isEmpty(),
-                "Deletion vectors mode is only supported for tables with primary keys.");
-
+    private static void validateForDeletionVectors(CoreOptions options) {
         checkArgument(
                 options.changelogProducer() == ChangelogProducer.NONE
                         || options.changelogProducer() == ChangelogProducer.LOOKUP,
