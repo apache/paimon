@@ -19,6 +19,7 @@
 package org.apache.paimon;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.deletionvectors.DeletionVectorIndexFileMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
@@ -39,6 +40,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.TraceableFileIO;
 
@@ -117,6 +119,11 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
         return fileHandler.scan(lastSnapshotId, DELETION_VECTORS_INDEX, partition, bucket);
     }
 
+    public DeletionVectorIndexFileMaintainer createDVIFMaintainer(
+            Map<String, DeletionFile> dataFileToDeletionFiles) {
+        return new DeletionVectorIndexFileMaintainer(fileHandler, dataFileToDeletionFiles);
+    }
+
     public DeletionVectorsMaintainer createOrRestoreDVMaintainer(BinaryRow partition, int bucket) {
         Long lastSnapshotId = snapshotManager().latestSnapshotId();
         DeletionVectorsMaintainer.Factory factory =
@@ -124,7 +131,7 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
         return factory.createOrRestore(lastSnapshotId, partition, bucket);
     }
 
-    public CommitMessage writeDVIndexFiles(
+    public CommitMessageImpl writeDVIndexFiles(
             BinaryRow partition, int bucket, Map<String, List<Integer>> dataFileToPositions) {
         DeletionVectorsMaintainer dvMaintainer = createOrRestoreDVMaintainer(partition, bucket);
         for (Map.Entry<String, List<Integer>> entry : dataFileToPositions.entrySet()) {
