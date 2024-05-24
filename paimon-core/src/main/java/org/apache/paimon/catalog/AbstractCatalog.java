@@ -42,6 +42,7 @@ import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -50,7 +51,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
@@ -125,17 +125,6 @@ public abstract class AbstractCatalog implements Catalog {
 
     protected boolean lockEnabled() {
         return catalogOptions.get(LOCK_ENABLED);
-    }
-
-    protected List<String> listDatabases(Path warehouse) {
-        List<String> databases = new ArrayList<>();
-        for (FileStatus status : uncheck(() -> fileIO.listDirectories(warehouse))) {
-            Path path = status.getPath();
-            if (status.isDir() && isDatabase(path)) {
-                databases.add(database(path));
-            }
-        }
-        return databases;
     }
 
     @Override
@@ -220,21 +209,7 @@ public abstract class AbstractCatalog implements Catalog {
         return listTablesImpl(databaseName).stream().sorted().collect(Collectors.toList());
     }
 
-    protected List<String> listTablesImpl(Path databasePath) {
-        List<String> tables = new ArrayList<>();
-        for (FileStatus status : uncheck(() -> fileIO.listDirectories(databasePath))) {
-            if (status.isDir() && tableExists(status.getPath())) {
-                tables.add(status.getPath().getName());
-            }
-        }
-        return tables;
-    }
-
     protected abstract List<String> listTablesImpl(String databaseName);
-
-    protected boolean tableExists(Path tablePath) {
-        return !new SchemaManager(fileIO, tablePath).listAllIds().isEmpty();
-    }
 
     @Override
     public void dropTable(Identifier identifier, boolean ignoreIfNotExists)
@@ -525,20 +500,35 @@ public abstract class AbstractCatalog implements Catalog {
                         CoreOptions.AUTO_CREATE.key(), Boolean.FALSE));
     }
 
-    private static boolean isDatabase(Path path) {
-        return path.getName().endsWith(DB_SUFFIX);
-    }
+    // =============================== Meta in File System =====================================
 
-    private static String database(Path path) {
-        String name = path.getName();
-        return name.substring(0, name.length() - DB_SUFFIX.length());
-    }
-
-    protected static <T> T uncheck(Callable<T> callable) {
-        try {
-            return callable.call();
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+    protected List<String> listDatabasesInFileSystem(Path warehouse) throws IOException {
+        List<String> databases = new ArrayList<>();
+        for (FileStatus status : fileIO.listDirectories(warehouse)) {
+            Path path = status.getPath();
+            if (status.isDir() && path.getName().endsWith(DB_SUFFIX)) {
+                String fileName = path.getName();
+                databases.add(fileName.substring(0, fileName.length() - DB_SUFFIX.length()));
+            }
         }
+        return databases;
+    }
+
+    protected List<String> listTablesInFileSystem(Path databasePath) throws IOException {
+        List<String> tables = new ArrayList<>();
+        for (FileStatus status : fileIO.listDirectories(databasePath)) {
+            if (status.isDir() && tableExistsInFileSystem(status.getPath())) {
+                tables.add(status.getPath().getName());
+            }
+        }
+        return tables;
+    }
+
+    protected boolean tableExistsInFileSystem(Path tablePath) {
+        return !new SchemaManager(fileIO, tablePath).listAllIds().isEmpty();
+    }
+
+    public Optional<TableSchema> tableSchemaInFileSystem(Path tablePath) {
+        return new SchemaManager(fileIO, tablePath).latest();
     }
 }

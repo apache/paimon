@@ -33,6 +33,7 @@ import org.slf4j.LoggerFactory;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
 
 import static org.apache.paimon.catalog.FileSystemCatalogOptions.CASE_SENSITIVE;
 
@@ -55,7 +56,7 @@ public class FileSystemCatalog extends AbstractCatalog {
 
     @Override
     public List<String> listDatabases() {
-        return listDatabases(warehouse);
+        return uncheck(() -> listDatabasesInFileSystem(warehouse));
     }
 
     @Override
@@ -89,7 +90,7 @@ public class FileSystemCatalog extends AbstractCatalog {
 
     @Override
     protected List<String> listTablesImpl(String databaseName) {
-        return listTablesImpl(newDatabasePath(databaseName));
+        return uncheck(() -> listTablesInFileSystem(newDatabasePath(databaseName)));
     }
 
     @Override
@@ -98,7 +99,7 @@ public class FileSystemCatalog extends AbstractCatalog {
             return super.tableExists(identifier);
         }
 
-        return tableExists(getDataTableLocation(identifier));
+        return tableExistsInFileSystem(getDataTableLocation(identifier));
     }
 
     @Override
@@ -147,6 +148,14 @@ public class FileSystemCatalog extends AbstractCatalog {
     protected void alterTableImpl(Identifier identifier, List<SchemaChange> changes)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
         schemaManager(identifier).commitChanges(changes);
+    }
+
+    protected static <T> T uncheck(Callable<T> callable) {
+        try {
+            return callable.call();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
