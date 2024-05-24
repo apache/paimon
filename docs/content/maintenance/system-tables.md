@@ -30,7 +30,7 @@ under the License.
 
 Table specified system tables contain metadata and information about each table, such as the snapshots created and the options in use. Users can access system tables with batch queries.
 
-Currently, Flink, Spark and Trino supports querying system tables.
+Currently, Flink, Spark, Trino and StarRocks support querying system tables.
 
 In some cases, the table name needs to be enclosed with back quotes to avoid syntax parsing conflicts, for example triple access mode:
 ```sql
