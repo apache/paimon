@@ -58,11 +58,24 @@ SELECT * FROM paimon_catalog.test_db.test_tbl;
 
 ## Query System Tables
 
-You can also access Paimon system table using StarRocks. For example, you can read the `ro` (read-optimized) 
-system table to improve reading performance of primary-key tables.
+You can access all kinds of Paimon system tables by StarRocks. For example, you can read the `ro` 
+(read-optimized) system table to improve reading performance of primary-key tables.
 
 ```sql
 SELECT * FROM paimon_catalog.test_db.test_tbl$ro;
+```
+
+For another example, you can query partition files of the table using the following SQL:
+
+```sql
+SELECT * FROM paimon_catalog.test_db.partition_tbl$partitions;
+/*
++-----------+--------------+--------------------+------------+----------------------------+
+| partition | record_count | file_size_in_bytes | file_count | last_update_time           |
++-----------+--------------+--------------------+------------+----------------------------+
+| [1]       |            1 |                645 |          1 | 2024-01-01 00:00:00.000000 |
++-----------+--------------+--------------------+------------+----------------------------+
+*/
 ```
 
 ## StarRocks to Paimon type mapping
