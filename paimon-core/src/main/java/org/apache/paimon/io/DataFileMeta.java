@@ -376,6 +376,26 @@ public class DataFileMeta {
                 fileSource);
     }
 
+    public DataFileMeta copy(byte[] newEmbeddedIndex) {
+        return new DataFileMeta(
+                fileName,
+                fileSize,
+                rowCount,
+                minKey,
+                maxKey,
+                keyStats,
+                valueStats,
+                minSequenceNumber,
+                maxSequenceNumber,
+                schemaId,
+                level,
+                extraFiles,
+                creationTime,
+                deleteRowCount,
+                newEmbeddedIndex,
+                fileSource);
+    }
+
     @Override
     public boolean equals(Object o) {
         if (o == this) {

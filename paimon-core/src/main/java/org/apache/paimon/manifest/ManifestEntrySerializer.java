@@ -23,8 +23,13 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
+import org.apache.paimon.io.DataInputViewStreamWrapper;
+import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.utils.VersionedObjectSerializer;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.util.function.Function;
 
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
@@ -75,6 +80,19 @@ public class ManifestEntrySerializer extends VersionedObjectSerializer<ManifestE
                 row.getInt(2),
                 row.getInt(3),
                 dataFileMetaSerializer.fromRow(row.getRow(4, dataFileMetaSerializer.numFields())));
+    }
+
+    public byte[] serializeToBytes(ManifestEntry manifestEntry) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(out);
+        serialize(manifestEntry, view);
+        return out.toByteArray();
+    }
+
+    public ManifestEntry deserializeFromBytes(byte[] bytes) throws IOException {
+        ByteArrayInputStream in = new ByteArrayInputStream(bytes);
+        DataInputViewStreamWrapper view = new DataInputViewStreamWrapper(in);
+        return deserialize(view);
     }
 
     public static Function<InternalRow, BinaryRow> partitionGetter() {
