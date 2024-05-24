@@ -136,6 +136,34 @@ INSERT INTO t VALUES (1, CAST(NULL AS INT), CAST(NULL AS INT), 2, 2);
 SELECT * FROM t; -- output 1, 2, 1, 2, 3
 ```
 
+You can specify a default aggregation function for all the input fields with `fields.default-aggregate-function`, see example:
+
+```sql
+CREATE TABLE t (
+          k INT,
+          a INT,
+          b INT,
+          c INT,
+          d INT,
+          PRIMARY KEY (k) NOT ENFORCED
+) WITH (
+     'merge-engine'='partial-update',
+     'fields.a.sequence-group' = 'b',
+     'fields.c.sequence-group' = 'd',
+     'fields.default-aggregate-function' = 'last_non_null_value',
+     'fields.d.aggregate-function' = 'sum'
+ );
+
+INSERT INTO t VALUES (1, 1, 1, CAST(NULL AS INT), CAST(NULL AS INT));
+INSERT INTO t VALUES (1, CAST(NULL AS INT), CAST(NULL AS INT), 1, 1);
+INSERT INTO t VALUES (1, 2, 2, CAST(NULL AS INT), CAST(NULL AS INT));
+INSERT INTO t VALUES (1, CAST(NULL AS INT), CAST(NULL AS INT), 2, 2);
+
+
+SELECT * FROM t; -- output 1, 2, 2, 2, 3
+
+```
+
 ## Aggregation
 
 {{< hint info >}}
