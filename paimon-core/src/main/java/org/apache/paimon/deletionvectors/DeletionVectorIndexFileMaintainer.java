@@ -23,6 +23,7 @@ import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.table.source.DeletionFile;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -39,17 +40,16 @@ public class DeletionVectorIndexFileMaintainer {
 
     private final Map<String, IndexManifestEntry> indexNameToEntry = new HashMap<>();
 
-    private final Map<String, List<DeletionFileWithDataFile>> indexFileToDataFiles =
-            new HashMap<>();
+    private final Map<String, Map<String, DeletionFile>> indexFileToDeletionFiles = new HashMap<>();
 
     private final Set<String> touchedIndexFiles = new HashSet<>();
 
     public DeletionVectorIndexFileMaintainer(
-            IndexFileHandler indexFileHandler, List<DeletionFileWithDataFile> files) {
+            IndexFileHandler indexFileHandler, Map<String, DeletionFile> dataFileToDeletionFiles) {
         this.indexFileHandler = indexFileHandler;
         List<String> touchedIndexFileNames =
-                files.stream()
-                        .map(file -> new Path(file.deletionFile().path()).getName())
+                dataFileToDeletionFiles.values().stream()
+                        .map(deletionFile -> new Path(deletionFile.path()).getName())
                         .distinct()
                         .collect(Collectors.toList());
         indexFileHandler.scan().stream()
@@ -59,23 +59,25 @@ public class DeletionVectorIndexFileMaintainer {
                                         indexManifestEntry.indexFile().fileName()))
                 .forEach(entry -> indexNameToEntry.put(entry.indexFile().fileName(), entry));
 
-        for (DeletionFileWithDataFile ddFile : files) {
-            String indexFileName = new Path(ddFile.deletionFile().path()).getName();
-            if (!indexFileToDataFiles.containsKey(indexFileName)) {
-                indexFileToDataFiles.put(indexFileName, new ArrayList<>());
+        for (String dataFile : dataFileToDeletionFiles.keySet()) {
+            DeletionFile deletionFile = dataFileToDeletionFiles.get(dataFile);
+            String indexFileName = new Path(deletionFile.path()).getName();
+            if (!indexFileToDeletionFiles.containsKey(indexFileName)) {
+                indexFileToDeletionFiles.put(indexFileName, new HashMap<>());
             }
-            indexFileToDataFiles.get(indexFileName).add(ddFile);
+            indexFileToDeletionFiles.get(indexFileName).put(dataFile, deletionFile);
         }
     }
 
-    public void notifyDeletionFiles(List<DeletionFileWithDataFile> ddFiles) {
-        for (DeletionFileWithDataFile ddFile : ddFiles) {
-            String indexFileName = new Path(ddFile.deletionFile().path()).getName();
+    public void notifyDeletionFiles(Map<String, DeletionFile> dataFileToDeletionFiles) {
+        for (String dataFile : dataFileToDeletionFiles.keySet()) {
+            DeletionFile deletionFile = dataFileToDeletionFiles.get(dataFile);
+            String indexFileName = new Path(deletionFile.path()).getName();
             touchedIndexFiles.add(indexFileName);
-            if (indexFileToDataFiles.containsKey(indexFileName)) {
-                indexFileToDataFiles.get(indexFileName).remove(ddFile);
-                if (indexFileToDataFiles.get(indexFileName).isEmpty()) {
-                    indexFileToDataFiles.remove(indexFileName);
+            if (indexFileToDeletionFiles.containsKey(indexFileName)) {
+                indexFileToDeletionFiles.get(indexFileName).remove(dataFile);
+                if (indexFileToDeletionFiles.get(indexFileName).isEmpty()) {
+                    indexFileToDeletionFiles.remove(indexFileName);
                     indexNameToEntry.remove(indexFileName);
                 }
             }
@@ -85,16 +87,18 @@ public class DeletionVectorIndexFileMaintainer {
     public List<IndexManifestEntry> writeUnchangedDeletionVector() {
         DeletionVectorsIndexFile deletionVectorsIndexFile = indexFileHandler.deletionVectorsIndex();
         List<IndexManifestEntry> newIndexEntries = new ArrayList<>();
-        for (String indexFile : indexFileToDataFiles.keySet()) {
+        for (String indexFile : indexFileToDeletionFiles.keySet()) {
             if (touchedIndexFiles.contains(indexFile)) {
                 IndexManifestEntry oldEntry = indexNameToEntry.get(indexFile);
 
                 // write unchanged deletion vector.
-                List<DeletionFileWithDataFile> ddFiles = indexFileToDataFiles.get(indexFile);
-                if (!ddFiles.isEmpty()) {
+                Map<String, DeletionFile> dataFileToDeletionFiles =
+                        indexFileToDeletionFiles.get(indexFile);
+                if (!dataFileToDeletionFiles.isEmpty()) {
                     IndexFileMeta newIndexFile =
                             indexFileHandler.writeDeletionVectorsIndex(
-                                    deletionVectorsIndexFile.readDeletionVector(ddFiles));
+                                    deletionVectorsIndexFile.readDeletionVector(
+                                            dataFileToDeletionFiles));
                     newIndexEntries.add(
                             new IndexManifestEntry(
                                     FileKind.ADD,

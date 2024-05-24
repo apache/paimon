@@ -31,7 +31,6 @@ import org.apache.paimon.utils.PathFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -61,15 +60,16 @@ public class DeletionVectorIndexFileMaintainerTest {
         store.commit(commitMessage1, commitMessage2);
 
         PathFactory indexPathFactory = store.pathFactory().indexFileFactory();
-        List<DeletionFileWithDataFile> ddFiles = new ArrayList<>();
-        ddFiles.addAll(
-                createDDFileFromIndexFileMetas(
+        Map<String, DeletionFile> dataFileToDeletionFiles = new HashMap<>();
+        dataFileToDeletionFiles.putAll(
+                createDeletionFileMapFromIndexFileMetas(
                         indexPathFactory, commitMessage1.indexIncrement().newIndexFiles()));
-        ddFiles.addAll(
-                createDDFileFromIndexFileMetas(
+        dataFileToDeletionFiles.putAll(
+                createDeletionFileMapFromIndexFileMetas(
                         indexPathFactory, commitMessage2.indexIncrement().newIndexFiles()));
 
-        DeletionVectorIndexFileMaintainer dvIFMaintainer = store.createDVIFMaintainer(ddFiles);
+        DeletionVectorIndexFileMaintainer dvIFMaintainer =
+                store.createDVIFMaintainer(dataFileToDeletionFiles);
 
         // no dv should be rewritten, because nothing is changed.
         List<IndexManifestEntry> res = dvIFMaintainer.writeUnchangedDeletionVector();
@@ -77,13 +77,15 @@ public class DeletionVectorIndexFileMaintainerTest {
 
         // no dv should be rewritten, because all the deletion vectors have been updated in the
         // index file that contains the dv of f3.
-        dvIFMaintainer.notifyDeletionFiles(Collections.singletonList(ddFiles.get(2)));
+        dvIFMaintainer.notifyDeletionFiles(
+                Collections.singletonMap("f3", dataFileToDeletionFiles.get("f3")));
         res = dvIFMaintainer.writeUnchangedDeletionVector();
         assertThat(res.size()).isEqualTo(0);
 
         // the dv of f1 and f2 are in one index file, and the dv of f1 is updated.
         // the dv of f2 need to be rewritten, and this index file should be marked as REMOVE.
-        dvIFMaintainer.notifyDeletionFiles(Collections.singletonList(ddFiles.get(0)));
+        dvIFMaintainer.notifyDeletionFiles(
+                Collections.singletonMap("f1", dataFileToDeletionFiles.get("f1")));
         res = dvIFMaintainer.writeUnchangedDeletionVector();
         assertThat(res.size()).isEqualTo(2);
         IndexManifestEntry entry =
@@ -94,25 +96,20 @@ public class DeletionVectorIndexFileMaintainerTest {
                 .isEqualTo(commitMessage1.indexIncrement().newIndexFiles().get(0));
     }
 
-    private List<DeletionFileWithDataFile> createDDFileFromIndexFileMetas(
+    private Map<String, DeletionFile> createDeletionFileMapFromIndexFileMetas(
             PathFactory indexPathFactory, List<IndexFileMeta> fileMetas) {
-        List<DeletionFileWithDataFile> ddFiles = new ArrayList<>();
+        Map<String, DeletionFile> dataFileToDeletionFiles = new HashMap<>();
         for (IndexFileMeta indexFileMeta : fileMetas) {
             for (Map.Entry<String, Pair<Integer, Integer>> range :
                     indexFileMeta.deletionVectorsRanges().entrySet()) {
-                ddFiles.add(
-                        createDDFile(
-                                range.getKey(),
+                dataFileToDeletionFiles.put(
+                        range.getKey(),
+                        new DeletionFile(
                                 indexPathFactory.toPath(indexFileMeta.fileName()).toString(),
                                 range.getValue().getLeft(),
                                 range.getValue().getRight()));
             }
         }
-        return ddFiles;
-    }
-
-    private DeletionFileWithDataFile createDDFile(
-            String dataFile, String indexFile, long offset, long length) {
-        return new DeletionFileWithDataFile(dataFile, new DeletionFile(indexFile, offset, length));
+        return dataFileToDeletionFiles;
     }
 }

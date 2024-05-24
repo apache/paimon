@@ -19,7 +19,6 @@
 package org.apache.paimon;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.deletionvectors.DeletionFileWithDataFile;
 import org.apache.paimon.deletionvectors.DeletionVectorIndexFileMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.fs.FileIO;
@@ -41,6 +40,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.TraceableFileIO;
 
@@ -120,8 +120,8 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
     }
 
     public DeletionVectorIndexFileMaintainer createDVIFMaintainer(
-            List<DeletionFileWithDataFile> ddFiles) {
-        return new DeletionVectorIndexFileMaintainer(fileHandler, ddFiles);
+            Map<String, DeletionFile> dataFileToDeletionFiles) {
+        return new DeletionVectorIndexFileMaintainer(fileHandler, dataFileToDeletionFiles);
     }
 
     public DeletionVectorsMaintainer createOrRestoreDVMaintainer(BinaryRow partition, int bucket) {
