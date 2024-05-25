@@ -20,9 +20,14 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.compact.UnawareBucketCompactionTopoBuilder;
+import org.apache.paimon.flink.predicate.SimpleSqlPredicateConvertor;
 import org.apache.paimon.flink.sink.CompactorSinkBuilder;
 import org.apache.paimon.flink.source.CompactorSourceBuilder;
+import org.apache.paimon.predicate.PartitionPredicateVisitor;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ExecutionOptions;
@@ -30,6 +35,8 @@ import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -39,7 +46,11 @@ import java.util.Map;
 /** Table compact action for Flink. */
 public class CompactAction extends TableActionBase {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(CompactAction.class);
+
     private List<Map<String, String>> partitions;
+
+    private String whereSql;
 
     public CompactAction(String warehouse, String database, String tableName) {
         this(warehouse, database, tableName, Collections.emptyMap(), Collections.emptyMap());
@@ -72,8 +83,13 @@ public class CompactAction extends TableActionBase {
         return this;
     }
 
+    public CompactAction withWhereSql(String whereSql) {
+        this.whereSql = whereSql;
+        return this;
+    }
+
     @Override
-    public void build() {
+    public void build() throws Exception {
         ReadableConfig conf = env.getConfiguration();
         boolean isStreaming =
                 conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING;
@@ -94,23 +110,25 @@ public class CompactAction extends TableActionBase {
     }
 
     private void buildForTraditionalCompaction(
-            StreamExecutionEnvironment env, FileStoreTable table, boolean isStreaming) {
+            StreamExecutionEnvironment env, FileStoreTable table, boolean isStreaming)
+            throws Exception {
         CompactorSourceBuilder sourceBuilder =
                 new CompactorSourceBuilder(identifier.getFullName(), table);
         CompactorSinkBuilder sinkBuilder = new CompactorSinkBuilder(table);
 
-        sourceBuilder.withPartitions(partitions);
+        sourceBuilder.withPartitionPredicate(getPredicate());
         DataStreamSource<RowData> source =
                 sourceBuilder.withEnv(env).withContinuousMode(isStreaming).build();
         sinkBuilder.withInput(source).build();
     }
 
     private void buildForUnawareBucketCompaction(
-            StreamExecutionEnvironment env, FileStoreTable table, boolean isStreaming) {
+            StreamExecutionEnvironment env, FileStoreTable table, boolean isStreaming)
+            throws Exception {
         UnawareBucketCompactionTopoBuilder unawareBucketCompactionTopoBuilder =
                 new UnawareBucketCompactionTopoBuilder(env, identifier.getFullName(), table);
 
-        unawareBucketCompactionTopoBuilder.withPartitions(partitions);
+        unawareBucketCompactionTopoBuilder.withPartitionPredicate(getPredicate());
         unawareBucketCompactionTopoBuilder.withContinuousMode(isStreaming);
         unawareBucketCompactionTopoBuilder.build();
     }
@@ -121,7 +139,34 @@ public class CompactAction extends TableActionBase {
         execute("Compact job");
     }
 
-    public List<Map<String, String>> getPartitions() {
-        return partitions;
+    // Check whether predicate contain non parition key.
+    private void checkPredicateOnlyFilterParition(Predicate predicate, List<String> partitionKey) {
+        if (predicate != null) {
+            LOGGER.info("the partition predicate of compaction is {}", predicate);
+            PartitionPredicateVisitor partitionPredicateVisitor =
+                    new PartitionPredicateVisitor(partitionKey);
+            Preconditions.checkArgument(
+                    predicate.visit(partitionPredicateVisitor),
+                    "Only parition key can be specialized in compaction action.");
+        }
+    }
+
+    protected Predicate getPredicate() throws Exception {
+        Preconditions.checkArgument(
+                partitions == null || whereSql == null,
+                "partitions and where cannot be used together.");
+        Predicate predicate = null;
+        if (partitions != null) {
+            predicate = PredicateBuilder.partitions(partitions, table.rowType());
+        } else if (whereSql != null) {
+            SimpleSqlPredicateConvertor convertor =
+                    new SimpleSqlPredicateConvertor(table.rowType());
+            predicate = convertor.convertSqlToPredicate(whereSql);
+        }
+
+        // Check whether predicate contain non parition key.
+        checkPredicateOnlyFilterParition(predicate, table.partitionKeys());
+
+        return predicate;
     }
 }

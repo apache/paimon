@@ -27,6 +27,7 @@ import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMetaSerializer;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -265,7 +266,8 @@ public class CompactorSourceITCase extends AbstractTestBase {
                 new CompactorSourceBuilder("test", table)
                         .withContinuousMode(isStreaming)
                         .withEnv(env)
-                        .withPartitions(specifiedPartitions)
+                        .withPartitionPredicate(
+                                PredicateBuilder.partitions(specifiedPartitions, table.rowType()))
                         .build();
         CloseableIterator<RowData> it = compactorSource.executeAndCollect();
 
