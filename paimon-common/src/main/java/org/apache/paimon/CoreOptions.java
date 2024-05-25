@@ -1356,7 +1356,7 @@ public class CoreOptions implements Serializable {
         return options.get(SNAPSHOT_EXPIRE_CLEAN_EMPTY_DIRECTORIES);
     }
 
-    public ExpireConfig.Builder expireConfig() {
+    public ExpireConfig expireConfig() {
         return ExpireConfig.builder()
                 .snapshotRetainMax(snapshotNumRetainMax())
                 .snapshotRetainMin(snapshotNumRetainMin())
@@ -1365,7 +1365,8 @@ public class CoreOptions implements Serializable {
                 .changelogRetainMax(options.getOptional(CHANGELOG_NUM_RETAINED_MAX).orElse(null))
                 .changelogRetainMin(options.getOptional(CHANGELOG_NUM_RETAINED_MIN).orElse(null))
                 .changelogTimeRetain(options.getOptional(CHANGELOG_TIME_RETAINED).orElse(null))
-                .changelogMaxDeletes(snapshotExpireLimit());
+                .changelogMaxDeletes(snapshotExpireLimit())
+                .build();
     }
 
     public int manifestMergeMinCount() {

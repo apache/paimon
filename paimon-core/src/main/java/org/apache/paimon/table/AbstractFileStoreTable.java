@@ -29,6 +29,7 @@ import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.metastore.TagPreviewCommitCallback;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
@@ -307,10 +308,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         Runnable snapshotExpire = null;
         if (!options.writeOnly()) {
             boolean changelogDecoupled = options.changelogLifecycleDecoupled();
-            ExpireSnapshots expireChangelog =
-                    newExpireChangelog().config(options.expireConfig().build());
-            ExpireSnapshots expireSnapshots =
-                    newExpireSnapshots().config(options.expireConfig().build());
+            ExpireConfig expireConfig = options.expireConfig();
+            ExpireSnapshots expireChangelog = newExpireChangelog().config(expireConfig);
+            ExpireSnapshots expireSnapshots = newExpireSnapshots().config(expireConfig);
             snapshotExpire =
                     () -> {
                         expireSnapshots.expire();
