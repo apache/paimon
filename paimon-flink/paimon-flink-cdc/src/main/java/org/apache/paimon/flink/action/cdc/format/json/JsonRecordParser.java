@@ -27,6 +27,13 @@ import org.apache.paimon.types.RowKind;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * The {@code JsonRecordParser} class extends the abstract {@link RecordParser} class and is
+ * designed to parse JSON records.
+ *
+ * <p>This class treats JSON records as special CDC data with only insert operation type and
+ * generates {@link RichCdcMultiplexRecord} objects with only INSERT operation types.
+ */
 public class JsonRecordParser extends RecordParser {
 
     public JsonRecordParser(

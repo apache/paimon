@@ -26,9 +26,13 @@ import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
-import java.util.*;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 
-import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.*;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TOPIC;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FORMAT;
 
 /** IT cases for {@link KafkaSyncTableAction}. */
 public class KafkaJsonSyncTableActionITCase extends KafkaSyncTableActionITCase {
@@ -90,7 +94,7 @@ public class KafkaJsonSyncTableActionITCase extends KafkaSyncTableActionITCase {
     }
 
     @Test
-    //  @Timeout(60)
+    @Timeout(60)
     public void testComputedColumn() throws Exception {
         String topic = "computed_column";
         Map<String, String> tableOptions = new HashMap<>();
