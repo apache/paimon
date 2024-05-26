@@ -37,6 +37,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -359,6 +360,20 @@ public class SnapshotManager implements Serializable {
 
     public Iterator<Snapshot> snapshots() throws IOException {
         return listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX)
+                .map(id -> snapshot(id))
+                .sorted(Comparator.comparingLong(Snapshot::id))
+                .iterator();
+    }
+
+    public Iterator<Snapshot> snapshotsWithinRange(Long maxSnapshotId, Long minSnapshotId)
+            throws IOException {
+        // check for specific snapshot
+        if (Objects.equals(maxSnapshotId, minSnapshotId)) {
+            return Collections.singletonList(snapshot(maxSnapshotId)).iterator();
+        }
+
+        return listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX)
+                .filter(id -> id >= minSnapshotId && id <= maxSnapshotId)
                 .map(id -> snapshot(id))
                 .sorted(Comparator.comparingLong(Snapshot::id))
                 .iterator();

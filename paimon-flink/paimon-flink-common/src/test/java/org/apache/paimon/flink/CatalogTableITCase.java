@@ -75,6 +75,26 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                 sql(
                         "SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots WHERE snapshot_id = 2");
         assertThat(result).containsExactly(Row.of(2L, 0L, "APPEND"));
+
+        result =
+                sql(
+                        "SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots WHERE snapshot_id > 1");
+        assertThat(result).containsExactly(Row.of(2L, 0L, "APPEND"));
+
+        result =
+                sql(
+                        "SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots WHERE snapshot_id < 2");
+        assertThat(result).containsExactly(Row.of(1L, 0L, "APPEND"));
+
+        result =
+                sql(
+                        "SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots WHERE snapshot_id >= 1");
+        assertThat(result).contains(Row.of(1L, 0L, "APPEND"), Row.of(2L, 0L, "APPEND"));
+
+        result =
+                sql(
+                        "SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots WHERE snapshot_id <= 2");
+        assertThat(result).contains(Row.of(1L, 0L, "APPEND"), Row.of(2L, 0L, "APPEND"));
     }
 
     @Test
