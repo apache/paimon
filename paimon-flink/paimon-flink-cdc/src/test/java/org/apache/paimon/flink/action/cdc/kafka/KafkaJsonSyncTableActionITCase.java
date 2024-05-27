@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -42,7 +41,6 @@ public class KafkaJsonSyncTableActionITCase extends KafkaSyncTableActionITCase {
     public void testSchemaEvolution() throws Exception {
         String topic = "schema-evolution";
         Map<String, String> tableOptions = new HashMap<>();
-        tableOptions.put(CoreOptions.BUCKET.key(), "-1");
 
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/json/table/schemaevolution/json-data-1.txt");
@@ -98,7 +96,6 @@ public class KafkaJsonSyncTableActionITCase extends KafkaSyncTableActionITCase {
     public void testComputedColumn() throws Exception {
         String topic = "computed_column";
         Map<String, String> tableOptions = new HashMap<>();
-        tableOptions.put(CoreOptions.BUCKET.key(), "-1");
 
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/json/table/computedcolumn/json-data-1.txt");

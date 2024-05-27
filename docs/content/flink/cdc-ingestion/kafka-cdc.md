@@ -179,7 +179,6 @@ For some append data (such as log data), it can be treated as special CDC data w
     --kafka_conf value.format=json \
     --catalog_conf metastore=hive \
     --catalog_conf uri=thrift://hive-metastore:9083 \
-    --table_conf bucket=4 \
     --table_conf sink.parallelism=4
 ```
 
