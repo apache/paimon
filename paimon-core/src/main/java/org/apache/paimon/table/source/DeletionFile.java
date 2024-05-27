@@ -46,6 +46,9 @@ import java.util.Optional;
  */
 @Public
 public class DeletionFile implements Serializable {
+
+    private static final long serialVersionUID = 1L;
+
     private final String path;
     private final long offset;
     private final long length;
