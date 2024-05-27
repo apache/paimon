@@ -21,6 +21,7 @@ package org.apache.paimon.fileindex;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 
+/** File index factory to construct {@link FileIndexer}. */
 public interface FileIndexerFactory {
 
     String identifier();
