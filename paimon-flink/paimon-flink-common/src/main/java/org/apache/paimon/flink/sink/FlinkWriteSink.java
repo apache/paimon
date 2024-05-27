@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.flink.VersionedSerializerWrapper;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestCommittableSerializer;
 import org.apache.paimon.table.FileStoreTable;
@@ -56,7 +55,6 @@ public abstract class FlinkWriteSink<T> extends FlinkSink<T> {
 
     @Override
     protected CommittableStateManager<ManifestCommittable> createCommittableStateManager() {
-        return new RestoreAndFailCommittableStateManager<>(
-                () -> new VersionedSerializerWrapper<>(new ManifestCommittableSerializer()));
+        return new RestoreAndFailCommittableStateManager<>(ManifestCommittableSerializer::new);
     }
 }

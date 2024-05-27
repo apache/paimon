@@ -21,7 +21,6 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.append.MultiTableAppendOnlyCompactionTask;
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.flink.VersionedSerializerWrapper;
 import org.apache.paimon.manifest.WrappedManifestCommittable;
 import org.apache.paimon.options.Options;
 
@@ -181,6 +180,6 @@ public class CombinedTableCompactorSink implements Serializable {
 
     protected CommittableStateManager<WrappedManifestCommittable> createCommittableStateManager() {
         return new RestoreAndFailCommittableStateManager<>(
-                () -> new VersionedSerializerWrapper<>(new WrappedManifestCommittableSerializer()));
+                WrappedManifestCommittableSerializer::new);
     }
 }
