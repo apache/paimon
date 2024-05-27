@@ -18,6 +18,7 @@
 
 package org.apache.paimon.fileindex;
 
+import org.apache.paimon.fs.SeekablePositionedMappingInputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 
@@ -31,7 +32,7 @@ public interface FileIndexer {
 
     FileIndexWriter createWriter();
 
-    FileIndexReader createReader(byte[] serializedBytes);
+    FileIndexReader createReader(SeekablePositionedMappingInputStream inputStream);
 
     static FileIndexer create(String type, DataType dataType, Options options) {
         FileIndexerFactory fileIndexerFactory = FileIndexerFactoryUtils.load(type);

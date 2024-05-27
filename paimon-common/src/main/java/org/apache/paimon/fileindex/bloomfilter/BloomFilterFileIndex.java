@@ -22,6 +22,7 @@ import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.fileindex.FileIndexWriter;
 import org.apache.paimon.fileindex.FileIndexer;
+import org.apache.paimon.fs.SeekablePositionedMappingInputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.types.DataType;
@@ -65,8 +66,8 @@ public class BloomFilterFileIndex implements FileIndexer {
     }
 
     @Override
-    public FileIndexReader createReader(byte[] serializedBytes) {
-        return new Reader(dataType, serializedBytes);
+    public FileIndexReader createReader(SeekablePositionedMappingInputStream inputStream) {
+        return new Reader(dataType, inputStream.readAllBytes());
     }
 
     private static class Writer extends FileIndexWriter {

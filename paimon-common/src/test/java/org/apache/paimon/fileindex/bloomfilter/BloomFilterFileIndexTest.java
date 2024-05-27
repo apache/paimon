@@ -20,6 +20,7 @@ package org.apache.paimon.fileindex.bloomfilter;
 
 import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexWriter;
+import org.apache.paimon.fs.SeekablePositionedMappingInputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataTypes;
 
@@ -60,7 +61,9 @@ public class BloomFilterFileIndexTest {
 
         testData.forEach(writer::write);
 
-        FileIndexReader reader = filter.createReader(writer.serializedBytes());
+        FileIndexReader reader =
+                filter.createReader(
+                        new SeekablePositionedMappingInputStream(writer.serializedBytes()));
 
         for (byte[] bytes : testData) {
             Assertions.assertThat(reader.visitEqual(null, bytes).remain()).isTrue();
@@ -100,7 +103,9 @@ public class BloomFilterFileIndexTest {
 
         testData.forEach(writer::write);
 
-        FileIndexReader reader = filter.createReader(writer.serializedBytes());
+        FileIndexReader reader =
+                filter.createReader(
+                        new SeekablePositionedMappingInputStream(writer.serializedBytes()));
 
         for (Long value : testData) {
             Assertions.assertThat(reader.visitEqual(null, value).remain()).isTrue();
