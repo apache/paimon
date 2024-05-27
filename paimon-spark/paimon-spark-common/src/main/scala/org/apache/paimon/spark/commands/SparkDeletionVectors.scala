@@ -16,25 +16,25 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark
+package org.apache.paimon.spark.commands
 
-import org.apache.paimon.spark.schema.PaimonMetadataColumn
-import org.apache.paimon.table.Table
-import org.apache.paimon.table.source.{DataSplit, Split}
+import org.apache.paimon.utils.{FileStorePathFactory, SerializationUtils}
 
-import org.apache.spark.sql.connector.read.{Batch, Scan}
-import org.apache.spark.sql.types.StructType
-
-/** For internal use only. */
-case class PaimonSplitScan(
-    table: Table,
-    dataSplits: Array[DataSplit],
-    metadataColumns: Seq[PaimonMetadataColumn] = Seq.empty)
-  extends Scan {
-  override def readSchema(): StructType = SparkTypeUtils.fromPaimonRowType(table.rowType())
-
-  override def toBatch: Batch = {
-    PaimonBatch(dataSplits.asInstanceOf[Array[Split]], table.newReadBuilder, metadataColumns)
+/**
+ * This class will be used as Dataset's pattern type. So here use Array[Byte] instead of BinaryRow
+ * or DeletionVector.
+ */
+case class SparkDeletionVectors(
+    partitionAndBucket: String,
+    partition: Array[Byte],
+    bucket: Int,
+    dataFileAndDeletionVector: Seq[(String, Array[Byte])]
+) {
+  def relativePaths(fileStorePathFactory: FileStorePathFactory): Seq[String] = {
+    val prefix = fileStorePathFactory
+      .relativePartitionAndBucketPath(SerializationUtils.deserializeBinaryRow(partition), bucket)
+      .toUri
+      .toString + "/"
+    dataFileAndDeletionVector.map(prefix + _._1)
   }
-
 }
