@@ -39,7 +39,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Test for {@link DeletionVectorsIndexFile}. */
 public class DeletionVectorsIndexFileTest {
 
-    private static MemorySize DEFAULT_TARGET_SIZE_PER_INDEX_FILE = MemorySize.parse("2MB");
+    private static final MemorySize DEFAULT_TARGET_SIZE_PER_INDEX_FILE = MemorySize.parse("2MB");
     @TempDir java.nio.file.Path tempPath;
 
     @Test

@@ -38,6 +38,7 @@ import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETIO
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.VERSION_ID_V1;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.calculateChecksum;
 
+/** Writer for deletion vector index file. */
 public class DeletionVectorIndexFileWriter {
 
     private final PathFactory indexPathFactory;
