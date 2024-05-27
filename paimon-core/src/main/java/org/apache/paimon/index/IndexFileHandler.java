@@ -27,7 +27,9 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.table.source.DeletionFile;
-import org.apache.paimon.utils.*;
+import org.apache.paimon.utils.IntIterator;
+import org.apache.paimon.utils.PathFactory;
+import org.apache.paimon.utils.SnapshotManager;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -39,6 +41,7 @@ import java.util.Optional;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Handle index files. */
 public class IndexFileHandler {
@@ -189,7 +192,7 @@ public class IndexFileHandler {
 
     public Map<String, DeletionVector> readAllDeletionVectors(List<IndexFileMeta> fileMetas) {
         for (IndexFileMeta indexFile : fileMetas) {
-            Preconditions.checkArgument(
+            checkArgument(
                     indexFile.indexType().equals(DELETION_VECTORS_INDEX),
                     "Input file is not deletion vectors index " + indexFile.indexType());
         }
