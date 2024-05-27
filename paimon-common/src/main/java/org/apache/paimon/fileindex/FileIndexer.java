@@ -18,25 +18,50 @@
 
 package org.apache.paimon.fileindex;
 
-import org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndex;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 
-import static org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndex.BLOOM_FILTER;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.ServiceLoader;
 
 /** File index interface. To build a file index. */
 public interface FileIndexer {
+
+    Logger LOG = LoggerFactory.getLogger(FileIndexer.class);
+
+    String identifier();
+
+    void init(DataType dataType, Options options);
 
     FileIndexWriter createWriter();
 
     FileIndexReader createReader(byte[] serializedBytes);
 
     static FileIndexer create(String type, DataType dataType, Options options) {
-        switch (type) {
-            case BLOOM_FILTER:
-                return new BloomFilterFileIndex(dataType, options);
-            default:
-                throw new RuntimeException("Doesn't support filter type: " + type);
+
+        ServiceLoader<FileIndexer> serviceLoader = ServiceLoader.load(FileIndexer.class);
+
+        List<FileIndexer> fileIndexers = new ArrayList<>();
+        for (FileIndexer fileIndexer : serviceLoader) {
+            if (type.equals(fileIndexer.identifier())) {
+                fileIndexers.add(fileIndexer);
+            }
         }
+
+        if (fileIndexers.isEmpty()) {
+            throw new RuntimeException("Can't find file index for type: " + type);
+        }
+
+        if (fileIndexers.size() > 1) {
+            LOG.warn("Found multiple FileIndexer for type: " + type + ", choose one of them");
+        }
+
+        FileIndexer fileIndexer = fileIndexers.get(0);
+        fileIndexer.init(dataType, options);
+        return fileIndexer;
     }
 }

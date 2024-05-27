@@ -47,18 +47,18 @@ public class BloomFilterFileIndex implements FileIndexer {
     private static final String ITEMS = "items";
     private static final String FPP = "fpp";
 
-    private final DataType dataType;
-    private final int items;
-    private final double fpp;
+    private DataType dataType;
+    private int items;
+    private double fpp;
 
-    public BloomFilterFileIndex(DataType dataType, Options options) {
+    public String identifier() {
+        return BLOOM_FILTER;
+    }
+
+    public void init(DataType dataType, Options options) {
         this.dataType = dataType;
         this.items = options.getInteger(ITEMS, DEFAULT_ITEMS);
         this.fpp = options.getDouble(FPP, DEFAULT_FPP);
-    }
-
-    public String name() {
-        return BLOOM_FILTER;
     }
 
     @Override
