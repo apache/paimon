@@ -146,7 +146,11 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 pathFactory().indexFileFactory(),
                 indexManifestFileFactory().create(),
                 new HashIndexFile(fileIO, pathFactory().indexFileFactory()),
-                new DeletionVectorsIndexFile(fileIO, pathFactory().indexFileFactory()));
+                new DeletionVectorsIndexFile(
+                        fileIO,
+                        pathFactory().indexFileFactory(),
+                        bucketMode(),
+                        options.deletionVectorIndexFileTargetSize()));
     }
 
     @Override

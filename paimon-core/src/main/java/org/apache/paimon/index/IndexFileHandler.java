@@ -27,17 +27,12 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.table.source.DeletionFile;
-import org.apache.paimon.utils.IntIterator;
-import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.PathFactory;
-import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.*;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -193,25 +188,16 @@ public class IndexFileHandler {
     }
 
     public Map<String, DeletionVector> readAllDeletionVectors(List<IndexFileMeta> fileMetas) {
-        Map<String, DeletionVector> deletionVectors = new HashMap<>();
         for (IndexFileMeta indexFile : fileMetas) {
-            if (!indexFile.indexType().equals(DELETION_VECTORS_INDEX)) {
-                throw new IllegalArgumentException(
-                        "Input file is not deletion vectors index " + indexFile.indexType());
-            }
-            deletionVectors.putAll(deletionVectorsIndex.readAllDeletionVectors(indexFile));
+            Preconditions.checkArgument(
+                    indexFile.indexType().equals(DELETION_VECTORS_INDEX),
+                    "Input file is not deletion vectors index " + indexFile.indexType());
         }
-        return deletionVectors;
+        return deletionVectorsIndex.readAllDeletionVectors(fileMetas);
     }
 
-    public IndexFileMeta writeDeletionVectorsIndex(Map<String, DeletionVector> deletionVectors) {
-        Pair<String, LinkedHashMap<String, Pair<Integer, Integer>>> pair =
-                deletionVectorsIndex.write(deletionVectors);
-        return new IndexFileMeta(
-                DELETION_VECTORS_INDEX,
-                pair.getLeft(),
-                deletionVectorsIndex.fileSize(pair.getLeft()),
-                deletionVectors.size(),
-                pair.getRight());
+    public List<IndexFileMeta> writeDeletionVectorsIndex(
+            Map<String, DeletionVector> deletionVectors) {
+        return deletionVectorsIndex.write(deletionVectors);
     }
 }

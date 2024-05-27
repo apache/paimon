@@ -95,16 +95,19 @@ public class DeletionVectorIndexFileMaintainer {
                 Map<String, DeletionFile> dataFileToDeletionFiles =
                         indexFileToDeletionFiles.get(indexFile);
                 if (!dataFileToDeletionFiles.isEmpty()) {
-                    IndexFileMeta newIndexFile =
+                    List<IndexFileMeta> newIndexFiles =
                             indexFileHandler.writeDeletionVectorsIndex(
                                     deletionVectorsIndexFile.readDeletionVector(
                                             dataFileToDeletionFiles));
-                    newIndexEntries.add(
-                            new IndexManifestEntry(
-                                    FileKind.ADD,
-                                    oldEntry.partition(),
-                                    oldEntry.bucket(),
-                                    newIndexFile));
+                    newIndexFiles.forEach(
+                            newIndexFile -> {
+                                newIndexEntries.add(
+                                        new IndexManifestEntry(
+                                                FileKind.ADD,
+                                                oldEntry.partition(),
+                                                oldEntry.bucket(),
+                                                newIndexFile));
+                            });
                 }
 
                 // mark the touched index file as removed.

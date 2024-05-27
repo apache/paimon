@@ -97,9 +97,8 @@ public class DeletionVectorsMaintainer {
      */
     public List<IndexFileMeta> prepareCommit() {
         if (modified) {
-            IndexFileMeta entry = indexFileHandler.writeDeletionVectorsIndex(deletionVectors);
             modified = false;
-            return Collections.singletonList(entry);
+            return indexFileHandler.writeDeletionVectorsIndex(deletionVectors);
         }
         return Collections.emptyList();
     }
