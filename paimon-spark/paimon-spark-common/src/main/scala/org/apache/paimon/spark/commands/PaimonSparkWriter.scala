@@ -19,15 +19,17 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.CoreOptions.WRITE_ONLY
+import org.apache.paimon.data.BinaryRow
+import org.apache.paimon.deletionvectors.{DeletionVector, DeletionVectorsMaintainer}
 import org.apache.paimon.index.{BucketAssigner, SimpleHashBucketAssigner}
+import org.apache.paimon.io.{CompactIncrement, DataIncrement, IndexIncrement}
+import org.apache.paimon.manifest.{FileKind, IndexManifestEntry}
 import org.apache.paimon.spark.{SparkRow, SparkTableWrite}
-import org.apache.paimon.spark.schema.SparkSystemColumns
 import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
 import org.apache.paimon.spark.util.SparkRowUtils
 import org.apache.paimon.table.{BucketMode, FileStoreTable}
-import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageSerializer, RowPartitionKeyExtractor}
-import org.apache.paimon.utils.Preconditions
-import org.apache.paimon.utils.Preconditions.checkArgument
+import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageImpl, CommitMessageSerializer, RowPartitionKeyExtractor}
+import org.apache.paimon.utils.SerializationUtils
 
 import org.apache.spark.{Partitioner, TaskContext}
 import org.apache.spark.sql.{DataFrame, Dataset, Row, SparkSession}
@@ -193,6 +195,94 @@ case class PaimonSparkWriter(table: FileStoreTable) {
     written
       .collect()
       .map(deserializeCommitMessage(serializer, _))
+      .toSeq
+  }
+
+  /**
+   * Write all the deletion vectors to the index files. If it's in unaware mode, one index file maps
+   * one deletion vector; else, one index file will contains all deletion vector with the same
+   * partition and bucket.
+   */
+  def persistDeletionVectors(deletionVectors: Dataset[SparkDeletionVectors]): Seq[CommitMessage] = {
+    val sparkSession = deletionVectors.sparkSession
+    import sparkSession.implicits._
+
+    val fileStore = table.store()
+    val lastSnapshotId = table.snapshotManager().latestSnapshotId()
+
+    def createOrRestoreDVMaintainer(
+        partition: BinaryRow,
+        bucket: Int): DeletionVectorsMaintainer = {
+      val deletionVectorsMaintainerFactory =
+        new DeletionVectorsMaintainer.Factory(fileStore.newIndexFileHandler())
+      fileStore.bucketMode() match {
+        case BucketMode.BUCKET_UNAWARE =>
+          deletionVectorsMaintainerFactory.create()
+        case _ =>
+          deletionVectorsMaintainerFactory.createOrRestore(lastSnapshotId, partition, bucket)
+      }
+    }
+
+    def commitDeletionVector(
+        sdv: SparkDeletionVectors,
+        serializer: CommitMessageSerializer): Array[Byte] = {
+      val partition = SerializationUtils.deserializeBinaryRow(sdv.partition)
+      val maintainer = createOrRestoreDVMaintainer(partition, sdv.bucket)
+      sdv.dataFileAndDeletionVector.foreach {
+        case (dataFileName, dv) =>
+          maintainer.notifyNewDeletion(dataFileName, DeletionVector.deserializeFromBytes(dv))
+      }
+
+      val commitMessage = new CommitMessageImpl(
+        partition,
+        sdv.bucket,
+        DataIncrement.emptyIncrement(),
+        CompactIncrement.emptyIncrement(),
+        new IndexIncrement(maintainer.prepareCommit()))
+
+      serializer.serialize(commitMessage)
+    }
+
+    val serializedCommits = fileStore.bucketMode() match {
+      case BucketMode.BUCKET_UNAWARE =>
+        deletionVectors.mapPartitions {
+          iter: Iterator[SparkDeletionVectors] =>
+            val serializer = new CommitMessageSerializer
+            iter.map(commitDeletionVector(_, serializer))
+        }
+      case _ =>
+        deletionVectors
+          .groupByKey(_.partitionAndBucket)
+          .mapGroups {
+            case (_, iter: Iterator[SparkDeletionVectors]) =>
+              val serializer = new CommitMessageSerializer
+              val grouped = iter
+                .reduce(
+                  (sdv1, sdv2) =>
+                    sdv1.copy(dataFileAndDeletionVector =
+                      sdv1.dataFileAndDeletionVector ++ sdv2.dataFileAndDeletionVector))
+              commitDeletionVector(grouped, serializer)
+          }
+    }
+    serializedCommits
+      .collect()
+      .map(deserializeCommitMessage(serializer, _))
+  }
+
+  def buildCommitMessageFromIndexManifestEntry(
+      indexManifestEntries: Seq[IndexManifestEntry]): Seq[CommitMessage] = {
+    indexManifestEntries
+      .groupBy(entry => (entry.partition(), entry.bucket()))
+      .map {
+        case ((partition, bucket), entries) =>
+          val (added, removed) = entries.partition(_.kind() == FileKind.ADD)
+          new CommitMessageImpl(
+            partition,
+            bucket,
+            DataIncrement.emptyIncrement(),
+            CompactIncrement.emptyIncrement(),
+            new IndexIncrement(added.map(_.indexFile()).asJava, removed.map(_.indexFile()).asJava))
+      }
       .toSeq
   }
 
