@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.options.ExpireConfig;
 
 import org.apache.flink.table.procedure.ProcedureContext;
 
@@ -32,8 +33,13 @@ public class ExpireSnapshotsProcedure extends ProcedureBase {
 
     public String[] call(ProcedureContext procedureContext, String tableId, int retainMax)
             throws Catalog.TableNotExistException {
+        ExpireConfig.Builder builder = ExpireConfig.builder();
         return new String[] {
-            table(tableId).newExpireSnapshots().retainMax(retainMax).expire() + ""
+            table(tableId)
+                            .newExpireSnapshots()
+                            .config(builder.snapshotRetainMax(retainMax).build())
+                            .expire()
+                    + ""
         };
     }
 }

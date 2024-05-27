@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.procedure;
 
+import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.table.ExpireSnapshots;
 
 import org.apache.spark.sql.catalyst.InternalRow;
@@ -26,6 +27,8 @@ import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
+
+import java.time.Duration;
 
 import static org.apache.spark.sql.types.DataTypes.IntegerType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
@@ -75,19 +78,21 @@ public class ExpireSnapshotsProcedure extends BaseProcedure {
                 tableIdent,
                 table -> {
                     ExpireSnapshots expireSnapshots = table.newExpireSnapshots();
+                    ExpireConfig.Builder builder = ExpireConfig.builder();
                     if (retainMax != null) {
-                        expireSnapshots.retainMax(retainMax);
+                        builder.snapshotRetainMax(retainMax);
                     }
                     if (retainMin != null) {
-                        expireSnapshots.retainMin(retainMin);
+                        builder.snapshotRetainMin(retainMin);
                     }
                     if (olderThanMills != null) {
-                        expireSnapshots.olderThanMills(olderThanMills);
+                        builder.snapshotTimeRetain(
+                                Duration.ofMillis(System.currentTimeMillis() - olderThanMills));
                     }
                     if (maxDeletes != null) {
-                        expireSnapshots.maxDeletes(maxDeletes);
+                        builder.snapshotMaxDeletes(maxDeletes);
                     }
-                    int deleted = expireSnapshots.expire();
+                    int deleted = expireSnapshots.config(builder.build()).expire();
                     return new InternalRow[] {newInternalRow(deleted)};
                 });
     }

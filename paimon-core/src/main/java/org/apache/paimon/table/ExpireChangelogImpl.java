@@ -19,8 +19,11 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.Changelog;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.ConsumerManager;
-import org.apache.paimon.operation.SnapshotDeletion;
+import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.operation.ChangelogDeletion;
+import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -30,7 +33,9 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.function.Predicate;
 
 /** Cleanup the changelog in changelog directory. */
 public class ExpireChangelogImpl implements ExpireSnapshots {
@@ -39,54 +44,39 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
 
     private final SnapshotManager snapshotManager;
     private final ConsumerManager consumerManager;
-    private final SnapshotDeletion snapshotDeletion;
+    private final ChangelogDeletion changelogDeletion;
     private final boolean cleanEmptyDirectories;
     private final TagManager tagManager;
 
-    private long olderThanMills = 0;
-    public int retainMin = 1;
-    private int retainMax = Integer.MAX_VALUE;
-    private int maxDeletes = Integer.MAX_VALUE;
+    private ExpireConfig expireConfig;
 
     public ExpireChangelogImpl(
             SnapshotManager snapshotManager,
             TagManager tagManager,
-            SnapshotDeletion snapshotDeletion,
+            ChangelogDeletion changelogDeletion,
             boolean cleanEmptyDirectories) {
         this.snapshotManager = snapshotManager;
         this.tagManager = tagManager;
         this.consumerManager =
                 new ConsumerManager(snapshotManager.fileIO(), snapshotManager.tablePath());
-        this.snapshotDeletion = snapshotDeletion;
         this.cleanEmptyDirectories = cleanEmptyDirectories;
+        this.changelogDeletion = changelogDeletion;
+        this.expireConfig = ExpireConfig.builder().build();
     }
 
     @Override
-    public ExpireChangelogImpl retainMax(int retainMax) {
-        this.retainMax = retainMax;
-        return this;
-    }
-
-    @Override
-    public ExpireChangelogImpl retainMin(int retainMin) {
-        this.retainMin = retainMin;
-        return this;
-    }
-
-    @Override
-    public ExpireChangelogImpl olderThanMills(long olderThanMills) {
-        this.olderThanMills = olderThanMills;
-        return this;
-    }
-
-    @Override
-    public ExpireChangelogImpl maxDeletes(int maxDeletes) {
-        this.maxDeletes = maxDeletes;
+    public ExpireSnapshots config(ExpireConfig expireConfig) {
+        this.expireConfig = expireConfig;
         return this;
     }
 
     @Override
     public int expire() {
+        int retainMax = expireConfig.getChangelogRetainMax();
+        int retainMin = expireConfig.getChangelogRetainMin();
+        int maxDeletes = expireConfig.getChangelogMaxDeletes();
+        long olderThanMills =
+                System.currentTimeMillis() - expireConfig.getChangelogTimeRetain().toMillis();
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         if (latestSnapshotId == null) {
             // no snapshot, nothing to expire
@@ -144,23 +134,36 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
             LOG.debug("Changelog expire range is [" + earliestId + ", " + endExclusiveId + ")");
         }
 
+        List<Snapshot> taggedSnapshots = tagManager.taggedSnapshots();
+
+        List<Snapshot> skippingSnapshots =
+                TagManager.findOverlappedSnapshots(taggedSnapshots, earliestId, endExclusiveId);
+        skippingSnapshots.add(snapshotManager.changelog(endExclusiveId));
+        Set<String> manifestSkippSet = changelogDeletion.manifestSkippingSet(skippingSnapshots);
         for (long id = earliestId; id < endExclusiveId; id++) {
             if (LOG.isDebugEnabled()) {
-                LOG.debug("Ready to delete changelog files from snapshot #" + id);
+                LOG.debug("Ready to delete changelog files from changelog #" + id);
             }
             Changelog changelog = snapshotManager.longLivedChangelog(id);
-            // delete changelog files
-            if (changelog.changelogManifestList() != null) {
-                snapshotDeletion.deleteAddedDataFiles(changelog.changelogManifestList());
-                snapshotDeletion.cleanUnusedManifestList(
-                        changelog.changelogManifestList(), new HashSet<>());
+            Predicate<ManifestEntry> skipper;
+            try {
+                skipper = changelogDeletion.dataFileSkipper(taggedSnapshots, id);
+            } catch (Exception e) {
+                LOG.info(
+                        String.format(
+                                "Skip cleaning data files of changelog '%s' due to failed to build skipping set.",
+                                id),
+                        e);
+                continue;
             }
 
+            changelogDeletion.cleanUnusedDataFiles(changelog, skipper);
+            changelogDeletion.cleanUnusedManifests(changelog, manifestSkippSet);
             snapshotManager.fileIO().deleteQuietly(snapshotManager.longLivedChangelogPath(id));
         }
 
         if (cleanEmptyDirectories) {
-            snapshotDeletion.cleanDataDirectories();
+            changelogDeletion.cleanDataDirectories();
         }
         writeEarliestHintFile(endExclusiveId);
         return (int) (endExclusiveId - earliestId);
