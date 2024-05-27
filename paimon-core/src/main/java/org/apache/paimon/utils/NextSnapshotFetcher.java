@@ -32,8 +32,6 @@ public class NextSnapshotFetcher {
     public static final Logger LOG = LoggerFactory.getLogger(NextSnapshotFetcher.class);
     private final SnapshotManager snapshotManager;
     private final boolean changelogDecoupled;
-    // Only support changelog as follow-up now.
-    private final boolean changelogAsFollowup;
 
     public NextSnapshotFetcher(
             SnapshotManager snapshotManager,
@@ -41,7 +39,6 @@ public class NextSnapshotFetcher {
             boolean changelogAsFollowup) {
         this.snapshotManager = snapshotManager;
         this.changelogDecoupled = changelogDecoupled;
-        this.changelogAsFollowup = changelogAsFollowup;
     }
 
     @Nullable
@@ -59,9 +56,7 @@ public class NextSnapshotFetcher {
             return null;
         }
 
-        if (!changelogAsFollowup
-                || !changelogDecoupled
-                || !snapshotManager.longLivedChangelogExists(nextSnapshotId)) {
+        if (!changelogDecoupled || !snapshotManager.longLivedChangelogExists(nextSnapshotId)) {
             throw new OutOfRangeException(
                     String.format(
                             "The snapshot with id %d has expired. You can: "

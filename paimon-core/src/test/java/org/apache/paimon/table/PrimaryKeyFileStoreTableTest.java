@@ -65,6 +65,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CompatibilityTestUtils;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
 import java.nio.file.Files;
@@ -1491,15 +1493,15 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 "1|2|200|binary|varbinary|mapKey:mapVal|multiset"));
     }
 
-    @Test
-    public void testRollbackToTagWithChangelogDecoupled() throws Exception {
+    @ParameterizedTest(name = "changelog-producer = {0}")
+    @ValueSource(strings = {"none", "input"})
+    public void testRollbackToTagWithChangelogDecoupled(String changelogProducer) throws Exception {
         int commitTimes = ThreadLocalRandom.current().nextInt(100) + 6;
         FileStoreTable table =
                 createFileStoreTable(
                         options ->
-                                options.set(
-                                        CoreOptions.CHANGELOG_PRODUCER,
-                                        CoreOptions.ChangelogProducer.INPUT));
+                                options.setString(
+                                        CoreOptions.CHANGELOG_PRODUCER.key(), changelogProducer));
         prepareRollbackTable(commitTimes, table);
 
         int t1 = 1;

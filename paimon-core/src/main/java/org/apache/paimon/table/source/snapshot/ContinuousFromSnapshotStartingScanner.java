@@ -27,18 +27,13 @@ import org.apache.paimon.utils.SnapshotManager;
  */
 public class ContinuousFromSnapshotStartingScanner extends AbstractStartingScanner {
 
-    private final boolean changelogAsFollowup;
     private final boolean changelogDecoupled;
 
     public ContinuousFromSnapshotStartingScanner(
-            SnapshotManager snapshotManager,
-            long snapshotId,
-            boolean changelogAsFollowup,
-            boolean changelogDecoupled) {
+            SnapshotManager snapshotManager, long snapshotId, boolean changelogDecoupled) {
         super(snapshotManager);
         this.startingSnapshotId = snapshotId;
         this.changelogDecoupled = changelogDecoupled;
-        this.changelogAsFollowup = changelogAsFollowup;
     }
 
     @Override
@@ -54,7 +49,7 @@ public class ContinuousFromSnapshotStartingScanner extends AbstractStartingScann
 
     private Long getEarliestId() {
         Long earliestId;
-        if (changelogAsFollowup && changelogDecoupled) {
+        if (changelogDecoupled) {
             Long earliestChangelogId = snapshotManager.earliestLongLivedChangelogId();
             earliestId =
                     earliestChangelogId == null

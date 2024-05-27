@@ -29,6 +29,8 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TraceableFileIO;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.UUID;
 
@@ -65,8 +67,7 @@ public class ContinuousFromTimestampStartingScannerTest extends ScannerTestBase 
         long timestamp = snapshotManager.snapshot(3).timeMillis();
 
         ContinuousFromTimestampStartingScanner scanner =
-                new ContinuousFromTimestampStartingScanner(
-                        snapshotManager, timestamp, false, false);
+                new ContinuousFromTimestampStartingScanner(snapshotManager, timestamp, false);
         StartingScanner.NextSnapshot result =
                 (StartingScanner.NextSnapshot) scanner.scan(snapshotReader);
         assertThat(result.nextSnapshotId()).isEqualTo(3);
@@ -80,7 +81,7 @@ public class ContinuousFromTimestampStartingScannerTest extends ScannerTestBase 
         SnapshotManager snapshotManager = table.snapshotManager();
         ContinuousFromTimestampStartingScanner scanner =
                 new ContinuousFromTimestampStartingScanner(
-                        snapshotManager, System.currentTimeMillis(), false, false);
+                        snapshotManager, System.currentTimeMillis(), false);
         assertThat(scanner.scan(snapshotReader)).isInstanceOf(StartingScanner.NoSnapshot.class);
     }
 
@@ -100,8 +101,7 @@ public class ContinuousFromTimestampStartingScannerTest extends ScannerTestBase 
         long timestamp = snapshotManager.snapshot(1).timeMillis();
 
         ContinuousFromTimestampStartingScanner scanner =
-                new ContinuousFromTimestampStartingScanner(
-                        snapshotManager, timestamp, false, false);
+                new ContinuousFromTimestampStartingScanner(snapshotManager, timestamp, false);
         StartingScanner.NextSnapshot result =
                 (StartingScanner.NextSnapshot) scanner.scan(snapshotReader);
         // next snapshot
@@ -111,14 +111,15 @@ public class ContinuousFromTimestampStartingScannerTest extends ScannerTestBase 
         commit.close();
     }
 
-    @Test
-    public void testScanFromChangelog() throws Exception {
+    @ParameterizedTest(name = "changelog-producer = {0}")
+    @ValueSource(strings = {"none", "input"})
+    public void testScanFromChangelog(String changelogProducer) throws Exception {
         Options options = new Options();
         options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 2);
         options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 1);
         options.set(CoreOptions.CHANGELOG_NUM_RETAINED_MAX, 20);
         options.set(CoreOptions.CHANGELOG_NUM_RETAINED_MIN, 10);
-        options.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.INPUT);
+        options.setString(CoreOptions.CHANGELOG_PRODUCER.key(), changelogProducer);
         FileStoreTable table =
                 createFileStoreTable(
                         true,
@@ -158,20 +159,20 @@ public class ContinuousFromTimestampStartingScannerTest extends ScannerTestBase 
 
         ContinuousFromTimestampStartingScanner scanner =
                 new ContinuousFromTimestampStartingScanner(
-                        snapshotManager, snapshotManager.snapshot(3).timeMillis(), true, true);
+                        snapshotManager, snapshotManager.snapshot(3).timeMillis(), true);
         StartingScanner.NextSnapshot result =
                 (StartingScanner.NextSnapshot) scanner.scan(snapshotReader);
         assertThat(result.nextSnapshotId()).isEqualTo(3);
         scanner =
                 new ContinuousFromTimestampStartingScanner(
-                        snapshotManager, snapshotManager.snapshot(2).timeMillis(), true, true);
+                        snapshotManager, snapshotManager.snapshot(2).timeMillis(), true);
 
         assertThat(((StartingScanner.NextSnapshot) scanner.scan(snapshotReader)).nextSnapshotId())
                 .isEqualTo(2);
 
         scanner =
                 new ContinuousFromTimestampStartingScanner(
-                        snapshotManager, snapshotManager.changelog(1).timeMillis(), true, true);
+                        snapshotManager, snapshotManager.changelog(1).timeMillis(), true);
         assertThat(((StartingScanner.NextSnapshot) scanner.scan(snapshotReader)).nextSnapshotId())
                 .isEqualTo(1);
 

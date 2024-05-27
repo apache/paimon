@@ -122,7 +122,6 @@ public abstract class AbstractDataTableScan implements DataTableScan {
                 return new ContinuousFromSnapshotStartingScanner(
                         snapshotManager,
                         consumer.get().nextSnapshot(),
-                        options.changelogProducer() != ChangelogProducer.NONE,
                         options.changelogLifecycleDecoupled());
             }
         }
@@ -152,7 +151,6 @@ public abstract class AbstractDataTableScan implements DataTableScan {
                         ? new ContinuousFromTimestampStartingScanner(
                                 snapshotManager,
                                 startupMillis,
-                                options.changelogProducer() != ChangelogProducer.NONE,
                                 options.changelogLifecycleDecoupled())
                         : new StaticFromTimestampStartingScanner(snapshotManager, startupMillis);
             case FROM_FILE_CREATION_TIME:
@@ -164,7 +162,6 @@ public abstract class AbstractDataTableScan implements DataTableScan {
                             ? new ContinuousFromSnapshotStartingScanner(
                                     snapshotManager,
                                     options.scanSnapshotId(),
-                                    options.changelogProducer() != ChangelogProducer.NONE,
                                     options.changelogLifecycleDecoupled())
                             : new StaticFromSnapshotStartingScanner(
                                     snapshotManager, options.scanSnapshotId());

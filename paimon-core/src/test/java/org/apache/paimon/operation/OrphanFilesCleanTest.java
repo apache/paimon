@@ -59,6 +59,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -328,8 +330,10 @@ public class OrphanFilesCleanTest {
         assertThat(result).containsExactlyInAnyOrderElementsOf(TestPojo.formatData(data));
     }
 
-    @Test
-    public void testCleanOrphanFilesWithChangelogDecoupled() throws Exception {
+    @ValueSource(strings = {"none", "input"})
+    @ParameterizedTest(name = "changelog-producer = {0}")
+    public void testCleanOrphanFilesWithChangelogDecoupled(String changelogProducer)
+            throws Exception {
         // recreate the table with another option
         this.write.close();
         this.commit.close();
@@ -338,6 +342,7 @@ public class OrphanFilesCleanTest {
         options.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.INPUT);
         options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 15);
         options.set(CoreOptions.CHANGELOG_NUM_RETAINED_MAX, 20);
+        options.setString(CoreOptions.CHANGELOG_PRODUCER.key(), changelogProducer);
         FileStoreTable table = createFileStoreTable(rowType, options);
         String commitUser = UUID.randomUUID().toString();
         this.table = table;
