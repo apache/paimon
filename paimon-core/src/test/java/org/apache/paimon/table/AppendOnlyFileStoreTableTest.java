@@ -26,7 +26,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fileindex.FileIndexOptions;
-import org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndex;
+import org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndexFactory;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -386,26 +386,26 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                             options.set(
                                     FileIndexOptions.FILE_INDEX
                                             + "."
-                                            + BloomFilterFileIndex.BLOOM_FILTER
+                                            + BloomFilterFileIndexFactory.BLOOM_FILTER
                                             + "."
                                             + CoreOptions.COLUMNS,
                                     "index_column, index_column2, index_column3");
                             options.set(
                                     FileIndexOptions.FILE_INDEX
                                             + "."
-                                            + BloomFilterFileIndex.BLOOM_FILTER
+                                            + BloomFilterFileIndexFactory.BLOOM_FILTER
                                             + ".index_column.items",
                                     "150");
                             options.set(
                                     FileIndexOptions.FILE_INDEX
                                             + "."
-                                            + BloomFilterFileIndex.BLOOM_FILTER
+                                            + BloomFilterFileIndexFactory.BLOOM_FILTER
                                             + ".index_column2.items",
                                     "150");
                             options.set(
                                     FileIndexOptions.FILE_INDEX
                                             + "."
-                                            + BloomFilterFileIndex.BLOOM_FILTER
+                                            + BloomFilterFileIndexFactory.BLOOM_FILTER
                                             + ".index_column3.items",
                                     "150");
                             options.set(FILE_INDEX_IN_MANIFEST_THRESHOLD.key(), "500 B");
@@ -452,7 +452,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                             options.set(
                                     FileIndexOptions.FILE_INDEX
                                             + "."
-                                            + BloomFilterFileIndex.BLOOM_FILTER
+                                            + BloomFilterFileIndexFactory.BLOOM_FILTER
                                             + "."
                                             + CoreOptions.COLUMNS,
                                     "index_column, index_column2, index_column3");
@@ -510,32 +510,32 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                             options.set(
                                     FileIndexOptions.FILE_INDEX
                                             + "."
-                                            + BloomFilterFileIndex.BLOOM_FILTER
+                                            + BloomFilterFileIndexFactory.BLOOM_FILTER
                                             + "."
                                             + CoreOptions.COLUMNS,
                                     "index_column, index_column2, index_column3[a], index_column3[b], index_column3[c], index_column3[d]");
                             options.set(
                                     FileIndexOptions.FILE_INDEX
                                             + "."
-                                            + BloomFilterFileIndex.BLOOM_FILTER
+                                            + BloomFilterFileIndexFactory.BLOOM_FILTER
                                             + ".index_column.items",
                                     "150");
                             options.set(
                                     FileIndexOptions.FILE_INDEX
                                             + "."
-                                            + BloomFilterFileIndex.BLOOM_FILTER
+                                            + BloomFilterFileIndexFactory.BLOOM_FILTER
                                             + ".index_column2.items",
                                     "150");
                             options.set(
                                     FileIndexOptions.FILE_INDEX
                                             + "."
-                                            + BloomFilterFileIndex.BLOOM_FILTER
+                                            + BloomFilterFileIndexFactory.BLOOM_FILTER
                                             + ".index_column3.items",
                                     "150");
                             options.set(
                                     FileIndexOptions.FILE_INDEX
                                             + "."
-                                            + BloomFilterFileIndex.BLOOM_FILTER
+                                            + BloomFilterFileIndexFactory.BLOOM_FILTER
                                             + ".index_column3[a].items",
                                     "10000");
                         });

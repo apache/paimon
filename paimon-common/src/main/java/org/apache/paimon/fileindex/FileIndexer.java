@@ -33,35 +33,30 @@ public interface FileIndexer {
 
     Logger LOG = LoggerFactory.getLogger(FileIndexer.class);
 
-    String identifier();
-
-    void init(DataType dataType, Options options);
-
     FileIndexWriter createWriter();
 
     FileIndexReader createReader(byte[] serializedBytes);
 
     static FileIndexer create(String type, DataType dataType, Options options) {
 
-        ServiceLoader<FileIndexer> serviceLoader = ServiceLoader.load(FileIndexer.class);
+        ServiceLoader<FileIndexerFactory> serviceLoader =
+                ServiceLoader.load(FileIndexerFactory.class);
 
-        List<FileIndexer> fileIndexers = new ArrayList<>();
-        for (FileIndexer fileIndexer : serviceLoader) {
-            if (type.equals(fileIndexer.identifier())) {
-                fileIndexers.add(fileIndexer);
+        List<FileIndexerFactory> factories = new ArrayList<>();
+        for (FileIndexerFactory indexerFactory : serviceLoader) {
+            if (type.equals(indexerFactory.identifier())) {
+                factories.add(indexerFactory);
             }
         }
 
-        if (fileIndexers.isEmpty()) {
+        if (factories.isEmpty()) {
             throw new RuntimeException("Can't find file index for type: " + type);
         }
 
-        if (fileIndexers.size() > 1) {
+        if (factories.size() > 1) {
             LOG.warn("Found multiple FileIndexer for type: " + type + ", choose one of them");
         }
 
-        FileIndexer fileIndexer = fileIndexers.get(0);
-        fileIndexer.init(dataType, options);
-        return fileIndexer;
+        return factories.get(0).create(dataType, options);
     }
 }

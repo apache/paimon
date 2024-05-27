@@ -38,16 +38,16 @@ public class BloomFilterFileIndexTest {
 
     @Test
     public void testAddFindByRandom() {
-        BloomFilterFileIndex filter = new BloomFilterFileIndex();
-        filter.init(
-                DataTypes.BYTES(),
-                new Options(
-                        new HashMap<String, String>() {
-                            {
-                                put("items", "10000");
-                                put("fpp", "0.02");
-                            }
-                        }));
+        BloomFilterFileIndex filter =
+                new BloomFilterFileIndex(
+                        DataTypes.BYTES(),
+                        new Options(
+                                new HashMap<String, String>() {
+                                    {
+                                        put("items", "10000");
+                                        put("fpp", "0.02");
+                                    }
+                                }));
         FileIndexWriter writer = filter.createWriter();
         List<byte[]> testData = new ArrayList<>();
 
@@ -81,16 +81,16 @@ public class BloomFilterFileIndexTest {
 
     @Test
     public void testAddFindByRandomLong() {
-        BloomFilterFileIndex filter = new BloomFilterFileIndex();
-        filter.init(
-                DataTypes.BIGINT(),
-                new Options(
-                        new HashMap<String, String>() {
-                            {
-                                put("items", "10000");
-                                put("fpp", "0.02");
-                            }
-                        }));
+        BloomFilterFileIndex filter =
+                new BloomFilterFileIndex(
+                        DataTypes.BIGINT(),
+                        new Options(
+                                new HashMap<String, String>() {
+                                    {
+                                        put("items", "10000");
+                                        put("fpp", "0.02");
+                                    }
+                                }));
         FileIndexWriter writer = filter.createWriter();
         List<Long> testData = new ArrayList<>();
 

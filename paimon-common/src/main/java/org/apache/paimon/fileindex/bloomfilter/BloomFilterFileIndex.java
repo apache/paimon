@@ -39,23 +39,17 @@ import org.apache.hadoop.util.bloom.HashFunction;
  */
 public class BloomFilterFileIndex implements FileIndexer {
 
-    public static final String BLOOM_FILTER = "bloom-filter";
-
     private static final int DEFAULT_ITEMS = 1_000_000;
     private static final double DEFAULT_FPP = 0.1;
 
     private static final String ITEMS = "items";
     private static final String FPP = "fpp";
 
-    private DataType dataType;
-    private int items;
-    private double fpp;
+    private final DataType dataType;
+    private final int items;
+    private final double fpp;
 
-    public String identifier() {
-        return BLOOM_FILTER;
-    }
-
-    public void init(DataType dataType, Options options) {
+    public BloomFilterFileIndex(DataType dataType, Options options) {
         this.dataType = dataType;
         this.items = options.getInteger(ITEMS, DEFAULT_ITEMS);
         this.fpp = options.getDouble(FPP, DEFAULT_FPP);
