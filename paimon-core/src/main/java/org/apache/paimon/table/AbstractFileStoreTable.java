@@ -29,6 +29,7 @@ import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.metastore.TagPreviewCommitCallback;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
@@ -289,8 +290,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 snapshotManager(),
                 store().newSnapshotDeletion(),
                 store().newTagManager(),
-                coreOptions().snapshotExpireCleanEmptyDirectories(),
-                coreOptions().changelogLifecycleDecoupled());
+                coreOptions().snapshotExpireCleanEmptyDirectories());
     }
 
     @Override
@@ -298,7 +298,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         return new ExpireChangelogImpl(
                 snapshotManager(),
                 tagManager(),
-                store().newSnapshotDeletion(),
+                store().newChangelogDeletion(),
                 coreOptions().snapshotExpireCleanEmptyDirectories());
     }
 
@@ -308,24 +308,14 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         Runnable snapshotExpire = null;
         if (!options.writeOnly()) {
             boolean changelogDecoupled = options.changelogLifecycleDecoupled();
-            ExpireSnapshots expireChangelog =
-                    newExpireChangelog()
-                            .maxDeletes(options.snapshotExpireLimit())
-                            .retainMin(options.changelogNumRetainMin())
-                            .retainMax(options.changelogNumRetainMax());
-            ExpireSnapshots expireSnapshots =
-                    newExpireSnapshots()
-                            .retainMax(options.snapshotNumRetainMax())
-                            .retainMin(options.snapshotNumRetainMin())
-                            .maxDeletes(options.snapshotExpireLimit());
-            long snapshotTimeRetain = options.snapshotTimeRetain().toMillis();
-            long changelogTimeRetain = options.changelogTimeRetain().toMillis();
+            ExpireConfig expireConfig = options.expireConfig();
+            ExpireSnapshots expireChangelog = newExpireChangelog().config(expireConfig);
+            ExpireSnapshots expireSnapshots = newExpireSnapshots().config(expireConfig);
             snapshotExpire =
                     () -> {
-                        long current = System.currentTimeMillis();
-                        expireSnapshots.olderThanMills(current - snapshotTimeRetain).expire();
+                        expireSnapshots.expire();
                         if (changelogDecoupled) {
-                            expireChangelog.olderThanMills(current - changelogTimeRetain).expire();
+                            expireChangelog.expire();
                         }
                     };
         }
