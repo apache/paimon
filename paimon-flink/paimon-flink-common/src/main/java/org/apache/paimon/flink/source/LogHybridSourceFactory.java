@@ -65,6 +65,7 @@ public class LogHybridSourceFactory
                 logOffsets = snapshot.logOffsets();
             }
         }
+        provider.preCreateSource();
         return provider.createSource(logOffsets);
     }
 

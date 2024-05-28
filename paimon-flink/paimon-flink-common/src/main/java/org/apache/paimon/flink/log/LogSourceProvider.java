@@ -40,4 +40,7 @@ public interface LogSourceProvider extends Serializable {
      * @param bucketOffsets optional, configure if you need to specify the startup offset.
      */
     Source<RowData, ?, ?> createSource(@Nullable Map<Integer, Long> bucketOffsets);
+
+    /** Pre-operations before create log {@link Source}. */
+    void preCreateSource();
 }
