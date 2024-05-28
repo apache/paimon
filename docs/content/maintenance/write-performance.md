@@ -249,6 +249,10 @@ If your Flink job does not rely on state, please avoid using managed memory, whi
 ```shell
 taskmanager.memory.managed.size=1m
 ```
+Or you can use Flink managed memory for your write buffer to avoid OOM, set table property:
+```shell
+sink.use-managed-memory-allocator=true
+```
 
 ## Commit Memory
 
