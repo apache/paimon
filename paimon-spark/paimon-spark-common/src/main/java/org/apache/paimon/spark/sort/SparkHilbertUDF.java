@@ -51,8 +51,6 @@ import scala.collection.Seq;
 public class SparkHilbertUDF implements Serializable {
     private static final long PRIMITIVE_EMPTY = Long.MAX_VALUE;
 
-    private static final int BITS_NUM = 63;
-
     SparkHilbertUDF() {}
 
     private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
