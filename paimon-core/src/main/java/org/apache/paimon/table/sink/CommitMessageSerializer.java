@@ -21,6 +21,8 @@ package org.apache.paimon.table.sink;
 import org.apache.paimon.data.serializer.VersionedSerializer;
 import org.apache.paimon.index.IndexFileMetaSerializer;
 import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFileMeta08Serializer;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.io.DataInputDeserializer;
@@ -28,10 +30,12 @@ import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.io.IndexIncrement;
+import org.apache.paimon.utils.ObjectSerializer;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
@@ -40,10 +44,12 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 /** {@link VersionedSerializer} for {@link CommitMessage}. */
 public class CommitMessageSerializer implements VersionedSerializer<CommitMessage> {
 
-    private static final int CURRENT_VERSION = 2;
+    private static final int CURRENT_VERSION = 3;
 
     private final DataFileMetaSerializer dataFileSerializer;
     private final IndexFileMetaSerializer indexEntrySerializer;
+
+    private DataFileMeta08Serializer dataFile08Serializer;
 
     public CommitMessageSerializer() {
         this.dataFileSerializer = new DataFileMetaSerializer();
@@ -86,34 +92,36 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
 
     @Override
     public CommitMessage deserialize(int version, byte[] serialized) throws IOException {
-        checkVersion(version);
         DataInputDeserializer view = new DataInputDeserializer(serialized);
-        return deserialize(view);
+        return deserialize(version, view);
     }
 
     public List<CommitMessage> deserializeList(int version, DataInputView view) throws IOException {
-        checkVersion(version);
         int length = view.readInt();
         List<CommitMessage> list = new ArrayList<>(length);
         for (int i = 0; i < length; i++) {
-            list.add(deserialize(view));
+            list.add(deserialize(version, view));
         }
         return list;
     }
 
-    private void checkVersion(int version) {
-        if (version != CURRENT_VERSION) {
+    private CommitMessage deserialize(int version, DataInputView view) throws IOException {
+        ObjectSerializer<DataFileMeta> dataFileSerializer;
+        if (version == CURRENT_VERSION) {
+            dataFileSerializer = this.dataFileSerializer;
+        } else if (version <= 2) {
+            if (dataFile08Serializer == null) {
+                dataFile08Serializer = new DataFileMeta08Serializer();
+            }
+            dataFileSerializer = dataFile08Serializer;
+        } else {
             throw new UnsupportedOperationException(
-                    "Expecting FileCommittable version to be "
+                    "Expecting CommitMessageSerializer version to be smaller or equal than "
                             + CURRENT_VERSION
                             + ", but found "
                             + version
-                            + ".\nFileCommittable is not a compatible data structure. "
-                            + "Please restart the job afresh (do not recover from savepoint).");
+                            + ".");
         }
-    }
-
-    private CommitMessage deserialize(DataInputView view) throws IOException {
         return new CommitMessageImpl(
                 deserializeBinaryRow(view),
                 view.readInt(),
@@ -127,6 +135,8 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
                         dataFileSerializer.deserializeList(view)),
                 new IndexIncrement(
                         indexEntrySerializer.deserializeList(view),
-                        indexEntrySerializer.deserializeList(view)));
+                        version <= 2
+                                ? Collections.emptyList()
+                                : indexEntrySerializer.deserializeList(view)));
     }
 }

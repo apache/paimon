@@ -33,7 +33,7 @@ import java.util.Map;
 /** {@link VersionedSerializer} for {@link ManifestCommittable}. */
 public class ManifestCommittableSerializer implements VersionedSerializer<ManifestCommittable> {
 
-    private static final int CURRENT_VERSION = 2;
+    private static final int CURRENT_VERSION = 3;
 
     private final CommitMessageSerializer commitMessageSerializer;
 
@@ -75,14 +75,13 @@ public class ManifestCommittableSerializer implements VersionedSerializer<Manife
 
     @Override
     public ManifestCommittable deserialize(int version, byte[] serialized) throws IOException {
-        if (version != CURRENT_VERSION) {
+        if (version > CURRENT_VERSION) {
             throw new UnsupportedOperationException(
-                    "Expecting ManifestCommittable version to be "
+                    "Expecting ManifestCommittableSerializer version to be smaller or equal than "
                             + CURRENT_VERSION
                             + ", but found "
                             + version
-                            + ".\nManifestCommittable is not a compatible data structure. "
-                            + "Please restart the job afresh (do not recover from savepoint).");
+                            + ".");
         }
 
         DataInputDeserializer view = new DataInputDeserializer(serialized);
