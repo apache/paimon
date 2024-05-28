@@ -119,13 +119,13 @@ Path Examples
 
 {{< generated/mongodb_path_example >}}
 
-2. The synchronized table is required to have its primary key set as `_id`.
+1. The synchronized table is required to have its primary key set as `_id`.
    This is because MongoDB's change events are recorded before updates in messages.
    Consequently, we can only convert them into Flink's UPSERT change log stream.
    The upstart stream demands a unique key, which is why we must declare `_id` as the primary key.
    Declaring other columns as primary keys is not feasible, as delete operations only encompass the _id and sharding key, excluding other keys and values.
 
-3. MongoDB Change Streams are designed to return simple JSON documents without any data type definitions. This is because MongoDB is a document-oriented database, and one of its core features is the dynamic schema, where documents can contain different fields, and the data types of fields can be flexible. Therefore, the absence of data type definitions in Change Streams is to maintain this flexibility and extensibility.
+2. MongoDB Change Streams are designed to return simple JSON documents without any data type definitions. This is because MongoDB is a document-oriented database, and one of its core features is the dynamic schema, where documents can contain different fields, and the data types of fields can be flexible. Therefore, the absence of data type definitions in Change Streams is to maintain this flexibility and extensibility.
    For this reason, we have set all field data types for synchronizing MongoDB to Paimon as String to address the issue of not being able to obtain data types.
 
 If the Paimon table you specify does not exist, this action will automatically create the table. Its schema will be derived from MongoDB collection.
