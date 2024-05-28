@@ -205,6 +205,12 @@ public class PrivilegedFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public void replaceBranch(String fromBranch) {
+        privilegeChecker.assertCanInsert(identifier);
+        wrapped.replaceBranch(fromBranch);
+    }
+
+    @Override
     public ExpireSnapshots newExpireSnapshots() {
         privilegeChecker.assertCanInsert(identifier);
         return wrapped.newExpireSnapshots();
