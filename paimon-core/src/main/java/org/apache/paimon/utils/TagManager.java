@@ -47,7 +47,6 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.BranchManager.getBranchPath;
-import static org.apache.paimon.utils.BranchManager.isMainBranch;
 import static org.apache.paimon.utils.FileUtils.listVersionedFileStatus;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -79,16 +78,12 @@ public class TagManager {
 
     /** Return the root Directory of tags. */
     public Path tagDirectory() {
-        return isMainBranch(branch)
-                ? new Path(tablePath + "/tag")
-                : new Path(getBranchPath(tablePath, branch) + "/tag");
+        return new Path(getBranchPath(fileIO, tablePath, branch) + "/tag");
     }
 
-    /** Return the path of a tag in branch. */
+    /** Return the path of a tag. */
     public Path tagPath(String tagName) {
-        return isMainBranch(branch)
-                ? new Path(tablePath + "/tag/" + TAG_PREFIX + tagName)
-                : new Path(getBranchPath(tablePath, branch) + "/tag/" + TAG_PREFIX + tagName);
+        return new Path(getBranchPath(fileIO, tablePath, branch) + "/tag/" + TAG_PREFIX + tagName);
     }
 
     /** Create a tag from given snapshot and save it in the storage. */
@@ -237,7 +232,7 @@ public class TagManager {
                 taggedSnapshot, tagDeletion.manifestSkippingSet(skippedSnapshots));
     }
 
-    /** Check if a branch tag exists. */
+    /** Check if a tag exists. */
     public boolean tagExists(String tagName) {
         Path path = tagPath(tagName);
         try {

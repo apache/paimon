@@ -47,7 +47,6 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.BranchManager.getBranchPath;
-import static org.apache.paimon.utils.BranchManager.isMainBranch;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 
 /** Manager for {@link Snapshot}, providing utility methods related to paths and snapshot hints. */
@@ -90,35 +89,27 @@ public class SnapshotManager implements Serializable {
     }
 
     public Path changelogDirectory() {
-        return isMainBranch(branch)
-                ? new Path(tablePath + "/changelog")
-                : new Path(getBranchPath(tablePath, branch) + "/changelog");
+        return new Path(getBranchPath(fileIO, tablePath, branch) + "/changelog");
     }
 
     public Path longLivedChangelogPath(long snapshotId) {
-        return isMainBranch(branch)
-                ? new Path(tablePath + "/changelog/" + CHANGELOG_PREFIX + snapshotId)
-                : new Path(
-                        getBranchPath(tablePath, branch)
-                                + "/changelog/"
-                                + CHANGELOG_PREFIX
-                                + snapshotId);
+        return new Path(
+                getBranchPath(fileIO, tablePath, branch)
+                        + "/changelog/"
+                        + CHANGELOG_PREFIX
+                        + snapshotId);
     }
 
     public Path snapshotPath(long snapshotId) {
-        return isMainBranch(branch)
-                ? new Path(tablePath + "/snapshot/" + SNAPSHOT_PREFIX + snapshotId)
-                : new Path(
-                        getBranchPath(tablePath, branch)
-                                + "/snapshot/"
-                                + SNAPSHOT_PREFIX
-                                + snapshotId);
+        return new Path(
+                getBranchPath(fileIO, tablePath, branch)
+                        + "/snapshot/"
+                        + SNAPSHOT_PREFIX
+                        + snapshotId);
     }
 
     public Path snapshotDirectory() {
-        return isMainBranch(branch)
-                ? new Path(tablePath + "/snapshot")
-                : new Path(getBranchPath(tablePath, branch) + "/snapshot");
+        return new Path(getBranchPath(fileIO, tablePath, branch) + "/snapshot");
     }
 
     public Snapshot snapshot(long snapshotId) {
