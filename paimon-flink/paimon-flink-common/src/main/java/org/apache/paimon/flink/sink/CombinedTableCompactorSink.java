@@ -40,6 +40,7 @@ import java.io.Serializable;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.apache.paimon.flink.FlinkConnectorOptions.END_INPUT_WATERMARK;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_OPERATOR_CHAINING;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_MANAGED_WRITER_BUFFER_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
@@ -152,7 +153,8 @@ public class CombinedTableCompactorSink implements Serializable {
                                         options.get(SINK_COMMITTER_OPERATOR_CHAINING),
                                         commitUser,
                                         createCommitterFactory(),
-                                        createCommittableStateManager()))
+                                        createCommittableStateManager(),
+                                        options.get(END_INPUT_WATERMARK)))
                         .setParallelism(1)
                         .setMaxParallelism(1);
         return committed.addSink(new DiscardingSink<>()).name("end").setParallelism(1);
