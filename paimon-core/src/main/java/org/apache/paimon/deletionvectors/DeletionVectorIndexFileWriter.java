@@ -22,7 +22,6 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.options.MemorySize;
-import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PathFactory;
 import org.apache.paimon.utils.Preconditions;
@@ -46,17 +45,12 @@ public class DeletionVectorIndexFileWriter {
 
     private final PathFactory indexPathFactory;
     private final FileIO fileIO;
-    private final boolean isWrittenToMulitFiles;
     private final long targetSizeInBytes;
 
     public DeletionVectorIndexFileWriter(
-            FileIO fileIO,
-            PathFactory pathFactory,
-            BucketMode bucketMode,
-            MemorySize targetSizePerIndexFile) {
+            FileIO fileIO, PathFactory pathFactory, MemorySize targetSizePerIndexFile) {
         this.indexPathFactory = pathFactory;
         this.fileIO = fileIO;
-        this.isWrittenToMulitFiles = BucketMode.BUCKET_UNAWARE == bucketMode;
         this.targetSizeInBytes = targetSizePerIndexFile.getBytes();
     }
 
@@ -74,16 +68,13 @@ public class DeletionVectorIndexFileWriter {
 
     private IndexFileMeta tryWriter(Iterator<Map.Entry<String, DeletionVector>> iterator)
             throws IOException {
-        SingleIndexFileWriter writer =
-                new SingleIndexFileWriter(fileIO, indexPathFactory.newPath());
+        SingleIndexFileWriter writer = new SingleIndexFileWriter();
         try {
             while (iterator.hasNext()) {
                 Map.Entry<String, DeletionVector> entry = iterator.next();
                 long currentSize = writer.write(entry.getKey(), entry.getValue());
 
-                if (isWrittenToMulitFiles
-                        && !writer.hasWritten()
-                        && writer.writtenSizeInBytes() + currentSize > targetSizeInBytes) {
+                if (writer.writtenSizeInBytes() + currentSize > targetSizeInBytes) {
                     break;
                 }
             }
@@ -94,14 +85,12 @@ public class DeletionVectorIndexFileWriter {
     }
 
     private List<IndexFileMeta> emptyIndexFile() throws IOException {
-        try (SingleIndexFileWriter writer =
-                new SingleIndexFileWriter(fileIO, indexPathFactory.newPath())) {
+        try (SingleIndexFileWriter writer = new SingleIndexFileWriter()) {
             return Collections.singletonList(writer.writtenIndexFile());
         }
     }
 
-    class SingleIndexFileWriter implements Closeable {
-        private final FileIO fileIO;
+    private class SingleIndexFileWriter implements Closeable {
 
         private final Path path;
 
@@ -111,16 +100,11 @@ public class DeletionVectorIndexFileWriter {
 
         private long writtenSizeInBytes = 0L;
 
-        public SingleIndexFileWriter(FileIO fileIO, Path path) throws IOException {
-            this.fileIO = fileIO;
-            this.path = path;
+        public SingleIndexFileWriter() throws IOException {
+            this.path = indexPathFactory.newPath();
             this.dataOutputStream = new DataOutputStream(fileIO.newOutputStream(path, true));
             dataOutputStream.writeByte(VERSION_ID_V1);
             this.dvRanges = new LinkedHashMap<>();
-        }
-
-        public boolean hasWritten() {
-            return dvRanges.isEmpty();
         }
 
         public long writtenSizeInBytes() {

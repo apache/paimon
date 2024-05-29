@@ -24,7 +24,6 @@ import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.index.IndexFile;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.options.MemorySize;
-import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PathFactory;
@@ -48,16 +47,11 @@ public class DeletionVectorsIndexFile extends IndexFile {
     public static final String DELETION_VECTORS_INDEX = "DELETION_VECTORS";
     public static final byte VERSION_ID_V1 = 1;
 
-    private final BucketMode bucketMode;
     private final MemorySize targetSizePerIndexFile;
 
     public DeletionVectorsIndexFile(
-            FileIO fileIO,
-            PathFactory pathFactory,
-            BucketMode bucketMode,
-            MemorySize targetSizePerIndexFile) {
+            FileIO fileIO, PathFactory pathFactory, MemorySize targetSizePerIndexFile) {
         super(fileIO, pathFactory);
-        this.bucketMode = bucketMode;
         this.targetSizePerIndexFile = targetSizePerIndexFile;
     }
 
@@ -143,10 +137,7 @@ public class DeletionVectorsIndexFile extends IndexFile {
         try {
             DeletionVectorIndexFileWriter writer =
                     new DeletionVectorIndexFileWriter(
-                            this.fileIO,
-                            this.pathFactory,
-                            this.bucketMode,
-                            this.targetSizePerIndexFile);
+                            this.fileIO, this.pathFactory, this.targetSizePerIndexFile);
             return writer.write(input);
         } catch (IOException e) {
             throw new RuntimeException("Failed to write deletion vectors.", e);
