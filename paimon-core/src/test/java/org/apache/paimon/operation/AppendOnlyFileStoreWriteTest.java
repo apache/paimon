@@ -30,16 +30,19 @@ import org.apache.paimon.disk.ExternalBuffer;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.types.DataTypes;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -167,6 +170,34 @@ public class AppendOnlyFileStoreWriteTest {
         BinaryRow binaryRow = new BinaryRow(1);
         BinaryRowWriter writer = new BinaryRowWriter(binaryRow);
         writer.writeInt(0, i);
+        writer.complete();
+        return binaryRow;
+    }
+
+    @Test
+    public void testScanFilterWithNullPartition() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        AppendOnlyFileStoreWrite write = (AppendOnlyFileStoreWrite) table.store().newWrite("ss");
+        StreamTableCommit commit = table.newStreamWriteBuilder().newCommit();
+        write.withExecutionMode(false);
+
+        for (int i = 0; i < 100; i++) {
+            write.write(nullPartition(), i, GenericRow.of(null, i, i));
+            commit.commit(i, write.prepareCommit(false, i));
+        }
+
+        BinaryRow binaryRow = nullPartition();
+        FileStoreScan scan = table.store().newScan();
+        List<SimpleFileEntry> l0 =
+                scan.withPartitionFilter(Collections.singletonList(binaryRow)).readSimpleEntries();
+        Assertions.assertThat(l0.size()).isEqualTo(100);
+    }
+
+    private BinaryRow nullPartition() {
+        BinaryRow binaryRow = new BinaryRow(1);
+        BinaryRowWriter writer = new BinaryRowWriter(binaryRow);
+        writer.setNullAt(0);
         writer.complete();
         return binaryRow;
     }
