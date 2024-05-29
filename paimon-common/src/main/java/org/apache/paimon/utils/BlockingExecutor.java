@@ -16,32 +16,36 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.fs;
+package org.apache.paimon.utils;
 
-import org.apache.paimon.catalog.CatalogContext;
-
-import java.io.IOException;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
 
-import static org.apache.paimon.utils.ThreadUtils.newDaemonThreadFactory;
+/** A executor wrapper to execute with {@link Semaphore}. */
+public class BlockingExecutor {
 
-/** Utils for {@link FileIO}. */
-public class FileIOUtils {
+    private final Semaphore semaphore;
+    private final ExecutorService executor;
 
-    public static final ExecutorService IO_THREAD_POOL =
-            Executors.newCachedThreadPool(newDaemonThreadFactory("IO-THREAD-POOL"));
+    public BlockingExecutor(ExecutorService executor, int permits) {
+        this.semaphore = new Semaphore(permits, true);
+        this.executor = executor;
+    }
 
-    public static FileIOLoader checkAccess(FileIOLoader fileIO, Path path, CatalogContext config)
-            throws IOException {
-        if (fileIO == null) {
-            return null;
+    public void submit(Runnable task) {
+        try {
+            semaphore.acquire();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
         }
-
-        // check access
-        FileIO io = fileIO.load(path);
-        io.configure(config);
-        io.exists(path);
-        return fileIO;
+        executor.submit(
+                () -> {
+                    try {
+                        task.run();
+                    } finally {
+                        semaphore.release();
+                    }
+                });
     }
 }
