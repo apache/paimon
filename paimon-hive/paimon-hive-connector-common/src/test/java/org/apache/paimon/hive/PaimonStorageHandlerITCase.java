@@ -153,6 +153,7 @@ public class PaimonStorageHandlerITCase {
                             DataTypes.BIGINT()
                         },
                         new String[] {"a", "b", "c", "d"});
+        conf.set(CoreOptions.BUCKET, 1);
         Table table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
@@ -275,6 +276,7 @@ public class PaimonStorageHandlerITCase {
                             DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT(), DataTypes.STRING()
                         },
                         new String[] {"pt", "a", "b", "c"});
+        conf.set(CoreOptions.BUCKET, 1);
         Table table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
@@ -551,6 +553,7 @@ public class PaimonStorageHandlerITCase {
     public void testReadAllSupportedTypes() throws Exception {
         Options conf = getBasicConf();
         conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
+        conf.set(CoreOptions.BUCKET, 1);
         Table table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
@@ -661,7 +664,6 @@ public class PaimonStorageHandlerITCase {
     @Test
     public void testPredicatePushDown() throws Exception {
         Options conf = getBasicConf();
-        conf.set(CoreOptions.BUCKET, 1);
         conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
         Table table =
                 FileStoreTestUtils.createFileStoreTable(
@@ -825,9 +827,11 @@ public class PaimonStorageHandlerITCase {
 
     @Test
     public void testTime() throws Exception {
+        Options options = getBasicConf();
+        options.set(CoreOptions.BUCKET, 1);
         Table table =
                 FileStoreTestUtils.createFileStoreTable(
-                        getBasicConf(),
+                        options,
                         RowType.of(
                                 new DataType[] {
                                     DataTypes.INT().notNull(), DataTypes.TIME(), DataTypes.TIME(2)
@@ -967,7 +971,6 @@ public class PaimonStorageHandlerITCase {
     private Options getBasicConf() {
         Options conf = new Options();
         conf.set(CatalogOptions.WAREHOUSE, warehouse);
-        conf.set(CoreOptions.BUCKET, 2);
         return conf;
     }
 

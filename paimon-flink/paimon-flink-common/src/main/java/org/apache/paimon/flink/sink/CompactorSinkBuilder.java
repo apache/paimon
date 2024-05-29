@@ -49,10 +49,10 @@ public class CompactorSinkBuilder {
     public DataStreamSink<?> build() {
         BucketMode bucketMode = table.bucketMode();
         switch (bucketMode) {
-            case FIXED:
-            case DYNAMIC:
+            case HASH_FIXED:
+            case HASH_DYNAMIC:
                 return buildForBucketAware();
-            case UNAWARE:
+            case BUCKET_UNAWARE:
             default:
                 throw new UnsupportedOperationException("Unsupported bucket mode: " + bucketMode);
         }

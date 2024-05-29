@@ -23,6 +23,8 @@ import org.slf4j.Logger;
 import java.lang.management.ManagementFactory;
 import java.lang.management.ThreadInfo;
 import java.util.Arrays;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /** Utils for thread. */
@@ -53,5 +55,39 @@ public class ThreadUtils {
             }
         }
         return false;
+    }
+
+    public static ThreadFactory newDaemonThreadFactory(final String prefix) {
+        final ThreadFactory namedFactory = getNamedThreadFactory(prefix);
+        return new ThreadFactory() {
+            @Override
+            public Thread newThread(Runnable r) {
+                Thread t = namedFactory.newThread(r);
+                if (!t.isDaemon()) {
+                    t.setDaemon(true);
+                }
+                if (t.getPriority() != Thread.NORM_PRIORITY) {
+                    t.setPriority(Thread.NORM_PRIORITY);
+                }
+                return t;
+            }
+        };
+    }
+
+    private static ThreadFactory getNamedThreadFactory(final String prefix) {
+        SecurityManager s = System.getSecurityManager();
+        final ThreadGroup threadGroup =
+                (s != null) ? s.getThreadGroup() : Thread.currentThread().getThreadGroup();
+
+        return new ThreadFactory() {
+            private final AtomicInteger threadNumber = new AtomicInteger(1);
+            private final ThreadGroup group = threadGroup;
+
+            @Override
+            public Thread newThread(Runnable r) {
+                final String name = prefix + "-t" + threadNumber.getAndIncrement();
+                return new Thread(group, r, name);
+            }
+        };
     }
 }

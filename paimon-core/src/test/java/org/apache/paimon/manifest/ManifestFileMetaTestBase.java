@@ -74,8 +74,8 @@ public abstract class ManifestFileMetaTestBase {
                         0, // not used
                         binaryRow, // not used
                         binaryRow, // not used
-                        StatsTestUtils.newEmptyTableStats(), // not used
-                        StatsTestUtils.newEmptyTableStats(), // not used
+                        StatsTestUtils.newEmptySimpleStats(), // not used
+                        StatsTestUtils.newEmptySimpleStats(), // not used
                         0, // not used
                         0, // not used
                         0, // not used
@@ -83,8 +83,8 @@ public abstract class ManifestFileMetaTestBase {
                         Collections.emptyList(),
                         Timestamp.fromEpochMillis(200000),
                         0L, // not used
-                        null // not used
-                        ));
+                        null, // not used
+                        FileSource.APPEND));
     }
 
     protected ManifestFileMeta makeManifest(ManifestEntry... entries) {
@@ -238,13 +238,14 @@ public abstract class ManifestFileMetaTestBase {
                         rowCount,
                         null, // not used
                         null, // not used
-                        StatsTestUtils.newEmptyTableStats(), // not used
-                        StatsTestUtils.newEmptyTableStats(), // not used
+                        StatsTestUtils.newEmptySimpleStats(), // not used
+                        StatsTestUtils.newEmptySimpleStats(), // not used
                         0, // not used
                         0, // not used
                         0, // not used
                         0, // not used
                         0L,
-                        null));
+                        null,
+                        FileSource.APPEND));
     }
 }

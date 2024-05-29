@@ -45,6 +45,7 @@ import java.util.TreeMap;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.BranchManager.getBranchPath;
 import static org.apache.paimon.utils.FileUtils.listVersionedFileStatus;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -58,25 +59,31 @@ public class TagManager {
 
     private final FileIO fileIO;
     private final Path tablePath;
+    private final String branch;
 
     public TagManager(FileIO fileIO, Path tablePath) {
+        this(fileIO, tablePath, DEFAULT_MAIN_BRANCH);
+    }
+
+    /** Specify the default branch for data writing. */
+    public TagManager(FileIO fileIO, Path tablePath, String branch) {
         this.fileIO = fileIO;
         this.tablePath = tablePath;
+        this.branch = StringUtils.isBlank(branch) ? DEFAULT_MAIN_BRANCH : branch;
+    }
+
+    public TagManager copyWithBranch(String branchName) {
+        return new TagManager(fileIO, tablePath, branchName);
     }
 
     /** Return the root Directory of tags. */
     public Path tagDirectory() {
-        return new Path(tablePath + "/tag");
+        return new Path(getBranchPath(fileIO, tablePath, branch) + "/tag");
     }
 
     /** Return the path of a tag. */
     public Path tagPath(String tagName) {
-        return new Path(tablePath + "/tag/" + TAG_PREFIX + tagName);
-    }
-
-    /** Return the path of a tag in branch. */
-    public Path branchTagPath(String branchName, String tagName) {
-        return new Path(getBranchPath(tablePath, branchName) + "/tag/" + TAG_PREFIX + tagName);
+        return new Path(getBranchPath(fileIO, tablePath, branch) + "/tag/" + TAG_PREFIX + tagName);
     }
 
     /** Create a tag from given snapshot and save it in the storage. */
@@ -152,14 +159,13 @@ public class TagManager {
         List<Snapshot> taggedSnapshots;
 
         // skip file deletion if snapshot exists
-        if (snapshotManager.snapshotExists(taggedSnapshot.id())) {
+        if (snapshotManager.copyWithBranch(branch).snapshotExists(taggedSnapshot.id())) {
             deleteTagMetaFile(tagName, callbacks);
             return;
         } else {
             // FileIO discovers tags by tag file, so we should read all tags before we delete tag
             SortedMap<Snapshot, List<String>> tags = tags();
             deleteTagMetaFile(tagName, callbacks);
-
             // skip data file clean if more than 1 tags are created based on this snapshot
             if (tags.get(taggedSnapshot).size() > 1) {
                 return;
@@ -196,7 +202,7 @@ public class TagManager {
             skippedSnapshots.add(taggedSnapshots.get(index - 1));
         }
         // the nearest right neighbor
-        Snapshot right = snapshotManager.earliestSnapshot();
+        Snapshot right = snapshotManager.copyWithBranch(branch).earliestSnapshot();
         if (index + 1 < taggedSnapshots.size()) {
             Snapshot rightTag = taggedSnapshots.get(index + 1);
             right = right.id() < rightTag.id() ? right : rightTag;
@@ -242,7 +248,6 @@ public class TagManager {
     /** Get the tagged snapshot by name. */
     public Snapshot taggedSnapshot(String tagName) {
         checkArgument(tagExists(tagName), "Tag '%s' doesn't exist.", tagName);
-        // Trim to snapshot to avoid equals and compare snapshot.
         return Tag.fromPath(fileIO, tagPath(tagName)).trimToSnapshot();
     }
 
@@ -259,7 +264,7 @@ public class TagManager {
         return new ArrayList<>(tags().keySet());
     }
 
-    /** Get all tagged snapshots with tag names sorted by snapshot id. */
+    /** Get all tagged snapshots with names sorted by snapshot id. */
     public SortedMap<Snapshot, List<String>> tags() {
         return tags(tagName -> true);
     }

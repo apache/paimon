@@ -192,11 +192,11 @@ public class CompactProcedure extends BaseProcedure {
                                             condition, relation.output(), table.rowType(), false)
                                     .getOrElse(null);
             switch (bucketMode) {
-                case FIXED:
-                case DYNAMIC:
+                case HASH_FIXED:
+                case HASH_DYNAMIC:
                     compactAwareBucketTable(table, filter, javaSparkContext);
                     break;
-                case UNAWARE:
+                case BUCKET_UNAWARE:
                     compactUnAwareBucketTable(table, filter, javaSparkContext);
                     break;
                 default:
@@ -205,7 +205,7 @@ public class CompactProcedure extends BaseProcedure {
             }
         } else {
             switch (bucketMode) {
-                case UNAWARE:
+                case BUCKET_UNAWARE:
                     sortCompactUnAwareBucketTable(
                             table, orderType, sortColumns, relation, condition);
                     break;

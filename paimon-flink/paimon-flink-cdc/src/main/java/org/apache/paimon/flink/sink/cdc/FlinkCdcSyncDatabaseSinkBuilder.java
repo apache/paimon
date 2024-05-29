@@ -207,16 +207,16 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
 
             BucketMode bucketMode = table.bucketMode();
             switch (bucketMode) {
-                case FIXED:
+                case HASH_FIXED:
                     buildForFixedBucket(table, parsedForTable);
                     break;
-                case DYNAMIC:
+                case HASH_DYNAMIC:
                     new CdcDynamicBucketSink(table).build(parsedForTable, parallelism);
                     break;
-                case UNAWARE:
+                case BUCKET_UNAWARE:
                     buildForUnawareBucket(table, parsedForTable);
                     break;
-                case GLOBAL_DYNAMIC:
+                case CROSS_PARTITION:
                 default:
                     throw new UnsupportedOperationException(
                             "Unsupported bucket mode: " + bucketMode);

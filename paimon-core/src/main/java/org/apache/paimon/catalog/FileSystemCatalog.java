@@ -19,7 +19,6 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
@@ -31,7 +30,6 @@ import org.apache.paimon.schema.TableSchema;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -58,14 +56,7 @@ public class FileSystemCatalog extends AbstractCatalog {
 
     @Override
     public List<String> listDatabases() {
-        List<String> databases = new ArrayList<>();
-        for (FileStatus status : uncheck(() -> fileIO.listDirectories(warehouse))) {
-            Path path = status.getPath();
-            if (status.isDir() && isDatabase(path)) {
-                databases.add(database(path));
-            }
-        }
-        return databases;
+        return uncheck(() -> listDatabasesInFileSystem(warehouse));
     }
 
     @Override
@@ -99,14 +90,7 @@ public class FileSystemCatalog extends AbstractCatalog {
 
     @Override
     protected List<String> listTablesImpl(String databaseName) {
-        List<String> tables = new ArrayList<>();
-        for (FileStatus status :
-                uncheck(() -> fileIO.listDirectories(newDatabasePath(databaseName)))) {
-            if (status.isDir() && tableExists(status.getPath())) {
-                tables.add(status.getPath().getName());
-            }
-        }
-        return tables;
+        return uncheck(() -> listTablesInFileSystem(newDatabasePath(databaseName)));
     }
 
     @Override
@@ -115,11 +99,7 @@ public class FileSystemCatalog extends AbstractCatalog {
             return super.tableExists(identifier);
         }
 
-        return tableExists(getDataTableLocation(identifier));
-    }
-
-    private boolean tableExists(Path tablePath) {
-        return new SchemaManager(fileIO, tablePath).listAllIds().size() > 0;
+        return tableExistsInFileSystem(getDataTableLocation(identifier));
     }
 
     @Override
@@ -170,21 +150,12 @@ public class FileSystemCatalog extends AbstractCatalog {
         schemaManager(identifier).commitChanges(changes);
     }
 
-    private static <T> T uncheck(Callable<T> callable) {
+    protected static <T> T uncheck(Callable<T> callable) {
         try {
             return callable.call();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-    }
-
-    private static boolean isDatabase(Path path) {
-        return path.getName().endsWith(DB_SUFFIX);
-    }
-
-    private static String database(Path path) {
-        String name = path.getName();
-        return name.substring(0, name.length() - DB_SUFFIX.length());
     }
 
     @Override

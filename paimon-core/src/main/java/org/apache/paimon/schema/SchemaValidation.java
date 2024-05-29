@@ -49,6 +49,7 @@ import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
+import static org.apache.paimon.CoreOptions.DEFAULT_AGG_FUNCTION;
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
@@ -183,7 +184,7 @@ public class SchemaValidation {
                                         field));
 
         if (options.deletionVectorsEnabled()) {
-            validateForDeletionVectors(schema, options);
+            validateForDeletionVectors(options);
         }
     }
 
@@ -349,7 +350,8 @@ public class SchemaValidation {
                             if (k.startsWith(FIELDS_PREFIX)) {
                                 String fieldName = k.split("\\.")[1];
                                 checkArgument(
-                                        fieldNames.contains(fieldName),
+                                        DEFAULT_AGG_FUNCTION.equals(fieldName)
+                                                || fieldNames.contains(fieldName),
                                         String.format(
                                                 "Field %s can not be found in table schema.",
                                                 fieldName));
@@ -459,11 +461,7 @@ public class SchemaValidation {
         }
     }
 
-    private static void validateForDeletionVectors(TableSchema schema, CoreOptions options) {
-        checkArgument(
-                !schema.primaryKeys().isEmpty(),
-                "Deletion vectors mode is only supported for tables with primary keys.");
-
+    private static void validateForDeletionVectors(CoreOptions options) {
         checkArgument(
                 options.changelogProducer() == ChangelogProducer.NONE
                         || options.changelogProducer() == ChangelogProducer.LOOKUP,
@@ -519,7 +517,7 @@ public class SchemaValidation {
         if (bucket == -1) {
             if (options.toMap().get(BUCKET_KEY.key()) != null) {
                 throw new RuntimeException(
-                        "Cannot define 'bucket-key' in unaware or dynamic bucket mode.");
+                        "Cannot define 'bucket-key' with bucket -1, please specify a bucket number.");
             }
 
             if (schema.primaryKeys().isEmpty()
@@ -536,6 +534,11 @@ public class SchemaValidation {
                                 "You should use dynamic bucket (bucket = -1) mode in cross partition update case "
                                         + "(Primary key constraint %s not include all partition fields %s).",
                                 schema.primaryKeys(), schema.partitionKeys()));
+            }
+
+            if (schema.primaryKeys().isEmpty() && schema.bucketKeys().isEmpty()) {
+                throw new RuntimeException(
+                        "You should define a 'bucket-key' for bucketed append mode.");
             }
         }
     }

@@ -20,9 +20,9 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.statistics.FieldStatsCollector;
-import org.apache.paimon.statistics.FullFieldStatsCollector;
-import org.apache.paimon.statistics.TruncateFieldStatsCollector;
+import org.apache.paimon.statistics.FullSimpleColStatsCollector;
+import org.apache.paimon.statistics.SimpleColStatsCollector;
+import org.apache.paimon.statistics.TruncateSimpleColStatsCollector;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
@@ -51,13 +51,13 @@ public class StatsCollectorFactoriesTest {
                 CoreOptions.FIELDS_PREFIX + ".b." + CoreOptions.STATS_MODE_SUFFIX, "truncate(12)");
         options.set(CoreOptions.FIELDS_PREFIX + ".c." + CoreOptions.STATS_MODE_SUFFIX, "full");
 
-        FieldStatsCollector.Factory[] statsFactories =
+        SimpleColStatsCollector.Factory[] statsFactories =
                 StatsCollectorFactories.createStatsFactories(
                         new CoreOptions(options), type.getFieldNames());
-        FieldStatsCollector[] stats = FieldStatsCollector.create(statsFactories);
+        SimpleColStatsCollector[] stats = SimpleColStatsCollector.create(statsFactories);
         assertThat(stats.length).isEqualTo(3);
-        assertThat(((TruncateFieldStatsCollector) stats[0]).getLength()).isEqualTo(16);
-        assertThat(((TruncateFieldStatsCollector) stats[1]).getLength()).isEqualTo(12);
-        assertThat(stats[2] instanceof FullFieldStatsCollector).isTrue();
+        assertThat(((TruncateSimpleColStatsCollector) stats[0]).getLength()).isEqualTo(16);
+        assertThat(((TruncateSimpleColStatsCollector) stats[1]).getLength()).isEqualTo(12);
+        assertThat(stats[2] instanceof FullSimpleColStatsCollector).isTrue();
     }
 }

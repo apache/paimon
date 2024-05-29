@@ -75,7 +75,7 @@ public class RowDataToObjectArrayConverter implements Serializable {
         Object[] partitionObjects = convert(binaryRow);
         for (int i = 0; i < getArity(); i++) {
             Object o = partitionObjects[i];
-            fieldPredicates.add(builder.equal(i, o));
+            fieldPredicates.add(o == null ? builder.isNull(i) : builder.equal(i, o));
         }
         return PredicateBuilder.and(fieldPredicates);
     }

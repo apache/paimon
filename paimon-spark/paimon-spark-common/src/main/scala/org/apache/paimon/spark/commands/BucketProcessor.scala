@@ -76,7 +76,7 @@ case class CommonBucketProcessor(
       override def next(): Row = {
         val row = rowIterator.next
         val sparkInternalRow = encoderGroup.rowToInternal(row)
-        sparkInternalRow.setInt(bucketColIndex, getBucketId((new SparkRow(rowType, row))))
+        sparkInternalRow.setInt(bucketColIndex, getBucketId(new SparkRow(rowType, row)))
         encoderGroup.internalToRow(sparkInternalRow)
       }
     }
@@ -118,23 +118,6 @@ case class DynamicBucketProcessor(
         val bucket = assigner.assign(partition, hash)
         val sparkInternalRow = encoderGroup.rowToInternal(row)
         sparkInternalRow.setInt(bucketColIndex, bucket)
-        encoderGroup.internalToRow(sparkInternalRow)
-      }
-    }
-  }
-}
-
-case class UnawareBucketProcessor(bucketColIndex: Int, encoderGroup: EncoderSerDeGroup)
-  extends BucketProcessor {
-
-  def processPartition(rowIterator: Iterator[Row]): Iterator[Row] = {
-    new Iterator[Row] {
-      override def hasNext: Boolean = rowIterator.hasNext
-
-      override def next(): Row = {
-        val row = rowIterator.next
-        val sparkInternalRow = encoderGroup.rowToInternal(row)
-        sparkInternalRow.setInt(bucketColIndex, 0)
         encoderGroup.internalToRow(sparkInternalRow)
       }
     }

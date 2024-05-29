@@ -29,6 +29,7 @@ import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.metastore.TagPreviewCommitCallback;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
@@ -40,6 +41,7 @@ import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.DynamicBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.RowKeyExtractor;
+import org.apache.paimon.table.sink.RowKindGenerator;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.UnawareBucketRowKeyExtractor;
 import org.apache.paimon.table.source.InnerStreamTableScan;
@@ -71,7 +73,6 @@ import java.util.SortedMap;
 import java.util.function.BiConsumer;
 
 import static org.apache.paimon.CoreOptions.PATH;
-import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -125,12 +126,12 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     public RowKeyExtractor createRowKeyExtractor() {
         switch (bucketMode()) {
-            case FIXED:
+            case HASH_FIXED:
                 return new FixedBucketRowKeyExtractor(schema());
-            case DYNAMIC:
-            case GLOBAL_DYNAMIC:
+            case HASH_DYNAMIC:
+            case CROSS_PARTITION:
                 return new DynamicBucketRowKeyExtractor(schema());
-            case UNAWARE:
+            case BUCKET_UNAWARE:
                 return new UnawareBucketRowKeyExtractor(schema());
             default:
                 throw new UnsupportedOperationException("Unsupported mode: " + bucketMode());
@@ -139,13 +140,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public SnapshotReader newSnapshotReader() {
-        return newSnapshotReader(DEFAULT_MAIN_BRANCH);
-    }
-
-    @Override
-    public SnapshotReader newSnapshotReader(String branchName) {
         return new SnapshotReaderImpl(
-                store().newScan(branchName),
+                store().newScan(),
                 tableSchema,
                 coreOptions(),
                 snapshotManager(),
@@ -246,7 +242,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public FileStoreTable copyWithLatestSchema() {
         Map<String, String> options = tableSchema.options();
-        SchemaManager schemaManager = new SchemaManager(fileIO(), location());
+        SchemaManager schemaManager =
+                new SchemaManager(fileIO(), location(), CoreOptions.branch(options()));
         Optional<TableSchema> optionalLatestSchema = schemaManager.latest();
         if (optionalLatestSchema.isPresent()) {
             TableSchema newTableSchema = optionalLatestSchema.get();
@@ -259,7 +256,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     protected SchemaManager schemaManager() {
-        return new SchemaManager(fileIO(), path);
+        return new SchemaManager(fileIO(), path, CoreOptions.branch(options()));
     }
 
     @Override
@@ -293,8 +290,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 snapshotManager(),
                 store().newSnapshotDeletion(),
                 store().newTagManager(),
-                coreOptions().snapshotExpireCleanEmptyDirectories(),
-                coreOptions().changelogLifecycleDecoupled());
+                coreOptions().snapshotExpireCleanEmptyDirectories());
     }
 
     @Override
@@ -302,45 +298,30 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         return new ExpireChangelogImpl(
                 snapshotManager(),
                 tagManager(),
-                store().newSnapshotDeletion(),
+                store().newChangelogDeletion(),
                 coreOptions().snapshotExpireCleanEmptyDirectories());
     }
 
     @Override
     public TableCommitImpl newCommit(String commitUser) {
-        // Compatibility with previous design, the main branch is written by default
-        return newCommit(commitUser, DEFAULT_MAIN_BRANCH);
-    }
-
-    public TableCommitImpl newCommit(String commitUser, String branchName) {
         CoreOptions options = coreOptions();
         Runnable snapshotExpire = null;
         if (!options.writeOnly()) {
             boolean changelogDecoupled = options.changelogLifecycleDecoupled();
-            ExpireSnapshots expireChangelog =
-                    newExpireChangelog()
-                            .maxDeletes(options.snapshotExpireLimit())
-                            .retainMin(options.changelogNumRetainMin())
-                            .retainMax(options.changelogNumRetainMax());
-            ExpireSnapshots expireSnapshots =
-                    newExpireSnapshots()
-                            .retainMax(options.snapshotNumRetainMax())
-                            .retainMin(options.snapshotNumRetainMin())
-                            .maxDeletes(options.snapshotExpireLimit());
-            long snapshotTimeRetain = options.snapshotTimeRetain().toMillis();
-            long changelogTimeRetain = options.changelogTimeRetain().toMillis();
+            ExpireConfig expireConfig = options.expireConfig();
+            ExpireSnapshots expireChangelog = newExpireChangelog().config(expireConfig);
+            ExpireSnapshots expireSnapshots = newExpireSnapshots().config(expireConfig);
             snapshotExpire =
                     () -> {
-                        long current = System.currentTimeMillis();
-                        expireSnapshots.olderThanMills(current - snapshotTimeRetain).expire();
+                        expireSnapshots.expire();
                         if (changelogDecoupled) {
-                            expireChangelog.olderThanMills(current - changelogTimeRetain).expire();
+                            expireChangelog.expire();
                         }
                     };
         }
 
         return new TableCommitImpl(
-                store().newCommit(commitUser, branchName),
+                store().newCommit(commitUser),
                 createCommitCallbacks(),
                 snapshotExpire,
                 options.writeOnly() ? null : store().newPartitionExpire(commitUser),
@@ -545,6 +526,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public void replaceBranch(String fromBranch) {
+        branchManager().replaceBranch(fromBranch);
+    }
+
+    @Override
     public void rollbackTo(String tagName) {
         TagManager tagManager = tagManager();
         checkArgument(tagManager.tagExists(tagName), "Rollback tag '%s' doesn't exist.", tagName);
@@ -571,7 +557,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public TagManager tagManager() {
-        return new TagManager(fileIO, path);
+        return new TagManager(fileIO, path, CoreOptions.branch(options()));
     }
 
     @Override
@@ -586,6 +572,10 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 fileIO,
                 store().newSnapshotDeletion(),
                 store().newTagDeletion());
+    }
+
+    protected RowKindGenerator rowKindGenerator() {
+        return RowKindGenerator.create(schema(), store().options());
     }
 
     @Override

@@ -66,7 +66,7 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
             List<String> joinKey) {
         this.executorFactory = executorFactory;
 
-        if (table.bucketMode() != BucketMode.FIXED) {
+        if (table.bucketMode() != BucketMode.HASH_FIXED) {
             throw new UnsupportedOperationException(
                     "Unsupported mode for partial lookup: " + table.bucketMode());
         }

@@ -368,10 +368,12 @@ public class PredicateBuilder {
         for (Map.Entry<String, String> entry : map.entrySet()) {
             int idx = fieldNames.indexOf(entry.getKey());
             Object literal = TypeUtils.castFromString(entry.getValue(), rowType.getTypeAt(idx));
+            Predicate predicateTemp =
+                    literal == null ? builder.isNull(idx) : builder.equal(idx, literal);
             if (predicate == null) {
-                predicate = builder.equal(idx, literal);
+                predicate = predicateTemp;
             } else {
-                predicate = PredicateBuilder.and(predicate, builder.equal(idx, literal));
+                predicate = PredicateBuilder.and(predicate, predicateTemp);
             }
         }
         return predicate;
@@ -394,10 +396,12 @@ public class PredicateBuilder {
         PredicateBuilder builder = new PredicateBuilder(partitionType);
         Object[] literals = converter.convert(partition);
         for (int i = 0; i < literals.length; i++) {
+            Predicate predicateTemp =
+                    literals[i] == null ? builder.isNull(i) : builder.equal(i, literals[i]);
             if (predicate == null) {
-                predicate = builder.equal(i, literals[i]);
+                predicate = predicateTemp;
             } else {
-                predicate = PredicateBuilder.and(predicate, builder.equal(i, literals[i]));
+                predicate = PredicateBuilder.and(predicate, predicateTemp);
             }
         }
 

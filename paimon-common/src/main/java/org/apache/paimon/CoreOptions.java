@@ -27,6 +27,7 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.options.description.DescribedEnum;
@@ -64,6 +65,7 @@ public class CoreOptions implements Serializable {
     public static final String FIELDS_PREFIX = "fields";
 
     public static final String AGG_FUNCTION = "aggregate-function";
+    public static final String DEFAULT_AGG_FUNCTION = "default-aggregate-function";
 
     public static final String IGNORE_RETRACT = "ignore-retract";
 
@@ -111,6 +113,9 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .noDefaultValue()
                     .withDescription("The file path of this table in the filesystem.");
+
+    public static final ConfigOption<String> BRANCH =
+            key("branch").stringType().defaultValue("main").withDescription("Specify branch name.");
 
     public static final String FILE_FORMAT_ORC = "orc";
     public static final String FILE_FORMAT_AVRO = "avro";
@@ -1148,6 +1153,13 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Time field for record level expire, it should be a seconds INT.");
 
+    public static final ConfigOption<String> FIELDS_DEFAULT_AGG_FUNC =
+            key(FIELDS_PREFIX + "." + DEFAULT_AGG_FUNCTION)
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Default aggregate function of all fields for partial-update and aggregate merge function");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -1176,6 +1188,17 @@ public class CoreOptions implements Serializable {
 
     public Path path() {
         return path(options.toMap());
+    }
+
+    public String branch() {
+        return branch(options.toMap());
+    }
+
+    public static String branch(Map<String, String> options) {
+        if (options.containsKey(BRANCH.key())) {
+            return options.get(BRANCH.key());
+        }
+        return BRANCH.defaultValue();
     }
 
     public static Path path(Map<String, String> options) {
@@ -1246,7 +1269,15 @@ public class CoreOptions implements Serializable {
         return fileFormat.toLowerCase();
     }
 
+    public String fieldsDefaultFunc() {
+        return options.get(FIELDS_DEFAULT_AGG_FUNC);
+    }
+
     public boolean definedAggFunc() {
+        if (options.contains(FIELDS_DEFAULT_AGG_FUNC)) {
+            return true;
+        }
+
         for (String key : options.toMap().keySet()) {
             if (key.startsWith(FIELDS_PREFIX) && key.endsWith(AGG_FUNCTION)) {
                 return true;
@@ -1339,6 +1370,19 @@ public class CoreOptions implements Serializable {
 
     public boolean snapshotExpireCleanEmptyDirectories() {
         return options.get(SNAPSHOT_EXPIRE_CLEAN_EMPTY_DIRECTORIES);
+    }
+
+    public ExpireConfig expireConfig() {
+        return ExpireConfig.builder()
+                .snapshotRetainMax(snapshotNumRetainMax())
+                .snapshotRetainMin(snapshotNumRetainMin())
+                .snapshotTimeRetain(snapshotTimeRetain())
+                .snapshotMaxDeletes(snapshotExpireLimit())
+                .changelogRetainMax(options.getOptional(CHANGELOG_NUM_RETAINED_MAX).orElse(null))
+                .changelogRetainMin(options.getOptional(CHANGELOG_NUM_RETAINED_MIN).orElse(null))
+                .changelogTimeRetain(options.getOptional(CHANGELOG_TIME_RETAINED).orElse(null))
+                .changelogMaxDeletes(snapshotExpireLimit())
+                .build();
     }
 
     public int manifestMergeMinCount() {

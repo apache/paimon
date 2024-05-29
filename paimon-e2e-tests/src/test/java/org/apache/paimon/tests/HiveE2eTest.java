@@ -65,7 +65,7 @@ public class HiveE2eTest extends E2eReaderTestBase {
                                 + "  'bucket' = '2'\n"
                                 + ");",
                         table);
-        runSql(createInsertSql(table), createCatalogSql("paimon", paimonPkPath), paimonPkDdl);
+        runBatchSql(createInsertSql(table), createCatalogSql("paimon", paimonPkPath), paimonPkDdl);
 
         String externalTablePkDdl =
                 String.format(
@@ -81,7 +81,7 @@ public class HiveE2eTest extends E2eReaderTestBase {
     public void testFlinkWriteAndHiveRead() throws Exception {
         final String warehouse = HDFS_ROOT + "/" + UUID.randomUUID() + ".warehouse";
         final String table = "t";
-        runSql(
+        runBatchSql(
                 String.join(
                         "\n",
                         createCatalogSql(
@@ -154,7 +154,7 @@ public class HiveE2eTest extends E2eReaderTestBase {
             }
         }
 
-        runSql(
+        runBatchSql(
                 "INSERT INTO t VALUES " + String.join(", ", values) + ";",
                 createCatalogSql(
                         "my_hive",
@@ -197,14 +197,5 @@ public class HiveE2eTest extends E2eReaderTestBase {
             throw new AssertionError("Failed when running hive sql.");
         }
         return execResult.getStdout();
-    }
-
-    private void runSql(String sql, String... ddls) throws Exception {
-        runSql(
-                "SET 'execution.runtime-mode' = 'batch';\n"
-                        + "SET 'table.dml-sync' = 'true';\n"
-                        + String.join("\n", ddls)
-                        + "\n"
-                        + sql);
     }
 }

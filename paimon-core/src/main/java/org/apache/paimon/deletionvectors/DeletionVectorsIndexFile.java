@@ -22,6 +22,8 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.index.IndexFile;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PathFactory;
 
@@ -34,6 +36,9 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.zip.CRC32;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** DeletionVectors index file. */
 public class DeletionVectorsIndexFile extends IndexFile {
@@ -48,18 +53,18 @@ public class DeletionVectorsIndexFile extends IndexFile {
     /**
      * Reads all deletion vectors from a specified file.
      *
-     * @param fileName The name of the file from which to read the deletion vectors.
-     * @param deletionVectorRanges A map where the key represents which file the DeletionVector
-     *     belongs to and the value is a Pair object specifying the range (start position and size)
-     *     within the file where the deletion vector data is located.
      * @return A map where the key represents which file the DeletionVector belongs to, and the
      *     value is the corresponding DeletionVector object.
      * @throws UncheckedIOException If an I/O error occurs while reading from the file.
      */
-    public Map<String, DeletionVector> readAllDeletionVectors(
-            String fileName, LinkedHashMap<String, Pair<Integer, Integer>> deletionVectorRanges) {
+    public Map<String, DeletionVector> readAllDeletionVectors(IndexFileMeta fileMeta) {
+        LinkedHashMap<String, Pair<Integer, Integer>> deletionVectorRanges =
+                fileMeta.deletionVectorsRanges();
+        checkNotNull(deletionVectorRanges);
+
+        String indexFileName = fileMeta.fileName();
         Map<String, DeletionVector> deletionVectors = new HashMap<>();
-        Path filePath = pathFactory.toPath(fileName);
+        Path filePath = pathFactory.toPath(indexFileName);
         try (SeekableInputStream inputStream = fileIO.newInputStream(filePath)) {
             checkVersion(inputStream);
             DataInputStream dataInputStream = new DataInputStream(inputStream);
@@ -76,6 +81,31 @@ public class DeletionVectorsIndexFile extends IndexFile {
                             + ", deletionVectorRanges: "
                             + deletionVectorRanges,
                     e);
+        }
+        return deletionVectors;
+    }
+
+    /** Reads deletion vectors from a list of DeletionFile which belong to a same index file. */
+    public Map<String, DeletionVector> readDeletionVector(
+            Map<String, DeletionFile> dataFileToDeletionFiles) {
+        Map<String, DeletionVector> deletionVectors = new HashMap<>();
+        if (dataFileToDeletionFiles.isEmpty()) {
+            return deletionVectors;
+        }
+
+        String indexFile = dataFileToDeletionFiles.values().stream().findAny().get().path();
+        try (SeekableInputStream inputStream = fileIO.newInputStream(new Path(indexFile))) {
+            checkVersion(inputStream);
+            for (String dataFile : dataFileToDeletionFiles.keySet()) {
+                DeletionFile deletionFile = dataFileToDeletionFiles.get(dataFile);
+                checkArgument(deletionFile.path().equals(indexFile));
+                inputStream.seek(deletionFile.offset());
+                DataInputStream dataInputStream = new DataInputStream(inputStream);
+                deletionVectors.put(
+                        dataFile, readDeletionVector(dataInputStream, (int) deletionFile.length()));
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Unable to read deletion vector from file: " + indexFile, e);
         }
         return deletionVectors;
     }

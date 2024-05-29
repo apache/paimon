@@ -20,6 +20,7 @@ package org.apache.paimon.deletionvectors;
 
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PathFactory;
 
@@ -32,6 +33,7 @@ import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
 
+import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link DeletionVectorsIndexFile}. */
@@ -66,8 +68,10 @@ public class DeletionVectorsIndexFileTest {
         LinkedHashMap<String, Pair<Integer, Integer>> deletionVectorRanges = pair.getRight();
 
         // read
+        IndexFileMeta indexFileMeta =
+                new IndexFileMeta(DELETION_VECTORS_INDEX, fileName, 0L, 0L, deletionVectorRanges);
         Map<String, DeletionVector> actualDeleteMap =
-                deletionVectorsIndexFile.readAllDeletionVectors(fileName, deletionVectorRanges);
+                deletionVectorsIndexFile.readAllDeletionVectors(indexFileMeta);
         assertThat(actualDeleteMap.get("file1.parquet").isDeleted(1)).isTrue();
         assertThat(actualDeleteMap.get("file1.parquet").isDeleted(2)).isFalse();
         assertThat(actualDeleteMap.get("file2.parquet").isDeleted(2)).isTrue();
@@ -104,8 +108,10 @@ public class DeletionVectorsIndexFileTest {
                 deletionVectorsIndexFile.write(deleteMap);
 
         // read
+        IndexFileMeta indexFileMeta =
+                new IndexFileMeta(DELETION_VECTORS_INDEX, pair.getLeft(), 0L, 0L, pair.getRight());
         Map<String, DeletionVector> dvs =
-                deletionVectorsIndexFile.readAllDeletionVectors(pair.getLeft(), pair.getRight());
+                deletionVectorsIndexFile.readAllDeletionVectors(indexFileMeta);
         assertThat(dvs.size()).isEqualTo(100000);
     }
 
@@ -128,8 +134,10 @@ public class DeletionVectorsIndexFileTest {
                 deletionVectorsIndexFile.write(deleteMap);
 
         // read
+        IndexFileMeta indexFileMeta =
+                new IndexFileMeta(DELETION_VECTORS_INDEX, pair.getLeft(), 0L, 0L, pair.getRight());
         Map<String, DeletionVector> dvs =
-                deletionVectorsIndexFile.readAllDeletionVectors(pair.getLeft(), pair.getRight());
+                deletionVectorsIndexFile.readAllDeletionVectors(indexFileMeta);
         assertThat(dvs.size()).isEqualTo(1);
     }
 

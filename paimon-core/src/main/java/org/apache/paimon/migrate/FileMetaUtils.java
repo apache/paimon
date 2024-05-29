@@ -21,18 +21,19 @@ package org.apache.paimon.migrate;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryWriter;
-import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.format.TableStatsExtractor;
+import org.apache.paimon.format.SimpleColStats;
+import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
-import org.apache.paimon.statistics.FieldStatsCollector;
-import org.apache.paimon.stats.BinaryTableStats;
-import org.apache.paimon.stats.FieldStatsArraySerializer;
+import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.statistics.SimpleColStatsCollector;
+import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -102,12 +103,12 @@ public class FileMetaUtils {
             Map<Path, Path> rollback) {
 
         try {
-            FieldStatsCollector.Factory[] factories =
+            SimpleColStatsCollector.Factory[] factories =
                     StatsCollectorFactories.createStatsFactories(
                             ((FileStoreTable) table).coreOptions(),
                             table.rowType().getFieldNames());
 
-            TableStatsExtractor tableStatsExtractor =
+            SimpleStatsExtractor simpleStatsExtractor =
                     FileFormat.getFileFormat(
                                     ((FileStoreTable) table).coreOptions().toConfiguration(),
                                     format)
@@ -122,7 +123,7 @@ public class FileMetaUtils {
                     newPath.getName(),
                     fileStatus.getLen(),
                     newPath,
-                    tableStatsExtractor,
+                    simpleStatsExtractor,
                     fileIO,
                     table);
         } catch (IOException e) {
@@ -147,16 +148,15 @@ public class FileMetaUtils {
             String fileName,
             long fileSize,
             Path path,
-            TableStatsExtractor tableStatsExtractor,
+            SimpleStatsExtractor simpleStatsExtractor,
             FileIO fileIO,
             Table table)
             throws IOException {
-        FieldStatsArraySerializer statsArraySerializer =
-                new FieldStatsArraySerializer(table.rowType());
+        SimpleStatsConverter statsArraySerializer = new SimpleStatsConverter(table.rowType());
 
-        Pair<FieldStats[], TableStatsExtractor.FileInfo> fileInfo =
-                tableStatsExtractor.extractWithFileInfo(fileIO, path);
-        BinaryTableStats stats = statsArraySerializer.toBinary(fileInfo.getLeft());
+        Pair<SimpleColStats[], SimpleStatsExtractor.FileInfo> fileInfo =
+                simpleStatsExtractor.extractWithFileInfo(fileIO, path);
+        SimpleStats stats = statsArraySerializer.toBinary(fileInfo.getLeft());
 
         return DataFileMeta.forAppend(
                 fileName,
@@ -165,7 +165,8 @@ public class FileMetaUtils {
                 stats,
                 0,
                 0,
-                ((FileStoreTable) table).schema().id());
+                ((FileStoreTable) table).schema().id(),
+                FileSource.APPEND);
     }
 
     public static BinaryRow writePartitionValue(

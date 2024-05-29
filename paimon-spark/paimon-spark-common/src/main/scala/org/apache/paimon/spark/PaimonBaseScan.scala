@@ -20,6 +20,7 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.{stats, CoreOptions}
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
+import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
 import org.apache.paimon.spark.statistics.StatisticsHelper
 import org.apache.paimon.table.{DataTable, FileStoreTable, Table}
@@ -51,6 +52,16 @@ abstract class PaimonBaseScan(
 
   private lazy val tableSchema = SparkTypeUtils.fromPaimonRowType(tableRowType)
 
+  private val (tableFields, metadataFields) = {
+    val requiredFieldNames = requiredSchema.fieldNames
+    val _tableFields = tableSchema.filter(field => requiredFieldNames.contains(field.name))
+    val _metadataFields =
+      requiredSchema
+        .filterNot(field => tableSchema.fieldNames.contains(field.name))
+        .filter(field => PaimonMetadataColumn.SUPPORTED_METADATA_COLUMNS.contains(field.name))
+    (_tableFields, _metadataFields)
+  }
+
   protected var runtimeFilters: Array[Filter] = Array.empty
 
   protected var splits: Array[Split] = _
@@ -60,14 +71,14 @@ abstract class PaimonBaseScan(
   lazy val statistics: Optional[stats.Statistics] = table.statistics()
 
   lazy val requiredStatsSchema: StructType = {
-    val fieldNames = requiredSchema.fieldNames ++ reservedFilters.flatMap(_.references)
+    val fieldNames = tableFields.map(_.name) ++ reservedFilters.flatMap(_.references)
     StructType(tableSchema.filter(field => fieldNames.contains(field.name)))
   }
 
   lazy val readBuilder: ReadBuilder = {
     val _readBuilder = table.newReadBuilder()
 
-    val projection = readSchema().fieldNames.map(field => tableRowType.getFieldNames.indexOf(field))
+    val projection = tableFields.map(field => tableSchema.fieldNames.indexOf(field.name)).toArray
     _readBuilder.withProjection(projection)
     if (filters.nonEmpty) {
       val pushedPredicate = PredicateBuilder.and(filters: _*)
@@ -90,12 +101,12 @@ abstract class PaimonBaseScan(
   }
 
   override def readSchema(): StructType = {
-    val requiredFieldNames = requiredSchema.fieldNames
-    StructType(tableSchema.filter(field => requiredFieldNames.contains(field.name)))
+    StructType(tableFields ++ metadataFields)
   }
 
   override def toBatch: Batch = {
-    PaimonBatch(getSplits, readBuilder)
+    val metadataColumns = metadataFields.map(field => PaimonMetadataColumn.get(field.name))
+    PaimonBatch(getSplits, readBuilder, metadataColumns)
   }
 
   override def toMicroBatchStream(checkpointLocation: String): MicroBatchStream = {

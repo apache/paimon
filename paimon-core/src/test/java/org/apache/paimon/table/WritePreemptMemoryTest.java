@@ -111,6 +111,31 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
     }
 
     @Override
+    protected FileStoreTable createFileStoreTable(String branch, Consumer<Options> configure)
+            throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.PATH, tablePath.toString());
+        // Run with minimal memory to ensure a more intense preempt
+        // Currently a writer needs at least one page
+        int pages = 10;
+        options.set(CoreOptions.WRITE_BUFFER_SIZE, new MemorySize(pages * 1024));
+        options.set(CoreOptions.PAGE_SIZE, new MemorySize(1024));
+        options.set(CoreOptions.BRANCH, branch);
+        configure.accept(options);
+        TableSchema schema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), tablePath, branch),
+                        new Schema(
+                                ROW_TYPE.getFields(),
+                                Collections.singletonList("pt"),
+                                Arrays.asList("pt", "a"),
+                                options.toMap(),
+                                ""));
+        return new PrimaryKeyFileStoreTable(FileIOFinder.find(tablePath), tablePath, schema);
+    }
+
+    @Override
     protected FileStoreTable overwriteTestFileStoreTable() throws Exception {
         Options conf = new Options();
         conf.set(CoreOptions.PATH, tablePath.toString());

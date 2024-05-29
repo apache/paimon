@@ -39,6 +39,8 @@ public class SparkTypeTest {
                                     1)) // posX and posY have field id 0 and 1, here we start from 2
                     .field("id", DataTypes.INT().notNull())
                     .field("name", DataTypes.STRING()) /* optional by default */
+                    .field("char", DataTypes.CHAR(10))
+                    .field("varchar", DataTypes.VARCHAR(10))
                     .field("salary", DataTypes.DOUBLE().notNull())
                     .field(
                             "locations",
@@ -79,6 +81,8 @@ public class SparkTypeTest {
                 "StructType("
                         + "StructField(id,IntegerType,true),"
                         + "StructField(name,StringType,true),"
+                        + "StructField(char,CharType(10),true),"
+                        + "StructField(varchar,VarcharType(10),true),"
                         + "StructField(salary,DoubleType,true),"
                         + nestedRowMapType
                         + ","

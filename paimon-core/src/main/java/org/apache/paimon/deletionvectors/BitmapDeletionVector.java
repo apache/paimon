@@ -24,6 +24,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataInput;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.util.Objects;
 
 /**
  * A {@link DeletionVector} based on {@link RoaringBitmap32}, it only supports files with row count
@@ -35,8 +36,8 @@ public class BitmapDeletionVector implements DeletionVector {
 
     private final RoaringBitmap32 roaringBitmap;
 
-    BitmapDeletionVector() {
-        roaringBitmap = new RoaringBitmap32();
+    public BitmapDeletionVector() {
+        this.roaringBitmap = new RoaringBitmap32();
     }
 
     private BitmapDeletionVector(RoaringBitmap32 roaringBitmap) {
@@ -47,6 +48,15 @@ public class BitmapDeletionVector implements DeletionVector {
     public void delete(long position) {
         checkPosition(position);
         roaringBitmap.add((int) position);
+    }
+
+    @Override
+    public void merge(DeletionVector deletionVector) {
+        if (deletionVector instanceof BitmapDeletionVector) {
+            roaringBitmap.or(((BitmapDeletionVector) deletionVector).roaringBitmap);
+        } else {
+            throw new RuntimeException("Only instance with the same class type can be merged.");
+        }
     }
 
     @Override
@@ -64,6 +74,11 @@ public class BitmapDeletionVector implements DeletionVector {
     @Override
     public boolean isEmpty() {
         return roaringBitmap.isEmpty();
+    }
+
+    @Override
+    public long getCardinality() {
+        return roaringBitmap.getCardinality();
     }
 
     @Override
@@ -89,5 +104,17 @@ public class BitmapDeletionVector implements DeletionVector {
             throw new IllegalArgumentException(
                     "The file has too many rows, RoaringBitmap32 only supports files with row count not exceeding 2147483647.");
         }
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        BitmapDeletionVector that = (BitmapDeletionVector) o;
+        return Objects.equals(this.roaringBitmap, that.roaringBitmap);
     }
 }

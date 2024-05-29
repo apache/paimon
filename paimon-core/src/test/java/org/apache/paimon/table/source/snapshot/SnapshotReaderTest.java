@@ -57,6 +57,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.io.DataFilePathFactory.INDEX_PATH_SUFFIX;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -341,6 +342,9 @@ public class SnapshotReaderTest {
         options.set(CoreOptions.BUCKET, 1);
         options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 5);
         options.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
+        if (primaryKeys.isEmpty()) {
+            options.set(BUCKET_KEY, "k");
+        }
         Map<String, String> formatPerLevel = new HashMap<>();
         formatPerLevel.put("5", "orc");
         options.set(CoreOptions.FILE_FORMAT_PER_LEVEL, formatPerLevel);

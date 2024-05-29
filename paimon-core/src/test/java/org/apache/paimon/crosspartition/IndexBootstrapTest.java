@@ -24,6 +24,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.Table;
@@ -44,6 +45,7 @@ import java.util.function.Consumer;
 
 import static org.apache.paimon.crosspartition.IndexBootstrap.filterSplit;
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
+import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link org.apache.paimon.crosspartition.IndexBootstrap}. */
@@ -128,7 +130,7 @@ public class IndexBootstrapTest extends TableTestBase {
                 1,
                 DataFileMeta.EMPTY_MIN_KEY,
                 DataFileMeta.EMPTY_MAX_KEY,
-                DataFileMeta.EMPTY_KEY_STATS,
+                EMPTY_STATS,
                 null,
                 0,
                 1,
@@ -140,7 +142,8 @@ public class IndexBootstrapTest extends TableTestBase {
                                 .atZone(ZoneId.systemDefault())
                                 .toLocalDateTime()),
                 0L,
-                null);
+                null,
+                FileSource.APPEND);
     }
 
     private Pair<InternalRow, Integer> row(int pt, int col, int pk, int bucket) {

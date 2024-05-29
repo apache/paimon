@@ -25,6 +25,7 @@ import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.FileStoreWrite;
@@ -95,12 +96,6 @@ public class PrivilegedFileStore<T> implements FileStore<T> {
     }
 
     @Override
-    public FileStoreScan newScan(String branchName) {
-        privilegeChecker.assertCanSelect(identifier);
-        return wrapped.newScan(branchName);
-    }
-
-    @Override
     public ManifestList.Factory manifestListFactory() {
         return wrapped.manifestListFactory();
     }
@@ -145,15 +140,15 @@ public class PrivilegedFileStore<T> implements FileStore<T> {
     }
 
     @Override
-    public FileStoreCommit newCommit(String commitUser, String branchName) {
-        privilegeChecker.assertCanInsert(identifier);
-        return wrapped.newCommit(commitUser, branchName);
-    }
-
-    @Override
     public SnapshotDeletion newSnapshotDeletion() {
         privilegeChecker.assertCanInsert(identifier);
         return wrapped.newSnapshotDeletion();
+    }
+
+    @Override
+    public ChangelogDeletion newChangelogDeletion() {
+        privilegeChecker.assertCanInsert(identifier);
+        return wrapped.newChangelogDeletion();
     }
 
     @Override

@@ -121,7 +121,6 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
           // define an append-only table and sink into it in complete mode
           spark.sql(s"""
                        |CREATE TABLE T (city String, population Long)
-                       |TBLPROPERTIES ('bucket'='3')
                        |""".stripMargin)
           val location = loadTable("T").location().toString
 
@@ -189,7 +188,7 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
         // define an append-only table and sink into it with aggregation and watermark in append mode
         spark.sql(s"""
                      |CREATE TABLE T (start Timestamp, stockId INT, avg_price DOUBLE)
-                     |TBLPROPERTIES ('bucket'='3')
+                     |TBLPROPERTIES ('bucket'='3', 'bucket-key'='stockId')
                      |""".stripMargin)
         val location = loadTable("T").location().toString
 

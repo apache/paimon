@@ -136,11 +136,6 @@ public class FileMonitorTable implements DataTable, ReadonlyTable {
     }
 
     @Override
-    public SnapshotReader newSnapshotReader(String branchName) {
-        return wrapped.newSnapshotReader(branchName);
-    }
-
-    @Override
     public InnerTableScan newScan() {
         return wrapped.newScan();
     }

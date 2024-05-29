@@ -78,6 +78,7 @@ public class HiveMigrator implements Migrator {
     private final String targetDatabase;
     private final String targetTable;
     private final Map<String, String> options;
+    private Boolean delete = true;
 
     public HiveMigrator(
             HiveCatalog hiveCatalog,
@@ -114,6 +115,11 @@ public class HiveMigrator implements Migrator {
         } catch (TException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    @Override
+    public void deleteOriginTable(boolean delete) {
+        this.delete = delete;
     }
 
     @Override
@@ -202,8 +208,10 @@ public class HiveMigrator implements Migrator {
             throw new RuntimeException("Migrating failed", e);
         }
 
-        // if all success, drop the origin table
-        client.dropTable(sourceDatabase, sourceTable, true, true);
+        // if all success, drop the origin table according the delete field
+        if (delete) {
+            client.dropTable(sourceDatabase, sourceTable, true, true);
+        }
     }
 
     @Override
@@ -216,8 +224,13 @@ public class HiveMigrator implements Migrator {
 
     private void checkPrimaryKey() throws Exception {
         PrimaryKeysRequest primaryKeysRequest = new PrimaryKeysRequest(sourceDatabase, sourceTable);
-        if (!client.getPrimaryKeys(primaryKeysRequest).isEmpty()) {
-            throw new IllegalArgumentException("Can't migrate primary key table yet.");
+        try {
+            if (!client.getPrimaryKeys(primaryKeysRequest).isEmpty()) {
+                throw new IllegalArgumentException("Can't migrate primary key table yet.");
+            }
+        } catch (Exception e) {
+            LOG.warn(
+                    "Your Hive version is low which not support get_primary_keys, skip primary key check firstly!");
         }
     }
 
@@ -227,7 +240,7 @@ public class HiveMigrator implements Migrator {
                     "Hive migrator only support append only table target table");
         }
 
-        if (paimonTable.store().bucketMode() != BucketMode.UNAWARE) {
+        if (paimonTable.store().bucketMode() != BucketMode.BUCKET_UNAWARE) {
             throw new IllegalArgumentException(
                     "Hive migrator only support unaware-bucket target table");
         }

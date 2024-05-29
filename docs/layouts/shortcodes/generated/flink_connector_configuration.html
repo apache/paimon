@@ -69,6 +69,36 @@ under the License.
             <td>Specific dynamic partition refresh interval for lookup, scan all partitions and obtain corresponding partition.</td>
         </tr>
         <tr>
+            <td><h5>lookup.refresh.async</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to refresh lookup table in an async thread.</td>
+        </tr>
+        <tr>
+            <td><h5>lookup.refresh.async.pending-snapshot-count</h5></td>
+            <td style="word-wrap: break-word;">5</td>
+            <td>Integer</td>
+            <td>If the pending snapshot count exceeds the threshold, lookup operator will refresh the table in sync.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.idle-time-to-done</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>Set a time duration when a partition has no new data after this time duration, mark the done status to indicate that the data is ready.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.mark-done-action</h5></td>
+            <td style="word-wrap: break-word;">"success-file"</td>
+            <td>String</td>
+            <td>Action to mark a partition done is to notify the downstream application that the partition has finished writing, the partition is ready to be read.<br />1. 'success-file': add '_success' file to directory.<br />2. 'done-partition': add 'xxx.done' partition to metastore.<br />Both can be configured at the same time: 'done-partition,success-file'.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.time-interval</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>You can specify time interval for partition, for example, daily partition is '1 d', hourly partition is '1 h'.</td>
+        </tr>
+        <tr>
             <td><h5>scan.infer-parallelism</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>

@@ -208,7 +208,7 @@ public class AlignedContinuousFileSplitEnumeratorTest extends FileSplitEnumerato
         private long discoveryInterval = Long.MAX_VALUE;
 
         private StreamTableScan scan;
-        private BucketMode bucketMode = BucketMode.FIXED;
+        private BucketMode bucketMode = BucketMode.HASH_FIXED;
 
         private long timeout = 30000L;
 

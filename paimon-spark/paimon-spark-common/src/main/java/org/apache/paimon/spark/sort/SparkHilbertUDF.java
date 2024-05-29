@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.sort;
 
+import org.apache.paimon.sort.hilbert.HilbertIndexer;
 import org.apache.paimon.utils.ConvertBinaryUtil;
 
 import org.apache.spark.sql.Column;
@@ -37,14 +38,11 @@ import org.apache.spark.sql.types.LongType;
 import org.apache.spark.sql.types.ShortType;
 import org.apache.spark.sql.types.StringType;
 import org.apache.spark.sql.types.TimestampType;
-import org.davidmoten.hilbert.HilbertCurve;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.Serializable;
 import java.math.BigDecimal;
-import java.math.BigInteger;
-import java.util.List;
 
 import scala.collection.JavaConverters;
 import scala.collection.Seq;
@@ -53,8 +51,6 @@ import scala.collection.Seq;
 public class SparkHilbertUDF implements Serializable {
     private static final long PRIMITIVE_EMPTY = Long.MAX_VALUE;
 
-    private static final int BITS_NUM = 63;
-
     SparkHilbertUDF() {}
 
     private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
@@ -62,11 +58,9 @@ public class SparkHilbertUDF implements Serializable {
     }
 
     byte[] hilbertCurvePosBytes(Seq<Long> points) {
-        List<Long> longs = JavaConverters.seqAsJavaList(points);
-        long[] data = longs.stream().mapToLong(Long::longValue).toArray();
-        HilbertCurve hilbertCurve = HilbertCurve.bits(BITS_NUM).dimensions(points.size());
-        BigInteger index = hilbertCurve.index(data);
-        return ConvertBinaryUtil.paddingToNByte(index.toByteArray(), BITS_NUM);
+        Long[] longs = JavaConverters.seqAsJavaList(points).stream().toArray(Long[]::new);
+        byte[] bytes = HilbertIndexer.hilbertCurvePosBytes(longs);
+        return bytes;
     }
 
     private UserDefinedFunction tinyToOrderedLongUDF() {

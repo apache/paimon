@@ -159,7 +159,7 @@ public class HashBucketAssigner implements BucketAssigner {
     }
 
     private boolean isMyBucket(int bucket) {
-        return bucket % numAssigners == assignId % numAssigners;
+        return BucketAssigner.isMyBucket(bucket, numAssigners, assignId);
     }
 
     private PartitionIndex loadIndex(BinaryRow partition, int partitionHash) {

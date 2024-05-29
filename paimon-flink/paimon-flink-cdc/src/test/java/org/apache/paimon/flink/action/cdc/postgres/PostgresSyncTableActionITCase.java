@@ -482,6 +482,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
                         new String[] {"a", "b", "c"}),
                 Collections.emptyList(),
                 Collections.singletonList("a"),
+                Collections.emptyList(),
                 new HashMap<>());
 
         PostgresSyncTableAction action =
