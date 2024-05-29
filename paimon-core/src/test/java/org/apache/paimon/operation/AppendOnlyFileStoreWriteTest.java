@@ -18,8 +18,6 @@
 
 package org.apache.paimon.operation;
 
-import java.util.Collections;
-import java.util.HashMap;
 import org.apache.paimon.append.AppendOnlyWriter;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.FileSystemCatalog;
@@ -44,6 +42,7 @@ import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -191,10 +190,10 @@ public class AppendOnlyFileStoreWriteTest {
 
         BinaryRow binaryRow = nullPartition();
         FileStoreScan scan = table.store().newScan();
-        List<SimpleFileEntry> l0 = scan.withPartitionFilter(Collections.singletonList(binaryRow)).readSimpleEntries();
+        List<SimpleFileEntry> l0 =
+                scan.withPartitionFilter(Collections.singletonList(binaryRow)).readSimpleEntries();
         Assertions.assertThat(l0.size()).isEqualTo(100);
     }
-
 
     private BinaryRow nullPartition() {
         BinaryRow binaryRow = new BinaryRow(1);
