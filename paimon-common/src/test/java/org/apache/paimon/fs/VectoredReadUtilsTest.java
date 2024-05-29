@@ -46,11 +46,6 @@ class VectoredReadUtilsTest {
                     }
 
                     @Override
-                    public int batchSizeForVectorReads() {
-                        return 1000;
-                    }
-
-                    @Override
                     public int pread(long position, byte[] buffer, int offset, int length)
                             throws IOException {
                         boolean returnAll = random.nextBoolean();
