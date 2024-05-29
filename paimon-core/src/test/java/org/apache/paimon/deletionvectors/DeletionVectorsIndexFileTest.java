@@ -46,7 +46,7 @@ public class DeletionVectorsIndexFileTest {
 
         DeletionVectorsIndexFile deletionVectorsIndexFile =
                 new DeletionVectorsIndexFile(
-                        LocalFileIO.create(), pathFactory, MemorySize.ofMebiBytes(Long.MAX_VALUE));
+                        LocalFileIO.create(), pathFactory, MemorySize.ofBytes(Long.MAX_VALUE));
 
         // write
         HashMap<String, DeletionVector> deleteMap = new HashMap<>();
@@ -86,7 +86,7 @@ public class DeletionVectorsIndexFileTest {
         PathFactory pathFactory = getPathFactory();
         DeletionVectorsIndexFile deletionVectorsIndexFile =
                 new DeletionVectorsIndexFile(
-                        LocalFileIO.create(), pathFactory, MemorySize.ofMebiBytes(Long.MAX_VALUE));
+                        LocalFileIO.create(), pathFactory, MemorySize.ofBytes(Long.MAX_VALUE));
 
         // write
         Random random = new Random();
@@ -110,7 +110,7 @@ public class DeletionVectorsIndexFileTest {
         PathFactory pathFactory = getPathFactory();
         DeletionVectorsIndexFile deletionVectorsIndexFile =
                 new DeletionVectorsIndexFile(
-                        LocalFileIO.create(), pathFactory, MemorySize.ofMebiBytes(Long.MAX_VALUE));
+                        LocalFileIO.create(), pathFactory, MemorySize.ofBytes(Long.MAX_VALUE));
 
         // write
         Random random = new Random();
