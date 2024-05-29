@@ -54,7 +54,7 @@ public interface VectoredReadable {
 
     /** The smallest reasonable seek. */
     default int minSeekForVectorReads() {
-        return 1024 * 1024;
+        return 128 * 1024;
     }
 
     /** The read parallelism for vector reads. */
