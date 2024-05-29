@@ -70,7 +70,7 @@ public class BloomFilterFileIndexTest {
         int num = 1000000;
         for (int i = 0; i < num; i++) {
             byte[] ra = random();
-            if (!reader.visitEqual(null, ra).remain()) {
+            if (reader.visitEqual(null, ra).remain()) {
                 errorCount++;
             }
         }
