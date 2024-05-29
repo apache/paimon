@@ -50,7 +50,7 @@ public abstract class NullFalseLeafBinaryFunction extends LeafFunction {
             List<Object> literals) {
         if (nullCount != null) {
             if (rowCount == nullCount || literals.get(0) == null) {
-                return rowCount == nullCount && literals.get(0) == null;
+                return false;
             }
         }
         return test(type, rowCount, min, max, nullCount, literals.get(0));
