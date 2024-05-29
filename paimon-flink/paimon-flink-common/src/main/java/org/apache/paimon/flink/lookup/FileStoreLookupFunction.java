@@ -258,9 +258,8 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         List<Predicate> predicates = new ArrayList<>();
         for (int i = 0; i < partitionKeys.size(); i++) {
             int index = fieldNames.indexOf(partitionKeys.get(i));
-            predicates.add(
-                    builder.equal(
-                            index, InternalRowUtils.get(partition, i, rowType.getTypeAt(index))));
+            Object value = InternalRowUtils.get(partition, i, rowType.getTypeAt(index));
+            predicates.add(value == null ? builder.isNull(index) : builder.equal(index, value));
         }
         return PredicateBuilder.and(predicates);
     }

@@ -155,7 +155,9 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                                         m.getValue(),
                                                         rowType.getTypeAt(index),
                                                         false);
-                                        return predicateBuilder.equal(index, value);
+                                        return value == null
+                                                ? predicateBuilder.isNull(index)
+                                                : predicateBuilder.equal(index, value);
                                     })
                             .collect(Collectors.toList());
             scan.withPartitionFilter(PredicateBuilder.and(partitionFilters));

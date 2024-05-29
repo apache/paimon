@@ -121,8 +121,11 @@ public interface PartitionPredicate {
             PredicateBuilder builder = new PredicateBuilder(partitionType);
             for (int i = 0; i < collectors.length; i++) {
                 FieldStats stats = collectors[i].result();
-                min[i] = builder.greaterOrEqual(i, stats.minValue());
-                max[i] = builder.lessOrEqual(i, stats.maxValue());
+                Object minValue = stats.minValue();
+                Object maxValue = stats.maxValue();
+
+                min[i] = minValue == null ? builder.isNull(i) : builder.greaterOrEqual(i, minValue);
+                max[i] = maxValue == null ? builder.isNull(i) : builder.lessOrEqual(i, maxValue);
             }
         }
 
