@@ -45,13 +45,7 @@ public class PrimaryKeyTableUtils {
 
     public static List<DataField> addKeyNamePrefix(List<DataField> keyFields) {
         return keyFields.stream()
-                .map(
-                        f ->
-                                new DataField(
-                                        f.id(),
-                                        KEY_FIELD_PREFIX + f.name(),
-                                        f.type(),
-                                        f.description()))
+                .map(f -> f.newName(KEY_FIELD_PREFIX + f.name()))
                 .collect(Collectors.toList());
     }
 
