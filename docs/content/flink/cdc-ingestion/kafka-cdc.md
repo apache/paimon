@@ -194,6 +194,7 @@ To use this feature through `flink run`, run the following shell command.
     kafka_sync_database
     --warehouse <warehouse-path> \
     --database <database-name> \
+    [--merge_shards <true/false>] \
     [--table_prefix <paimon-table-prefix>] \
     [--table_suffix <paimon-table-suffix>] \
     [--including_tables <table-name|name-regular-expr>] \
