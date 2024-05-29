@@ -19,6 +19,7 @@
 package org.apache.paimon.fileindex.bloomfilter;
 
 import org.apache.paimon.fileindex.FileIndexReader;
+import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.fileindex.FileIndexWriter;
 import org.apache.paimon.fileindex.FileIndexer;
 import org.apache.paimon.options.Options;
@@ -28,6 +29,9 @@ import org.apache.paimon.utils.BloomFilter64;
 import org.apache.paimon.utils.BloomFilter64.BitSet;
 
 import org.apache.hadoop.util.bloom.HashFunction;
+
+import static org.apache.paimon.fileindex.FileIndexResult.REMAIN;
+import static org.apache.paimon.fileindex.FileIndexResult.SKIP;
 
 /**
  * Bloom filter for file index.
@@ -118,8 +122,8 @@ public class BloomFilterFileIndex implements FileIndexer {
         }
 
         @Override
-        public Boolean visitEqual(FieldRef fieldRef, Object key) {
-            return key == null || filter.testHash(hashFunction.hash(key));
+        public FileIndexResult visitEqual(FieldRef fieldRef, Object key) {
+            return key == null || filter.testHash(hashFunction.hash(key)) ? REMAIN : SKIP;
         }
     }
 }

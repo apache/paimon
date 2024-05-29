@@ -30,6 +30,9 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.types.RowType;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import java.io.Closeable;
@@ -37,19 +40,24 @@ import java.io.IOException;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
+
+import static org.apache.paimon.fileindex.FileIndexResult.REMAIN;
+import static org.apache.paimon.fileindex.FileIndexResult.SKIP;
 
 /** Utils to check secondary index (e.g. bloom filter) predicate. */
 public class FileIndexPredicate implements Closeable {
 
+    private static final Logger LOG = LoggerFactory.getLogger(FileIndexPredicate.class);
+
     private final FileIndexFormat.Reader reader;
-    private final Map<String, FileIndexFieldPredicate> fieldPredicates = new HashMap<>();
+
+    @Nullable private Path path;
 
     public FileIndexPredicate(Path path, FileIO fileIO, RowType fileRowType) throws IOException {
         this(fileIO.newInputStream(path), fileRowType);
+        this.path = path;
     }
 
     public FileIndexPredicate(byte[] serializedBytes, RowType fileRowType) {
@@ -67,22 +75,13 @@ public class FileIndexPredicate implements Closeable {
 
         Set<String> requredFieldNames = getRequiredNames(filePredicate);
 
-        List<FileIndexFieldPredicate> testWorkers =
-                requredFieldNames.stream()
-                        .map(
-                                cname ->
-                                        fieldPredicates.computeIfAbsent(
-                                                cname,
-                                                k ->
-                                                        new FileIndexFieldPredicate(
-                                                                cname,
-                                                                reader.readColumnIndex(cname))))
-                        .collect(Collectors.toList());
-
-        for (FileIndexFieldPredicate testWorker : testWorkers) {
-            if (!testWorker.test(filePredicate)) {
-                return false;
-            }
+        Map<String, Collection<FileIndexReader>> indexReaders = new HashMap<>();
+        requredFieldNames.forEach(name -> indexReaders.put(name, reader.readColumnIndex(name)));
+        if (!new FileIndexPredicateTest(indexReaders).test(filePredicate).remain()) {
+            LOG.debug(
+                    "One file has been filtered: "
+                            + (path == null ? "in scan stage" : path.toString()));
+            return false;
         }
         return true;
     }
@@ -114,55 +113,55 @@ public class FileIndexPredicate implements Closeable {
     }
 
     /** Predicate test worker. */
-    private static class FileIndexFieldPredicate implements PredicateVisitor<Boolean> {
+    private static class FileIndexPredicateTest implements PredicateVisitor<FileIndexResult> {
 
-        private final String columnName;
-        private final Collection<FileIndexReader> fileIndexReaders;
+        private final Map<String, Collection<FileIndexReader>> columnIndexReaders;
 
-        public FileIndexFieldPredicate(
-                String columnName, Collection<FileIndexReader> fileIndexReaders) {
-            this.columnName = columnName;
-            this.fileIndexReaders = fileIndexReaders;
+        public FileIndexPredicateTest(Map<String, Collection<FileIndexReader>> fileIndexReaders) {
+            this.columnIndexReaders = fileIndexReaders;
         }
 
-        public Boolean test(Predicate predicate) {
+        public FileIndexResult test(Predicate predicate) {
             return predicate.visit(this);
         }
 
         @Override
-        public Boolean visit(LeafPredicate predicate) {
-            if (columnName.equals(predicate.fieldName())) {
-                FieldRef fieldRef =
-                        new FieldRef(predicate.index(), predicate.fieldName(), predicate.type());
-                for (FileIndexReader fileIndexReader : fileIndexReaders) {
-                    if (!predicate
-                            .function()
-                            .visit(fileIndexReader, fieldRef, predicate.literals())) {
-                        return false;
-                    }
+        public FileIndexResult visit(LeafPredicate predicate) {
+            FileIndexResult compoundResult = REMAIN;
+            FieldRef fieldRef =
+                    new FieldRef(predicate.index(), predicate.fieldName(), predicate.type());
+            for (FileIndexReader fileIndexReader : columnIndexReaders.get(predicate.fieldName())) {
+                compoundResult =
+                        compoundResult.and(
+                                predicate
+                                        .function()
+                                        .visit(fileIndexReader, fieldRef, predicate.literals()));
+
+                if (!compoundResult.remain()) {
+                    return compoundResult;
                 }
             }
-            return true;
+            return compoundResult;
         }
 
         @Override
-        public Boolean visit(CompoundPredicate predicate) {
-
+        public FileIndexResult visit(CompoundPredicate predicate) {
             if (predicate.function() instanceof Or) {
+                FileIndexResult compoundResult = SKIP;
                 for (Predicate predicate1 : predicate.children()) {
-                    if (predicate1.visit(this)) {
-                        return true;
-                    }
+                    compoundResult = compoundResult.or(predicate1.visit(this));
                 }
-                return false;
+                return compoundResult;
 
             } else {
+                FileIndexResult compundResult = REMAIN;
                 for (Predicate predicate1 : predicate.children()) {
-                    if (!predicate1.visit(this)) {
-                        return false;
+                    compundResult = compundResult.and(predicate1.visit(this));
+                    if (!compundResult.remain()) {
+                        return compundResult;
                     }
                 }
-                return true;
+                return compundResult;
             }
         }
     }
