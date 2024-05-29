@@ -26,7 +26,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.source.InnerStreamTableScan;
+import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.utils.SnapshotManager;
@@ -117,7 +117,7 @@ public class LogHybridSourceFactory
                 StreamTableScan scan = readBuilder.newStreamScan();
                 // register scan metrics
                 if (context.metricGroup() != null) {
-                    ((InnerStreamTableScan) scan)
+                    ((StreamDataTableScan) scan)
                             .withMetricsRegistry(new FlinkMetricRegistry(context.metricGroup()));
                 }
                 splits = splitGenerator.createSplits(scan.plan());

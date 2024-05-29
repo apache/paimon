@@ -26,7 +26,7 @@ import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.source.InnerStreamTableScan;
+import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.InnerStreamTableScanImpl;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
@@ -107,7 +107,7 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     }
 
     @Override
-    public InnerStreamTableScan newStreamScan() {
+    public StreamDataTableScan newStreamScan() {
         return new InnerStreamTableScanImpl(
                 coreOptions(),
                 newSnapshotReader(),

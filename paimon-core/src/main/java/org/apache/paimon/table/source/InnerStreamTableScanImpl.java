@@ -49,7 +49,7 @@ import static org.apache.paimon.CoreOptions.ChangelogProducer.FULL_COMPACTION;
 
 /** {@link StreamTableScan} implementation for streaming planning. */
 public class InnerStreamTableScanImpl extends AbstractInnerTableScan
-        implements InnerStreamTableScan {
+        implements StreamDataTableScan {
 
     private static final Logger LOG = LoggerFactory.getLogger(InnerStreamTableScanImpl.class);
 

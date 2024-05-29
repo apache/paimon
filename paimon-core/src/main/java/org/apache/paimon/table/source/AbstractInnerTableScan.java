@@ -56,7 +56,7 @@ import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** An abstraction layer above {@link FileStoreScan} to provide input split generation. */
-public abstract class AbstractInnerTableScan implements InnerTableScan {
+public abstract class AbstractInnerTableScan implements DataTableScan {
 
     private final CoreOptions options;
     protected final SnapshotReader snapshotReader;

@@ -24,7 +24,7 @@ import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.InnerTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.sink.StreamWriteBuilderImpl;
-import org.apache.paimon.table.source.InnerStreamTableScan;
+import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -35,7 +35,7 @@ public interface InnerTable extends Table {
 
     InnerTableScan newScan();
 
-    InnerStreamTableScan newStreamScan();
+    StreamDataTableScan newStreamScan();
 
     InnerTableRead newRead();
 

@@ -122,6 +122,9 @@ public interface ReadBuilder extends Serializable {
     /** the row number pushed down. */
     ReadBuilder withLimit(int limit);
 
+    /** Specify the shard to be read, and allocate sharded files to read records. */
+    ReadBuilder withShard(int indexOfThisSubtask, int numberOfParallelSubtasks);
+
     /** Create a {@link TableScan} to perform batch planning. */
     TableScan newScan();
 

@@ -89,6 +89,11 @@ public class ReadBuilderImpl implements ReadBuilder {
     }
 
     @Override
+    public ReadBuilder withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
+        return null;
+    }
+
+    @Override
     public TableScan newScan() {
         InnerTableScan tableScan =
                 table.newScan().withFilter(filter).withPartitionFilter(partitionSpec);

@@ -22,7 +22,7 @@ import org.apache.paimon.CoreOptions
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.spark.SparkTypeUtils
 import org.apache.paimon.table.DataTable
-import org.apache.paimon.table.source.{DataSplit, InnerStreamTableScan}
+import org.apache.paimon.table.source.{DataSplit, StreamDataTableScan}
 import org.apache.paimon.table.source.TableScan.Plan
 import org.apache.paimon.table.source.snapshot.StartingContext
 import org.apache.paimon.utils.{RowDataPartitionComputer, TypeUtils}
@@ -44,7 +44,7 @@ private[spark] trait StreamHelper {
 
   var lastTriggerMillis: Long
 
-  private lazy val streamScan: InnerStreamTableScan = table.newStreamScan()
+  private lazy val streamScan: StreamDataTableScan = table.newStreamScan()
 
   private lazy val partitionSchema: StructType =
     SparkTypeUtils.fromPaimonRowType(TypeUtils.project(table.rowType(), table.partitionKeys()))

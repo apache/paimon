@@ -44,7 +44,7 @@ import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.RowKindGenerator;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.UnawareBucketRowKeyExtractor;
-import org.apache.paimon.table.source.InnerStreamTableScan;
+import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.InnerStreamTableScanImpl;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.InnerTableScanImpl;
@@ -163,7 +163,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public InnerStreamTableScan newStreamScan() {
+    public StreamDataTableScan newStreamScan() {
         return new InnerStreamTableScanImpl(
                 coreOptions(),
                 newSnapshotReader(),

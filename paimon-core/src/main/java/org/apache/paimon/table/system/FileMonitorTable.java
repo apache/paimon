@@ -34,7 +34,7 @@ import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.InnerStreamTableScan;
+import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.Split;
@@ -141,7 +141,7 @@ public class FileMonitorTable implements DataTable, ReadonlyTable {
     }
 
     @Override
-    public InnerStreamTableScan newStreamScan() {
+    public StreamDataTableScan newStreamScan() {
         return wrapped.newStreamScan();
     }
 
