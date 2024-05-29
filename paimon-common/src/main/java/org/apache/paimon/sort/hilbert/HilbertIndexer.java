@@ -295,7 +295,7 @@ public class HilbertIndexer implements Serializable {
         }
     }
 
-    private byte[] hilbertCurvePosBytes(Long[] points) {
+    public static byte[] hilbertCurvePosBytes(Long[] points) {
         long[] data = Arrays.stream(points).mapToLong(Long::longValue).toArray();
         HilbertCurve hilbertCurve = HilbertCurve.bits(BITS_NUM).dimensions(points.length);
         BigInteger index = hilbertCurve.index(data);
