@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.table.Table
 import org.apache.paimon.table.source.{DataSplit, Split}
@@ -30,11 +31,17 @@ case class PaimonSplitScan(
     table: Table,
     dataSplits: Array[DataSplit],
     metadataColumns: Seq[PaimonMetadataColumn] = Seq.empty)
-  extends Scan {
+  extends Scan
+  with ScanHelper {
+
+  override val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
+
   override def readSchema(): StructType = SparkTypeUtils.fromPaimonRowType(table.rowType())
 
   override def toBatch: Batch = {
-    PaimonBatch(dataSplits.asInstanceOf[Array[Split]], table.newReadBuilder, metadataColumns)
+    PaimonBatch(
+      reshuffleSplits(dataSplits.asInstanceOf[Array[Split]]),
+      table.newReadBuilder,
+      metadataColumns)
   }
-
 }
