@@ -41,6 +41,10 @@ public interface LogSourceProvider extends Serializable {
      */
     Source<RowData, ?, ?> createSource(@Nullable Map<Integer, Long> bucketOffsets);
 
-    /** Pre-operations before create log {@link Source}. */
+    /**
+     * Do pre-operations before log {@link Source} creation if you need, like system properties
+     * setting before job submitting, for the log {@link Source} inside of {@link HybridSource} will
+     * be created during job running.
+     */
     void preCreateSource();
 }
