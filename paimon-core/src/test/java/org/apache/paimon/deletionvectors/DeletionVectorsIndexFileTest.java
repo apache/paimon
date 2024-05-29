@@ -22,7 +22,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.options.MemorySize;
-import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.utils.PathFactory;
 
 import org.junit.jupiter.api.Test;
@@ -39,7 +38,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Test for {@link DeletionVectorsIndexFile}. */
 public class DeletionVectorsIndexFileTest {
 
-    private static final MemorySize DEFAULT_TARGET_SIZE_PER_INDEX_FILE = MemorySize.parse("2MB");
     @TempDir java.nio.file.Path tempPath;
 
     @Test
@@ -48,10 +46,7 @@ public class DeletionVectorsIndexFileTest {
 
         DeletionVectorsIndexFile deletionVectorsIndexFile =
                 new DeletionVectorsIndexFile(
-                        LocalFileIO.create(),
-                        pathFactory,
-                        BucketMode.HASH_FIXED,
-                        DEFAULT_TARGET_SIZE_PER_INDEX_FILE);
+                        LocalFileIO.create(), pathFactory, MemorySize.ofMebiBytes(Long.MAX_VALUE));
 
         // write
         HashMap<String, DeletionVector> deleteMap = new HashMap<>();
@@ -91,10 +86,7 @@ public class DeletionVectorsIndexFileTest {
         PathFactory pathFactory = getPathFactory();
         DeletionVectorsIndexFile deletionVectorsIndexFile =
                 new DeletionVectorsIndexFile(
-                        LocalFileIO.create(),
-                        pathFactory,
-                        BucketMode.HASH_FIXED,
-                        DEFAULT_TARGET_SIZE_PER_INDEX_FILE);
+                        LocalFileIO.create(), pathFactory, MemorySize.ofMebiBytes(Long.MAX_VALUE));
 
         // write
         Random random = new Random();
@@ -118,10 +110,7 @@ public class DeletionVectorsIndexFileTest {
         PathFactory pathFactory = getPathFactory();
         DeletionVectorsIndexFile deletionVectorsIndexFile =
                 new DeletionVectorsIndexFile(
-                        LocalFileIO.create(),
-                        pathFactory,
-                        BucketMode.HASH_FIXED,
-                        DEFAULT_TARGET_SIZE_PER_INDEX_FILE);
+                        LocalFileIO.create(), pathFactory, MemorySize.ofMebiBytes(Long.MAX_VALUE));
 
         // write
         Random random = new Random();
@@ -149,14 +138,11 @@ public class DeletionVectorsIndexFileTest {
     }
 
     @Test
-    public void testWriteDVIndexWithUnawareBucket() {
+    public void testWriteDVIndexWithLimitedTargetSizePerIndexFile() {
         PathFactory pathFactory = getPathFactory();
         DeletionVectorsIndexFile deletionVectorsIndexFile =
                 new DeletionVectorsIndexFile(
-                        LocalFileIO.create(),
-                        pathFactory,
-                        BucketMode.BUCKET_UNAWARE,
-                        DEFAULT_TARGET_SIZE_PER_INDEX_FILE);
+                        LocalFileIO.create(), pathFactory, MemorySize.parse("2MB"));
 
         // write1
         Random random = new Random();
