@@ -26,7 +26,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionTimeExtractor;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.utils.RowDataPartitionComputer;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
 
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
@@ -63,7 +63,7 @@ public class PartitionMarkDone implements Closeable {
                     "mark-done-pending-partitions",
                     new ListSerializer<>(StringSerializer.INSTANCE));
 
-    private final RowDataPartitionComputer partitionComputer;
+    private final InternalRowPartitionComputer partitionComputer;
     private final PartitionMarkDoneTrigger trigger;
     private final List<PartitionMarkDoneAction> actions;
 
@@ -100,8 +100,8 @@ public class PartitionMarkDone implements Closeable {
                 "Table should enable %s",
                 METASTORE_PARTITIONED_TABLE.key());
 
-        RowDataPartitionComputer partitionComputer =
-                new RowDataPartitionComputer(
+        InternalRowPartitionComputer partitionComputer =
+                new InternalRowPartitionComputer(
                         coreOptions.partitionDefaultName(),
                         table.schema().logicalPartitionType(),
                         partitionKeys.toArray(new String[0]));
@@ -136,7 +136,7 @@ public class PartitionMarkDone implements Closeable {
     }
 
     public PartitionMarkDone(
-            RowDataPartitionComputer partitionComputer,
+            InternalRowPartitionComputer partitionComputer,
             PartitionMarkDoneTrigger trigger,
             List<PartitionMarkDoneAction> actions) {
         this.partitionComputer = partitionComputer;

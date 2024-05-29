@@ -28,7 +28,7 @@ import org.apache.paimon.spark.schema.SparkSystemColumns.ROW_KIND_COL
 import org.apache.paimon.table.{BucketMode, FileStoreTable}
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage}
 import org.apache.paimon.types.RowKind
-import org.apache.paimon.utils.RowDataPartitionComputer
+import org.apache.paimon.utils.InternalRowPartitionComputer
 
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
@@ -82,7 +82,7 @@ case class DeleteFromPaimonTableCommand(
       ) {
         val matchedPartitions =
           table.newSnapshotReader().withPartitionFilter(partitionPredicate.get).partitions().asScala
-        val rowDataPartitionComputer = new RowDataPartitionComputer(
+        val rowDataPartitionComputer = new InternalRowPartitionComputer(
           CoreOptions.PARTITION_DEFAULT_NAME.defaultValue,
           table.schema().logicalPartitionType(),
           table.partitionKeys.asScala.toArray

@@ -43,6 +43,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
+
 /**
  * Source builder to build a Flink {@link StaticFileStoreSource} or {@link
  * ContinuousFileStoreSource}. This is for dedicated compactor jobs.
@@ -89,7 +91,13 @@ public class CompactorSourceBuilder {
             partitionPredicate =
                     PredicateBuilder.or(
                             specifiedPartitions.stream()
-                                    .map(p -> PredicateBuilder.partition(p, table.rowType()))
+                                    .map(
+                                            p ->
+                                                    createPartitionPredicate(
+                                                            p,
+                                                            table.rowType(),
+                                                            table.coreOptions()
+                                                                    .partitionDefaultName()))
                                     .toArray(Predicate[]::new));
         }
 
