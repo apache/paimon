@@ -31,6 +31,7 @@ import java.io.Closeable;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -60,6 +61,9 @@ public class DeletionVectorIndexFileWriter {
     }
 
     public List<IndexFileMeta> write(Map<String, DeletionVector> input) throws IOException {
+        if (input.isEmpty()) {
+            return emptyIndexFile();
+        }
         List<IndexFileMeta> result = new ArrayList<>();
         Iterator<Map.Entry<String, DeletionVector>> iterator = input.entrySet().iterator();
         while (iterator.hasNext()) {
@@ -87,6 +91,13 @@ public class DeletionVectorIndexFileWriter {
             writer.close();
         }
         return writer.writtenIndexFile();
+    }
+
+    private List<IndexFileMeta> emptyIndexFile() throws IOException {
+        try (SingleIndexFileWriter writer =
+                new SingleIndexFileWriter(fileIO, indexPathFactory.newPath())) {
+            return Collections.singletonList(writer.writtenIndexFile());
+        }
     }
 
     class SingleIndexFileWriter implements Closeable {
