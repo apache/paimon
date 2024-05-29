@@ -87,6 +87,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private ScanMode scanMode = ScanMode.ALL;
     private Filter<Integer> levelFilter = null;
     private Long dataFileTimeMills = null;
+    private Filter<String> fileNameFilter = null;
 
     private ManifestCacheFilter manifestCacheFilter = null;
     private ScanMetrics scanMetrics = null;
@@ -201,6 +202,12 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     @Override
     public FileStoreScan withManifestCacheFilter(ManifestCacheFilter manifestFilter) {
         this.manifestCacheFilter = manifestFilter;
+        return this;
+    }
+
+    @Override
+    public FileStoreScan withDataFileNameFilter(Filter<String> fileNameFilter) {
+        this.fileNameFilter = fileNameFilter;
         return this;
     }
 
@@ -488,7 +495,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                         manifest.fileSize(),
                         ManifestEntry.createCacheRowFilter(manifestCacheFilter, numOfBuckets),
                         ManifestEntry.createEntryRowFilter(
-                                partitionFilter, bucketFilter, numOfBuckets));
+                                partitionFilter, bucketFilter, fileNameFilter, numOfBuckets));
     }
 
     /** Note: Keep this thread-safe. */
@@ -503,7 +510,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                         // see SimpleFileEntrySerializer
                         ManifestEntry.createCacheRowFilter(manifestCacheFilter, numOfBuckets),
                         ManifestEntry.createEntryRowFilter(
-                                partitionFilter, bucketFilter, numOfBuckets));
+                                partitionFilter, bucketFilter, fileNameFilter, numOfBuckets));
     }
 
     // ------------------------------------------------------------------------

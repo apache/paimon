@@ -18,8 +18,9 @@
 
 package org.apache.paimon.table.source;
 
-/**
- * Table scan for data table.
- */
+/** Table scan for data table. */
 public interface DataTableScan extends InnerTableScan {
+
+    /** Specify the shard to be read, and allocate sharded files to read records. */
+    DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks);
 }

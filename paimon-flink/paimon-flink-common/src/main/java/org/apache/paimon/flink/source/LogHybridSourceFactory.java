@@ -26,8 +26,8 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.utils.SnapshotManager;
 

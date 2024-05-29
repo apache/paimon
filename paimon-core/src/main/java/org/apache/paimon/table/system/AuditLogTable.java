@@ -39,12 +39,12 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataTableScan;
-import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
+import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingContext;
@@ -277,6 +277,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public SnapshotReader withDataFileNameFilter(Filter<String> fileNameFilter) {
+            snapshotReader.withDataFileNameFilter(fileNameFilter);
+            return this;
+        }
+
+        @Override
         public SnapshotReader withMetricRegistry(MetricRegistry registry) {
             snapshotReader.withMetricRegistry(registry);
             return this;
@@ -361,6 +367,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         public List<BinaryRow> listPartitions() {
             return batchScan.listPartitions();
         }
+
+        @Override
+        public DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
+            batchScan.withShard(indexOfThisSubtask, numberOfParallelSubtasks);
+            return this;
+        }
     }
 
     private class AuditLogStreamScan implements StreamDataTableScan {
@@ -422,6 +434,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public StreamDataTableScan withMetricsRegistry(MetricRegistry metricsRegistry) {
             streamScan.withMetricsRegistry(metricsRegistry);
+            return this;
+        }
+
+        @Override
+        public DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
+            streamScan.withShard(indexOfThisSubtask, numberOfParallelSubtasks);
             return this;
         }
     }

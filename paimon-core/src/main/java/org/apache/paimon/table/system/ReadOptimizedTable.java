@@ -26,11 +26,10 @@ import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.source.StreamDataTableScan;
-import org.apache.paimon.table.source.InnerStreamTableScanImpl;
+import org.apache.paimon.table.source.DataTableBatchScan;
+import org.apache.paimon.table.source.DataTableStreamScan;
 import org.apache.paimon.table.source.InnerTableRead;
-import org.apache.paimon.table.source.InnerTableScan;
-import org.apache.paimon.table.source.InnerTableScanImpl;
+import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchManager;
@@ -98,8 +97,9 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     }
 
     @Override
-    public InnerTableScan newScan() {
-        return new InnerTableScanImpl(
+    public DataTableBatchScan newScan() {
+        return new DataTableBatchScan(
+                dataTable.bucketMode(),
                 dataTable.schema().primaryKeys().size() > 0,
                 coreOptions(),
                 newSnapshotReader(),
@@ -108,7 +108,8 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
 
     @Override
     public StreamDataTableScan newStreamScan() {
-        return new InnerStreamTableScanImpl(
+        return new DataTableStreamScan(
+                dataTable.bucketMode(),
                 coreOptions(),
                 newSnapshotReader(),
                 snapshotManager(),

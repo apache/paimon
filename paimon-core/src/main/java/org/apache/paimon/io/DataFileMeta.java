@@ -53,6 +53,27 @@ import static org.apache.paimon.utils.SerializationUtils.newStringType;
 /** Metadata of a data file. */
 public class DataFileMeta {
 
+    public static final RowType SCHEMA =
+            new RowType(
+                    Arrays.asList(
+                            new DataField(0, "_FILE_NAME", newStringType(false)),
+                            new DataField(1, "_FILE_SIZE", new BigIntType(false)),
+                            new DataField(2, "_ROW_COUNT", new BigIntType(false)),
+                            new DataField(3, "_MIN_KEY", newBytesType(false)),
+                            new DataField(4, "_MAX_KEY", newBytesType(false)),
+                            new DataField(5, "_KEY_STATS", SimpleStatsConverter.schema()),
+                            new DataField(6, "_VALUE_STATS", SimpleStatsConverter.schema()),
+                            new DataField(7, "_MIN_SEQUENCE_NUMBER", new BigIntType(false)),
+                            new DataField(8, "_MAX_SEQUENCE_NUMBER", new BigIntType(false)),
+                            new DataField(9, "_SCHEMA_ID", new BigIntType(false)),
+                            new DataField(10, "_LEVEL", new IntType(false)),
+                            new DataField(
+                                    11, "_EXTRA_FILES", new ArrayType(false, newStringType(false))),
+                            new DataField(12, "_CREATION_TIME", DataTypes.TIMESTAMP_MILLIS()),
+                            new DataField(13, "_DELETE_ROW_COUNT", new BigIntType(true)),
+                            new DataField(14, "_EMBEDDED_FILE_INDEX", newBytesType(true)),
+                            new DataField(15, "_FILE_SOURCE", new TinyIntType(true))));
+
     public static final BinaryRow EMPTY_MIN_KEY = EMPTY_ROW;
     public static final BinaryRow EMPTY_MAX_KEY = EMPTY_ROW;
     public static final int DUMMY_LEVEL = 0;
@@ -430,24 +451,7 @@ public class DataFileMeta {
     }
 
     public static RowType schema() {
-        List<DataField> fields = new ArrayList<>();
-        fields.add(new DataField(0, "_FILE_NAME", newStringType(false)));
-        fields.add(new DataField(1, "_FILE_SIZE", new BigIntType(false)));
-        fields.add(new DataField(2, "_ROW_COUNT", new BigIntType(false)));
-        fields.add(new DataField(3, "_MIN_KEY", newBytesType(false)));
-        fields.add(new DataField(4, "_MAX_KEY", newBytesType(false)));
-        fields.add(new DataField(5, "_KEY_STATS", SimpleStatsConverter.schema()));
-        fields.add(new DataField(6, "_VALUE_STATS", SimpleStatsConverter.schema()));
-        fields.add(new DataField(7, "_MIN_SEQUENCE_NUMBER", new BigIntType(false)));
-        fields.add(new DataField(8, "_MAX_SEQUENCE_NUMBER", new BigIntType(false)));
-        fields.add(new DataField(9, "_SCHEMA_ID", new BigIntType(false)));
-        fields.add(new DataField(10, "_LEVEL", new IntType(false)));
-        fields.add(new DataField(11, "_EXTRA_FILES", new ArrayType(false, newStringType(false))));
-        fields.add(new DataField(12, "_CREATION_TIME", DataTypes.TIMESTAMP_MILLIS()));
-        fields.add(new DataField(13, "_DELETE_ROW_COUNT", new BigIntType(true)));
-        fields.add(new DataField(14, "_EMBEDDED_FILE_INDEX", newBytesType(true)));
-        fields.add(new DataField(15, "_FILE_SOURCE", new TinyIntType(true)));
-        return new RowType(fields);
+        return SCHEMA;
     }
 
     public static long getMaxSequenceNumber(List<DataFileMeta> fileMetas) {
