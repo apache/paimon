@@ -42,7 +42,7 @@ import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.util.Collections;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -189,9 +189,10 @@ public class AppendOnlyFileStoreWriteTest {
         }
 
         BinaryRow binaryRow = nullPartition();
+        BinaryRow binaryRow1 = partition(0);
         FileStoreScan scan = table.store().newScan();
         List<SimpleFileEntry> l0 =
-                scan.withPartitionFilter(Collections.singletonList(binaryRow)).readSimpleEntries();
+                scan.withPartitionFilter(Arrays.asList(binaryRow1, binaryRow)).readSimpleEntries();
         Assertions.assertThat(l0.size()).isEqualTo(100);
     }
 
