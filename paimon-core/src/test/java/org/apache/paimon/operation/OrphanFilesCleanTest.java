@@ -42,8 +42,8 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
-import org.apache.paimon.table.source.InnerStreamTableScan;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
@@ -267,7 +267,7 @@ public class OrphanFilesCleanTest {
                 changelogData.keySet().stream()
                         .max(Comparator.comparingLong(Long::longValue))
                         .get();
-        InnerStreamTableScan scan = scanTable.newStreamScan();
+        StreamDataTableScan scan = scanTable.newStreamScan();
         TreeMap<Long, List<InternalRow>> data = new TreeMap<>(changelogData);
         // clear the data < the smallest changelog data.
         data.headMap(changelogs.get(0).id()).clear();

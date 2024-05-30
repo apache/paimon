@@ -34,9 +34,9 @@ import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
-import org.apache.paimon.table.source.InnerStreamTableScan;
+import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
-import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.SnapshotManager;
@@ -235,13 +235,13 @@ public class PrivilegedFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public InnerTableScan newScan() {
+    public DataTableScan newScan() {
         privilegeChecker.assertCanSelect(identifier);
         return wrapped.newScan();
     }
 
     @Override
-    public InnerStreamTableScan newStreamScan() {
+    public StreamDataTableScan newStreamScan() {
         privilegeChecker.assertCanSelect(identifier);
         return wrapped.newStreamScan();
     }

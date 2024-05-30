@@ -171,19 +171,27 @@ public class ManifestEntry implements FileEntry {
     public static Filter<InternalRow> createEntryRowFilter(
             @Nullable PartitionPredicate partitionFilter,
             @Nullable Filter<Integer> bucketFilter,
+            @Nullable Filter<String> fileNameFilter,
             int numOfBuckets) {
         Function<InternalRow, BinaryRow> partitionGetter =
                 ManifestEntrySerializer.partitionGetter();
         Function<InternalRow, Integer> bucketGetter = ManifestEntrySerializer.bucketGetter();
         Function<InternalRow, Integer> totalBucketGetter =
                 ManifestEntrySerializer.totalBucketGetter();
+        Function<InternalRow, String> fileNameGetter = ManifestEntrySerializer.fileNameGetter();
         return row -> {
             if ((partitionFilter != null && !partitionFilter.test(partitionGetter.apply(row)))) {
                 return false;
             }
 
-            if (bucketFilter != null && numOfBuckets == totalBucketGetter.apply(row)) {
-                return bucketFilter.test(bucketGetter.apply(row));
+            if (bucketFilter != null
+                    && numOfBuckets == totalBucketGetter.apply(row)
+                    && !bucketFilter.test(bucketGetter.apply(row))) {
+                return false;
+            }
+
+            if (fileNameFilter != null && !fileNameFilter.test((fileNameGetter.apply(row)))) {
+                return false;
             }
 
             return true;

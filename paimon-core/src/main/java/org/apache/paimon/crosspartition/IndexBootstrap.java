@@ -27,7 +27,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.source.AbstractInnerTableScan;
+import org.apache.paimon.table.source.AbstractDataTableScan;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
@@ -84,7 +84,7 @@ public class IndexBootstrap implements Serializable {
                         .newReadBuilder()
                         .withProjection(keyProjection);
 
-        AbstractInnerTableScan tableScan = (AbstractInnerTableScan) readBuilder.newScan();
+        AbstractDataTableScan tableScan = (AbstractDataTableScan) readBuilder.newScan();
         List<Split> splits =
                 tableScan
                         .withBucketFilter(bucket -> bucket % numAssigners == assignId)

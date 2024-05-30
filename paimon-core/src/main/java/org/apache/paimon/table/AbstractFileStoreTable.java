@@ -44,11 +44,10 @@ import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.RowKindGenerator;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.UnawareBucketRowKeyExtractor;
-import org.apache.paimon.table.source.InnerStreamTableScan;
-import org.apache.paimon.table.source.InnerStreamTableScanImpl;
-import org.apache.paimon.table.source.InnerTableScan;
-import org.apache.paimon.table.source.InnerTableScanImpl;
+import org.apache.paimon.table.source.DataTableBatchScan;
+import org.apache.paimon.table.source.DataTableStreamScan;
 import org.apache.paimon.table.source.SplitGenerator;
+import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.SnapshotReaderImpl;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
@@ -154,8 +153,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public InnerTableScan newScan() {
-        return new InnerTableScanImpl(
+    public DataTableBatchScan newScan() {
+        return new DataTableBatchScan(
+                bucketMode(),
                 tableSchema.primaryKeys().size() > 0,
                 coreOptions(),
                 newSnapshotReader(),
@@ -163,8 +163,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public InnerStreamTableScan newStreamScan() {
-        return new InnerStreamTableScanImpl(
+    public StreamDataTableScan newStreamScan() {
+        return new DataTableStreamScan(
+                bucketMode(),
                 coreOptions(),
                 newSnapshotReader(),
                 snapshotManager(),

@@ -221,6 +221,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
         return this;
     }
 
+    @Override
+    public SnapshotReader withDataFileNameFilter(Filter<String> fileNameFilter) {
+        scan.withDataFileNameFilter(fileNameFilter);
+        return this;
+    }
+
     /** Get splits from {@link FileKind#ADD} files. */
     @Override
     public Plan read() {
