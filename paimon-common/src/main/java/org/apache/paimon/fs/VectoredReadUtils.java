@@ -26,9 +26,12 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
 
 import static java.util.Objects.requireNonNull;
 import static org.apache.paimon.fs.FileIOUtils.IO_THREAD_POOL;
+import static org.apache.paimon.fs.FileRange.createFileRange;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /* This file is based on source code from the Hadoop Project (http://hadoop.apache.org/), licensed by the Apache
@@ -56,12 +59,20 @@ public class VectoredReadUtils {
         }
 
         BlockingExecutor executor = new BlockingExecutor(IO_THREAD_POOL, parallelism);
+        long batchSize = readable.batchSizeForVectorReads();
         for (CombinedRange combinedRange : combinedRanges) {
             if (combinedRange.underlying.size() == 1) {
                 FileRange fileRange = combinedRange.underlying.get(0);
                 executor.submit(() -> readSingleRange(readable, fileRange));
             } else {
-                executor.submit(() -> readCombinedRange(readable, combinedRange));
+                List<FileRange> splitBatches = combinedRange.splitBatches(batchSize, parallelism);
+                splitBatches.forEach(
+                        range -> executor.submit(() -> readSingleRange(readable, range)));
+                List<CompletableFuture<byte[]>> futures =
+                        splitBatches.stream().map(FileRange::getData).collect(Collectors.toList());
+                CompletableFuture.allOf(futures.toArray(new CompletableFuture<?>[0]))
+                        .thenAcceptAsync(
+                                unused -> copyToFileRanges(combinedRange, futures), IO_THREAD_POOL);
             }
         }
     }
@@ -93,27 +104,42 @@ public class VectoredReadUtils {
         }
     }
 
-    private static void readCombinedRange(VectoredReadable readable, CombinedRange combinedRange) {
-        try {
-            long position = combinedRange.offset;
-            int length = combinedRange.length;
+    private static void copyToFileRanges(
+            CombinedRange combinedRange, List<CompletableFuture<byte[]>> futures) {
+        List<byte[]> segments = new ArrayList<>(futures.size());
+        for (CompletableFuture<byte[]> future : futures) {
+            segments.add(future.join());
+        }
+        long offset = combinedRange.offset;
+        for (FileRange fileRange : combinedRange.underlying) {
+            byte[] buffer = new byte[fileRange.getLength()];
+            copyMultiBytesToBytes(
+                    segments,
+                    (int) (fileRange.getOffset() - offset),
+                    buffer,
+                    fileRange.getLength());
+            fileRange.getData().complete(buffer);
+        }
+    }
 
-            byte[] total = new byte[length];
-            readable.preadFully(position, total, 0, length);
-
-            for (FileRange child : combinedRange.underlying) {
-                byte[] buffer = new byte[child.getLength()];
-                System.arraycopy(
-                        total, (int) (child.getOffset() - position), buffer, 0, child.getLength());
-                child.getData().complete(buffer);
-            }
-        } catch (Exception ex) {
-            // complete exception all the underlying ranges which have not already
-            // finished.
-            for (FileRange child : combinedRange.underlying) {
-                if (!child.getData().isDone()) {
-                    child.getData().completeExceptionally(ex);
+    private static void copyMultiBytesToBytes(
+            List<byte[]> segments, int offset, byte[] bytes, int numBytes) {
+        int remainSize = numBytes;
+        for (byte[] segment : segments) {
+            int remain = segment.length - offset;
+            if (remain > 0) {
+                int nCopy = Math.min(remain, remainSize);
+                System.arraycopy(segment, offset, bytes, numBytes - remainSize, nCopy);
+                remainSize -= nCopy;
+                // next new segment.
+                offset = 0;
+                if (remainSize == 0) {
+                    return;
                 }
+            } else {
+                // remain is negative, let's advance to next segment
+                // now the offset = offset - segmentSize (-remain)
+                offset = -remain;
             }
         }
     }
@@ -205,6 +231,30 @@ public class VectoredReadUtils {
             this.length = (int) (newEnd - offset);
             append(other);
             return true;
+        }
+
+        private List<FileRange> splitBatches(long batchSize, int parallelism) {
+            long expectedSize = Math.max(batchSize, (length / parallelism) + 1);
+            List<FileRange> splitBatches = new ArrayList<>();
+            long offset = this.offset;
+            long end = offset + length;
+
+            // split only when remain size exceeds twice the batchSize to avoid small File IO
+            long minRemain = Math.max(expectedSize, batchSize * 2);
+
+            while (true) {
+                if (end < offset + minRemain) {
+                    int currentLen = (int) (end - offset);
+                    if (currentLen > 0) {
+                        splitBatches.add(createFileRange(offset, currentLen));
+                    }
+                    break;
+                } else {
+                    splitBatches.add(createFileRange(offset, (int) expectedSize));
+                    offset += expectedSize;
+                }
+            }
+            return splitBatches;
         }
 
         @Override
