@@ -19,6 +19,7 @@
 package org.apache.paimon.fs;
 
 import org.apache.paimon.utils.BlockingExecutor;
+import org.apache.paimon.utils.IOUtils;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -46,10 +47,17 @@ public class VectoredReadUtils {
             return;
         }
 
+        List<? extends FileRange> sortRanges = validateAndSortRanges(ranges);
         List<CombinedRange> combinedRanges =
-                mergeSortedRanges(validateAndSortRanges(ranges), readable.minSeekForVectorReads());
+                mergeSortedRanges(sortRanges, readable.minSeekForVectorReads());
 
         int parallelism = readable.parallelismForVectorReads();
+
+        if (combinedRanges.size() == 1) {
+            fallbackToReadSequence(readable, sortRanges);
+            return;
+        }
+
         BlockingExecutor executor = new BlockingExecutor(IO_THREAD_POOL, parallelism);
         long batchSize = readable.batchSizeForVectorReads();
         for (CombinedRange combinedRange : combinedRanges) {
@@ -66,6 +74,17 @@ public class VectoredReadUtils {
                         .thenAcceptAsync(
                                 unused -> copyToFileRanges(combinedRange, futures), IO_THREAD_POOL);
             }
+        }
+    }
+
+    private static void fallbackToReadSequence(
+            VectoredReadable readable, List<? extends FileRange> ranges) throws IOException {
+        SeekableInputStream in = (SeekableInputStream) readable;
+        for (FileRange range : ranges) {
+            byte[] bytes = new byte[range.getLength()];
+            in.seek(range.getOffset());
+            IOUtils.readFully(in, bytes);
+            range.getData().complete(bytes);
         }
     }
 
