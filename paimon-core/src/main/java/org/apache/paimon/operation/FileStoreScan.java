@@ -70,6 +70,8 @@ public interface FileStoreScan {
 
     FileStoreScan withManifestCacheFilter(ManifestCacheFilter manifestFilter);
 
+    FileStoreScan withDataFileNameFilter(Filter<String> fileNameFilter);
+
     FileStoreScan withMetrics(ScanMetrics metrics);
 
     /** Produce a {@link Plan}. */

@@ -21,8 +21,8 @@ package org.apache.paimon.flink.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.table.BucketMode;
-import org.apache.paimon.table.source.InnerStreamTableScan;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.StreamTableScan;
 
 import org.apache.flink.api.connector.source.Boundedness;
@@ -77,7 +77,7 @@ public class ContinuousFileStoreSource extends FlinkSource {
         }
         StreamTableScan scan = readBuilder.newStreamScan();
         if (metricGroup(context) != null) {
-            ((InnerStreamTableScan) scan)
+            ((StreamDataTableScan) scan)
                     .withMetricsRegistry(new FlinkMetricRegistry(context.metricGroup()));
         }
         scan.restore(nextSnapshotId);

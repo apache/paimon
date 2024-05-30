@@ -41,6 +41,9 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     private Integer limit = null;
 
+    private Integer shardIndexOfThisSubtask;
+    private Integer shardNumberOfParallelSubtasks;
+
     private Map<String, String> partitionSpec;
 
     public ReadBuilderImpl(InnerTable table) {
@@ -89,9 +92,15 @@ public class ReadBuilderImpl implements ReadBuilder {
     }
 
     @Override
+    public ReadBuilder withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
+        this.shardIndexOfThisSubtask = indexOfThisSubtask;
+        this.shardNumberOfParallelSubtasks = numberOfParallelSubtasks;
+        return this;
+    }
+
+    @Override
     public TableScan newScan() {
-        InnerTableScan tableScan =
-                table.newScan().withFilter(filter).withPartitionFilter(partitionSpec);
+        InnerTableScan tableScan = configureScan(table.newScan());
         if (limit != null) {
             tableScan.withLimit(limit);
         }
@@ -100,7 +109,22 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     @Override
     public StreamTableScan newStreamScan() {
-        return (StreamTableScan) table.newStreamScan().withFilter(filter);
+        return (StreamTableScan) configureScan(table.newStreamScan());
+    }
+
+    private InnerTableScan configureScan(InnerTableScan scan) {
+        scan.withFilter(filter).withPartitionFilter(partitionSpec);
+
+        if (shardIndexOfThisSubtask != null) {
+            if (scan instanceof DataTableScan) {
+                ((DataTableScan) scan)
+                        .withShard(shardIndexOfThisSubtask, shardNumberOfParallelSubtasks);
+            } else {
+                throw new UnsupportedOperationException(
+                        "Unsupported table scan type for shard configuring, the scan is: " + scan);
+            }
+        }
+        return scan;
     }
 
     @Override

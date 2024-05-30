@@ -24,6 +24,7 @@ import org.apache.paimon.consumer.Consumer;
 import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.snapshot.AllDeltaFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.BoundedChecker;
 import org.apache.paimon.table.source.snapshot.CompactionChangelogFollowUpScanner;
@@ -48,11 +49,11 @@ import javax.annotation.Nullable;
 import static org.apache.paimon.CoreOptions.ChangelogProducer.FULL_COMPACTION;
 
 /** {@link StreamTableScan} implementation for streaming planning. */
-public class InnerStreamTableScanImpl extends AbstractInnerTableScan
-        implements InnerStreamTableScan {
+public class DataTableStreamScan extends AbstractDataTableScan implements StreamDataTableScan {
 
-    private static final Logger LOG = LoggerFactory.getLogger(InnerStreamTableScanImpl.class);
+    private static final Logger LOG = LoggerFactory.getLogger(DataTableStreamScan.class);
 
+    private final BucketMode bucketMode;
     private final CoreOptions options;
     private final SnapshotManager snapshotManager;
     private final boolean supportStreamingReadOverwrite;
@@ -68,13 +69,15 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
     @Nullable private Long currentWatermark;
     @Nullable private Long nextSnapshotId;
 
-    public InnerStreamTableScanImpl(
+    public DataTableStreamScan(
+            BucketMode bucketMode,
             CoreOptions options,
             SnapshotReader snapshotReader,
             SnapshotManager snapshotManager,
             boolean supportStreamingReadOverwrite,
             DefaultValueAssigner defaultValueAssigner) {
         super(options, snapshotReader);
+        this.bucketMode = bucketMode;
         this.options = options;
         this.snapshotManager = snapshotManager;
         this.supportStreamingReadOverwrite = supportStreamingReadOverwrite;
@@ -87,7 +90,7 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
     }
 
     @Override
-    public InnerStreamTableScanImpl withFilter(Predicate predicate) {
+    public DataTableStreamScan withFilter(Predicate predicate) {
         snapshotReader.withFilter(defaultValueAssigner.handlePredicate(predicate));
         return this;
     }
@@ -278,5 +281,11 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
         if (consumerId != null) {
             snapshotReader.consumerManager().resetConsumer(consumerId, new Consumer(nextSnapshot));
         }
+    }
+
+    @Override
+    public DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
+        snapshotReader.withShard(bucketMode, indexOfThisSubtask, numberOfParallelSubtasks);
+        return this;
     }
 }

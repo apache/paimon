@@ -386,6 +386,35 @@ public abstract class FileStoreTableTestBase {
         assertThat(((DataSplit) splits.get(0)).bucket()).isEqualTo(1);
     }
 
+    protected void innerTestWithShard(FileStoreTable table) throws Exception {
+        StreamTableWrite write = table.newWrite(commitUser);
+        write.write(rowData(1, 1, 2L));
+        write.write(rowData(1, 3, 4L));
+        write.write(rowData(1, 5, 6L));
+        write.write(rowData(1, 7, 8L));
+        write.write(rowData(1, 9, 10L));
+        TableCommitImpl commit = table.newCommit(commitUser);
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.close();
+        commit.close();
+
+        ReadBuilder readBuilder = table.newReadBuilder();
+
+        List<Split> splits = new ArrayList<>();
+        splits.addAll(readBuilder.withShard(0, 3).newScan().plan().splits());
+        splits.addAll(readBuilder.withShard(1, 3).newScan().plan().splits());
+        splits.addAll(readBuilder.withShard(2, 3).newScan().plan().splits());
+
+        assertThat(getResult(readBuilder.newRead(), splits, BATCH_ROW_TO_STRING))
+                .hasSameElementsAs(
+                        Arrays.asList(
+                                "1|3|4|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|9|10|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|1|2|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|5|6|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|7|8|binary|varbinary|mapKey:mapVal|multiset"));
+    }
+
     @Test
     public void testAbort() throws Exception {
         FileStoreTable table = createFileStoreTable(conf -> conf.set(BUCKET, 1));

@@ -21,6 +21,7 @@ package org.apache.paimon.manifest;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.utils.VersionedObjectSerializer;
 
@@ -86,5 +87,9 @@ public class ManifestEntrySerializer extends VersionedObjectSerializer<ManifestE
 
     public static Function<InternalRow, Integer> totalBucketGetter() {
         return row -> row.getInt(4);
+    }
+
+    public static Function<InternalRow, String> fileNameGetter() {
+        return row -> row.getRow(5, DataFileMeta.SCHEMA.getFieldCount()).getString(0).toString();
     }
 }

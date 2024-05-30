@@ -484,6 +484,23 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Test
+    public void testWithShardAppendTable() throws Exception {
+        FileStoreTable table = createFileStoreTable(conf -> conf.set(BUCKET, -1));
+        innerTestWithShard(table);
+    }
+
+    @Test
+    public void testWithShardBucketedTable() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(BUCKET, 5);
+                            conf.set(BUCKET_KEY, "a");
+                        });
+        innerTestWithShard(table);
+    }
+
+    @Test
     public void testBloomFilterForMapField() throws Exception {
         RowType rowType =
                 RowType.builder()

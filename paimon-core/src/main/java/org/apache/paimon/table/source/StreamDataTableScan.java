@@ -16,36 +16,17 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table;
+package org.apache.paimon.table.source;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.table.source.DataTableScan;
-import org.apache.paimon.table.source.snapshot.SnapshotReader;
-import org.apache.paimon.utils.BranchManager;
-import org.apache.paimon.utils.SnapshotManager;
-import org.apache.paimon.utils.TagManager;
+import org.apache.paimon.table.source.snapshot.StartingContext;
 
-/** A {@link Table} for data. */
-public interface DataTable extends InnerTable {
+import javax.annotation.Nullable;
 
-    @Override
-    DataTableScan newScan();
+/** Streaming {@link InnerTableScan} with {@link StreamTableScan}. */
+public interface StreamDataTableScan extends DataTableScan, StreamTableScan {
 
-    SnapshotReader newSnapshotReader();
+    StartingContext startingContext();
 
-    SnapshotReader newSnapshotReader(String branchName);
-
-    CoreOptions coreOptions();
-
-    SnapshotManager snapshotManager();
-
-    TagManager tagManager();
-
-    BranchManager branchManager();
-
-    Path location();
-
-    FileIO fileIO();
+    /** Restore from checkpoint next snapshot id with scan kind. */
+    void restore(@Nullable Long nextSnapshotId, boolean scanAllSnapshot);
 }
