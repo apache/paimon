@@ -71,7 +71,7 @@ public interface SnapshotReader {
 
     default SnapshotReader withShard(
             BucketMode bucketMode, int indexOfThisSubtask, int numberOfParallelSubtasks) {
-        if (bucketMode == BucketMode.BUCKET_UNAWARE) {
+        if (bucketMode == BucketMode.UNAWARE) {
             withDataFileNameFilter(
                     file ->
                             Math.abs(file.hashCode() % numberOfParallelSubtasks)
