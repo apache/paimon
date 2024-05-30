@@ -84,6 +84,13 @@ public class DeletionVectorIndexFileWriter {
         return writer.writtenIndexFile();
     }
 
+    /**
+     * The deletion file of the bucketed table is updated according to the bucket. If a compaction
+     * occurs and there is no longer a deletion file, an empty deletion file needs to be generated
+     * to overwrite the old file.
+     *
+     * <p>TODO: We can consider sending a message to delete the deletion file in the future.
+     */
     private List<IndexFileMeta> emptyIndexFile() throws IOException {
         try (SingleIndexFileWriter writer = new SingleIndexFileWriter()) {
             return Collections.singletonList(writer.writtenIndexFile());
