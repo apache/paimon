@@ -20,14 +20,15 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.io.DataFileMeta
-import org.apache.paimon.table.source.{DataSplit, DeletionFile, RawFile, Split}
+import org.apache.paimon.table.source.{DataSplit, DeletionFile, Split}
 
+import org.apache.spark.internal.Logging
 import org.apache.spark.sql.SparkSession
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable.ArrayBuffer
 
-trait ScanHelper {
+trait ScanHelper extends Logging {
 
   private val spark = SparkSession.active
 
@@ -45,12 +46,15 @@ trait ScanHelper {
 
   def reshuffleSplits(splits: Array[Split]): Array[Split] = {
     if (splits.length < leafNodeDefaultParallelism) {
+      val beforeLength = splits.length
       val (toReshuffle, reserved) = splits.partition {
         case split: DataSplit => split.beforeFiles().isEmpty && split.convertToRawFiles.isPresent
         case _ => false
       }
       val reshuffled = reshuffleSplits0(toReshuffle.collect { case ds: DataSplit => ds })
-      reshuffled ++ reserved
+      val all = reshuffled ++ reserved
+      logInfo(s"Reshuffle splits from $beforeLength to ${all.length}")
+      all
     } else {
       splits
     }
@@ -134,5 +138,4 @@ trait ScanHelper {
 
     Math.min(defaultMaxSplitBytes, Math.max(openCostInBytes, bytesPerCore))
   }
-
 }
