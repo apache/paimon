@@ -83,7 +83,7 @@ public class DataFileTestUtils {
     }
 
     public static DataFileMeta newFile(
-            String name, int level, int minKey, int maxKey, long maxSequence, long deleteRowCount) {
+            String name, int level, int minKey, int maxKey, long maxSequence, Long deleteRowCount) {
         return new DataFileMeta(
                 name,
                 maxKey - minKey + 1,

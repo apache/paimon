@@ -144,6 +144,7 @@ public class MergeTreeSplitGenerator implements SplitGenerator {
     }
 
     private boolean withoutDeleteRow(DataFileMeta dataFileMeta) {
-        return dataFileMeta.deleteRowCount().map(count -> count == 0L).orElse(false);
+        // null to true to be compatible with old version
+        return dataFileMeta.deleteRowCount().map(count -> count == 0L).orElse(true);
     }
 }
