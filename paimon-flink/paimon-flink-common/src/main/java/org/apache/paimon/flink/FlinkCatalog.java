@@ -32,8 +32,8 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Preconditions;
-import org.apache.paimon.utils.RowDataPartitionComputer;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.api.TableSchema;
@@ -860,7 +860,7 @@ public class FlinkCatalog extends AbstractCatalog {
             org.apache.paimon.types.RowType partitionRowType =
                     fileStoreTable.schema().logicalPartitionType();
 
-            RowDataPartitionComputer partitionComputer =
+            InternalRowPartitionComputer partitionComputer =
                     FileStorePathFactory.getPartitionComputer(
                             partitionRowType,
                             new CoreOptions(table.options()).partitionDefaultName());

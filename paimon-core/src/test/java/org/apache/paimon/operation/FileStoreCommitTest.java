@@ -79,6 +79,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
+import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -658,8 +659,10 @@ public class FileStoreCommitTest {
                 partitions.stream()
                         .map(
                                 partition ->
-                                        PredicateBuilder.partition(
-                                                partition, TestKeyValueGenerator.DEFAULT_PART_TYPE))
+                                        createPartitionPredicate(
+                                                partition,
+                                                TestKeyValueGenerator.DEFAULT_PART_TYPE,
+                                                CoreOptions.PARTITION_DEFAULT_NAME.defaultValue()))
                         .reduce(PredicateBuilder::or)
                         .get();
 
