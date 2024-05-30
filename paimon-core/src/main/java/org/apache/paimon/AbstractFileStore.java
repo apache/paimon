@@ -39,6 +39,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.service.ServiceManager;
 import org.apache.paimon.stats.StatsFile;
 import org.apache.paimon.stats.StatsFileHandler;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.sink.CallbackUtils;
 import org.apache.paimon.table.sink.TagCallback;
@@ -146,7 +147,12 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 pathFactory().indexFileFactory(),
                 indexManifestFileFactory().create(),
                 new HashIndexFile(fileIO, pathFactory().indexFileFactory()),
-                new DeletionVectorsIndexFile(fileIO, pathFactory().indexFileFactory()));
+                new DeletionVectorsIndexFile(
+                        fileIO,
+                        pathFactory().indexFileFactory(),
+                        bucketMode() == BucketMode.BUCKET_UNAWARE
+                                ? options.deletionVectorIndexFileTargetSize()
+                                : MemorySize.ofBytes(Long.MAX_VALUE)));
     }
 
     @Override

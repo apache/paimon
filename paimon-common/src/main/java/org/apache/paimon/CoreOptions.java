@@ -1113,6 +1113,12 @@ public class CoreOptions implements Serializable {
                                     + " vectors are generated when data is written, which marks the data for deletion."
                                     + " During read operations, by applying these index files, merging can be avoided.");
 
+    public static final ConfigOption<MemorySize> DELETION_VECTOR_INDEX_FILE_TARGET_SIZE =
+            key("deletion-vector.index-file.target-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(2))
+                    .withDescription("The target size of deletion vector index file.");
+
     public static final ConfigOption<Boolean> DELETION_FORCE_PRODUCE_CHANGELOG =
             key("delete.force-produce-changelog")
                     .booleanType()
@@ -1814,6 +1820,10 @@ public class CoreOptions implements Serializable {
 
     public boolean deletionVectorsEnabled() {
         return options.get(DELETION_VECTORS_ENABLED);
+    }
+
+    public MemorySize deletionVectorIndexFileTargetSize() {
+        return options.get(DELETION_VECTOR_INDEX_FILE_TARGET_SIZE);
     }
 
     public FileIndexOptions indexColumnsOptions() {

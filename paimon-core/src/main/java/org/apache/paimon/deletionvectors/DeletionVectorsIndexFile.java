@@ -23,17 +23,18 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.index.IndexFile;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PathFactory;
 
 import java.io.DataInputStream;
-import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.zip.CRC32;
 
@@ -46,8 +47,12 @@ public class DeletionVectorsIndexFile extends IndexFile {
     public static final String DELETION_VECTORS_INDEX = "DELETION_VECTORS";
     public static final byte VERSION_ID_V1 = 1;
 
-    public DeletionVectorsIndexFile(FileIO fileIO, PathFactory pathFactory) {
+    private final MemorySize targetSizePerIndexFile;
+
+    public DeletionVectorsIndexFile(
+            FileIO fileIO, PathFactory pathFactory, MemorySize targetSizePerIndexFile) {
         super(fileIO, pathFactory);
+        this.targetSizePerIndexFile = targetSizePerIndexFile;
     }
 
     /**
@@ -85,6 +90,12 @@ public class DeletionVectorsIndexFile extends IndexFile {
         return deletionVectors;
     }
 
+    public Map<String, DeletionVector> readAllDeletionVectors(List<IndexFileMeta> indexFiles) {
+        Map<String, DeletionVector> deletionVectors = new HashMap<>();
+        indexFiles.forEach(indexFile -> deletionVectors.putAll(readAllDeletionVectors(indexFile)));
+        return deletionVectors;
+    }
+
     /** Reads deletion vectors from a list of DeletionFile which belong to a same index file. */
     public Map<String, DeletionVector> readDeletionVector(
             Map<String, DeletionFile> dataFileToDeletionFiles) {
@@ -111,33 +122,6 @@ public class DeletionVectorsIndexFile extends IndexFile {
     }
 
     /**
-     * Reads a single deletion vector from the specified file.
-     *
-     * @param fileName The name of the file from which to read the deletion vector.
-     * @param deletionVectorRange A Pair specifying the range (start position and size) within the
-     *     file where the deletion vector data is located.
-     * @return The DeletionVector object read from the specified range in the file.
-     * @throws UncheckedIOException If an I/O error occurs while reading from the file.
-     */
-    public DeletionVector readDeletionVector(
-            String fileName, Pair<Integer, Integer> deletionVectorRange) {
-        Path filePath = pathFactory.toPath(fileName);
-        try (SeekableInputStream inputStream = fileIO.newInputStream(filePath)) {
-            checkVersion(inputStream);
-            inputStream.seek(deletionVectorRange.getLeft());
-            DataInputStream dataInputStream = new DataInputStream(inputStream);
-            return readDeletionVector(dataInputStream, deletionVectorRange.getRight());
-        } catch (Exception e) {
-            throw new RuntimeException(
-                    "Unable to read deletion vector from file: "
-                            + filePath
-                            + ", deletionVectorRange: "
-                            + deletionVectorRange,
-                    e);
-        }
-    }
-
-    /**
      * Write deletion vectors to a new file, the format of this file can be referenced at: <a
      * href="https://cwiki.apache.org/confluence/x/Tws4EQ">PIP-16</a>.
      *
@@ -149,28 +133,15 @@ public class DeletionVectorsIndexFile extends IndexFile {
      *     data is located.
      * @throws UncheckedIOException If an I/O error occurs while writing to the file.
      */
-    public Pair<String, LinkedHashMap<String, Pair<Integer, Integer>>> write(
-            Map<String, DeletionVector> input) {
-        int size = input.size();
-        LinkedHashMap<String, Pair<Integer, Integer>> deletionVectorRanges =
-                new LinkedHashMap<>(size);
-        Path path = pathFactory.newPath();
-        try (DataOutputStream dataOutputStream =
-                new DataOutputStream(fileIO.newOutputStream(path, true))) {
-            dataOutputStream.writeByte(VERSION_ID_V1);
-            for (Map.Entry<String, DeletionVector> entry : input.entrySet()) {
-                String key = entry.getKey();
-                byte[] valueBytes = entry.getValue().serializeToBytes();
-                deletionVectorRanges.put(key, Pair.of(dataOutputStream.size(), valueBytes.length));
-                dataOutputStream.writeInt(valueBytes.length);
-                dataOutputStream.write(valueBytes);
-                dataOutputStream.writeInt(calculateChecksum(valueBytes));
-            }
+    public List<IndexFileMeta> write(Map<String, DeletionVector> input) {
+        try {
+            DeletionVectorIndexFileWriter writer =
+                    new DeletionVectorIndexFileWriter(
+                            this.fileIO, this.pathFactory, this.targetSizePerIndexFile);
+            return writer.write(input);
         } catch (IOException e) {
-            throw new RuntimeException(
-                    "Unable to write deletion vectors to file: " + path.getName(), e);
+            throw new RuntimeException("Failed to write deletion vectors.", e);
         }
-        return Pair.of(path.getName(), deletionVectorRanges);
     }
 
     private void checkVersion(InputStream in) throws IOException {
@@ -213,7 +184,7 @@ public class DeletionVectorsIndexFile extends IndexFile {
         }
     }
 
-    private int calculateChecksum(byte[] bytes) {
+    public static int calculateChecksum(byte[] bytes) {
         CRC32 crc = new CRC32();
         crc.update(bytes);
         return (int) crc.getValue();
