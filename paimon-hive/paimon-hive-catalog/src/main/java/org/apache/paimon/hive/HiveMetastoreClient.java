@@ -45,7 +45,7 @@ public class HiveMetastoreClient implements MetastoreClient {
     private final IMetaStoreClient client;
     private final StorageDescriptor sd;
 
-    private HiveMetastoreClient(Identifier identifier, TableSchema schema, IMetaStoreClient client)
+    public HiveMetastoreClient(Identifier identifier, TableSchema schema, IMetaStoreClient client)
             throws Exception {
         this.identifier = identifier;
         this.partitionComputer =
