@@ -186,6 +186,13 @@ public class SplitGeneratorTest {
                 .containsExactlyInAnyOrder(
                         Pair.of(Arrays.asList("1", "2", "3", "4", "5"), false),
                         Pair.of(Collections.singletonList("6"), true));
+
+        // test convertible for old version
+        List<DataFileMeta> files6 =
+                Arrays.asList(
+                        newFile("1", 1, 0, 10, 10L, null), newFile("2", 1, 10, 20, 20L, null));
+        assertThat(toNamesAndRawConvertible(mergeTreeSplitGenerator.splitForBatch(files6)))
+                .containsExactlyInAnyOrder(Pair.of(Arrays.asList("1", "2"), true));
     }
 
     @Test
