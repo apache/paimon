@@ -183,7 +183,7 @@ public class FileMetaUtils {
         for (int i = 0; i < fields.size(); i++) {
             String partitionName = partitionValues.get(fields.get(i).name());
             if (partitionName.equals(partitionDefaultName)) {
-                valueSetters.get(i).setNull(binaryRowWriter, i);
+                binaryRowWriter.setNullAt(i);
             } else {
                 Object value = TypeUtils.castFromString(partitionName, fields.get(i).type());
                 valueSetters.get(i).setValue(binaryRowWriter, i, value);
