@@ -59,7 +59,7 @@ public interface VectoredReadable {
 
     /** The batch size of data read by a single parallelism. */
     default int batchSizeForVectorReads() {
-        return 2 * 1024 * 1024;
+        return 4 * 1024 * 1024;
     }
 
     /** The read parallelism for vector reads. */
