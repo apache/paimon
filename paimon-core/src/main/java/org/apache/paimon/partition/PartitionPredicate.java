@@ -40,6 +40,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.apache.paimon.utils.InternalRowPartitionComputer.convertSpecToInternal;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** A special predicate to filter partition only, just like {@link Predicate}. */
 public interface PartitionPredicate {
@@ -126,11 +127,16 @@ public interface PartitionPredicate {
             PredicateBuilder builder = new PredicateBuilder(partitionType);
             for (int i = 0; i < collectors.length; i++) {
                 SimpleColStats stats = collectors[i].result();
-                min[i] = builder.greaterOrEqual(i, stats.min());
-                max[i] = builder.lessOrEqual(i, stats.max());
-                if (stats.nullCount() > 0) {
-                    min[i] = PredicateBuilder.or(min[i], builder.isNull(i));
-                    max[i] = PredicateBuilder.or(max[i], builder.isNull(i));
+                if (stats.nullCount() == partitions.size()) {
+                    min[i] = builder.isNull(i);
+                    max[i] = builder.isNull(i);
+                } else {
+                    min[i] = builder.greaterOrEqual(i, checkNotNull(stats.min()));
+                    max[i] = builder.lessOrEqual(i, checkNotNull(stats.max()));
+                    if (stats.nullCount() > 0) {
+                        min[i] = PredicateBuilder.or(builder.isNull(i), min[i]);
+                        max[i] = PredicateBuilder.or(builder.isNull(i), max[i]);
+                    }
                 }
             }
         }
