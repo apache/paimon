@@ -176,7 +176,39 @@ public class AppendOnlyFileStoreWriteTest {
     }
 
     @Test
-    public void testScanFilterWithNullPartition() throws Exception {
+    public void testScanFilterWithMixedPartitionWrite() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        AppendOnlyFileStoreWrite write = (AppendOnlyFileStoreWrite) table.store().newWrite("ss");
+        StreamTableCommit commit = table.newStreamWriteBuilder().newCommit();
+        write.withExecutionMode(false);
+
+        for (int i = 0; i < 100; i++) {
+            if (i == 0) {
+                write.write(nullPartition(), i, GenericRow.of(null, i, i));
+                commit.commit(i, write.prepareCommit(false, i));
+            } else {
+                write.write(partition(1), i, GenericRow.of(null, i, i));
+                commit.commit(i, write.prepareCommit(false, i));
+            }
+        }
+
+        BinaryRow binaryRow = nullPartition();
+        FileStoreScan scan = table.store().newScan();
+        List<SimpleFileEntry> l0 =
+                scan.withPartitionFilter(Arrays.asList(binaryRow)).readSimpleEntries();
+        Assertions.assertThat(l0.size()).isEqualTo(1);
+
+        BinaryRow binaryRow1 = partition(1);
+        l0 = scan.withPartitionFilter(Arrays.asList(binaryRow, binaryRow1)).readSimpleEntries();
+        Assertions.assertThat(l0.size()).isEqualTo(100);
+
+        l0 = scan.withPartitionFilter(Arrays.asList(binaryRow1)).readSimpleEntries();
+        Assertions.assertThat(l0.size()).isEqualTo(99);
+    }
+
+    @Test
+    public void testScanFilterWithAllNullPartitionWrite() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         AppendOnlyFileStoreWrite write = (AppendOnlyFileStoreWrite) table.store().newWrite("ss");
@@ -189,10 +221,43 @@ public class AppendOnlyFileStoreWriteTest {
         }
 
         BinaryRow binaryRow = nullPartition();
-        BinaryRow binaryRow1 = partition(0);
         FileStoreScan scan = table.store().newScan();
         List<SimpleFileEntry> l0 =
-                scan.withPartitionFilter(Arrays.asList(binaryRow1, binaryRow)).readSimpleEntries();
+                scan.withPartitionFilter(Arrays.asList(binaryRow)).readSimpleEntries();
+        Assertions.assertThat(l0.size()).isEqualTo(100);
+
+        BinaryRow binaryRow1 = partition(1);
+        l0 = scan.withPartitionFilter(Arrays.asList(binaryRow, binaryRow1)).readSimpleEntries();
+        Assertions.assertThat(l0.size()).isEqualTo(100);
+
+        l0 = scan.withPartitionFilter(Arrays.asList(binaryRow1)).readSimpleEntries();
+        Assertions.assertThat(l0.size()).isEqualTo(0);
+    }
+
+    @Test
+    public void testScanFilterWithNoneNullPartitionWrite() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        AppendOnlyFileStoreWrite write = (AppendOnlyFileStoreWrite) table.store().newWrite("ss");
+        StreamTableCommit commit = table.newStreamWriteBuilder().newCommit();
+        write.withExecutionMode(false);
+
+        for (int i = 0; i < 100; i++) {
+            write.write(partition(1), i, GenericRow.of(null, i, i));
+            commit.commit(i, write.prepareCommit(false, i));
+        }
+
+        BinaryRow binaryRow = nullPartition();
+        FileStoreScan scan = table.store().newScan();
+        List<SimpleFileEntry> l0 =
+                scan.withPartitionFilter(Arrays.asList(binaryRow)).readSimpleEntries();
+        Assertions.assertThat(l0.size()).isEqualTo(0);
+
+        BinaryRow binaryRow1 = partition(1);
+        l0 = scan.withPartitionFilter(Arrays.asList(binaryRow, binaryRow1)).readSimpleEntries();
+        Assertions.assertThat(l0.size()).isEqualTo(100);
+
+        l0 = scan.withPartitionFilter(Arrays.asList(binaryRow1)).readSimpleEntries();
         Assertions.assertThat(l0.size()).isEqualTo(100);
     }
 
