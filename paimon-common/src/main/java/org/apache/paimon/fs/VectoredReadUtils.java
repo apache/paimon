@@ -53,8 +53,8 @@ public class VectoredReadUtils {
 
         int parallelism = readable.parallelismForVectorReads();
 
-        if (combinedRanges.size() == 1) {
-            fallbackToReadSequence(readable, sortRanges);
+        if (combinedRanges.size() == 1 && readable instanceof SeekableInputStream) {
+            fallbackToReadSequence((SeekableInputStream) readable, sortRanges);
             return;
         }
 
@@ -78,8 +78,7 @@ public class VectoredReadUtils {
     }
 
     private static void fallbackToReadSequence(
-            VectoredReadable readable, List<? extends FileRange> ranges) throws IOException {
-        SeekableInputStream in = (SeekableInputStream) readable;
+            SeekableInputStream in, List<? extends FileRange> ranges) throws IOException {
         for (FileRange range : ranges) {
             byte[] bytes = new byte[range.getLength()];
             in.seek(range.getOffset());
