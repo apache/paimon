@@ -133,6 +133,10 @@ public interface PartitionPredicate {
                 } else {
                     min[i] = builder.greaterOrEqual(i, checkNotNull(stats.minValue()));
                     max[i] = builder.lessOrEqual(i, checkNotNull(stats.maxValue()));
+                    if (stats.nullCount() > 0) {
+                        min[i] = PredicateBuilder.or(builder.isNull(i), min[i]);
+                        max[i] = PredicateBuilder.or(builder.isNull(i), max[i]);
+                    }
                 }
             }
         }
