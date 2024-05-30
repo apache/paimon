@@ -42,6 +42,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
+
 /** Compact with sort action. */
 public class SortCompactAction extends CompactAction {
 
@@ -96,7 +98,14 @@ public class SortCompactAction extends CompactAction {
             Predicate partitionPredicate =
                     PredicateBuilder.or(
                             getPartitions().stream()
-                                    .map(p -> PredicateBuilder.partition(p, table.rowType()))
+                                    .map(
+                                            p ->
+                                                    createPartitionPredicate(
+                                                            p,
+                                                            table.rowType(),
+                                                            ((FileStoreTable) table)
+                                                                    .coreOptions()
+                                                                    .partitionDefaultName()))
                                     .toArray(Predicate[]::new));
             sourceBuilder.predicate(partitionPredicate);
         }

@@ -24,15 +24,18 @@ import org.apache.paimon.types.RowType;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+
+import static org.apache.paimon.utils.TypeUtils.castFromString;
 
 /** PartitionComputer for {@link InternalRow}. */
-public class RowDataPartitionComputer {
+public class InternalRowPartitionComputer {
 
     protected final String defaultPartValue;
     protected final String[] partitionColumns;
     protected final InternalRow.FieldGetter[] partitionFieldGetters;
 
-    public RowDataPartitionComputer(
+    public InternalRowPartitionComputer(
             String defaultPartValue, RowType rowType, String[] partitionColumns) {
         this.defaultPartValue = defaultPartValue;
         this.partitionColumns = partitionColumns;
@@ -59,5 +62,19 @@ public class RowDataPartitionComputer {
             partSpec.put(partitionColumns[i], partitionValue);
         }
         return partSpec;
+    }
+
+    public static Map<String, Object> convertSpecToInternal(
+            Map<String, String> spec, RowType partType, String defaultPartValue) {
+        Map<String, Object> partValues = new LinkedHashMap<>();
+        for (Map.Entry<String, String> entry : spec.entrySet()) {
+            partValues.put(
+                    entry.getKey(),
+                    defaultPartValue.equals(entry.getValue())
+                            ? null
+                            : castFromString(
+                                    entry.getValue(), partType.getField(entry.getKey()).type()));
+        }
+        return partValues;
     }
 }

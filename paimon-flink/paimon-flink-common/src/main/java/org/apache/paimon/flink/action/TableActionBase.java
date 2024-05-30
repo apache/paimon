@@ -21,7 +21,6 @@ package org.apache.paimon.flink.action;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.sink.FlinkSinkBuilder;
-import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 
 import org.apache.flink.api.dag.Transformation;
@@ -60,7 +59,7 @@ public abstract class TableActionBase extends ActionBase {
     public TableResult batchSink(DataStream<RowData> dataStream) {
         List<Transformation<?>> transformations =
                 Collections.singletonList(
-                        new FlinkSinkBuilder((FileStoreTable) table)
+                        new FlinkSinkBuilder(table)
                                 .forRowData(dataStream)
                                 .build()
                                 .getTransformation());

@@ -41,12 +41,10 @@ import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.PlanImpl;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.SplitGenerator;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
-import org.apache.paimon.utils.TypeUtils;
 
 import javax.annotation.Nullable;
 
@@ -60,10 +58,10 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiConsumer;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.operation.FileStoreScan.Plan.groupByPartFiles;
+import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
 
 /** Implementation of {@link SnapshotReader}. */
@@ -142,25 +140,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Override
     public SnapshotReader withPartitionFilter(Map<String, String> partitionSpec) {
         if (partitionSpec != null) {
-            List<String> partitionKeys = tableSchema.partitionKeys();
-            RowType rowType = tableSchema.logicalPartitionType();
-            PredicateBuilder predicateBuilder = new PredicateBuilder(rowType);
-            List<Predicate> partitionFilters =
-                    partitionSpec.entrySet().stream()
-                            .map(
-                                    m -> {
-                                        int index = partitionKeys.indexOf(m.getKey());
-                                        Object value =
-                                                TypeUtils.castFromStringInternal(
-                                                        m.getValue(),
-                                                        rowType.getTypeAt(index),
-                                                        false);
-                                        return value == null
-                                                ? predicateBuilder.isNull(index)
-                                                : predicateBuilder.equal(index, value);
-                                    })
-                            .collect(Collectors.toList());
-            scan.withPartitionFilter(PredicateBuilder.and(partitionFilters));
+            Predicate partitionPredicate =
+                    createPartitionPredicate(
+                            partitionSpec,
+                            tableSchema.logicalPartitionType(),
+                            options.partitionDefaultName());
+            scan.withPartitionFilter(partitionPredicate);
         }
         return this;
     }

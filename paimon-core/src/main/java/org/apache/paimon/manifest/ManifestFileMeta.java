@@ -46,6 +46,7 @@ import java.util.Set;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Metadata of a manifest file. */
@@ -405,7 +406,8 @@ public class ManifestFileMeta {
 
             List<Predicate> predicateList =
                     partitions.stream()
-                            .map(rowArrayConverter::createEqualPredicate)
+                            .map(rowArrayConverter::convert)
+                            .map(values -> createPartitionPredicate(partitionType, values))
                             .collect(Collectors.toList());
             predicateOpt = Optional.of(PredicateBuilder.or(predicateList));
         } else {
