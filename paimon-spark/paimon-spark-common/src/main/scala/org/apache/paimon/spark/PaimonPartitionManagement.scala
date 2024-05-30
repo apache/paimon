@@ -23,7 +23,7 @@ import org.apache.paimon.operation.FileStoreCommit
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.BatchWriteBuilder
 import org.apache.paimon.types.RowType
-import org.apache.paimon.utils.{FileStorePathFactory, RowDataPartitionComputer}
+import org.apache.paimon.utils.InternalRowPartitionComputer
 
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.{CatalystTypeConverters, InternalRow}
@@ -54,7 +54,7 @@ trait PaimonPartitionManagement extends SupportsPartitionManagement {
       .createToScalaConverter(partitionSchema())
       .apply(internalRow)
       .asInstanceOf[Row]
-    val rowDataPartitionComputer = new RowDataPartitionComputer(
+    val rowDataPartitionComputer = new InternalRowPartitionComputer(
       CoreOptions.PARTITION_DEFAULT_NAME.defaultValue,
       tableRowType,
       partitionKeys.asScala.toArray)

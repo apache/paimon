@@ -39,7 +39,7 @@ public class FileStorePathFactory {
 
     private final Path root;
     private final String uuid;
-    private final RowDataPartitionComputer partitionComputer;
+    private final InternalRowPartitionComputer partitionComputer;
     private final String formatIdentifier;
 
     private final AtomicInteger manifestFileCount;
@@ -68,10 +68,10 @@ public class FileStorePathFactory {
     }
 
     @VisibleForTesting
-    public static RowDataPartitionComputer getPartitionComputer(
+    public static InternalRowPartitionComputer getPartitionComputer(
             RowType partitionType, String defaultPartValue) {
         String[] partitionColumns = partitionType.getFieldNames().toArray(new String[0]);
-        return new RowDataPartitionComputer(defaultPartValue, partitionType, partitionColumns);
+        return new InternalRowPartitionComputer(defaultPartValue, partitionType, partitionColumns);
     }
 
     public Path newManifestFile() {
