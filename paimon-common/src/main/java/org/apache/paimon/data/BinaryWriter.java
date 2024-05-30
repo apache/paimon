@@ -212,5 +212,9 @@ public interface BinaryWriter {
     /** Accessor for setting the elements of a binary writer during runtime. */
     interface ValueSetter extends Serializable {
         void setValue(BinaryWriter writer, int pos, Object value);
+
+        default void setNull(BinaryWriter writer, int pos) {
+            writer.setNullAt(pos);
+        }
     }
 }

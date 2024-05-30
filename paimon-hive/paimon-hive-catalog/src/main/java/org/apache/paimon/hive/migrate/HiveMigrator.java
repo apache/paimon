@@ -78,6 +78,7 @@ public class HiveMigrator implements Migrator {
     private final String targetDatabase;
     private final String targetTable;
     private final Map<String, String> options;
+    private final CoreOptions coreOptions;
     private Boolean delete = true;
 
     public HiveMigrator(
@@ -95,6 +96,7 @@ public class HiveMigrator implements Migrator {
         this.targetDatabase = targetDatabase;
         this.targetTable = targetTable;
         this.options = options;
+        this.coreOptions = new CoreOptions(options);
     }
 
     public static List<Migrator> databaseMigrators(
@@ -302,7 +304,11 @@ public class HiveMigrator implements Migrator {
             String format = parseFormat(partition.getSd().getSerdeInfo().toString());
             String location = partition.getSd().getLocation();
             BinaryRow partitionRow =
-                    FileMetaUtils.writePartitionValue(partitionRowType, values, valueSetters);
+                    FileMetaUtils.writePartitionValue(
+                            partitionRowType,
+                            values,
+                            valueSetters,
+                            coreOptions.partitionDefaultName());
             Path path = paimonTable.store().pathFactory().bucketPath(partitionRow, 0);
 
             migrateTasks.add(

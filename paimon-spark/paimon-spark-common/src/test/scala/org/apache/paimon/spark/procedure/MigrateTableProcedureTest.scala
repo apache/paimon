@@ -93,4 +93,30 @@ class MigrateTableProcedureTest extends PaimonHiveTestBase {
         }
       }
     })
+
+  test(s"Paimon migrate table procedure: migrate partitioned table with null partition") {
+    withTable("hive_tbl") {
+      // create hive table
+      spark.sql(s"""
+                   |CREATE TABLE hive_tbl (id STRING, name STRING, pt INT)
+                   |USING parquet
+                   |PARTITIONED BY (pt)
+                   |""".stripMargin)
+
+      spark.sql(s"INSERT INTO hive_tbl VALUES ('1', 'a', 1), ('2', 'b', null)")
+
+      checkAnswer(
+        spark.sql(s"SELECT * FROM hive_tbl ORDER BY id"),
+        Row("1", "a", 1) :: Row("2", "b", null) :: Nil)
+
+      spark.sql(
+        s"""CALL sys.migrate_table(source_type => 'hive', table => '$hiveDbName.hive_tbl',
+           |options => 'file.format=parquet,partition.default-name=__HIVE_DEFAULT_PARTITION__')
+           |""".stripMargin)
+
+      checkAnswer(
+        spark.sql(s"SELECT * FROM hive_tbl ORDER BY id"),
+        Row("1", "a", 1) :: Row("2", "b", null) :: Nil)
+    }
+  }
 }
