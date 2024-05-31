@@ -32,6 +32,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadOnceTableScan;
+import org.apache.paimon.table.source.SingletonSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.BigIntType;
@@ -124,16 +125,10 @@ public class PartitionsTable implements ReadonlyTable {
         }
     }
 
-    private static class PartitionsSplit implements Split {
+    private static class PartitionsSplit extends SingletonSplit {
 
         private static final long serialVersionUID = 1L;
 
-        @Override
-        public long rowCount() {
-            return 1;
-        }
-
-        @Override
         public boolean equals(Object o) {
             if (this == o) {
                 return true;

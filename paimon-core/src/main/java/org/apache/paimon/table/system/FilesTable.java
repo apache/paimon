@@ -43,6 +43,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadOnceTableScan;
+import org.apache.paimon.table.source.SingletonSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
@@ -175,7 +176,7 @@ public class FilesTable implements ReadonlyTable {
         }
     }
 
-    private static class FilesSplit implements Split {
+    private static class FilesSplit extends SingletonSplit {
 
         @Nullable private final LeafPredicate partitionPredicate;
         @Nullable private final LeafPredicate bucketPredicate;
@@ -188,12 +189,6 @@ public class FilesTable implements ReadonlyTable {
             this.partitionPredicate = partitionPredicate;
             this.bucketPredicate = bucketPredicate;
             this.levelPredicate = levelPredicate;
-        }
-
-        @Override
-        public long rowCount() {
-            // just put one for statistics
-            return 1;
         }
 
         @Override

@@ -30,6 +30,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadOnceTableScan;
+import org.apache.paimon.table.source.SingletonSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataField;
@@ -39,7 +40,6 @@ import org.apache.paimon.utils.ProjectedRow;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
-import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
@@ -113,7 +113,7 @@ public class CatalogOptionsTable implements ReadonlyTable {
         }
     }
 
-    private static class CatalogOptionsSplit implements Split {
+    private static class CatalogOptionsSplit extends SingletonSplit {
 
         private static final long serialVersionUID = 1L;
 
@@ -121,11 +121,6 @@ public class CatalogOptionsTable implements ReadonlyTable {
 
         private CatalogOptionsSplit(Options catalogOptions) {
             this.catalogOptions = catalogOptions.toMap();
-        }
-
-        @Override
-        public long rowCount() {
-            return catalogOptions.size();
         }
 
         @Override
@@ -168,7 +163,7 @@ public class CatalogOptionsTable implements ReadonlyTable {
         }
 
         @Override
-        public RecordReader<InternalRow> createReader(Split split) throws IOException {
+        public RecordReader<InternalRow> createReader(Split split) {
             if (!(split instanceof CatalogOptionsTable.CatalogOptionsSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }

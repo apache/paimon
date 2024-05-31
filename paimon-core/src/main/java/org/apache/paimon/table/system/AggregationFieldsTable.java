@@ -33,6 +33,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadOnceTableScan;
+import org.apache.paimon.table.source.SingletonSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataField;
@@ -120,30 +121,19 @@ public class AggregationFieldsTable implements ReadonlyTable {
 
         @Override
         public Plan innerPlan() {
-            return () ->
-                    Collections.singletonList(
-                            new AggregationSplit(
-                                    new SchemaManager(fileIO, location).listAllIds().size(),
-                                    location));
+            return () -> Collections.singletonList(new AggregationSplit(location));
         }
     }
 
     /** {@link Split} implementation for {@link AggregationFieldsTable}. */
-    private static class AggregationSplit implements Split {
+    private static class AggregationSplit extends SingletonSplit {
 
         private static final long serialVersionUID = 1L;
 
-        private final long rowCount;
         private final Path location;
 
-        private AggregationSplit(long rowCount, Path location) {
-            this.rowCount = rowCount;
+        private AggregationSplit(Path location) {
             this.location = location;
-        }
-
-        @Override
-        public long rowCount() {
-            return rowCount;
         }
 
         @Override

@@ -35,6 +35,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadOnceTableScan;
+import org.apache.paimon.table.source.SingletonSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.BigIntType;
@@ -48,13 +49,11 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
-import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
@@ -109,7 +108,7 @@ public class ManifestsTable implements ReadonlyTable {
         return new ManifestsTable(dataTable.copy(dynamicOptions));
     }
 
-    private class ManifestsScan extends ReadOnceTableScan {
+    private static class ManifestsScan extends ReadOnceTableScan {
 
         @Override
         public InnerTableScan withFilter(Predicate predicate) {
@@ -119,41 +118,22 @@ public class ManifestsTable implements ReadonlyTable {
 
         @Override
         protected Plan innerPlan() {
-            return () ->
-                    Collections.singletonList(new ManifestsSplit(allManifests(dataTable).size()));
+            return () -> Collections.singletonList(new ManifestsSplit());
         }
     }
 
-    private static class ManifestsSplit implements Split {
+    private static class ManifestsSplit extends SingletonSplit {
 
         private static final long serialVersionUID = 1L;
 
-        private final long rowCount;
-
-        private ManifestsSplit(long rowCount) {
-            this.rowCount = rowCount;
-        }
-
-        @Override
-        public long rowCount() {
-            return rowCount;
-        }
+        private ManifestsSplit() {}
 
         @Override
         public boolean equals(Object o) {
             if (this == o) {
                 return true;
             }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            ManifestsSplit that = (ManifestsSplit) o;
-            return Objects.equals(rowCount, that.rowCount);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(rowCount);
+            return o != null && getClass() == o.getClass();
         }
     }
 
@@ -185,7 +165,7 @@ public class ManifestsTable implements ReadonlyTable {
         }
 
         @Override
-        public RecordReader<InternalRow> createReader(Split split) throws IOException {
+        public RecordReader<InternalRow> createReader(Split split) {
             if (!(split instanceof ManifestsSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
