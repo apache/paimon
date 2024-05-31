@@ -31,7 +31,11 @@ import org.apache.parquet.schema.MessageType;
 import java.io.Closeable;
 import java.io.IOException;
 
-/** Write records to a Parquet file. */
+/**
+ * Write records to a Parquet file.
+ *
+ * <p>NOTE: The file was copied and modified to reduce hadoop dependencies.
+ */
 public class ParquetWriter<T> implements Closeable {
 
     public static final int DEFAULT_BLOCK_SIZE = 128 * 1024 * 1024;
