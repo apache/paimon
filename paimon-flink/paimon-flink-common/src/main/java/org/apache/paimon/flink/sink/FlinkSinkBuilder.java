@@ -26,8 +26,12 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 
 import org.apache.flink.api.common.functions.MapFunction;
+import org.apache.flink.api.connector.source.Boundedness;
+import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
+import org.apache.flink.streaming.api.transformations.LegacySourceTransformation;
+import org.apache.flink.streaming.api.transformations.SourceTransformation;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.util.DataFormatConverters;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
@@ -38,6 +42,7 @@ import org.apache.flink.types.Row;
 import javax.annotation.Nullable;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
@@ -176,6 +181,24 @@ public class FlinkSinkBuilder {
                 "Unaware bucket mode only works with append-only table for now.");
         if (boundedInput == null) {
             boundedInput = !FlinkSink.isStreaming(input);
+
+            if (!boundedInput) {
+                List<Transformation<?>> transformations =
+                        input.getExecutionEnvironment().getTransformations();
+                for (Transformation<?> transformation : transformations) {
+                    if ((transformation instanceof LegacySourceTransformation
+                                    && ((LegacySourceTransformation<?>) transformation)
+                                                    .getBoundedness()
+                                            == Boundedness.BOUNDED)
+                            || (transformation instanceof SourceTransformation
+                                    && ((SourceTransformation<?, ?, ?>) transformation)
+                                                    .getBoundedness()
+                                            == Boundedness.BOUNDED)) {
+                        boundedInput = true;
+                        break;
+                    }
+                }
+            }
         }
         return new RowUnawareBucketSink(
                         table, overwritePartition, logSinkFunction, parallelism, boundedInput)
