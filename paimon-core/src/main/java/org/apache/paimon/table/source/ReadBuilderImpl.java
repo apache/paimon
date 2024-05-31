@@ -22,12 +22,15 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Projection;
 import org.apache.paimon.utils.TypeUtils;
 
 import java.util.Arrays;
 import java.util.Map;
 import java.util.Objects;
+
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Implementation for {@link ReadBuilder}. */
 public class ReadBuilderImpl implements ReadBuilder {
@@ -45,6 +48,8 @@ public class ReadBuilderImpl implements ReadBuilder {
     private Integer shardNumberOfParallelSubtasks;
 
     private Map<String, String> partitionSpec;
+
+    private Filter<Integer> bucketFilter;
 
     public ReadBuilderImpl(InnerTable table) {
         this.table = table;
@@ -99,6 +104,12 @@ public class ReadBuilderImpl implements ReadBuilder {
     }
 
     @Override
+    public ReadBuilder withBucketFilter(Filter<Integer> bucketFilter) {
+        this.bucketFilter = bucketFilter;
+        return this;
+    }
+
+    @Override
     public TableScan newScan() {
         InnerTableScan tableScan = configureScan(table.newScan());
         if (limit != null) {
@@ -114,15 +125,21 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     private InnerTableScan configureScan(InnerTableScan scan) {
         scan.withFilter(filter).withPartitionFilter(partitionSpec);
-
+        checkState(
+                bucketFilter == null || shardIndexOfThisSubtask == null,
+                "Bucket filter and shard configuration cannot be used together. "
+                        + "Please choose one method to specify the data subset.");
         if (shardIndexOfThisSubtask != null) {
             if (scan instanceof DataTableScan) {
-                ((DataTableScan) scan)
+                return ((DataTableScan) scan)
                         .withShard(shardIndexOfThisSubtask, shardNumberOfParallelSubtasks);
             } else {
                 throw new UnsupportedOperationException(
                         "Unsupported table scan type for shard configuring, the scan is: " + scan);
             }
+        }
+        if (bucketFilter != null) {
+            scan.withBucketFilter(bucketFilter);
         }
         return scan;
     }

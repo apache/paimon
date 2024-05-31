@@ -45,6 +45,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.IntUnaryOperator;
 import java.util.stream.IntStream;
 
@@ -68,11 +69,22 @@ public class LookupStreamingReader {
                     CoreOptions.SCAN_TAG_NAME,
                     CoreOptions.SCAN_VERSION);
 
-    public LookupStreamingReader(Table table, int[] projection, @Nullable Predicate predicate) {
+    public LookupStreamingReader(
+            Table table,
+            int[] projection,
+            @Nullable Predicate predicate,
+            Set<Integer> requireCachedBucketIds) {
         this.table = unsetTimeTravelOptions(table);
         this.projection = projection;
         this.readBuilder =
-                this.table.newReadBuilder().withProjection(projection).withFilter(predicate);
+                this.table
+                        .newReadBuilder()
+                        .withProjection(projection)
+                        .withFilter(predicate)
+                        .withBucketFilter(
+                                requireCachedBucketIds == null
+                                        ? null
+                                        : requireCachedBucketIds::contains);
         scan = readBuilder.newStreamScan();
 
         if (predicate != null) {
