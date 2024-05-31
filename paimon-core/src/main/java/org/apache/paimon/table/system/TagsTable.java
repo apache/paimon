@@ -32,6 +32,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadOnceTableScan;
+import org.apache.paimon.table.source.SingletonSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.tag.Tag;
@@ -126,27 +127,18 @@ public class TagsTable implements ReadonlyTable {
 
         @Override
         public Plan innerPlan() {
-            return () ->
-                    Collections.singletonList(
-                            new TagsSplit(new TagManager(fileIO, location).tagCount(), location));
+            return () -> Collections.singletonList(new TagsSplit(location));
         }
     }
 
-    private static class TagsSplit implements Split {
+    private static class TagsSplit extends SingletonSplit {
 
         private static final long serialVersionUID = 1L;
 
-        private final long rowCount;
         private final Path location;
 
-        private TagsSplit(long rowCount, Path location) {
-            this.rowCount = rowCount;
+        private TagsSplit(Path location) {
             this.location = location;
-        }
-
-        @Override
-        public long rowCount() {
-            return rowCount;
         }
 
         @Override
