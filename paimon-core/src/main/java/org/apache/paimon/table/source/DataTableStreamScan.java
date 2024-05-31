@@ -148,7 +148,8 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
             ScannedResult scannedResult = (ScannedResult) result;
             currentWatermark = scannedResult.currentWatermark();
             long currentSnapshotId = scannedResult.currentSnapshotId();
-            if (options.lookupStrategy().equals(LookupStrategy.DELETION_VECTOR_ONLY)) {
+            LookupStrategy lookupStrategy = options.lookupStrategy();
+            if (!lookupStrategy.produceChangelog && lookupStrategy.deletionVector) {
                 // For DELETION_VECTOR_ONLY mode, we need to return the remaining data from level 0
                 // in the subsequent plan.
                 nextSnapshotId = currentSnapshotId;
