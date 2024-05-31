@@ -136,6 +136,7 @@ public class BranchesTable implements ReadonlyTable {
             this.location = location;
         }
 
+        @Override
         public boolean equals(Object o) {
             if (this == o) {
                 return true;
