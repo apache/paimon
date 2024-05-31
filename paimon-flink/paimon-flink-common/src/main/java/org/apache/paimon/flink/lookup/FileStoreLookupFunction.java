@@ -60,6 +60,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
@@ -165,7 +166,11 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                 try {
                     this.lookupTable =
                             PrimaryKeyPartialLookupTable.createLocalTable(
-                                    storeTable, projection, path, joinKeys);
+                                    storeTable,
+                                    projection,
+                                    path,
+                                    joinKeys,
+                                    getRequireCachedBucketIds());
                 } catch (UnsupportedOperationException ignore2) {
                 }
             }
@@ -179,7 +184,8 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                             predicate,
                             createProjectedPredicate(projection),
                             path,
-                            joinKeys);
+                            joinKeys,
+                            getRequireCachedBucketIds());
             this.lookupTable = FullCacheLookupTable.create(context, options.get(LOOKUP_CACHE_ROWS));
         }
 
@@ -336,5 +342,18 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         Field field = runtimeContext.getClass().getDeclaredField("runtimeContext");
         field.setAccessible(true);
         return extractStreamingRuntimeContext(field.get(runtimeContext));
+    }
+
+    /**
+     * Get the set of bucket IDs that need to be cached by the current lookup join subtask.
+     *
+     * <p>The Flink Planner will distribute data to lookup join nodes based on buckets. This allows
+     * paimon to cache only the necessary buckets for each subtask, improving efficiency.
+     *
+     * @return the set of bucket IDs to be cached
+     */
+    private Set<Integer> getRequireCachedBucketIds() {
+        // TODO: Implement the method when Flink support bucket shuffle for lookup join.
+        return null;
     }
 }

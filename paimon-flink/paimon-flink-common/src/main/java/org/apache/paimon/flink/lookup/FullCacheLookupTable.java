@@ -54,6 +54,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -146,7 +147,12 @@ public abstract class FullCacheLookupTable implements LookupTable {
     protected void bootstrap() throws Exception {
         Predicate scanPredicate =
                 PredicateBuilder.andNullable(context.tablePredicate, specificPartition);
-        this.reader = new LookupStreamingReader(context.table, context.projection, scanPredicate);
+        this.reader =
+                new LookupStreamingReader(
+                        context.table,
+                        context.projection,
+                        scanPredicate,
+                        context.requiredCachedBucketIds);
         BinaryExternalSortBuffer bulkLoadSorter =
                 RocksDBState.createBulkLoadSorter(
                         IOManager.create(context.tempPath.toString()), context.table.coreOptions());
@@ -328,6 +334,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
         @Nullable public final Predicate projectedPredicate;
         public final File tempPath;
         public final List<String> joinKey;
+        public final Set<Integer> requiredCachedBucketIds;
 
         public Context(
                 FileStoreTable table,
@@ -335,13 +342,15 @@ public abstract class FullCacheLookupTable implements LookupTable {
                 @Nullable Predicate tablePredicate,
                 @Nullable Predicate projectedPredicate,
                 File tempPath,
-                List<String> joinKey) {
+                List<String> joinKey,
+                @Nullable Set<Integer> requiredCachedBucketIds) {
             this.table = table;
             this.projection = projection;
             this.tablePredicate = tablePredicate;
             this.projectedPredicate = projectedPredicate;
             this.tempPath = tempPath;
             this.joinKey = joinKey;
+            this.requiredCachedBucketIds = requiredCachedBucketIds;
         }
     }
 }

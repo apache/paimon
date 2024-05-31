@@ -114,6 +114,7 @@ import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.params.provider.Arguments.arguments;
 
@@ -375,13 +376,12 @@ public abstract class FileStoreTableTestBase {
         commit.commit(0, write.prepareCommit(true, 0));
         write.close();
         commit.close();
-
         List<Split> splits =
-                toSplits(
-                        table.newSnapshotReader()
-                                .withFilter(new PredicateBuilder(ROW_TYPE).equal(1, 5))
-                                .read()
-                                .dataSplits());
+                table.newReadBuilder()
+                        .withBucketFilter(bucketId -> bucketId == 1)
+                        .newScan()
+                        .plan()
+                        .splits();
         assertThat(splits.size()).isEqualTo(1);
         assertThat(((DataSplit) splits.get(0)).bucket()).isEqualTo(1);
     }
@@ -413,6 +413,33 @@ public abstract class FileStoreTableTestBase {
                                 "1|1|2|binary|varbinary|mapKey:mapVal|multiset",
                                 "1|5|6|binary|varbinary|mapKey:mapVal|multiset",
                                 "1|7|8|binary|varbinary|mapKey:mapVal|multiset"));
+    }
+
+    @Test
+    public void testBucketFilterConflictWithShard() throws Exception {
+        String exceptionMessage = "Bucket filter and shard configuration cannot be used together";
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(BUCKET, 5);
+                            conf.set(BUCKET_KEY, "a");
+                        });
+        assertThatExceptionOfType(IllegalStateException.class)
+                .isThrownBy(
+                        () ->
+                                table.newReadBuilder()
+                                        .withBucketFilter(bucketId -> bucketId == 1)
+                                        .withShard(0, 1)
+                                        .newScan())
+                .withMessageContaining(exceptionMessage);
+        assertThatExceptionOfType(IllegalStateException.class)
+                .isThrownBy(
+                        () ->
+                                table.newReadBuilder()
+                                        .withShard(0, 1)
+                                        .withBucketFilter(bucketId -> bucketId == 1)
+                                        .newStreamScan())
+                .withMessageContaining(exceptionMessage);
     }
 
     @Test
