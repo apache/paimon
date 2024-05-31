@@ -37,6 +37,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadOnceTableScan;
+import org.apache.paimon.table.source.SingletonSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.BigIntType;
@@ -155,7 +156,7 @@ public class SnapshotsTable implements ReadonlyTable {
         }
     }
 
-    private static class SnapshotsSplit implements Split {
+    private static class SnapshotsSplit extends SingletonSplit {
 
         private static final long serialVersionUID = 1L;
 
@@ -163,12 +164,6 @@ public class SnapshotsTable implements ReadonlyTable {
 
         private SnapshotsSplit(Path location) {
             this.location = location;
-        }
-
-        @Override
-        public long rowCount() {
-            // dummy 1, just 1 parallelism
-            return 1;
         }
 
         @Override
