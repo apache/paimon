@@ -37,29 +37,29 @@ public class PartitionMarkDoneTrigger {
 
     private final State state;
     private final PartitionTimeExtractor timeExtractor;
-    private final long timeInternal;
+    private final long timeInterval;
     private final long idleTime;
     private final Map<String, Long> pendingPartitions;
 
     public PartitionMarkDoneTrigger(
             State state,
             PartitionTimeExtractor timeExtractor,
-            Duration timeInternal,
+            Duration timeInterval,
             Duration idleTime)
             throws Exception {
-        this(state, timeExtractor, timeInternal, idleTime, System.currentTimeMillis());
+        this(state, timeExtractor, timeInterval, idleTime, System.currentTimeMillis());
     }
 
     PartitionMarkDoneTrigger(
             State state,
             PartitionTimeExtractor timeExtractor,
-            Duration timeInternal,
+            Duration timeInterval,
             Duration idleTime,
             long currentTimeMillis)
             throws Exception {
         this.state = state;
         this.timeExtractor = timeExtractor;
-        this.timeInternal = timeInternal.toMillis();
+        this.timeInterval = timeInterval.toMillis();
         this.idleTime = idleTime.toMillis();
         this.pendingPartitions = new HashMap<>();
         state.restore().forEach(p -> pendingPartitions.put(p, currentTimeMillis));
@@ -93,7 +93,7 @@ public class PartitionMarkDoneTrigger {
                             .atZone(ZoneId.systemDefault())
                             .toInstant()
                             .toEpochMilli();
-            long partitionEndTime = partitionStartTime + timeInternal;
+            long partitionEndTime = partitionStartTime + timeInterval;
             lastUpdateTime = Math.max(lastUpdateTime, partitionEndTime);
 
             if (currentTimeMillis - lastUpdateTime > idleTime) {
