@@ -171,9 +171,10 @@ public class SchemaValidation {
         }
 
         if (options.mergeEngine() == MergeEngine.FIRST_ROW) {
-            if (options.changelogProducer() != ChangelogProducer.LOOKUP) {
+            if (options.changelogProducer() != ChangelogProducer.LOOKUP
+                    && options.changelogProducer() != ChangelogProducer.NONE) {
                 throw new IllegalArgumentException(
-                        "Only support 'lookup' changelog-producer on FIRST_MERGE merge engine");
+                        "Only support 'none' and 'lookup' changelog-producer on FIRST_MERGE merge engine");
             }
         }
 

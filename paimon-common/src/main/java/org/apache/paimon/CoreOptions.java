@@ -1489,7 +1489,8 @@ public class CoreOptions implements Serializable {
 
     public LookupStrategy lookupStrategy() {
         return LookupStrategy.from(
-                options.get(CHANGELOG_PRODUCER).equals(ChangelogProducer.LOOKUP),
+                mergeEngine().equals(MergeEngine.FIRST_ROW),
+                changelogProducer().equals(ChangelogProducer.LOOKUP),
                 deletionVectorsEnabled());
     }
 
