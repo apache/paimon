@@ -49,6 +49,38 @@ snapshot expiration, and even partition expiration in Flink Sink (if it is confi
 
 For multiple jobs to write the same table, you can refer to [dedicated compaction job]({{< ref "maintenance/dedicated-compaction#dedicated-compaction-job" >}}) for more info.
 
+### Clustering
+
+In Paimon, clustering is a feature that allows you to cluster data in your [Append Table]({{< ref "append-table/append-table#Append Table" >}})
+based on the values of certain columns during the write process. This organization of data can significantly enhance the efficiency of downstream
+tasks when reading the data, as it enables faster and more targeted data retrieval. This feature is only supported for [Append Table]({{< ref "append-table/append-table#Append Table" >}})
+and batch execution mode.
+
+To utilize clustering, you can specify the columns you want to cluster when creating or writing to a table. Here's a simple example of how to enable clustering:
+
+```sql
+CREATE TABLE my_table (
+    a STRING,
+    b STRING,
+    c STRING,
+) WITH (
+  'sink.clustering.by-columns' = 'a,b',
+);
+```
+
+You can also use SQL hints to dynamically set clustering options:
+
+```sql
+INSERT INTO my_table /*+ OPTIONS('sink.clustering.by-columns' = 'a,b') */
+SELECT * FROM source;
+```
+
+The data is clustered using an automatically chosen strategy (such as ORDER, ZORDER, or HILBERT), but you can manually specify the clustering strategy
+by setting the `sink.clustering.strategy`. Clustering relies on sampling and sorting. If the clustering process takes too much time, you can decrease
+the total sample number by setting the `sink.clustering.sample-factor` or disable the sorting step by setting the `sink.clustering.sort-in-cluster` to false.
+
+You can refer to [FlinkConnectorOptions]({{< ref "maintenance/configurations#FlinkConnectorOptions" >}}) for more info about the configurations above.
+
 ## Overwriting the Whole Table
 
 For unpartitioned tables, Paimon supports overwriting the whole table.

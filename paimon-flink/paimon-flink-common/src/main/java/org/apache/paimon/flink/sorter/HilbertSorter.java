@@ -36,7 +36,6 @@ import org.apache.flink.table.data.RowData;
 
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.List;
 
 /**
  * This is a table sorter which will sort the records by the hilbert curve of specified columns. It
@@ -49,12 +48,15 @@ public class HilbertSorter extends TableSorter {
     private static final RowType KEY_TYPE =
             new RowType(Collections.singletonList(new DataField(0, "H_INDEX", DataTypes.BYTES())));
 
+    private final TableSortInfo tableSortInfo;
+
     public HilbertSorter(
             StreamExecutionEnvironment batchTEnv,
             DataStream<RowData> origin,
             FileStoreTable table,
-            List<String> colNames) {
-        super(batchTEnv, origin, table, colNames);
+            TableSortInfo tableSortInfo) {
+        super(batchTEnv, origin, table, tableSortInfo.getSortColumns());
+        this.tableSortInfo = tableSortInfo;
     }
 
     @Override
@@ -99,6 +101,7 @@ public class HilbertSorter extends TableSorter {
                         return Arrays.copyOf(hilbert, hilbert.length);
                     }
                 },
-                GenericRow::of);
+                GenericRow::of,
+                tableSortInfo);
     }
 }
