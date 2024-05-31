@@ -109,7 +109,7 @@ public class MigrateTableProcedure extends BaseProcedure {
                 paimonCatalog.renameTable(tmpTableId, sourceTableId, false);
             }
         } catch (Exception e) {
-            throw new RuntimeException("Call migrate_table error", e);
+            throw new RuntimeException("Call migrate_table error: " + e.getMessage(), e);
         }
 
         return new InternalRow[] {newInternalRow(true)};

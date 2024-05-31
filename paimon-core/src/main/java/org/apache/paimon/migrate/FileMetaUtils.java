@@ -172,7 +172,8 @@ public class FileMetaUtils {
     public static BinaryRow writePartitionValue(
             RowType partitionRowType,
             Map<String, String> partitionValues,
-            List<BinaryWriter.ValueSetter> valueSetters) {
+            List<BinaryWriter.ValueSetter> valueSetters,
+            String partitionDefaultName) {
 
         BinaryRow binaryRow = new BinaryRow(partitionRowType.getFieldCount());
         BinaryRowWriter binaryRowWriter = new BinaryRowWriter(binaryRow);
@@ -180,10 +181,13 @@ public class FileMetaUtils {
         List<DataField> fields = partitionRowType.getFields();
 
         for (int i = 0; i < fields.size(); i++) {
-            Object value =
-                    TypeUtils.castFromString(
-                            partitionValues.get(fields.get(i).name()), fields.get(i).type());
-            valueSetters.get(i).setValue(binaryRowWriter, i, value);
+            String partitionName = partitionValues.get(fields.get(i).name());
+            if (partitionName.equals(partitionDefaultName)) {
+                binaryRowWriter.setNullAt(i);
+            } else {
+                Object value = TypeUtils.castFromString(partitionName, fields.get(i).type());
+                valueSetters.get(i).setValue(binaryRowWriter, i, value);
+            }
         }
         binaryRowWriter.complete();
         return binaryRow;
