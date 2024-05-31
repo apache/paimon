@@ -243,27 +243,18 @@ case class PaimonSparkWriter(table: FileStoreTable) {
       serializer.serialize(commitMessage)
     }
 
-    val serializedCommits = fileStore.bucketMode() match {
-      case BucketMode.BUCKET_UNAWARE =>
-        deletionVectors.mapPartitions {
-          iter: Iterator[SparkDeletionVectors] =>
-            val serializer = new CommitMessageSerializer
-            iter.map(commitDeletionVector(_, serializer))
-        }
-      case _ =>
-        deletionVectors
-          .groupByKey(_.partitionAndBucket)
-          .mapGroups {
-            case (_, iter: Iterator[SparkDeletionVectors]) =>
-              val serializer = new CommitMessageSerializer
-              val grouped = iter
-                .reduce(
-                  (sdv1, sdv2) =>
-                    sdv1.copy(dataFileAndDeletionVector =
-                      sdv1.dataFileAndDeletionVector ++ sdv2.dataFileAndDeletionVector))
-              commitDeletionVector(grouped, serializer)
+    val serializedCommits = deletionVectors
+      .groupByKey(_.partitionAndBucket)
+      .mapGroups {
+        case (_, iter: Iterator[SparkDeletionVectors]) =>
+          val serializer = new CommitMessageSerializer
+          val grouped = iter.reduce {
+            (sdv1, sdv2) =>
+              sdv1.copy(dataFileAndDeletionVector =
+                sdv1.dataFileAndDeletionVector ++ sdv2.dataFileAndDeletionVector)
           }
-    }
+          commitDeletionVector(grouped, serializer)
+      }
     serializedCommits
       .collect()
       .map(deserializeCommitMessage(serializer, _))
