@@ -129,6 +129,7 @@ public class PartitionsTable implements ReadonlyTable {
 
         private static final long serialVersionUID = 1L;
 
+        @Override
         public boolean equals(Object o) {
             if (this == o) {
                 return true;
