@@ -253,7 +253,7 @@ public class HiveMigrator implements Migrator {
             Map<String, String> hiveTableOptions) {
         checkArgument(
                 coreOptions.bucket() == -1,
-                "Hive migrator only support unaware-bucket target table");
+                "Hive migrator only support unaware-bucket target table, bucket should be -1");
         Map<String, String> paimonOptions = coreOptions.toMap();
         // for compatible with hive comment system
         if (hiveTableOptions.get("comment") != null) {
