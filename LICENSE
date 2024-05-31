@@ -267,6 +267,7 @@ paimon-format/src/main/java/org/apache/orc/OrcFile.java
 from https://orc.apache.org/ version 2.0
 
 paimon-format/src/main/java/org/apache/parquet/hadoop/ParquetFileReader.java
+paimon-format/src/main/java/org/apache/parquet/hadoop/ParquetWriter.java
 from https://parquet.apache.org/ version 1.14.0
 
 MIT License
