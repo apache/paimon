@@ -96,6 +96,43 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
+    public void testMultiSequenceFields() {
+        Options options = new Options();
+        options.set("fields.f3,f4.sequence-group", "f1,f2");
+        options.set("fields.f7,f8.sequence-group", "f5,f6");
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
+        MergeFunction<KeyValue> func =
+                PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"))
+                        .create();
+        func.reset();
+        add(func, 1, 1, 1, 1, 1, 1, 1, 1, 3);
+        add(func, 1, 2, 2, 2, 2, 2, 1, 1, null);
+        validate(func, 1, 2, 2, 2, 2, 1, 1, 1, 3);
+        add(func, 1, 1, 3, 1, 3, 3, 3, 3, 2);
+        validate(func, 1, 2, 2, 2, 2, 3, 3, 3, 2);
+
+        // delete
+        add(func, RowKind.DELETE, 1, 1, 1, 3, 3, 1, 1, null, null);
+        validate(func, 1, null, null, 3, 3, 3, 3, 3, 2);
+        add(func, RowKind.DELETE, 1, 1, 1, 3, 1, 1, 1, 4, 4);
+        validate(func, 1, null, null, 3, 3, null, null, 4, 4);
+        add(func, 1, 4, 4, 4, 4, 5, 5, 5, 5);
+        validate(func, 1, 4, 4, 4, 4, 5, 5, 5, 5);
+        add(func, RowKind.DELETE, 1, 1, 1, 6, 1, 1, 1, 6, 1);
+        validate(func, 1, null, null, 6, 1, null, null, 6, 1);
+    }
+
+    @Test
     public void testSequenceGroupDefaultAggFunc() {
         Options options = new Options();
         options.set("fields.f3.sequence-group", "f1,f2");
@@ -124,10 +161,61 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
+    public void testMultiSequenceFieldsDefaultAggFunc() {
+        Options options = new Options();
+        options.set("fields.f3,f4.sequence-group", "f1,f2");
+        options.set("fields.f7,f8.sequence-group", "f5,f6");
+        options.set(FIELDS_DEFAULT_AGG_FUNC, "last_non_null_value");
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
+        MergeFunction<KeyValue> func =
+                PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"))
+                        .create();
+        func.reset();
+        add(func, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+        add(func, 1, 2, 2, 2, 2, 2, 2, null, null);
+        validate(func, 1, 2, 2, 2, 2, 1, 1, 1, 1);
+        add(func, 1, 3, 3, 1, 1, 3, 3, 3, 3);
+        validate(func, 1, 2, 2, 2, 2, 3, 3, 3, 3);
+        add(func, 1, 4, null, 4, 4, 5, null, 5, 5);
+        validate(func, 1, 4, 2, 4, 4, 5, 3, 5, 5);
+    }
+
+    @Test
     public void testSequenceGroupDefinedNoField() {
         Options options = new Options();
         options.set("fields.f3.sequence-group", "f1,f2,f7");
         options.set("fields.f6.sequence-group", "f4,f5");
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
+        assertThatThrownBy(
+                        () ->
+                                PartialUpdateMergeFunction.factory(
+                                        options, rowType, ImmutableList.of("f0")))
+                .hasMessageContaining("can not be found in table schema");
+    }
+
+    @Test
+    public void testMultiSequenceFieldsDefinedNoField() {
+        Options options = new Options();
+        options.set("fields.f2,f3.sequence-group", "f1,f7");
+        options.set("fields.f5,f6.sequence-group", "f4");
         RowType rowType =
                 RowType.of(
                         DataTypes.INT(),
@@ -151,6 +239,27 @@ public class PartialUpdateMergeFunctionTest {
         options.set("fields.f4.sequence-group", "f1,f2");
         RowType rowType =
                 RowType.of(
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
+        assertThatThrownBy(
+                        () ->
+                                PartialUpdateMergeFunction.factory(
+                                        options, rowType, ImmutableList.of("f0")))
+                .hasMessageContaining("is defined repeatedly by multiple groups");
+    }
+
+    @Test
+    public void testMultiSequenceFieldsRepeatDefine() {
+        Options options = new Options();
+        options.set("fields.f3,f4.sequence-group", "f1,f2");
+        options.set("fields.f5,f6.sequence-group", "f1,f2");
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT(),
+                        DataTypes.INT(),
                         DataTypes.INT(),
                         DataTypes.INT(),
                         DataTypes.INT(),
@@ -199,6 +308,45 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
+    public void testMultiSequenceFieldsAdjustProjectionRepeatProject() {
+        Options options = new Options();
+        options.set("fields.f2,f4.sequence-group", "f1,f3");
+        options.set("fields.f5,f6.sequence-group", "f7");
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
+        // the field 'f1' is projected twice
+        int[][] projection = new int[][] {{1}, {1}, {3}, {7}};
+        MergeFunctionFactory<KeyValue> factory =
+                PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"));
+        MergeFunctionFactory.AdjustedProjection adjustedProjection =
+                factory.adjustProjection(projection);
+
+        validate(adjustedProjection, new int[] {1, 1, 3, 7, 2, 4, 5, 6}, new int[] {0, 1, 2, 3});
+
+        MergeFunction<KeyValue> func = factory.create(adjustedProjection.pushdownProjection);
+        func.reset();
+        add(func, 1, 1, 1, 1, 1, 1, 1, 1);
+        add(func, 2, 2, 6, 2, 2, 2, 2, 6);
+        validate(func, 2, 2, 6, 2, 2, 2, 2, 6);
+
+        // update first sequence group
+        add(func, 3, 3, null, 7, 4, null, 1, 8);
+        validate(func, 3, 3, null, 2, 4, null, 2, 6);
+
+        // update second sequence group
+        add(func, 5, 5, 3, 3, 3, 5, 5, 6);
+        validate(func, 5, 3, null, 3, 4, null, 5, 6);
+    }
+
+    @Test
     public void testAdjustProjectionSequenceFieldsProject() {
         Options options = new Options();
         options.set("fields.f4.sequence-group", "f1,f3");
@@ -231,10 +379,77 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
+    public void testMultiSequenceFieldsAdjustProjectionProject() {
+        Options options = new Options();
+        options.set("fields.f2,f4.sequence-group", "f1,f3");
+        options.set("fields.f5,f6.sequence-group", "f7");
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
+        // the sequence field 'f4' is projected too
+        int[][] projection = new int[][] {{1}, {4}, {3}, {7}};
+        MergeFunctionFactory<KeyValue> factory =
+                PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"));
+        MergeFunctionFactory.AdjustedProjection adjustedProjection =
+                factory.adjustProjection(projection);
+
+        validate(adjustedProjection, new int[] {1, 4, 3, 7, 2, 5, 6}, new int[] {0, 1, 2, 3});
+
+        MergeFunction<KeyValue> func = factory.create(adjustedProjection.pushdownProjection);
+        func.reset();
+        // if sequence field is null, the related fields should not be updated
+        add(func, 1, 1, 1, 1, 1, 1, 1);
+        add(func, 1, null, 1, 3, 2, 2, 2);
+        validate(func, 1, null, 1, 3, 2, 2, 2);
+    }
+
+    @Test
     public void testAdjustProjectionAllFieldsProject() {
         Options options = new Options();
         options.set("fields.f4.sequence-group", "f1,f3");
         options.set("fields.f5.sequence-group", "f7");
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
+        // all fields are projected
+        int[][] projection = new int[][] {{0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}};
+        MergeFunctionFactory<KeyValue> factory =
+                PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"));
+        MergeFunctionFactory.AdjustedProjection adjustedProjection =
+                factory.adjustProjection(projection);
+
+        validate(
+                adjustedProjection,
+                new int[] {0, 1, 2, 3, 4, 5, 6, 7},
+                new int[] {0, 1, 2, 3, 4, 5, 6, 7});
+
+        MergeFunction<KeyValue> func = factory.create(adjustedProjection.pushdownProjection);
+        func.reset();
+        // 'f6' has no sequence group, it should not be updated by null
+        add(func, 1, 1, 1, 1, 1, 1, 1, 1);
+        add(func, 4, 2, 4, 2, 2, 0, null, 3);
+        validate(func, 4, 2, 4, 2, 2, 1, 1, 1);
+    }
+
+    @Test
+    public void testMultiSequenceFieldsAdjustProjectionAllFieldsProject() {
+        Options options = new Options();
+        options.set("fields.f2,f4.sequence-group", "f1,f3");
+        options.set("fields.f5,f6.sequence-group", "f7");
         RowType rowType =
                 RowType.of(
                         DataTypes.INT(),
@@ -373,6 +588,33 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
+    public void testMultiSequenceFieldsFirstValue() {
+        Options options = new Options();
+        options.set("fields.f1,f2.sequence-group", "f3,f4");
+        options.set("fields.f3.aggregate-function", "first_value");
+        options.set("fields.f4.aggregate-function", "last_value");
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
+        MergeFunction<KeyValue> func =
+                PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"))
+                        .create();
+
+        func.reset();
+
+        // f7 sequence group 2
+        add(func, 1, 1, 1, 1, 1);
+        add(func, 1, 2, 2, 2, 2);
+        validate(func, 1, 2, 2, 1, 2);
+        add(func, 1, 0, 1, 3, 3);
+        validate(func, 1, 2, 2, 3, 2);
+    }
+
+    @Test
     public void testPartialUpdateWithAggregation() {
         Options options = new Options();
         options.set("fields.f1.sequence-group", "f2,f3,f4");
@@ -432,6 +674,65 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
+    public void testMultiSequenceFieldsPartialUpdateWithAggregation() {
+        Options options = new Options();
+        options.set("fields.f1,f2.sequence-group", "f3,f4,f5");
+        options.set("fields.f7,f8.sequence-group", "f6");
+        options.set("fields.f0.aggregate-function", "listagg");
+        options.set("fields.f3.aggregate-function", "sum");
+        options.set("fields.f4.aggregate-function", "first_value");
+        options.set("fields.f5.aggregate-function", "last_value");
+        options.set("fields.f6.aggregate-function", "last_non_null_value");
+        options.set("fields.f4.ignore-retract", "true");
+        options.set("fields.f6.ignore-retract", "true");
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
+        MergeFunction<KeyValue> func =
+                PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"))
+                        .create();
+
+        func.reset();
+        // f0 pk
+        // f1, f2 sequence group 1
+        // f3 in f1, f2 group with sum agg
+        // f4 in f1, f2 group with first_value agg
+        // f5 in f1, f2 group with last_value agg
+        // f6 in f7, f8 group with last_not_null agg
+        // f7, f8 sequence group 2
+        add(func, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+        add(func, 1, 1, 2, 1, 2, 2, null, 2, 0);
+        validate(func, 1, 1, 2, 2, 1, 2, 1, 2, 0);
+
+        // sequence group not advanced
+        add(func, 1, 1, 1, 1, 3, 1, 1, 2, 0);
+        validate(func, 1, 1, 2, 3, 3, 2, 1, 2, 0);
+
+        // test null
+        add(func, 1, 1, 3, null, null, null, null, 4, 2);
+        validate(func, 1, 1, 3, 3, 3, null, 1, 4, 2);
+
+        // test retract
+        add(func, 1, 2, 3, 1, 1, 1, 1, 4, 3);
+        validate(func, 1, 2, 3, 4, 3, 1, 1, 4, 3);
+        add(func, RowKind.UPDATE_BEFORE, 1, 2, 3, 2, 1, 2, 1, 4, 3);
+        validate(func, 1, 2, 3, 2, 3, null, 1, 4, 3);
+        add(func, RowKind.DELETE, 1, 3, 2, 3, 1, 1, 4, 3);
+        validate(func, 1, 3, 2, -1, 3, null, 1, 4, 3);
+        // retract for old sequence
+        add(func, RowKind.DELETE, 1, 2, 2, 2, 1, 1, 1, 1, 3);
+        validate(func, 1, 3, 2, -3, 3, null, 1, 4, 3);
+    }
+
+    @Test
     public void testPartialUpdateWithAggregationProjectPushDown() {
         Options options = new Options();
         options.set("fields.f1.sequence-group", "f2,f3,f4");
@@ -483,6 +784,62 @@ public class PartialUpdateMergeFunctionTest {
         validate(func, null, 0, 2, 3);
         add(func, RowKind.DELETE, 1, 2, 1, 3);
         validate(func, null, -2, 2, 3);
+    }
+
+    @Test
+    public void testMultiSequenceFieldsPartialUpdateWithAggregationProjectPushDown() {
+        Options options = new Options();
+        options.set("fields.f1,f8.sequence-group", "f2,f3,f4");
+        options.set("fields.f7,f9.sequence-group", "f6");
+        options.set("fields.f0.aggregate-function", "listagg");
+        options.set("fields.f2.aggregate-function", "sum");
+        options.set("fields.f4.aggregate-function", "last_value");
+        options.set("fields.f6.aggregate-function", "last_non_null_value");
+        options.set("fields.f4.ignore-retract", "true");
+        options.set("fields.f6.ignore-retract", "true");
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
+        MergeFunctionFactory<KeyValue> factory =
+                PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"));
+
+        MergeFunctionFactory.AdjustedProjection adjustedProjection =
+                factory.adjustProjection(new int[][] {{3}, {2}, {5}});
+
+        validate(adjustedProjection, new int[] {3, 2, 5, 1, 8}, new int[] {0, 1, 2});
+
+        MergeFunction<KeyValue> func = factory.create(adjustedProjection.pushdownProjection);
+
+        func.reset();
+        // f0 pk
+        // f1, f8 sequence group
+        // f2 in f1, f8 group with sum agg
+        // f3 in f1, f8 group without agg
+        // f4 in f1, f8 group with last_value agg
+        // f5 not in group
+        // f6 in f7, f9 group with last_not_null agg
+        // f7, f9 sequence group 2
+        add(func, 1, 1, 1, 1, 1);
+        add(func, 2, 1, 2, 2, 2);
+        validate(func, 2, 2, 2, 2, 2);
+
+        add(func, RowKind.INSERT, null, null, null, 3, 3);
+        validate(func, null, 2, 2, 3, 3);
+
+        // test retract
+        add(func, RowKind.UPDATE_BEFORE, 1, 2, 1, 3, 3);
+        validate(func, null, 0, 2, 3, 3);
+        add(func, RowKind.DELETE, 1, 2, 1, 3, 3);
+        validate(func, null, -2, 2, 3, 3);
     }
 
     @Test

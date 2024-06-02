@@ -35,6 +35,7 @@ import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -51,6 +52,7 @@ import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.DEFAULT_AGG_FUNCTION;
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
+import static org.apache.paimon.CoreOptions.FIELDS_SEPARATOR;
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP;
@@ -349,13 +351,15 @@ public class SchemaValidation {
                 .forEach(
                         k -> {
                             if (k.startsWith(FIELDS_PREFIX)) {
-                                String fieldName = k.split("\\.")[1];
-                                checkArgument(
-                                        DEFAULT_AGG_FUNCTION.equals(fieldName)
-                                                || fieldNames.contains(fieldName),
-                                        String.format(
-                                                "Field %s can not be found in table schema.",
-                                                fieldName));
+                                String[] fields = k.split("\\.")[1].split(FIELDS_SEPARATOR);
+                                for (String field : fields) {
+                                    checkArgument(
+                                            DEFAULT_AGG_FUNCTION.equals(field)
+                                                    || fieldNames.contains(field),
+                                            String.format(
+                                                    "Field %s can not be found in table schema.",
+                                                    field));
+                                }
                             }
                         });
     }
@@ -367,29 +371,42 @@ public class SchemaValidation {
             String v = entry.getValue();
             List<String> fieldNames = schema.fieldNames();
             if (k.startsWith(FIELDS_PREFIX) && k.endsWith(SEQUENCE_GROUP)) {
-                String sequenceFieldName =
+                String[] sequenceFieldNames =
                         k.substring(
-                                FIELDS_PREFIX.length() + 1,
-                                k.length() - SEQUENCE_GROUP.length() - 1);
-                if (!fieldNames.contains(sequenceFieldName)) {
-                    throw new IllegalArgumentException(
-                            String.format(
-                                    "The sequence field group: %s can not be found in table schema.",
-                                    sequenceFieldName));
-                }
+                                        FIELDS_PREFIX.length() + 1,
+                                        k.length() - SEQUENCE_GROUP.length() - 1)
+                                .split(FIELDS_SEPARATOR);
 
-                for (String field : v.split(",")) {
+                for (String field : v.split(FIELDS_SEPARATOR)) {
                     if (!fieldNames.contains(field)) {
                         throw new IllegalArgumentException(
                                 String.format("Field %s can not be found in table schema.", field));
                     }
-                    Set<String> group = fields2Group.computeIfAbsent(field, p -> new HashSet<>());
-                    if (group.add(sequenceFieldName) && group.size() > 1) {
+
+                    List<String> sequenceFieldsList = new ArrayList<>();
+                    for (String sequenceFieldName : sequenceFieldNames) {
+                        if (!fieldNames.contains(sequenceFieldName)) {
+                            throw new IllegalArgumentException(
+                                    String.format(
+                                            "The sequence field group: %s can not be found in table schema.",
+                                            sequenceFieldName));
+                        }
+                        sequenceFieldsList.add(sequenceFieldName);
+                    }
+
+                    if (fields2Group.containsKey(field)) {
+                        List<List<String>> sequenceGroups = new ArrayList<>();
+                        sequenceGroups.add(new ArrayList<>(fields2Group.get(field)));
+                        sequenceGroups.add(sequenceFieldsList);
+
                         throw new IllegalArgumentException(
                                 String.format(
                                         "Field %s is defined repeatedly by multiple groups: %s.",
-                                        field, group));
+                                        field, sequenceGroups));
                     }
+
+                    Set<String> group = fields2Group.computeIfAbsent(field, p -> new HashSet<>());
+                    group.addAll(sequenceFieldsList);
                 }
             }
         }
