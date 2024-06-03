@@ -225,10 +225,10 @@ public class ParquetFileReader implements Closeable {
 
     private InternalFileDecryptor fileDecryptor = null;
 
-    public ParquetFileReader(ParquetInputFile file, ParquetReadOptions options) throws IOException {
+    public ParquetFileReader(InputFile file, ParquetReadOptions options) throws IOException {
         this.converter = new ParquetMetadataConverter(options);
-        this.file = file;
-        this.f = file.newStream();
+        this.file = (ParquetInputFile) file;
+        this.f = this.file.newStream();
         this.options = options;
         try {
             this.footer = readFooter(file, options, f, converter);
