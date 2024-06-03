@@ -117,7 +117,9 @@ public class PartitionTimeExtractor {
                             .mapToObj(i -> partitionKeys.get(i) + ":" + partitionValues.get(i))
                             .collect(Collectors.joining(","));
             LOG.warn(
-                    "Parition {} can't be extract datetime to expire,Please check the partition expiration configuration or manually delete the partition using the drop-partition command. ",
+                    "Partition {} can't be extract datetime to expire."
+                            + " Please check the partition expiration configuration or"
+                            + " manually delete the partition using the drop-partition command.",
                     paritionInfos);
         }
         return dateTime;
