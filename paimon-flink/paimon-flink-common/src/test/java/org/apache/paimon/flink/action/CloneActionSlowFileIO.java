@@ -30,8 +30,8 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import java.io.IOException;
 
 /**
- * Special {@link FileIO} for {@link CloneActionITCase}. It will sleep before reading and writing a
- * file, thus making it slower.
+ * Special {@link FileIO} for {@link CloneActionITCase}. It will sleep before cloning a file, thus
+ * making it slower.
  */
 public class CloneActionSlowFileIO extends LocalFileIO {
 
