@@ -43,6 +43,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
+
 /** Table compact action for Flink. */
 public class CompactAction extends TableActionBase {
 
@@ -133,31 +135,24 @@ public class CompactAction extends TableActionBase {
         unawareBucketCompactionTopoBuilder.build();
     }
 
-    @Override
-    public void run() throws Exception {
-        build();
-        execute("Compact job");
-    }
-
-    // Check whether predicate contain non parition key.
-    private void checkPredicateOnlyFilterParition(Predicate predicate, List<String> partitionKey) {
-        if (predicate != null) {
-            LOGGER.info("the partition predicate of compaction is {}", predicate);
-            PartitionPredicateVisitor partitionPredicateVisitor =
-                    new PartitionPredicateVisitor(partitionKey);
-            Preconditions.checkArgument(
-                    predicate.visit(partitionPredicateVisitor),
-                    "Only parition key can be specialized in compaction action.");
-        }
-    }
-
     protected Predicate getPredicate() throws Exception {
         Preconditions.checkArgument(
                 partitions == null || whereSql == null,
                 "partitions and where cannot be used together.");
         Predicate predicate = null;
         if (partitions != null) {
-            predicate = PredicateBuilder.partitions(partitions, table.rowType());
+            predicate =
+                    PredicateBuilder.or(
+                            partitions.stream()
+                                    .map(
+                                            p ->
+                                                    createPartitionPredicate(
+                                                            p,
+                                                            table.rowType(),
+                                                            ((FileStoreTable) table)
+                                                                    .coreOptions()
+                                                                    .partitionDefaultName()))
+                                    .toArray(Predicate[]::new));
         } else if (whereSql != null) {
             SimpleSqlPredicateConvertor convertor =
                     new SimpleSqlPredicateConvertor(table.rowType());
@@ -165,8 +160,21 @@ public class CompactAction extends TableActionBase {
         }
 
         // Check whether predicate contain non parition key.
-        checkPredicateOnlyFilterParition(predicate, table.partitionKeys());
+        if (predicate != null) {
+            LOGGER.info("the partition predicate of compaction is {}", predicate);
+            PartitionPredicateVisitor partitionPredicateVisitor =
+                    new PartitionPredicateVisitor(table.partitionKeys());
+            Preconditions.checkArgument(
+                    predicate.visit(partitionPredicateVisitor),
+                    "Only parition key can be specialized in compaction action.");
+        }
 
         return predicate;
+    }
+
+    @Override
+    public void run() throws Exception {
+        build();
+        execute("Compact job");
     }
 }

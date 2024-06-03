@@ -32,7 +32,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -70,6 +69,7 @@ import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
 
+import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -122,7 +122,10 @@ public class CompactorSinkITCase extends AbstractTestBase {
         CompactorSourceBuilder sourceBuilder =
                 new CompactorSourceBuilder(tablePath.toString(), table);
         Predicate predicate =
-                PredicateBuilder.partitions(getSpecifiedPartitions(), table.rowType());
+                createPartitionPredicate(
+                        getSpecifiedPartitions(),
+                        table.rowType(),
+                        table.coreOptions().partitionDefaultName());
         DataStreamSource<RowData> source =
                 sourceBuilder
                         .withEnv(env)
@@ -159,7 +162,10 @@ public class CompactorSinkITCase extends AbstractTestBase {
         CompactorSourceBuilder sourceBuilder =
                 new CompactorSourceBuilder(tablePath.toString(), table);
         Predicate predicate =
-                PredicateBuilder.partitions(getSpecifiedPartitions(), table.rowType());
+                createPartitionPredicate(
+                        getSpecifiedPartitions(),
+                        table.rowType(),
+                        table.coreOptions().partitionDefaultName());
         DataStreamSource<RowData> source =
                 sourceBuilder
                         .withEnv(env)
