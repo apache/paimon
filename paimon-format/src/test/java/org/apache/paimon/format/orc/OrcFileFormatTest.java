@@ -41,7 +41,6 @@ public class OrcFileFormatTest {
         options.setString("haha", "1");
         OrcFileFormat orc = new OrcFileFormatFactory().create(new FormatContext(options, 1024));
         assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".haha", "")).isEqualTo("1");
-        assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".compress", "")).isEqualTo("lz4");
     }
 
     @Test

@@ -112,7 +112,7 @@ public class AvroFileFormatTest {
         Path file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
 
         try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
-            FormatWriter writer = format.createWriterFactory(rowType).create(out, null);
+            FormatWriter writer = format.createWriterFactory(rowType).create(out, "zstd");
             for (int i = 0; i < 1000000; i++) {
                 writer.addElement(GenericRow.of(i));
             }
