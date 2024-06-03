@@ -23,7 +23,6 @@ import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 
 import org.apache.parquet.io.InputFile;
-import org.apache.parquet.io.SeekableInputStream;
 
 import java.io.IOException;
 
@@ -52,7 +51,7 @@ public class ParquetInputFile implements InputFile {
     }
 
     @Override
-    public SeekableInputStream newStream() throws IOException {
+    public ParquetInputStream newStream() throws IOException {
         return new ParquetInputStream(fileIO.newInputStream(stat.getPath()));
     }
 

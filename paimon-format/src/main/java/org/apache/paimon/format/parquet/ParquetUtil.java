@@ -78,7 +78,7 @@ public class ParquetUtil {
      * @return parquet reader, used for reading footer, status, etc.
      */
     public static ParquetFileReader getParquetReader(FileIO fileIO, Path path) throws IOException {
-        return ParquetFileReader.open(
+        return new ParquetFileReader(
                 ParquetInputFile.fromPath(fileIO, path), ParquetReadOptions.builder().build());
     }
 
