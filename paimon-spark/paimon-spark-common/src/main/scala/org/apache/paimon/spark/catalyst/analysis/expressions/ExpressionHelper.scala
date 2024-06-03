@@ -128,6 +128,7 @@ trait ExpressionHelper extends PredicateHelper {
       partitionColumns: Seq[String],
       resolver: Resolver
   ): Boolean = {
+    condition.references.nonEmpty &&
     condition.references.forall(r => partitionColumns.exists(resolver(r.name, _)))
   }
 
