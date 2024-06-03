@@ -65,6 +65,9 @@ object EvalSubqueriesForDeleteTable extends Rule[LogicalPlan] with ExpressionHel
         } else {
           throw new RuntimeException("InSubquery with multi-values are not supported")
         }
+        if (listQuery.isCorrelated) {
+          throw new RuntimeException("Correlated InSubquery is not supported")
+        }
 
         val executedPlan = QueryExecution.prepareExecutedPlan(spark, listQuery.plan)
         val physicalSubquery = execution.InSubqueryExec(
