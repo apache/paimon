@@ -76,9 +76,6 @@ public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
     }
 
     public String getCompression(String compression) {
-        if (conf.get("parquet.compression") != null) {
-            return conf.get("parquet.compression");
-        }
-        return compression;
+        return conf.get("parquet.compression", compression);
     }
 }
