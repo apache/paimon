@@ -37,7 +37,6 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -45,6 +44,7 @@ import java.util.function.BinaryOperator;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import java.util.stream.LongStream;
 
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.BranchManager.getBranchPath;
@@ -365,16 +365,28 @@ public class SnapshotManager implements Serializable {
                 .iterator();
     }
 
-    public Iterator<Snapshot> snapshotsWithinRange(Long maxSnapshotId, Long minSnapshotId)
+    public Iterator<Snapshot> snapshotsWithinRange(
+            Optional<Long> optionalMaxSnapshotId, Optional<Long> optionalMinSnapshotId)
             throws IOException {
-        // check for specific snapshot
-        if (Objects.equals(maxSnapshotId, minSnapshotId)) {
-            return Collections.singletonList(snapshot(maxSnapshotId)).iterator();
+        Long lowerBoundSnapshotId = earliestSnapshotId();
+        Long upperBoundSnapshotId = latestSnapshotId();
+
+        // null check on lowerBoundSnapshotId & upperBoundSnapshotId
+        if (lowerBoundSnapshotId == null || upperBoundSnapshotId == null) {
+            return Collections.emptyIterator();
         }
 
-        return listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX)
-                .filter(id -> id >= minSnapshotId && id <= maxSnapshotId)
-                .map(id -> snapshot(id))
+        if (optionalMaxSnapshotId.isPresent()) {
+            upperBoundSnapshotId = optionalMaxSnapshotId.get();
+        }
+
+        if (optionalMinSnapshotId.isPresent()) {
+            lowerBoundSnapshotId = optionalMinSnapshotId.get();
+        }
+
+        // +1 here to include the upperBoundSnapshotId
+        return LongStream.range(lowerBoundSnapshotId, upperBoundSnapshotId + 1)
+                .mapToObj(this::snapshot)
                 .sorted(Comparator.comparingLong(Snapshot::id))
                 .iterator();
     }

@@ -64,6 +64,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
@@ -195,8 +196,8 @@ public class SnapshotsTable implements ReadonlyTable {
 
         private final FileIO fileIO;
         private int[][] projection;
-        private Long filterSnapshotIdMax = Long.MAX_VALUE;
-        private Long filterSnapshotIdMin = Long.MIN_VALUE;
+        private Optional<Long> optionalFilterSnapshotIdMax = Optional.empty();
+        private Optional<Long> optionalFilterSnapshotIdMin = Optional.empty();
 
         public SnapshotsRead(FileIO fileIO) {
             this.fileIO = fileIO;
@@ -212,24 +213,30 @@ public class SnapshotsTable implements ReadonlyTable {
                     predicate.visit(LeafPredicateExtractor.INSTANCE).get("snapshot_id");
             if (snapshotPred != null) {
                 if (snapshotPred.function() instanceof Equal) {
-                    filterSnapshotIdMin = (Long) snapshotPred.literals().get(0);
-                    filterSnapshotIdMax = (Long) snapshotPred.literals().get(0);
+                    optionalFilterSnapshotIdMin =
+                            Optional.of((Long) snapshotPred.literals().get(0));
+                    optionalFilterSnapshotIdMax =
+                            Optional.of((Long) snapshotPred.literals().get(0));
                 }
 
                 if (snapshotPred.function() instanceof GreaterThan) {
-                    filterSnapshotIdMin = (Long) snapshotPred.literals().get(0) + 1;
+                    optionalFilterSnapshotIdMin =
+                            Optional.of((Long) snapshotPred.literals().get(0) + 1);
                 }
 
                 if (snapshotPred.function() instanceof GreaterOrEqual) {
-                    filterSnapshotIdMin = (Long) snapshotPred.literals().get(0);
+                    optionalFilterSnapshotIdMin =
+                            Optional.of((Long) snapshotPred.literals().get(0));
                 }
 
                 if (snapshotPred.function() instanceof LessThan) {
-                    filterSnapshotIdMax = (Long) snapshotPred.literals().get(0) - 1;
+                    optionalFilterSnapshotIdMax =
+                            Optional.of((Long) snapshotPred.literals().get(0) - 1);
                 }
 
                 if (snapshotPred.function() instanceof LessOrEqual) {
-                    filterSnapshotIdMax = (Long) snapshotPred.literals().get(0);
+                    optionalFilterSnapshotIdMax =
+                            Optional.of((Long) snapshotPred.literals().get(0));
                 }
             }
 
@@ -255,7 +262,8 @@ public class SnapshotsTable implements ReadonlyTable {
             SnapshotManager snapshotManager =
                     new SnapshotManager(fileIO, ((SnapshotsSplit) split).location);
             Iterator<Snapshot> snapshots =
-                    snapshotManager.snapshotsWithinRange(filterSnapshotIdMax, filterSnapshotIdMin);
+                    snapshotManager.snapshotsWithinRange(
+                            optionalFilterSnapshotIdMax, optionalFilterSnapshotIdMin);
 
             Iterator<InternalRow> rows = Iterators.transform(snapshots, this::toRow);
             if (projection != null) {
