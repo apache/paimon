@@ -152,14 +152,14 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .defaultValue("zstd")
                     .withDescription(
-                            "Default file compression. It can be overridden by format own configuration.");
+                            "Default file compression. For faster read and write, it is recommended to use LZ4.");
 
     public static final ConfigOption<Integer> FILE_COMPRESSION_ZSTD_LEVEL =
             key("file.compression.zstd-level")
                     .intType()
                     .defaultValue(1)
                     .withDescription(
-                            "Default file compression zstd level. It can be overridden by format own configuration.");
+                            "Default file compression zstd level. For higher compression rates, it can be configured to 9, but the read and write speed will significantly decrease.");
 
     public static final ConfigOption<MemorySize> FILE_BLOCK_SIZE =
             key("file.block-size")

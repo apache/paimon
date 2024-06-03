@@ -258,7 +258,7 @@ under the License.
             <td><h5>file.compression</h5></td>
             <td style="word-wrap: break-word;">"zstd"</td>
             <td>String</td>
-            <td>Default file compression. It can be overridden by format own configuration.</td>
+            <td>Default file compression. For faster read and write, it is recommended to use LZ4.</td>
         </tr>
         <tr>
             <td><h5>file.compression.per.level</h5></td>
@@ -270,7 +270,7 @@ under the License.
             <td><h5>file.compression.zstd-level</h5></td>
             <td style="word-wrap: break-word;">1</td>
             <td>Integer</td>
-            <td>Default file compression zstd level. It can be overridden by format own configuration.</td>
+            <td>Default file compression zstd level. For higher compression rates, it can be configured to 9, but the read and write speed will significantly decrease.</td>
         </tr>
         <tr>
             <td><h5>file.format</h5></td>
