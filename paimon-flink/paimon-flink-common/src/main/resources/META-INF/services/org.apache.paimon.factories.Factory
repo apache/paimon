@@ -30,7 +30,6 @@ org.apache.paimon.flink.action.RemoveOrphanFilesActionFactory
 org.apache.paimon.flink.action.QueryServiceActionFactory
 
 ### procedure factories
-org.apache.paimon.flink.procedure.CloneProcedure
 org.apache.paimon.flink.procedure.CompactDatabaseProcedure
 org.apache.paimon.flink.procedure.CompactProcedure
 org.apache.paimon.flink.procedure.CreateTagProcedure

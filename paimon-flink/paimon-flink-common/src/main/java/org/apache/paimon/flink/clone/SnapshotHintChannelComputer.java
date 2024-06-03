@@ -22,7 +22,10 @@ import org.apache.paimon.table.sink.ChannelComputer;
 
 /**
  * {@link ChannelComputer} for distributing {@link CloneFileInfo} records into SnapshotHintOperator
- * for recreate Snapshot hints.
+ * for recreate snapshot hints.
+ *
+ * <p>{@link CloneFileInfo}s are distributed by target table name, so the creation of snapshot hints
+ * of each table is handled by only one parallelism.
  */
 public class SnapshotHintChannelComputer implements ChannelComputer<CloneFileInfo> {
 

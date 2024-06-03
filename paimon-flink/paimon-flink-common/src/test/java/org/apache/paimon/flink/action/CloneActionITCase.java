@@ -18,157 +18,341 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.Snapshot;
-import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogFactory;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.clone.PickFilesUtil;
+import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.sink.StreamWriteBuilder;
-import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.TableScan;
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.junit.jupiter.api.Assertions;
+import org.apache.flink.table.api.TableEnvironment;
+import org.apache.flink.types.Row;
+import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static org.apache.paimon.utils.Preconditions.checkState;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link CloneAction}. */
-public class CloneActionITCase extends ActionITCaseBase {
+public class CloneActionITCase extends AbstractTestBase {
 
-    private static final DataType[] FIELD_TYPES =
-            new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.STRING()};
-
-    private static final RowType ROW_TYPE =
-            RowType.of(FIELD_TYPES, new String[] {"k", "v", "hh", "dt"});
-
-    private final String targetTableName = "copy_table";
-    private long incrementalIdentifier = 0;
+    // ------------------------------------------------------------------------
+    //  Constructed Tests
+    // ------------------------------------------------------------------------
 
     @Test
-    @Timeout(60_000)
-    public void testCloneLatestSnapshot() throws Exception {
-        /** prepare source table */
-        FileStoreTable table =
-                prepareTable(
-                        Arrays.asList("dt", "hh"),
-                        Arrays.asList("dt", "hh", "k"),
-                        Collections.emptyMap());
+    public void testCloneTable() throws Exception {
+        String sourceWarehouse = getTempDirPath("source-ware");
+        prepareData(sourceWarehouse);
 
-        /** write data to source table */
-        writeData(
-                rowData(1, 100, 15, BinaryString.fromString("20221208")),
-                rowData(1, 100, 16, BinaryString.fromString("20221208")),
-                rowData(1, 100, 15, BinaryString.fromString("20221209")));
-        writeData(
-                rowData(2, 100, 15, BinaryString.fromString("20221208")),
-                rowData(2, 100, 16, BinaryString.fromString("20221208")),
-                rowData(2, 100, 15, BinaryString.fromString("20221209")));
-        checkLatestSnapshot(table, 2, Snapshot.CommitKind.APPEND);
+        String targetWarehouse = getTempDirPath("target-ware");
+        String[] args =
+                new String[] {
+                    "clone",
+                    "--warehouse",
+                    sourceWarehouse,
+                    "--database",
+                    "db1",
+                    "--table",
+                    "t1",
+                    "--target_warehouse",
+                    targetWarehouse,
+                    "--target_database",
+                    "mydb",
+                    "--target_table",
+                    "myt"
+                };
+        ActionFactory.createAction(args).get().run();
 
-        /** do clone */
-        runCloneLatestSnapshotAction();
-        FileStoreTable targetTable = getFileStoreTable(targetTableName);
-        checkLatestSnapshot(targetTable, 2, Snapshot.CommitKind.APPEND);
+        // check result
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        tEnv.executeSql(
+                "CREATE CATALOG targetcat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + String.format("  'warehouse' = '%s'\n", targetWarehouse)
+                        + ")");
+        tEnv.executeSql("USE CATALOG targetcat");
 
-        /** check scan result */
-        List<DataSplit> splits1 = table.newSnapshotReader().read().dataSplits();
-        assertThat(splits1.size()).isEqualTo(3);
-        List<DataSplit> splits2 = targetTable.newSnapshotReader().read().dataSplits();
-        assertThat(splits2.size()).isEqualTo(3);
-
-        TableScan sourceTableScan = table.newReadBuilder().newScan();
-        TableScan targetTableScan = targetTable.newReadBuilder().newScan();
-
-        List<String> scanResult =
-                Arrays.asList(
-                        "+I[1, 100, 15, 20221208]",
-                        "+I[1, 100, 15, 20221209]",
-                        "+I[1, 100, 16, 20221208]",
-                        "+I[2, 100, 15, 20221208]",
-                        "+I[2, 100, 15, 20221209]",
-                        "+I[2, 100, 16, 20221208]");
-        validateResult(table, ROW_TYPE, sourceTableScan, scanResult, 60_000);
-        validateResult(targetTable, ROW_TYPE, targetTableScan, scanResult, 60_000);
+        List<String> actual = collect(tEnv, "SELECT pt, k, v FROM mydb.myt ORDER BY pt, k");
+        assertThat(actual)
+                .containsExactly(
+                        "+I[one, 1, 10]", "+I[one, 2, 21]", "+I[two, 1, 101]", "+I[two, 2, 200]");
+        compareCloneFiles(sourceWarehouse, "db1", "t1", targetWarehouse, "mydb", "myt");
     }
 
     @Test
-    @Timeout(60_000)
-    public void testCopyFilesNameAndSize() throws Exception {
-        /** prepare source table */
-        FileStoreTable table =
-                prepareTable(
-                        Arrays.asList("dt", "hh"),
-                        Arrays.asList("dt", "hh", "k"),
-                        new HashMap<String, String>() {
-                            {
-                                put(
-                                        CoreOptions.CHANGELOG_PRODUCER.key(),
-                                        CoreOptions.ChangelogProducer.INPUT.toString());
-                                put(CoreOptions.BUCKET.key(), "-1");
-                            }
-                        });
+    public void testCloneDatabase() throws Exception {
+        String sourceWarehouse = getTempDirPath("source-ware");
+        prepareData(sourceWarehouse);
 
-        /** write data to source table */
-        writeDataToDynamicBucket(
-                Arrays.asList(
-                        rowData(1, 100, 15, BinaryString.fromString("20221201")),
-                        rowData(2, 40000, 16, BinaryString.fromString("20221208")),
-                        rowData(4, 100, 19, BinaryString.fromString("20221209"))),
-                1);
-        writeDataToDynamicBucket(
-                Arrays.asList(
-                        rowData(24, 898, 1, BinaryString.fromString("20221209")),
-                        rowData(12, 312, 90, BinaryString.fromString("20221208")),
-                        rowData(29, 434, 15, BinaryString.fromString("20221209"))),
-                2);
-        checkLatestSnapshot(table, 2, Snapshot.CommitKind.APPEND);
+        String targetWarehouse = getTempDirPath("target-ware");
+        String[] args =
+                new String[] {
+                    "clone",
+                    "--warehouse",
+                    sourceWarehouse,
+                    "--database",
+                    "db1",
+                    "--target_warehouse",
+                    targetWarehouse,
+                    "--target_database",
+                    "mydb"
+                };
+        ActionFactory.createAction(args).get().run();
 
-        /** do clone */
-        runCloneLatestSnapshotAction();
-        FileStoreTable targetTable = getFileStoreTable(targetTableName);
-        checkLatestSnapshot(targetTable, 2, Snapshot.CommitKind.APPEND);
+        // check result
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        tEnv.executeSql(
+                "CREATE CATALOG targetcat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + String.format("  'warehouse' = '%s'\n", targetWarehouse)
+                        + ")");
+        tEnv.executeSql("USE CATALOG targetcat");
 
-        /** check scan result */
-        List<DataSplit> splits1 = table.newSnapshotReader().read().dataSplits();
-        assertThat(splits1.size()).isEqualTo(6);
-        List<DataSplit> splits2 = targetTable.newSnapshotReader().read().dataSplits();
-        assertThat(splits2.size()).isEqualTo(6);
+        List<String> actual = collect(tEnv, "SELECT pt, k, v FROM mydb.t1 ORDER BY pt, k");
+        assertThat(actual)
+                .containsExactly(
+                        "+I[one, 1, 10]", "+I[one, 2, 21]", "+I[two, 1, 101]", "+I[two, 2, 200]");
+        compareCloneFiles(sourceWarehouse, "db1", "t1", targetWarehouse, "mydb", "t1");
 
-        TableScan sourceTableScan = table.newReadBuilder().newScan();
-        TableScan targetTableScan = targetTable.newReadBuilder().newScan();
+        actual = collect(tEnv, "SELECT k, v FROM mydb.t2 ORDER BY k");
+        assertThat(actual)
+                .containsExactly("+I[10, 100]", "+I[20, 201]", "+I[100, 1001]", "+I[200, 2000]");
+        compareCloneFiles(sourceWarehouse, "db1", "t2", targetWarehouse, "mydb", "t2");
+    }
 
-        List<String> scanResult =
-                Arrays.asList(
-                        "+I[1, 100, 15, 20221201]",
-                        "+I[12, 312, 90, 20221208]",
-                        "+I[2, 40000, 16, 20221208]",
-                        "+I[24, 898, 1, 20221209]",
-                        "+I[29, 434, 15, 20221209]",
-                        "+I[4, 100, 19, 20221209]");
-        validateResult(table, ROW_TYPE, sourceTableScan, scanResult, 60_000);
-        validateResult(targetTable, ROW_TYPE, targetTableScan, scanResult, 60_000);
+    @Test
+    public void testCloneWarehouse() throws Exception {
+        String sourceWarehouse = getTempDirPath("source-ware");
+        prepareData(sourceWarehouse);
 
-        /**
-         * check file name and file size of manifest && index && data && schema && changelog &&
-         * snapshot files
-         */
+        String targetWarehouse = getTempDirPath("target-ware");
+        String[] args =
+                new String[] {
+                    "clone", "--warehouse", sourceWarehouse, "--target_warehouse", targetWarehouse
+                };
+        ActionFactory.createAction(args).get().run();
+
+        // check result
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        tEnv.executeSql(
+                "CREATE CATALOG targetcat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + String.format("  'warehouse' = '%s'\n", targetWarehouse)
+                        + ")");
+        tEnv.executeSql("USE CATALOG targetcat");
+
+        List<String> actual = collect(tEnv, "SELECT pt, k, v FROM db1.t1 ORDER BY pt, k");
+        assertThat(actual)
+                .containsExactly(
+                        "+I[one, 1, 10]", "+I[one, 2, 21]", "+I[two, 1, 101]", "+I[two, 2, 200]");
+        compareCloneFiles(sourceWarehouse, "db1", "t1", targetWarehouse, "db1", "t1");
+
+        actual = collect(tEnv, "SELECT k, v FROM db1.t2 ORDER BY k");
+        assertThat(actual)
+                .containsExactly("+I[10, 100]", "+I[20, 201]", "+I[100, 1001]", "+I[200, 2000]");
+        compareCloneFiles(sourceWarehouse, "db1", "t2", targetWarehouse, "db1", "t2");
+
+        actual = collect(tEnv, "SELECT pt, k, v FROM db2.t3 ORDER BY pt, k");
+        assertThat(actual)
+                .containsExactly(
+                        "+I[1, 1, one]",
+                        "+I[1, 2, twenty]",
+                        "+I[2, 1, banana]",
+                        "+I[2, 2, orange]");
+        compareCloneFiles(sourceWarehouse, "db2", "t3", targetWarehouse, "db2", "t3");
+
+        actual = collect(tEnv, "SELECT k, v FROM db2.t4 ORDER BY k");
+        assertThat(actual)
+                .containsExactly(
+                        "+I[10, one]", "+I[20, twenty]", "+I[100, banana]", "+I[200, orange]");
+        compareCloneFiles(sourceWarehouse, "db2", "t4", targetWarehouse, "db2", "t4");
+    }
+
+    private void prepareData(String sourceWarehouse) throws Exception {
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        tEnv.executeSql(
+                "CREATE CATALOG sourcecat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + String.format("  'warehouse' = '%s'\n", sourceWarehouse)
+                        + ")");
+        tEnv.executeSql("USE CATALOG sourcecat");
+
+        tEnv.executeSql("CREATE DATABASE db1");
+        tEnv.executeSql("CREATE DATABASE db2");
+
+        // prepare data: db1.t1
+        tEnv.executeSql(
+                "CREATE TABLE db1.t1 (\n"
+                        + "  pt STRING,\n"
+                        + "  k INT,\n"
+                        + "  v INT,\n"
+                        + "  PRIMARY KEY (pt, k) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (pt) WITH (\n"
+                        + "  'changelog-producer' = 'lookup'\n"
+                        + ")");
+        tEnv.executeSql(
+                        "INSERT INTO db1.t1 VALUES "
+                                + "('one', 1, 10), "
+                                + "('one', 2, 20), "
+                                + "('two', 1, 100)")
+                .await();
+        tEnv.executeSql(
+                        "INSERT INTO db1.t1 VALUES "
+                                + "('one', 2, 21), "
+                                + "('two', 1, 101), "
+                                + "('two', 2, 200)")
+                .await();
+
+        // prepare data: db1.t2
+        tEnv.executeSql(
+                "CREATE TABLE db1.t2 (\n"
+                        + "  k INT,\n"
+                        + "  v INT,\n"
+                        + "  PRIMARY KEY (k) NOT ENFORCED\n"
+                        + ") WITH (\n"
+                        + "  'changelog-producer' = 'lookup'\n"
+                        + ")");
+        tEnv.executeSql(
+                        "INSERT INTO db1.t2 VALUES "
+                                + "(10, 100), "
+                                + "(20, 200), "
+                                + "(100, 1000)")
+                .await();
+        tEnv.executeSql(
+                        "INSERT INTO db1.t2 VALUES "
+                                + "(20, 201), "
+                                + "(100, 1001), "
+                                + "(200, 2000)")
+                .await();
+
+        // prepare data: db2.t3
+        tEnv.executeSql(
+                "CREATE TABLE db2.t3 (\n"
+                        + "  pt INT,\n"
+                        + "  k INT,\n"
+                        + "  v STRING,\n"
+                        + "  PRIMARY KEY (pt, k) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (pt) WITH (\n"
+                        + "  'changelog-producer' = 'lookup'\n"
+                        + ")");
+        tEnv.executeSql(
+                        "INSERT INTO db2.t3 VALUES "
+                                + "(1, 1, 'one'), "
+                                + "(1, 2, 'two'), "
+                                + "(2, 1, 'apple')")
+                .await();
+        tEnv.executeSql(
+                        "INSERT INTO db2.t3 VALUES "
+                                + "(1, 2, 'twenty'), "
+                                + "(2, 1, 'banana'), "
+                                + "(2, 2, 'orange')")
+                .await();
+
+        // prepare data: db2.t4
+        tEnv.executeSql(
+                "CREATE TABLE db2.t4 (\n"
+                        + "  k INT,\n"
+                        + "  v STRING,\n"
+                        + "  PRIMARY KEY (k) NOT ENFORCED\n"
+                        + ") WITH (\n"
+                        + "  'changelog-producer' = 'lookup'\n"
+                        + ")");
+        tEnv.executeSql(
+                        "INSERT INTO db2.t4 VALUES "
+                                + "(10, 'one'), "
+                                + "(20, 'two'), "
+                                + "(100, 'apple')")
+                .await();
+        tEnv.executeSql(
+                        "INSERT INTO db2.t4 VALUES "
+                                + "(20, 'twenty'), "
+                                + "(100, 'banana'), "
+                                + "(200, 'orange')")
+                .await();
+    }
+
+    @Test
+    public void testCloneWithSchemaEvolution() throws Exception {
+        String sourceWarehouse = getTempDirPath("source-ware");
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        tEnv.executeSql(
+                "CREATE CATALOG sourcecat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + String.format("  'warehouse' = '%s'\n", sourceWarehouse)
+                        + ")");
+        tEnv.executeSql("USE CATALOG sourcecat");
+
+        tEnv.executeSql(
+                "CREATE TABLE t (\n"
+                        + "  pt STRING,\n"
+                        + "  k INT,\n"
+                        + "  v INT,\n"
+                        + "  PRIMARY KEY (pt, k) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (pt) WITH (\n"
+                        + "  'changelog-producer' = 'lookup'\n"
+                        + ")");
+        tEnv.executeSql(
+                        "INSERT INTO t VALUES "
+                                + "('one', 1, 10), "
+                                + "('one', 2, 20), "
+                                + "('two', 1, 100)")
+                .await();
+        tEnv.executeSql("ALTER TABLE t ADD v2 STRING AFTER v");
+        tEnv.executeSql(
+                        "INSERT INTO t VALUES "
+                                + "('one', 2, 21, 'apple'), "
+                                + "('two', 1, 101, 'banana'), "
+                                + "('two', 2, 200, 'orange')")
+                .await();
+
+        String targetWarehouse = getTempDirPath("target-ware");
+        String[] args =
+                new String[] {
+                    "clone", "--warehouse", sourceWarehouse, "--target_warehouse", targetWarehouse
+                };
+        ActionFactory.createAction(args).get().run();
+
+        // check result
+        tEnv.executeSql(
+                "CREATE CATALOG targetcat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + String.format("  'warehouse' = '%s'\n", targetWarehouse)
+                        + ")");
+        tEnv.executeSql("USE CATALOG targetcat");
+
+        List<String> actual = collect(tEnv, "SELECT pt, k, v, v2 FROM t ORDER BY pt, k");
+        assertThat(actual)
+                .containsExactly(
+                        "+I[one, 1, 10, null]",
+                        "+I[one, 2, 21, apple]",
+                        "+I[two, 1, 101, banana]",
+                        "+I[two, 2, 200, orange]");
+        compareCloneFiles(sourceWarehouse, "default", "t", targetWarehouse, "default", "t");
+    }
+
+    private void compareCloneFiles(
+            String sourceWarehouse,
+            String sourceDb,
+            String sourceTableName,
+            String targetWarehouse,
+            String targetDb,
+            String targetTableName)
+            throws Exception {
+        FileStoreTable targetTable = getFileStoreTable(targetWarehouse, targetDb, targetTableName);
         List<Path> targetTableFiles = PickFilesUtil.getUsedFilesForLatestSnapshot(targetTable);
         List<Pair<Path, Path>> filesPathInfoList =
                 targetTableFiles.stream()
@@ -180,114 +364,14 @@ public class CloneActionITCase extends ActionITCaseBase {
                                                         absolutePath, targetTable.location())))
                         .collect(Collectors.toList());
 
-        Path tableLocation = table.location();
+        FileStoreTable sourceTable = getFileStoreTable(sourceWarehouse, sourceDb, sourceTableName);
+        Path tableLocation = sourceTable.location();
         for (Pair<Path, Path> filesPathInfo : filesPathInfoList) {
             Path sourceTableFile = new Path(tableLocation.toString() + filesPathInfo.getRight());
-            Assertions.assertTrue(table.fileIO().exists(sourceTableFile));
-            Assertions.assertEquals(
-                    table.fileIO().getFileSize(sourceTableFile),
-                    targetTable.fileIO().getFileSize(filesPathInfo.getLeft()));
+            assertThat(sourceTable.fileIO().exists(sourceTableFile)).isTrue();
+            assertThat(targetTable.fileIO().getFileSize(filesPathInfo.getLeft()))
+                    .isEqualTo(sourceTable.fileIO().getFileSize(sourceTableFile));
         }
-    }
-
-    @Test
-    @Timeout(60_000)
-    public void testSnapshotWithFastExpire() throws Exception {
-        /** prepare source table */
-        FileStoreTable table =
-                prepareTable(
-                        Arrays.asList("dt", "hh"),
-                        Arrays.asList("dt", "hh", "k"),
-                        new HashMap<String, String>() {
-                            {
-                                put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "3");
-                                put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "3");
-                            }
-                        });
-
-        /** write data into source table and commit them */
-        Thread writeDataToSourceTablethread =
-                new Thread(
-                        () -> {
-                            try {
-                                /** write and commit data to source table. */
-                                while (true) {
-                                    writeData(
-                                            rowData(
-                                                    1,
-                                                    100,
-                                                    15,
-                                                    BinaryString.fromString("20221208")),
-                                            rowData(
-                                                    1,
-                                                    100,
-                                                    16,
-                                                    BinaryString.fromString("20221208")),
-                                            rowData(
-                                                    1,
-                                                    100,
-                                                    15,
-                                                    BinaryString.fromString("20221209")),
-                                            rowData(
-                                                    2,
-                                                    100,
-                                                    15,
-                                                    BinaryString.fromString("20221208")),
-                                            rowData(
-                                                    2,
-                                                    100,
-                                                    16,
-                                                    BinaryString.fromString("20221208")),
-                                            rowData(
-                                                    2,
-                                                    100,
-                                                    15,
-                                                    BinaryString.fromString("20221209")));
-                                }
-                            } catch (Exception ignored) {
-                            }
-                        });
-        writeDataToSourceTablethread.start();
-
-        /** do clone with source table fast expire */
-        boolean cloneJobHasException;
-        do {
-            try {
-                runCloneLatestSnapshotAction();
-                cloneJobHasException = false;
-            } catch (Exception e) {
-                cloneJobHasException = true;
-            }
-        } while (cloneJobHasException);
-
-        /** check scan result */
-        FileStoreTable targetTable = getFileStoreTable(targetTableName);
-        List<DataSplit> splits1 = table.newSnapshotReader().read().dataSplits();
-        assertThat(splits1.size()).isEqualTo(3);
-        List<DataSplit> splits2 = targetTable.newSnapshotReader().read().dataSplits();
-        assertThat(splits2.size()).isEqualTo(3);
-
-        TableScan sourceTableScan = table.newReadBuilder().newScan();
-        TableScan targetTableScan = targetTable.newReadBuilder().newScan();
-
-        List<String> scanResult =
-                Arrays.asList(
-                        "+I[1, 100, 15, 20221208]",
-                        "+I[1, 100, 15, 20221209]",
-                        "+I[1, 100, 16, 20221208]",
-                        "+I[2, 100, 15, 20221208]",
-                        "+I[2, 100, 15, 20221209]",
-                        "+I[2, 100, 16, 20221208]");
-        validateResult(table, ROW_TYPE, sourceTableScan, scanResult, 60_000);
-        validateResult(targetTable, ROW_TYPE, targetTableScan, scanResult, 60_000);
-    }
-
-    private void writeDataToDynamicBucket(List<GenericRow> data, int bucket) throws Exception {
-        for (GenericRow d : data) {
-            write.write(d, bucket);
-        }
-        commit.commit(incrementalIdentifier, write.prepareCommit(true, incrementalIdentifier));
-        incrementalIdentifier++;
     }
 
     private Path getPathExcludeTableRoot(Path absolutePath, Path sourceTableRoot) {
@@ -304,50 +388,145 @@ public class CloneActionITCase extends ActionITCaseBase {
         return new Path(fileAbsolutePath.substring(sourceTableRootPath.length()));
     }
 
-    private FileStoreTable prepareTable(
-            List<String> partitionKeys, List<String> primaryKeys, Map<String, String> tableOptions)
+    private FileStoreTable getFileStoreTable(String warehouse, String db, String tableName)
             throws Exception {
-        FileStoreTable table =
-                createFileStoreTable(
-                        ROW_TYPE,
-                        partitionKeys,
-                        primaryKeys,
-                        Collections.emptyList(),
-                        tableOptions);
-        StreamWriteBuilder streamWriteBuilder =
-                table.newStreamWriteBuilder().withCommitUser(commitUser);
-        write = streamWriteBuilder.newWrite();
-        commit = streamWriteBuilder.newCommit();
-        return table;
+        try (Catalog catalog =
+                CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)))) {
+            return (FileStoreTable) catalog.getTable(Identifier.create(db, tableName));
+        }
     }
 
-    private void checkLatestSnapshot(
-            FileStoreTable table, long snapshotId, Snapshot.CommitKind commitKind) {
-        SnapshotManager snapshotManager = table.snapshotManager();
-        Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
-        assertThat(snapshot.id()).isEqualTo(snapshotId);
-        assertThat(snapshot.commitKind()).isEqualTo(commitKind);
-    }
+    // ------------------------------------------------------------------------
+    //  Random Tests
+    // ------------------------------------------------------------------------
 
-    private void runCloneLatestSnapshotAction() throws Exception {
-        StreamExecutionEnvironment env = streamExecutionEnvironmentBuilder().batchMode().build();
-        CloneAction action =
-                createAction(
-                        CloneAction.class,
-                        "clone",
-                        "--warehouse",
-                        warehouse,
-                        "--database",
-                        database,
-                        "--table",
-                        tableName,
-                        "--target_warehouse",
-                        warehouse,
-                        "--target_database",
-                        database,
-                        "--target_table",
-                        targetTableName);
+    @Test
+    @Timeout(180)
+    public void testCloneTableWithExpiration() throws Exception {
+        String sourceWarehouse = getTempDirPath("source-ware");
+
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().parallelism(1).build();
+        tEnv.executeSql(
+                "CREATE CATALOG sourcecat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + String.format("  'warehouse' = '%s'\n", sourceWarehouse)
+                        + ")");
+        tEnv.executeSql("USE CATALOG sourcecat");
+        tEnv.executeSql(
+                "CREATE TABLE t (\n"
+                        + "  pt INT,\n"
+                        + "  k INT,\n"
+                        + "  v INT,\n"
+                        + "  PRIMARY KEY (pt, k) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (pt) WITH (\n"
+                        + "  'changelog-producer' = 'lookup',\n"
+                        // very fast expiration
+                        + "  'snapshot.num-retained.min' = '1',\n"
+                        + "  'snapshot.num-retained.max' = '1',\n"
+                        + "  'write-buffer-size' = '256 kb'\n"
+                        + ")");
+
+        int numPartitions = 3;
+        int numKeysPerPartition = 10000;
+        tEnv.executeSql(
+                "CREATE TEMPORARY TABLE s (\n"
+                        + "  a INT\n"
+                        + ") WITH (\n"
+                        + "  'connector' = 'datagen',\n"
+                        + "  'fields.a.kind' = 'sequence',\n"
+                        + "  'fields.a.start' = '0',\n"
+                        + String.format(
+                                "  'fields.a.end' = '%d',\n",
+                                numPartitions * numKeysPerPartition - 1)
+                        + String.format(
+                                "  'number-of-rows' = '%d'\n", numPartitions * numKeysPerPartition)
+                        + ")");
+
+        // write initial data
+        tEnv.executeSql(
+                        String.format(
+                                "INSERT INTO t SELECT (a / %d) AS pt, (a %% %d) AS k, 0 AS v FROM s",
+                                numKeysPerPartition, numKeysPerPartition))
+                .await();
+
+        AtomicBoolean running = new AtomicBoolean(true);
+        Runnable runnable =
+                () -> {
+                    int rounds = 1;
+                    while (running.get()) {
+                        String sql =
+                                String.format(
+                                        "INSERT INTO t SELECT (a / %d) AS pt, (a %% %d) AS k, %d AS v FROM s",
+                                        numKeysPerPartition, numKeysPerPartition, rounds);
+                        try {
+                            tEnv.executeSql(sql).await();
+                            // Sleeping time will become longer and longer, so expiration time will
+                            // also become longer.
+                            // Thus, at the beginning of the test, clone job is very likely to fail
+                            // due to FileNotFoundException.
+                            // However, as the test progresses further, clone job should be able to
+                            // complete due to longer expiration time.
+                            Thread.sleep(100L << Math.min(rounds, 9));
+                        } catch (Exception e) {
+                            throw new RuntimeException(e);
+                        }
+                        rounds++;
+                    }
+                };
+        Thread thread = new Thread(runnable);
+        thread.start();
+
+        Thread.sleep(ThreadLocalRandom.current().nextInt(2000));
+        String targetWarehouse = getTempDirPath("target-ware");
+        String[] args =
+                new String[] {
+                    "clone",
+                    "--warehouse",
+                    // special file io to make cloning slower, thus more likely to face
+                    // FileNotFoundException, see CloneActionSlowFileIO
+                    "clone-slow://" + sourceWarehouse,
+                    "--target_warehouse",
+                    "clone-slow://" + targetWarehouse,
+                    "--parallelism",
+                    "1"
+                };
+        CloneAction action = (CloneAction) ActionFactory.createAction(args).get();
+
+        StreamExecutionEnvironment env =
+                streamExecutionEnvironmentBuilder().streamingMode().allowRestart().build();
         action.withStreamExecutionEnvironment(env).build();
         env.execute();
+        running.set(false);
+        thread.join();
+
+        // check result
+        tEnv.executeSql(
+                "CREATE CATALOG targetcat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + String.format("  'warehouse' = '%s'\n", targetWarehouse)
+                        + ")");
+        tEnv.executeSql("USE CATALOG targetcat");
+        assertThat(collect(tEnv, "SELECT pt, COUNT(*) FROM t GROUP BY pt ORDER BY pt"))
+                .isEqualTo(
+                        IntStream.range(0, numPartitions)
+                                .mapToObj(i -> String.format("+I[%d, %d]", i, numKeysPerPartition))
+                                .collect(Collectors.toList()));
+        assertThat(collect(tEnv, "SELECT COUNT(DISTINCT v) FROM t"))
+                .isEqualTo(Collections.singletonList("+I[1]"));
+    }
+
+    // ------------------------------------------------------------------------
+    //  Utils
+    // ------------------------------------------------------------------------
+
+    private List<String> collect(TableEnvironment tEnv, String sql) throws Exception {
+        List<String> actual = new ArrayList<>();
+        try (CloseableIterator<Row> it = tEnv.executeSql(sql).collect()) {
+            while (it.hasNext()) {
+                Row row = it.next();
+                actual.add(row.toString());
+            }
+        }
+        return actual;
     }
 }

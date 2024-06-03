@@ -22,15 +22,47 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.StreamTableScan;
+import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.TimeoutException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Base IT cases for {@link CompactAction} and {@link CompactDatabaseAction} . */
 public class CompactActionITCaseBase extends ActionITCaseBase {
+
+    protected void validateResult(
+            FileStoreTable table,
+            RowType rowType,
+            StreamTableScan scan,
+            List<String> expected,
+            long timeout)
+            throws Exception {
+        List<String> actual = new ArrayList<>();
+        long start = System.currentTimeMillis();
+        while (actual.size() != expected.size()) {
+            TableScan.Plan plan = scan.plan();
+            actual.addAll(getResult(table.newReadBuilder().newRead(), plan.splits(), rowType));
+
+            if (System.currentTimeMillis() - start > timeout) {
+                break;
+            }
+        }
+        if (actual.size() != expected.size()) {
+            throw new TimeoutException(
+                    String.format(
+                            "Cannot collect %s records in %s milliseconds.",
+                            expected.size(), timeout));
+        }
+        actual.sort(String::compareTo);
+        assertThat(actual).isEqualTo(expected);
+    }
 
     protected void checkFileAndRowSize(
             FileStoreTable table, Long expectedSnapshotId, Long timeout, int fileNum, long rowCount)

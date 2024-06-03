@@ -94,10 +94,14 @@ public class CloneAction extends ActionBase {
 
     @Override
     public void build() {
-        buildCloneFlinkJob(env);
+        try {
+            buildCloneFlinkJob(env);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
-    private void buildCloneFlinkJob(StreamExecutionEnvironment env) {
+    private void buildCloneFlinkJob(StreamExecutionEnvironment env) throws Exception {
         DataStream<Tuple2<String, String>> cloneSource =
                 new CloneSourceBuilder(
                                 env,

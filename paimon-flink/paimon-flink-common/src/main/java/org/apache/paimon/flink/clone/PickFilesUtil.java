@@ -42,7 +42,7 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-/** Util class for get used files' path of a table's latest snapshot. */
+/** Util class for get used files' paths of a table's latest snapshot. */
 public class PickFilesUtil {
 
     private static final int READ_FILE_RETRY_NUM = 3;
@@ -114,6 +114,10 @@ public class PickFilesUtil {
 
             // When scanning, dataFiles are listed from older to newer.
             // By reversing dataFiles, newer files will be copied first.
+            //
+            // We do this because new files are from the latest partition, and are prone to be
+            // deleted. Older files however, are from previous partitions and should not be changed
+            // very often.
             Collections.reverse(dataFiles);
             files.addAll(dataFiles);
 

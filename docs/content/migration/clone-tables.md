@@ -26,31 +26,12 @@ under the License.
 
 # Clone Tables
 
-Paimon supports clone tables of the latest Snapshot for data migration.
+Paimon supports cloning tables for data migration.
+Currently, only table files used by the latest snapshot will be cloned.
 
-{{< hint info >}}
-1、Clone Tables only support batch mode yet. Please use -D execution.runtime-mode=batch or -yD execution.runtime-mode=batch (for the ON-YARN scenario) to run clone job.
-
-2、If you want clone job runs quickly, you can add parameter parallelism.
-
-3、Only support Flink now.
-{{< /hint >}}
-
-## Clone Table
-The target table needs to be a non-existent table, and it will have the exact same schema (only the schema for current snapshot) as the source table.
-
-To run a Flink batch job for clone, follow these instructions.
-
-### LatestSnapshot
-Clone the latest snapshot of the source table, copying all the files required for the snapshot to the new target table.
-
-{{< tabs "clone-tables" >}}
-
-{{< tab "Flink" >}}
-
-Flink SQL currently does not support statements related to clone, so we have to submit the clone job through `flink run`.
-
-Run the following command to submit a clone job for the table's latest Snapshot.
+To clone a table, run the following command to submit a clone job.
+If the table you clone is not modified at the same time, it is recommended to submit a Flink batch job for better performance.
+However, if you want to clone the table while writing it at the same time, submit a Flink streaming job for automatic failure recovery.
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -64,15 +45,15 @@ Run the following command to submit a clone job for the table's latest Snapshot.
     [--target_database <target-database>] \
     [--target_table <target-table-name>] \
     [--target_catalog_conf <target-paimon-catalog-conf> [--target_catalog_conf <target-paimon-catalog-conf> ...]]
-    [--parallelism 128 ]
+    [--parallelism <parallelism>]
 ```
 
 {{< hint info >}}
-1、If the database parameter is not passed, then all tables of all databases will be cloned.
-2、If the table parameter is not passed, then all tables of the database will be cloned.
+1. If `database` is not specified, all tables in all databases of the specified warehouse will be cloned.
+2. If `table` is not specified, all tables of the specified database will be cloned.
 {{< /hint >}}
 
-Example: clone table latest Snapshot.
+Example: Clone `test_db.test_table` from source warehouse to target warehouse.
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -99,18 +80,3 @@ For more usage of the clone action, see
     /path/to/paimon-flink-action-{{< version >}}.jar \
     clone --help
 ```
-
-{{< /tab >}}
-
-{{< tab "Flink Procedure" >}}
-
-Run the following command to submit a clone job for the table's latest Snapshot.
-
-```bash
-CALL sys.clone('source_warehouse', 'source_database', 'source_table', '', 'target_warehouse', 'target_database', 'target_table', '', '')
-```
-
-{{< /tab >}}
-
-{{< /tabs >}}
-

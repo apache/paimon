@@ -25,6 +25,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
@@ -36,8 +37,6 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-
-import static org.apache.paimon.utils.Preconditions.checkState;
 
 /**
  * Pick the files to be cloned of a table based on the input record. The record type it produce is
@@ -62,7 +61,6 @@ public class PickFilesForCloneOperator extends AbstractStreamOperator<CloneFileI
 
     @Override
     public void open() throws Exception {
-        super.open();
         sourceCatalog =
                 FlinkCatalogFactory.createPaimonCatalog(Options.fromMap(sourceCatalogConfig));
         targetCatalog =
@@ -71,15 +69,6 @@ public class PickFilesForCloneOperator extends AbstractStreamOperator<CloneFileI
 
     @Override
     public void processElement(StreamRecord<Tuple2<String, String>> streamRecord) throws Exception {
-        try {
-            processElementImpl(streamRecord);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to pick files", e);
-        }
-    }
-
-    private void processElementImpl(StreamRecord<Tuple2<String, String>> streamRecord)
-            throws Exception {
         String sourceIdentifierStr = streamRecord.getValue().f0;
         Identifier sourceIdentifier = Identifier.fromString(sourceIdentifierStr);
         String targetIdentifierStr = streamRecord.getValue().f1;
@@ -97,7 +86,9 @@ public class PickFilesForCloneOperator extends AbstractStreamOperator<CloneFileI
                         sourceIdentifierStr,
                         targetIdentifierStr);
 
-        LOG.info("The CloneFileInfo of table {} is {} : ", sourceTable.location(), result);
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("The CloneFileInfo of table {} is {} : ", sourceTable.location(), result);
+        }
 
         for (CloneFileInfo info : result) {
             output.collect(new StreamRecord<>(info));
@@ -112,7 +103,8 @@ public class PickFilesForCloneOperator extends AbstractStreamOperator<CloneFileI
         List<CloneFileInfo> result = new ArrayList<>();
         for (Path file : files) {
             Path relativePath = getPathExcludeTableRoot(file, sourceTableRoot);
-            result.add(new CloneFileInfo(relativePath, sourceIdentifier, targetIdentifier));
+            result.add(
+                    new CloneFileInfo(relativePath.toString(), sourceIdentifier, targetIdentifier));
         }
         return result;
     }
@@ -121,13 +113,24 @@ public class PickFilesForCloneOperator extends AbstractStreamOperator<CloneFileI
         String fileAbsolutePath = absolutePath.toUri().toString();
         String sourceTableRootPath = sourceTableRoot.toString();
 
-        checkState(
+        Preconditions.checkState(
                 fileAbsolutePath.startsWith(sourceTableRootPath),
-                "This is a bug, please report. fileAbsolutePath is : "
+                "File absolute path does not start with source table root path. This is unexpected. "
+                        + "fileAbsolutePath is: "
                         + fileAbsolutePath
-                        + ", sourceTableRootPath is : "
+                        + ", sourceTableRootPath is: "
                         + sourceTableRootPath);
 
         return new Path(fileAbsolutePath.substring(sourceTableRootPath.length()));
+    }
+
+    @Override
+    public void close() throws Exception {
+        if (sourceCatalog != null) {
+            sourceCatalog.close();
+        }
+        if (targetCatalog != null) {
+            targetCatalog.close();
+        }
     }
 }

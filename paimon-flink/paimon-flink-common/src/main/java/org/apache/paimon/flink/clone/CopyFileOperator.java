@@ -48,14 +48,12 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
 
     public CopyFileOperator(
             Map<String, String> sourceCatalogConfig, Map<String, String> targetCatalogConfig) {
-        super();
         this.sourceCatalogConfig = sourceCatalogConfig;
         this.targetCatalogConfig = targetCatalogConfig;
     }
 
     @Override
     public void open() throws Exception {
-        super.open();
         sourceCatalog =
                 (AbstractCatalog)
                         FlinkCatalogFactory.createPaimonCatalog(
@@ -79,24 +77,26 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
                 targetCatalog.getDataTableLocation(
                         Identifier.fromString(cloneFileInfo.getTargetIdentifier()));
 
-        Path filePathExcludeTableRoot = cloneFileInfo.getFilePathExcludeTableRoot();
-        Path sourcePath = new Path(sourceTableRootPath.toString() + filePathExcludeTableRoot);
-        Path targetPath = new Path(targetTableRootPath.toString() + filePathExcludeTableRoot);
+        String filePathExcludeTableRoot = cloneFileInfo.getFilePathExcludeTableRoot();
+        Path sourcePath = new Path(sourceTableRootPath + filePathExcludeTableRoot);
+        Path targetPath = new Path(targetTableRootPath + filePathExcludeTableRoot);
 
-        /**
-         * We still send record to SnapshotHintOperator to avoid the following corner case: When
-         * clone two tables under a catalog, after clone Table A is completed, the job fails due to
-         * FileNotFound(snapshot expiration) when clone Table B. And then after restarts the clone
-         * job, the relevant file information of Table A will not be sent to SnapshotHintOperator,
-         * resulting in the job successfully ending but the snapshot hint file of Table A is missing
-         * created.
-         */
         if (targetTableFileIO.exists(targetPath)
                 && targetTableFileIO.getFileSize(targetPath)
                         == sourceTableFileIO.getFileSize(sourcePath)) {
-            LOG.info(
-                    "Skipping clone target file {} because it already exists and has the same size.",
-                    targetPath);
+
+            if (LOG.isDebugEnabled()) {
+                LOG.debug(
+                        "Skipping clone target file {} because it already exists and has the same size.",
+                        targetPath);
+            }
+
+            // We still send record to SnapshotHintOperator to avoid the following corner case:
+            //
+            // When cloning two tables under a catalog, after clone table A is completed,
+            // the job fails due to snapshot expiration when cloning table B.
+            // If we don't re-send file information of table A to SnapshotHintOperator,
+            // the snapshot hint file of A will not be created after the restart.
             output.collect(streamRecord);
             return;
         }
@@ -112,5 +112,15 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
         }
 
         output.collect(streamRecord);
+    }
+
+    @Override
+    public void close() throws Exception {
+        if (sourceCatalog != null) {
+            sourceCatalog.close();
+        }
+        if (targetCatalog != null) {
+            targetCatalog.close();
+        }
     }
 }

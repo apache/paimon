@@ -66,10 +66,14 @@ public class CloneSourceBuilder {
         this.targetTableName = targetTableName;
     }
 
-    public DataStream<Tuple2<String, String>> build() {
-        Catalog sourceCatalog =
-                FlinkCatalogFactory.createPaimonCatalog(Options.fromMap(sourceCatalogConfig));
+    public DataStream<Tuple2<String, String>> build() throws Exception {
+        try (Catalog sourceCatalog =
+                FlinkCatalogFactory.createPaimonCatalog(Options.fromMap(sourceCatalogConfig))) {
+            return build(sourceCatalog);
+        }
+    }
 
+    private DataStream<Tuple2<String, String>> build(Catalog sourceCatalog) throws Exception {
         List<Tuple2<String, String>> result = new ArrayList<>();
 
         if (database == null) {
@@ -83,13 +87,9 @@ public class CloneSourceBuilder {
                     StringUtils.isBlank(targetTableName),
                     "targetTableName must be blank when clone all tables in a catalog.");
             for (String db : sourceCatalog.listDatabases()) {
-                try {
-                    for (String table : sourceCatalog.listTables(db)) {
-                        String s = db + "." + table;
-                        result.add(new Tuple2<>(s, s));
-                    }
-                } catch (Exception e) {
-                    throw new RuntimeException("ListTable error.", e);
+                for (String table : sourceCatalog.listTables(db)) {
+                    String s = db + "." + table;
+                    result.add(new Tuple2<>(s, s));
                 }
             }
         } else if (tableName == null) {
@@ -99,13 +99,8 @@ public class CloneSourceBuilder {
             checkArgument(
                     StringUtils.isBlank(targetTableName),
                     "targetTableName must be blank when clone all tables in a catalog.");
-            try {
-                for (String table : sourceCatalog.listTables(database)) {
-                    result.add(new Tuple2<>(database + "." + table, targetDatabase + "." + table));
-                }
-            } catch (Exception e) {
-                throw new RuntimeException(
-                        "Unexpected error when trying to list tables in database " + database, e);
+            for (String table : sourceCatalog.listTables(database)) {
+                result.add(new Tuple2<>(database + "." + table, targetDatabase + "." + table));
             }
         } else {
             checkArgument(
@@ -119,8 +114,9 @@ public class CloneSourceBuilder {
                             database + "." + tableName, targetDatabase + "." + targetTableName));
         }
 
-        LOG.info("The clone identifier of source table and target table is : " + result);
-
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("The clone identifiers of source table and target table are: {}", result);
+        }
         return env.fromCollection(result).forceNonParallel().forward();
     }
 }

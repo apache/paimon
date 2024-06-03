@@ -52,7 +52,6 @@ public class SnapshotHintOperator extends AbstractStreamOperator<CloneFileInfo>
 
     @Override
     public void open() throws Exception {
-        super.open();
         targetCatalog =
                 FlinkCatalogFactory.createPaimonCatalog(Options.fromMap(targetCatalogConfig));
         identifiers = new HashSet<>();
@@ -90,6 +89,13 @@ public class SnapshotHintOperator extends AbstractStreamOperator<CloneFileInfo>
                             .deleteQuietly(targetTableSnapshotManager.snapshotPath(snapshot.id()));
                 }
             }
+        }
+    }
+
+    @Override
+    public void close() throws Exception {
+        if (targetCatalog != null) {
+            targetCatalog.close();
         }
     }
 }
