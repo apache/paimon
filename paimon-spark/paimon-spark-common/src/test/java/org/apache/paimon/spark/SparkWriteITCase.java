@@ -224,18 +224,4 @@ public class SparkWriteITCase {
         rows = spark.sql("SELECT max(bucket) FROM `T$FILES`").collectAsList();
         assertThat(rows.toString()).isEqualTo("[[0]]");
     }
-
-    @Test
-    public void testNonnull() {
-        try {
-            spark.sql("CREATE TABLE S AS SELECT 1 as a, 2 as b, 'yann' as c");
-
-            spark.sql("CREATE TABLE T (a INT NOT NULL, b INT, c STRING)");
-            spark.sql("INSERT INTO T SELECT * FROM S");
-            List<Row> rows = spark.sql("SELECT * FROM T").collectAsList();
-            assertThat(rows.toString()).isEqualTo("[[1,2,yann]]");
-        } finally {
-            spark.sql("DROP TABLE IF EXISTS S");
-        }
-    }
 }

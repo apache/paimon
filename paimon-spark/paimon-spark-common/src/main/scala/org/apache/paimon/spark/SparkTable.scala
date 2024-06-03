@@ -70,6 +70,7 @@ case class SparkTable(table: Table)
 
   override def capabilities: JSet[TableCapability] = {
     JEnumSet.of(
+      TableCapability.ACCEPT_ANY_SCHEMA,
       TableCapability.BATCH_READ,
       TableCapability.V1_BATCH_WRITE,
       TableCapability.OVERWRITE_BY_FILTER,
