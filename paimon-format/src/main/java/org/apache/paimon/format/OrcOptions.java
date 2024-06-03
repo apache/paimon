@@ -31,15 +31,6 @@ public class OrcOptions {
                     .defaultValue(1024)
                     .withDescription("write batch size for orc.");
 
-    public static final ConfigOption<String> ORC_COMPRESS =
-            key("orc.compress")
-                    .stringType()
-                    .defaultValue("lz4")
-                    .withDescription(
-                            "Define the compression codec for ORC file, if a higher compression ratio is required, "
-                                    + "it is recommended to configure it as 'zstd', and you can configure: "
-                                    + "orc.compression.zstd.level");
-
     public static final ConfigOption<Integer> ORC_COLUMN_ENCODING_DIRECT =
             key("orc.column.encoding.direct")
                     .intType()
@@ -56,14 +47,4 @@ public class OrcOptions {
                                     + "fraction of the total number of non-null rows, turn off "
                                     + "dictionary encoding in orc. Use 0 to always disable dictionary encoding. "
                                     + "Use 1 to always use dictionary encoding.");
-
-    // Do not use OrcConf.COMPRESSION_ZSTD_LEVEL, it may cause IDE testing to occur
-    // NoSuchMethodException
-    public static final ConfigOption<Integer> ORC_COMPRESSION_ZSTD_LEVEL =
-            key("orc.compression.zstd.level")
-                    .intType()
-                    .defaultValue(3)
-                    .withDescription(
-                            "Define the compression level to use with ZStandard codec while writing data. "
-                                    + "The valid range is 1~22.");
 }

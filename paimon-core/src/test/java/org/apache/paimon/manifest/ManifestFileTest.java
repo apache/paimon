@@ -108,6 +108,7 @@ public class ManifestFileTest {
                         new SchemaManager(fileIO, path),
                         DEFAULT_PART_TYPE,
                         avro,
+                        "zstd",
                         pathFactory,
                         suggestedFileSize,
                         null)

@@ -29,8 +29,6 @@ import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.io.OutputFile;
 
-import javax.annotation.Nullable;
-
 import java.io.IOException;
 
 /** A {@link ParquetBuilder} for {@link InternalRow}. */
@@ -77,14 +75,10 @@ public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
                 .build();
     }
 
-    public String getCompression(@Nullable String compression) {
-        String compressName;
-        if (null != compression) {
-            compressName = compression;
-        } else {
-            compressName =
-                    conf.get(ParquetOutputFormat.COMPRESSION, CompressionCodecName.SNAPPY.name());
+    public String getCompression(String compression) {
+        if (conf.get("parquet.compression") != null) {
+            return conf.get("parquet.compression");
         }
-        return compressName;
+        return compression;
     }
 }

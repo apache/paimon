@@ -189,16 +189,16 @@ under the License.
             <td>Force produce changelog in delete sql, or you can use 'streaming-read-overwrite' to read changelog from overwrite commit.</td>
         </tr>
         <tr>
-            <td><h5>deletion-vectors.enabled</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>Whether to enable deletion vectors mode. In this mode, index files containing deletion vectors are generated when data is written, which marks the data for deletion. During read operations, by applying these index files, merging can be avoided.</td>
-        </tr>
-        <tr>
             <td><h5>deletion-vector.index-file.target-size</h5></td>
             <td style="word-wrap: break-word;">2 mb</td>
             <td>MemorySize</td>
             <td>The target size of deletion vector index file.</td>
+        </tr>
+        <tr>
+            <td><h5>deletion-vectors.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to enable deletion vectors mode. In this mode, index files containing deletion vectors are generated when data is written, which marks the data for deletion. During read operations, by applying these index files, merging can be avoided.</td>
         </tr>
         <tr>
             <td><h5>dynamic-bucket.assigner-parallelism</h5></td>
@@ -249,16 +249,28 @@ under the License.
             <td>The threshold for read file async.</td>
         </tr>
         <tr>
-            <td><h5>file.compression</h5></td>
+            <td><h5>file.block-size</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>File block size of format, default value of orc stripe is 64 MB, and parquet row group is 128 MB.</td>
+        </tr>
+        <tr>
+            <td><h5>file.compression</h5></td>
+            <td style="word-wrap: break-word;">"zstd"</td>
             <td>String</td>
-            <td>Default file compression format, orc is lz4 and parquet is snappy. It can be overridden by file.compression.per.level</td>
+            <td>Default file compression. It can be overridden by format own configuration.</td>
         </tr>
         <tr>
             <td><h5>file.compression.per.level</h5></td>
             <td style="word-wrap: break-word;"></td>
             <td>Map</td>
             <td>Define different compression policies for different level, you can add the conf like this: 'file.compression.per.level' = '0:lz4,1:zstd'.</td>
+        </tr>
+        <tr>
+            <td><h5>file.compression.zstd-level</h5></td>
+            <td style="word-wrap: break-word;">1</td>
+            <td>Integer</td>
+            <td>Default file compression zstd level. It can be overridden by format own configuration.</td>
         </tr>
         <tr>
             <td><h5>file.format</h5></td>
@@ -356,6 +368,12 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td style="word-wrap: break-word;">0.75</td>
             <td>Float</td>
             <td>The index load factor for lookup.</td>
+        </tr>
+        <tr>
+            <td><h5>manifest.compression</h5></td>
+            <td style="word-wrap: break-word;">"zstd"</td>
+            <td>String</td>
+            <td>Default file compression for manifest.</td>
         </tr>
         <tr>
             <td><h5>manifest.format</h5></td>

@@ -61,16 +61,6 @@ public class ParquetFileFormatTest {
     }
 
     @Test
-    public void testDefaultCompressionCodecName() {
-        // no parquet.compression and no file.compression
-        Options conf = new Options();
-        RowDataParquetBuilder builder =
-                new RowDataParquetBuilder(
-                        new RowType(new ArrayList<>()), getParquetConfiguration(conf));
-        assertThat(builder.getCompression(null)).isEqualTo(CompressionCodec.SNAPPY.name());
-    }
-
-    @Test
     public void testFileCompressionHigherPreference() {
         Options conf = new Options();
         String lz4 = CompressionCodec.LZ4.name();
@@ -78,9 +68,10 @@ public class ParquetFileFormatTest {
         RowDataParquetBuilder builder =
                 new RowDataParquetBuilder(
                         new RowType(new ArrayList<>()),
-                        getParquetConfiguration(conf.removePrefix(IDENTIFIER + ".")));
+                        getParquetConfiguration(
+                                new FormatContext(conf.removePrefix(IDENTIFIER + "."), 1024)));
         assertThat(builder.getCompression(null)).isEqualTo(lz4);
-        assertThat(builder.getCompression("SNAPPY")).isEqualTo(CompressionCodec.SNAPPY.name());
+        assertThat(builder.getCompression("SNAPPY")).isEqualTo(lz4);
     }
 
     @Test

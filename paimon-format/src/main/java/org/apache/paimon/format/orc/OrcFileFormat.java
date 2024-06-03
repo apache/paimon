@@ -31,6 +31,7 @@ import org.apache.paimon.format.orc.filter.OrcSimpleStatsExtractor;
 import org.apache.paimon.format.orc.reader.OrcSplitReaderUtil;
 import org.apache.paimon.format.orc.writer.RowDataVectorizer;
 import org.apache.paimon.format.orc.writer.Vectorizer;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
@@ -43,6 +44,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 
+import org.apache.orc.OrcConf;
 import org.apache.orc.TypeDescription;
 
 import javax.annotation.Nullable;
@@ -65,17 +67,16 @@ public class OrcFileFormat extends FileFormat {
     private final Properties orcProperties;
     private final org.apache.hadoop.conf.Configuration readerConf;
     private final org.apache.hadoop.conf.Configuration writerConf;
-
-    private final FormatContext formatContext;
+    private final int readBatchSize;
 
     public OrcFileFormat(FormatContext formatContext) {
         super(IDENTIFIER);
-        this.orcProperties = getOrcProperties(formatContext.formatOptions());
+        this.orcProperties = getOrcProperties(formatContext.formatOptions(), formatContext);
         this.readerConf = new org.apache.hadoop.conf.Configuration();
         this.orcProperties.forEach((k, v) -> readerConf.set(k.toString(), v.toString()));
         this.writerConf = new org.apache.hadoop.conf.Configuration();
         this.orcProperties.forEach((k, v) -> writerConf.set(k.toString(), v.toString()));
-        this.formatContext = formatContext;
+        this.readBatchSize = formatContext.readBatchSize();
     }
 
     @VisibleForTesting
@@ -84,8 +85,8 @@ public class OrcFileFormat extends FileFormat {
     }
 
     @VisibleForTesting
-    public FormatContext formatContext() {
-        return formatContext;
+    public int readBatchSize() {
+        return readBatchSize;
     }
 
     @Override
@@ -111,7 +112,7 @@ public class OrcFileFormat extends FileFormat {
                 readerConf,
                 (RowType) refineDataType(projectedRowType),
                 orcPredicates,
-                formatContext.readBatchSize());
+                readBatchSize);
     }
 
     @Override
@@ -142,11 +143,25 @@ public class OrcFileFormat extends FileFormat {
         return new OrcWriterFactory(vectorizer, orcProperties, writerConf);
     }
 
-    private static Properties getOrcProperties(Options options) {
+    private static Properties getOrcProperties(Options options, FormatContext formatContext) {
         Properties orcProperties = new Properties();
+
         Properties properties = new Properties();
         options.addAllToProperties(properties);
         properties.forEach((k, v) -> orcProperties.put(IDENTIFIER + "." + k, v));
+
+        if (!orcProperties.containsKey(OrcConf.COMPRESSION_ZSTD_LEVEL.getAttribute())) {
+            orcProperties.setProperty(
+                    OrcConf.COMPRESSION_ZSTD_LEVEL.getAttribute(),
+                    String.valueOf(formatContext.zstdLevel()));
+        }
+
+        MemorySize blockSize = formatContext.blockSize();
+        if (blockSize != null) {
+            orcProperties.setProperty(
+                    OrcConf.STRIPE_SIZE.getAttribute(), String.valueOf(blockSize.getBytes()));
+        }
+
         return orcProperties;
     }
 

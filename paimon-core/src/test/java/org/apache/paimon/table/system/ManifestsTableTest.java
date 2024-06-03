@@ -82,6 +82,7 @@ public class ManifestsTableTest extends TableTestBase {
                         FileFormat.fromIdentifier(
                                 CoreOptions.MANIFEST_FORMAT.defaultValue().toString(),
                                 new Options()),
+                        "zstd",
                         createNonPartFactory(tablePath),
                         null);
         manifestList = factory.create();

@@ -150,10 +150,23 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<String> FILE_COMPRESSION =
             key("file.compression")
                     .stringType()
+                    .defaultValue("zstd")
+                    .withDescription(
+                            "Default file compression. It can be overridden by format own configuration.");
+
+    public static final ConfigOption<Integer> FILE_COMPRESSION_ZSTD_LEVEL =
+            key("file.compression.zstd-level")
+                    .intType()
+                    .defaultValue(1)
+                    .withDescription(
+                            "Default file compression zstd level. It can be overridden by format own configuration.");
+
+    public static final ConfigOption<MemorySize> FILE_BLOCK_SIZE =
+            key("file.block-size")
+                    .memoryType()
                     .noDefaultValue()
                     .withDescription(
-                            "Default file compression format, orc is lz4 and parquet is snappy. It can be overridden by "
-                                    + FILE_COMPRESSION_PER_LEVEL.key());
+                            "File block size of format, default value of orc stripe is 64 MB, and parquet row group is 128 MB.");
 
     public static final ConfigOption<MemorySize> FILE_INDEX_IN_MANIFEST_THRESHOLD =
             key("file-index.in-manifest-threshold")
@@ -172,6 +185,12 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .defaultValue(CoreOptions.FILE_FORMAT_AVRO)
                     .withDescription("Specify the message format of manifest files.");
+
+    public static final ConfigOption<String> MANIFEST_COMPRESSION =
+            key("manifest.compression")
+                    .stringType()
+                    .defaultValue("zstd")
+                    .withDescription("Default file compression for manifest.");
 
     public static final ConfigOption<MemorySize> MANIFEST_TARGET_FILE_SIZE =
             key("manifest.target-file-size")
@@ -1227,6 +1246,10 @@ public class CoreOptions implements Serializable {
         return createFileFormat(options, MANIFEST_FORMAT);
     }
 
+    public String manifestCompression() {
+        return options.get(MANIFEST_COMPRESSION);
+    }
+
     public MemorySize manifestTargetSize() {
         return options.get(MANIFEST_TARGET_FILE_SIZE);
     }
@@ -1325,6 +1348,7 @@ public class CoreOptions implements Serializable {
                         .defaultValue(false));
     }
 
+    @Nullable
     public String fileCompression() {
         return options.get(FILE_COMPRESSION);
     }
