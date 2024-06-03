@@ -146,6 +146,14 @@ abstract class PaimonOptimizationTestBase extends PaimonSparkTestBase {
           checkAnswer(
             spark.sql("SELECT * FROM t1 ORDER BY id"),
             Row(1, "a", 1) :: Row(5, "e", 4) :: Nil)
+
+          // subquery eval nothing
+          spark.sql(s"""DELETE FROM t1 WHERE
+                       |pt >= (SELECT min(id) FROM t2 WHERE n > 10)""".stripMargin)
+
+          checkAnswer(
+            spark.sql("SELECT * FROM t1 ORDER BY id"),
+            Row(1, "a", 1) :: Row(5, "e", 4) :: Nil)
         }
       })
   }
@@ -178,6 +186,14 @@ abstract class PaimonOptimizationTestBase extends PaimonSparkTestBase {
           Assertions.assertEquals(
             CommitKind.OVERWRITE,
             loadTable("t1").store().snapshotManager().latestSnapshot().commitKind())
+
+          checkAnswer(
+            spark.sql("SELECT * FROM t1 ORDER BY id"),
+            Row(1, "a", 1) :: Row(5, "e", 4) :: Nil)
+
+          // subquery eval nothing
+          spark.sql(s"""DELETE FROM t1 WHERE
+                       |pt in (SELECT id FROM t2 WHERE n > 10)""".stripMargin)
 
           checkAnswer(
             spark.sql("SELECT * FROM t1 ORDER BY id"),

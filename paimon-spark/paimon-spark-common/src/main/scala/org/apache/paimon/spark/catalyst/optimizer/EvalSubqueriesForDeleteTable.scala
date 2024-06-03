@@ -36,6 +36,9 @@ import scala.collection.JavaConverters._
  * For those delete conditions with subqueries that only contain partition columns, we can eval them
  * in advance. So that when running [[DeleteFromPaimonTableCommand]], we can directly call
  * dropPartitions to achieve fast deletion.
+ *
+ * Note: this rule must be placed before [[MergePaimonScalarSubqueriers]], because
+ * [[MergePaimonScalarSubqueriers]] will merge subqueries.
  */
 object EvalSubqueriesForDeleteTable extends Rule[LogicalPlan] with ExpressionHelper with Logging {
 
@@ -77,7 +80,7 @@ object EvalSubqueriesForDeleteTable extends Rule[LogicalPlan] with ExpressionHel
         evalPhysicalSubquery(physicalSubquery)
 
         physicalSubquery.values() match {
-          case Some(l) if l.nonEmpty => In(expr, l.map(Literal(_, expr.dataType)))
+          case Some(l) if l.length > 0 => In(expr, l.map(Literal(_, expr.dataType)))
           case _ => Literal(false, BooleanType)
         }
 
