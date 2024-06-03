@@ -21,7 +21,7 @@ package org.apache.paimon.flink.action.cdc.format.debezium;
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
-import org.apache.paimon.flink.action.cdc.format.RecordParser;
+import org.apache.paimon.flink.action.cdc.format.AbstractRecordParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -59,12 +59,12 @@ import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaU
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
- * Implementation of {@link RecordParser} for parsing messages in the Debezium avro format.
+ * Implementation of {@link AbstractRecordParser} for parsing messages in the Debezium avro format.
  *
  * <p>This parser handles records in the Debezium avro format and extracts relevant information to
  * produce {@link RichCdcMultiplexRecord} objects.
  */
-public class DebeziumAvroRecordParser extends RecordParser {
+public class DebeziumAvroRecordParser extends AbstractRecordParser {
     private static final Logger LOG = LoggerFactory.getLogger(DebeziumAvroRecordParser.class);
 
     private static final Schema NULL_AVRO_SCHEMA = Schema.create(Schema.Type.NULL);

@@ -161,12 +161,17 @@ class PaimonPartitionManagementTest extends PaimonSparkTestBase {
 
             checkAnswer(
               spark.sql("select * from T"),
-              Row("a", "b", 1L, 20230816L, "1132") :: Row("a", "b", 1L, 20230816L, "1133") :: Row(
+              Row("a", "b         ", 1L, 20230816L, "1132") :: Row(
                 "a",
-                "b",
+                "b         ",
+                1L,
+                20230816L,
+                "1133") :: Row("a", "b         ", 2L, 20230817L, "1132") :: Row(
+                "a",
+                "b         ",
                 2L,
                 20230817L,
-                "1132") :: Row("a", "b", 2L, 20230817L, "1134") :: Nil
+                "1134") :: Nil
             )
           }
       }

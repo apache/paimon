@@ -170,6 +170,10 @@ public abstract class TableTestBase {
         catalog.createTable(identifier(), schemaDefault(), true);
     }
 
+    public void createTable(Identifier identifier) throws Exception {
+        catalog.createTable(identifier, schemaDefault(), false);
+    }
+
     protected void commitDefault(List<CommitMessage> messages) throws Exception {
         BatchTableCommit commit = getTableDefault().newBatchWriteBuilder().newCommit();
         commit.commit(messages);
@@ -177,16 +181,23 @@ public abstract class TableTestBase {
     }
 
     protected List<CommitMessage> writeDataDefault(int size, int times) throws Exception {
+        return writeData(getTableDefault(), size, times);
+    }
+
+    protected List<CommitMessage> writeData(Table table, int size, int times) throws Exception {
         List<CommitMessage> messages = new ArrayList<>();
         for (int i = 0; i < times; i++) {
-            messages.addAll(writeOnce(getTableDefault(), i, size));
+            messages.addAll(writeOnce(table, i, size));
         }
-
         return messages;
     }
 
     public FileStoreTable getTableDefault() throws Exception {
-        return (FileStoreTable) catalog.getTable(identifier());
+        return getTable(identifier());
+    }
+
+    public FileStoreTable getTable(Identifier identifier) throws Exception {
+        return (FileStoreTable) catalog.getTable(identifier);
     }
 
     private List<CommitMessage> writeOnce(Table table, int time, int size) throws Exception {

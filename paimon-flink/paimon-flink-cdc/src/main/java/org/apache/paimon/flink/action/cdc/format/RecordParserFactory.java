@@ -24,24 +24,24 @@ import org.apache.paimon.flink.action.cdc.TypeMapping;
 import java.util.List;
 
 /**
- * Represents a factory for creating instances of {@link RecordParser}.
+ * Represents a factory for creating instances of {@link AbstractRecordParser}.
  *
  * <p>This interface provides a method to create a new RecordParser with specific configurations
  * such as case sensitivity, table name conversion, and computed columns.
  *
- * @see RecordParser
+ * @see AbstractRecordParser
  */
 @FunctionalInterface
 public interface RecordParserFactory {
 
     /**
-     * Creates a new instance of {@link RecordParser} with the specified configurations.
+     * Creates a new instance of {@link AbstractRecordParser} with the specified configurations.
      *
      * @param caseSensitive Indicates whether the parser should be case-sensitive.
      * @param typeMapping Data type mapping options.
      * @param computedColumns List of computed columns to be considered by the parser.
-     * @return A new instance of {@link RecordParser}.
+     * @return A new instance of {@link AbstractRecordParser}.
      */
-    RecordParser createParser(
+    AbstractRecordParser createParser(
             boolean caseSensitive, TypeMapping typeMapping, List<ComputedColumn> computedColumns);
 }

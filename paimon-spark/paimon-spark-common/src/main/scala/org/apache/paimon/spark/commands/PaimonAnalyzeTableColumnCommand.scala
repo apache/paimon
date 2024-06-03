@@ -53,10 +53,14 @@ case class PaimonAnalyzeTableColumnCommand(
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
     val relation = DataSourceV2Relation.create(v2Table, Some(catalog), Some(identifier))
+    val attributes = getColumnsToAnalyze(relation)
+
     val currentSnapshot = table.snapshotManager().latestSnapshot()
+    if (currentSnapshot == null) {
+      return Seq.empty[Row]
+    }
 
     // compute stats
-    val attributes = getColumnsToAnalyze(relation, columnNames, allColumns)
     val totalSize = PaimonStatsUtils.calculateTotalSize(
       sparkSession.sessionState,
       table.name(),
@@ -92,10 +96,7 @@ case class PaimonAnalyzeTableColumnCommand(
     Seq.empty[Row]
   }
 
-  private def getColumnsToAnalyze(
-      relation: DataSourceV2Relation,
-      columnNames: Option[Seq[String]],
-      allColumns: Boolean): Seq[Attribute] = {
+  private def getColumnsToAnalyze(relation: DataSourceV2Relation): Seq[Attribute] = {
     if (columnNames.isDefined && allColumns) {
       throw new UnsupportedOperationException(
         "Parameter `columnNames` and `allColumns` are " +

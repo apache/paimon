@@ -25,9 +25,9 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.stats.BinaryTableStats;
-import org.apache.paimon.stats.FieldStatsArraySerializer;
-import org.apache.paimon.stats.FieldStatsConverters;
+import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.stats.SimpleStatsConverter;
+import org.apache.paimon.stats.SimpleStatsConverters;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataField;
 
@@ -96,7 +96,7 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
 
     protected void validateStatsField(List<DataFileMeta> fileMetaList) {
         for (DataFileMeta fileMeta : fileMetaList) {
-            BinaryTableStats stats = getTableValueStats(fileMeta);
+            SimpleStats stats = getTableValueStats(fileMeta);
             assertThat(stats.minValues().getFieldCount()).isEqualTo(12);
             for (int i = 0; i < 11; i++) {
                 assertThat(stats.minValues().isNullAt(i)).isFalse();
@@ -236,10 +236,10 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
             List<String> filesName,
             List<DataFileMeta> fileMetaList) {
         Function<Long, List<DataField>> schemaFields = id -> tableSchemas.get(id).fields();
-        FieldStatsConverters converters = new FieldStatsConverters(schemaFields, schemaId);
+        SimpleStatsConverters converters = new SimpleStatsConverters(schemaFields, schemaId);
         for (DataFileMeta fileMeta : fileMetaList) {
-            BinaryTableStats stats = getTableValueStats(fileMeta);
-            FieldStatsArraySerializer serializer = converters.getOrCreate(fileMeta.schemaId());
+            SimpleStats stats = getTableValueStats(fileMeta);
+            SimpleStatsConverter serializer = converters.getOrCreate(fileMeta.schemaId());
             InternalRow min = serializer.evolution(stats.minValues());
             InternalRow max = serializer.evolution(stats.maxValues());
             assertThat(stats.minValues().getFieldCount()).isEqualTo(12);
@@ -342,5 +342,5 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
         return SCHEMA_PRIMARY_KEYS;
     }
 
-    protected abstract BinaryTableStats getTableValueStats(DataFileMeta fileMeta);
+    protected abstract SimpleStats getTableValueStats(DataFileMeta fileMeta);
 }

@@ -99,7 +99,9 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
         }
     }
 
+    // Since we created a new sparkContext, we need to stop it and reset the default sparkContext
     reusedSpark.stop()
+    reset()
   }
 
   test("Paimon DDL with hive catalog: drop database cascade which contains paimon table") {
@@ -111,6 +113,12 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
           spark.sql(s"CREATE DATABASE paimon_db")
           spark.sql(s"USE paimon_db")
           spark.sql(s"CREATE TABLE paimon_tbl (id int, name string, dt string) using paimon")
+          // Currently, only spark_catalog supports create other table or view
+          if (catalogName.equals(sparkCatalogName)) {
+            spark.sql(s"CREATE TABLE parquet_tbl (id int, name string, dt string) using parquet")
+            spark.sql(s"CREATE VIEW parquet_tbl_view AS SELECT * FROM parquet_tbl")
+            spark.sql(s"CREATE VIEW paimon_tbl_view AS SELECT * FROM paimon_tbl")
+          }
           spark.sql(s"USE default")
           spark.sql(s"DROP DATABASE paimon_db CASCADE")
       }

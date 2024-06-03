@@ -147,13 +147,14 @@ class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
         return new TableWriteImpl<>(
                 writer,
                 createRowKeyExtractor(),
-                record -> {
+                (record, rowKind) -> {
                     Preconditions.checkState(
-                            record.row().getRowKind() == RowKind.INSERT,
+                            rowKind.isAdd(),
                             "Append only writer can not accept row with RowKind %s",
-                            record.row().getRowKind());
+                            rowKind);
                     return record.row();
                 },
+                rowKindGenerator(),
                 CoreOptions.fromMap(tableSchema.options()).ignoreDelete());
     }
 

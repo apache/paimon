@@ -361,6 +361,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             List<String> fieldNames = rowType.getFieldNames();
             List<DataType> fieldTypes = rowType.getFieldTypes();
             Map<Integer, FieldAggregator> fieldAggregators = new HashMap<>();
+            String defaultAggFunc = options.fieldsDefaultFunc();
             for (int i = 0; i < fieldNames.size(); i++) {
                 String fieldName = fieldNames.get(i);
                 DataType fieldType = fieldTypes.get(i);
@@ -375,6 +376,16 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                             FieldAggregator.createFieldAggregator(
                                     fieldType,
                                     strAggFunc,
+                                    ignoreRetract,
+                                    isPrimaryKey,
+                                    options,
+                                    fieldName));
+                } else if (defaultAggFunc != null) {
+                    fieldAggregators.put(
+                            i,
+                            FieldAggregator.createFieldAggregator(
+                                    fieldType,
+                                    defaultAggFunc,
                                     ignoreRetract,
                                     isPrimaryKey,
                                     options,

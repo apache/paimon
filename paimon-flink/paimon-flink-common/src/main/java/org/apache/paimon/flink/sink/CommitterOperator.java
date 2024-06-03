@@ -119,7 +119,14 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
                 StateUtils.getSingleValueFromState(
                         context, "commit_user_state", String.class, initialCommitUser);
         // parallelism of commit operator is always 1, so commitUser will never be null
-        committer = committerFactory.create(commitUser, getMetricGroup());
+        committer =
+                committerFactory.create(
+                        Committer.createContext(
+                                commitUser,
+                                getMetricGroup(),
+                                streamingCheckpointEnabled,
+                                context.isRestored(),
+                                context.getOperatorStateStore()));
 
         committableStateManager.initializeState(context, committer);
     }

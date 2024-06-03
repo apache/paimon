@@ -23,13 +23,13 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
-import org.apache.paimon.format.TableStatsCollector;
+import org.apache.paimon.format.SimpleStatsCollector;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.io.SingleFileWriter;
 import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.stats.FieldStatsArraySerializer;
+import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.ObjectsFile;
@@ -103,8 +103,8 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
 
     private class ManifestEntryWriter extends SingleFileWriter<ManifestEntry, ManifestFileMeta> {
 
-        private final TableStatsCollector partitionStatsCollector;
-        private final FieldStatsArraySerializer partitionStatsSerializer;
+        private final SimpleStatsCollector partitionStatsCollector;
+        private final SimpleStatsConverter partitionStatsSerializer;
 
         private long numAddedFiles = 0;
         private long numDeletedFiles = 0;
@@ -113,8 +113,8 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         ManifestEntryWriter(FormatWriterFactory factory, Path path, String fileCompression) {
             super(ManifestFile.this.fileIO, factory, path, serializer::toRow, fileCompression);
 
-            this.partitionStatsCollector = new TableStatsCollector(partitionType);
-            this.partitionStatsSerializer = new FieldStatsArraySerializer(partitionType);
+            this.partitionStatsCollector = new SimpleStatsCollector(partitionType);
+            this.partitionStatsSerializer = new SimpleStatsConverter(partitionType);
         }
 
         @Override

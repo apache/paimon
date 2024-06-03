@@ -83,8 +83,6 @@ import java.util.function.Supplier;
 
 import static org.apache.paimon.CoreOptions.ChangelogProducer.FULL_COMPACTION;
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
-import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
-import static org.apache.paimon.io.DataFileMeta.getMaxSequenceNumber;
 import static org.apache.paimon.lookup.LookupStoreFactory.bfGenerator;
 
 /** {@link FileStoreWrite} for {@link KeyValueFileStore}. */
@@ -168,6 +166,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             BinaryRow partition,
             int bucket,
             List<DataFileMeta> restoreFiles,
+            long restoredMaxSeqNumber,
             @Nullable CommitIncrement restoreIncrement,
             ExecutorService compactExecutor,
             @Nullable DeletionVectorsMaintainer dvMaintainer) {
@@ -204,7 +203,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 options.spillCompression(),
                 ioManager,
                 compactManager,
-                getMaxSequenceNumber(restoreFiles),
+                restoredMaxSeqNumber,
                 keyComparator,
                 mfFactory.create(),
                 writerFactory,
@@ -273,6 +272,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
         int maxLevel = options.numLevels() - 1;
         MergeEngine mergeEngine = options.mergeEngine();
         ChangelogProducer changelogProducer = options.changelogProducer();
+        LookupStrategy lookupStrategy = options.lookupStrategy();
         if (changelogProducer.equals(FULL_COMPACTION)) {
             return new FullChangelogMergeTreeCompactRewriter(
                     maxLevel,
@@ -285,12 +285,11 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                     mergeSorter,
                     valueEqualiserSupplier.get(),
                     options.changelogRowDeduplicate());
-        } else if (options.needLookup()) {
-            LookupStrategy lookupStrategy = options.lookupStrategy();
+        } else if (lookupStrategy.needLookup) {
             LookupLevels.ValueProcessor<?> processor;
             LookupMergeTreeCompactRewriter.MergeFunctionWrapperFactory<?> wrapperFactory;
             FileReaderFactory<KeyValue> lookupReaderFactory = readerFactory;
-            if (mergeEngine == FIRST_ROW) {
+            if (lookupStrategy.isFirstRow) {
                 if (options.deletionVectorsEnabled()) {
                     throw new UnsupportedOperationException(
                             "First row merge engine does not need deletion vectors because there is no deletion of old data in this merge engine.");

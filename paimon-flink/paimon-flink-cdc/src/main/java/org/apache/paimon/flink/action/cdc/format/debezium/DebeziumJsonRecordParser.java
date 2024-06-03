@@ -21,7 +21,7 @@ package org.apache.paimon.flink.action.cdc.format.debezium;
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
-import org.apache.paimon.flink.action.cdc.format.JsonRecordParser;
+import org.apache.paimon.flink.action.cdc.format.AbstractJsonRecordParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -59,8 +59,8 @@ import static org.apache.paimon.utils.JsonSerdeUtil.getNodeAs;
 import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
 
 /**
- * The {@code DebeziumRecordParser} class extends the abstract {@link JsonRecordParser} and is
- * designed to parse records from Debezium's JSON change data capture (CDC) format. Debezium is a
+ * The {@code DebeziumRecordParser} class extends the abstract {@link AbstractJsonRecordParser} and
+ * is designed to parse records from Debezium's JSON change data capture (CDC) format. Debezium is a
  * CDC solution for MySQL databases that captures row-level changes to database tables and outputs
  * them in JSON format. This parser extracts relevant information from the Debezium-JSON format and
  * converts it into a list of {@link RichCdcMultiplexRecord} objects.
@@ -75,7 +75,7 @@ import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
  * operation type, and primary key field names are used to construct the details of each record
  * event.
  */
-public class DebeziumJsonRecordParser extends JsonRecordParser {
+public class DebeziumJsonRecordParser extends AbstractJsonRecordParser {
 
     private boolean hasSchema;
     private final Map<String, String> debeziumTypes = new HashMap<>();

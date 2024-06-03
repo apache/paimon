@@ -23,8 +23,8 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.PartitionPathUtils;
-import org.apache.paimon.utils.RowDataPartitionComputer;
 
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
@@ -40,16 +40,16 @@ import java.util.List;
 public class HiveMetastoreClient implements MetastoreClient {
 
     private final Identifier identifier;
-    private final RowDataPartitionComputer partitionComputer;
+    private final InternalRowPartitionComputer partitionComputer;
 
     private final IMetaStoreClient client;
     private final StorageDescriptor sd;
 
-    private HiveMetastoreClient(Identifier identifier, TableSchema schema, IMetaStoreClient client)
+    public HiveMetastoreClient(Identifier identifier, TableSchema schema, IMetaStoreClient client)
             throws Exception {
         this.identifier = identifier;
         this.partitionComputer =
-                new RowDataPartitionComputer(
+                new InternalRowPartitionComputer(
                         new CoreOptions(schema.options()).partitionDefaultName(),
                         schema.logicalPartitionType(),
                         schema.partitionKeys().toArray(new String[0]));

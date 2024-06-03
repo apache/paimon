@@ -95,6 +95,10 @@ public class MergeSorter {
         return memoryPool;
     }
 
+    public RowType valueType() {
+        return valueType;
+    }
+
     public void setIOManager(IOManager ioManager) {
         this.ioManager = ioManager;
     }

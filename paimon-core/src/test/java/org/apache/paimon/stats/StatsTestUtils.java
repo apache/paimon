@@ -19,7 +19,7 @@
 package org.apache.paimon.stats;
 
 import org.apache.paimon.data.BinaryArray;
-import org.apache.paimon.format.FieldStats;
+import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
@@ -33,72 +33,72 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Utils for stats related tests. */
 public class StatsTestUtils {
 
-    public static FieldStats[] convertWithoutSchemaEvolution(
-            BinaryTableStats stats, RowType rowType) {
+    public static SimpleColStats[] convertWithoutSchemaEvolution(
+            SimpleStats stats, RowType rowType) {
         RowDataToObjectArrayConverter converter = new RowDataToObjectArrayConverter(rowType);
         Object[] mins = converter.convert(stats.minValues());
         Object[] maxs = converter.convert(stats.maxValues());
-        FieldStats[] ret = new FieldStats[rowType.getFieldCount()];
+        SimpleColStats[] ret = new SimpleColStats[rowType.getFieldCount()];
         BinaryArray nulls = stats.nullCounts();
         for (int i = 0; i < ret.length; i++) {
-            ret[i] = new FieldStats(mins[i], maxs[i], nulls.isNullAt(i) ? null : nulls.getLong(i));
+            ret[i] =
+                    new SimpleColStats(
+                            mins[i], maxs[i], nulls.isNullAt(i) ? null : nulls.getLong(i));
         }
         return ret;
     }
 
     @SuppressWarnings("unchecked")
     public static <T> void checkRollingFileStats(
-            FieldStats expected, List<T> actualObjects, Function<T, FieldStats> mapToStats) {
-        List<FieldStats> actual = new ArrayList<>();
+            SimpleColStats expected,
+            List<T> actualObjects,
+            Function<T, SimpleColStats> mapToStats) {
+        List<SimpleColStats> actual = new ArrayList<>();
         for (T object : actualObjects) {
             actual.add(mapToStats.apply(object));
         }
-        if (expected.minValue() instanceof Comparable) {
+        if (expected.min() instanceof Comparable) {
             Object actualMin = null;
             Object actualMax = null;
-            for (FieldStats stats : actual) {
-                if (stats.minValue() != null
+            for (SimpleColStats stats : actual) {
+                if (stats.min() != null
                         && (actualMin == null
-                                || ((Comparable<Object>) stats.minValue()).compareTo(actualMin)
-                                        < 0)) {
-                    actualMin = stats.minValue();
+                                || ((Comparable<Object>) stats.min()).compareTo(actualMin) < 0)) {
+                    actualMin = stats.min();
                 }
-                if (stats.maxValue() != null
+                if (stats.max() != null
                         && (actualMax == null
-                                || ((Comparable<Object>) stats.maxValue()).compareTo(actualMax)
-                                        > 0)) {
-                    actualMax = stats.maxValue();
+                                || ((Comparable<Object>) stats.max()).compareTo(actualMax) > 0)) {
+                    actualMax = stats.max();
                 }
             }
-            assertThat(actualMin).isEqualTo(expected.minValue());
-            assertThat(actualMax).isEqualTo(expected.maxValue());
+            assertThat(actualMin).isEqualTo(expected.min());
+            assertThat(actualMax).isEqualTo(expected.max());
         } else {
-            for (FieldStats stats : actual) {
-                assertThat(stats.minValue()).isNull();
-                assertThat(stats.maxValue()).isNull();
+            for (SimpleColStats stats : actual) {
+                assertThat(stats.min()).isNull();
+                assertThat(stats.max()).isNull();
             }
         }
-        assertThat(actual.stream().mapToLong(FieldStats::nullCount).sum())
+        assertThat(actual.stream().mapToLong(SimpleColStats::nullCount).sum())
                 .isEqualTo(expected.nullCount());
     }
 
-    public static BinaryTableStats newEmptyTableStats() {
-        return newEmptyTableStats(1);
+    public static SimpleStats newEmptySimpleStats() {
+        return newEmptySimpleStats(1);
     }
 
-    public static BinaryTableStats newEmptyTableStats(int fieldCount) {
-        FieldStatsArraySerializer statsConverter =
-                new FieldStatsArraySerializer(RowType.of(new IntType()));
-        FieldStats[] array = new FieldStats[fieldCount];
+    public static SimpleStats newEmptySimpleStats(int fieldCount) {
+        SimpleStatsConverter statsConverter = new SimpleStatsConverter(RowType.of(new IntType()));
+        SimpleColStats[] array = new SimpleColStats[fieldCount];
         for (int i = 0; i < fieldCount; i++) {
-            array[i] = new FieldStats(null, null, 0L);
+            array[i] = new SimpleColStats(null, null, 0L);
         }
         return statsConverter.toBinary(array);
     }
 
-    public static BinaryTableStats newTableStats(int min, int max) {
-        FieldStatsArraySerializer statsConverter =
-                new FieldStatsArraySerializer(RowType.of(new IntType()));
-        return statsConverter.toBinary(new FieldStats[] {new FieldStats(min, max, 0L)});
+    public static SimpleStats newSimpleStats(int min, int max) {
+        SimpleStatsConverter statsConverter = new SimpleStatsConverter(RowType.of(new IntType()));
+        return statsConverter.toBinary(new SimpleColStats[] {new SimpleColStats(min, max, 0L)});
     }
 }

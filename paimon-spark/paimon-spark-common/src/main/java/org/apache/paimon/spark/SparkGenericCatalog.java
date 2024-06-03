@@ -134,7 +134,14 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
             throws NoSuchNamespaceException, NonEmptyNamespaceException {
         if (namespace.length == 1 && namespaceExists(namespace) && cascade) {
             for (Identifier table : listTables(namespace)) {
-                dropTable(table);
+                try {
+                    dropTable(table);
+                } catch (Exception e) {
+                    LOG.warn(
+                            "Failed to drop {}, fallback to use sessionCatalog to drop, for {}",
+                            table,
+                            e.getMessage());
+                }
             }
         }
         return asNamespaceCatalog().dropNamespace(namespace, cascade);
@@ -322,10 +329,6 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
         if (!underlyingSessionCatalogEnabled) {
             this.sessionCatalog = delegate;
         }
-    }
-
-    private boolean usePaimon(String provider) {
-        return provider == null || SparkSource.NAME().equalsIgnoreCase(provider);
     }
 
     private TableCatalog asTableCatalog() {

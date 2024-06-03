@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.flink.VersionedSerializerWrapper;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestCommittableSerializer;
 import org.apache.paimon.table.FileStoreTable;
@@ -40,23 +39,22 @@ public abstract class FlinkWriteSink<T> extends FlinkSink<T> {
     }
 
     @Override
-    protected Committer.Factory<Committable, ManifestCommittable> createCommitterFactory(
-            boolean streamingCheckpointEnabled) {
+    protected Committer.Factory<Committable, ManifestCommittable> createCommitterFactory() {
         // If checkpoint is enabled for streaming job, we have to
         // commit new files list even if they're empty.
         // Otherwise we can't tell if the commit is successful after
         // a restart.
-        return (user, metricGroup) ->
+        return context ->
                 new StoreCommitter(
-                        table.newCommit(user)
+                        table,
+                        table.newCommit(context.commitUser())
                                 .withOverwrite(overwritePartition)
-                                .ignoreEmptyCommit(!streamingCheckpointEnabled),
-                        metricGroup);
+                                .ignoreEmptyCommit(!context.streamingCheckpointEnabled()),
+                        context);
     }
 
     @Override
     protected CommittableStateManager<ManifestCommittable> createCommittableStateManager() {
-        return new RestoreAndFailCommittableStateManager<>(
-                () -> new VersionedSerializerWrapper<>(new ManifestCommittableSerializer()));
+        return new RestoreAndFailCommittableStateManager<>(ManifestCommittableSerializer::new);
     }
 }

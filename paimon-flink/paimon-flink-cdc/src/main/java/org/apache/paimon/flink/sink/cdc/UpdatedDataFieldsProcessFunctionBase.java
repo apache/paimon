@@ -63,6 +63,9 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
 
     private static final List<DataTypeRoot> DECIMAL_TYPES = Arrays.asList(DataTypeRoot.DECIMAL);
 
+    private static final List<DataTypeRoot> TIMESTAMP_TYPES =
+            Arrays.asList(DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE);
+
     protected UpdatedDataFieldsProcessFunctionBase(Catalog.Loader catalogLoader) {
         this.catalogLoader = catalogLoader;
     }
@@ -172,6 +175,14 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
                             && DataTypeChecks.getScale(newType) <= DataTypeChecks.getScale(oldType)
                     ? ConvertAction.IGNORE
                     : ConvertAction.CONVERT;
+        }
+
+        oldIdx = TIMESTAMP_TYPES.indexOf(oldType.getTypeRoot());
+        newIdx = TIMESTAMP_TYPES.indexOf(newType.getTypeRoot());
+        if (oldIdx >= 0 && newIdx >= 0) {
+            return DataTypeChecks.getPrecision(oldType) <= DataTypeChecks.getPrecision(newType)
+                    ? ConvertAction.CONVERT
+                    : ConvertAction.IGNORE;
         }
 
         return ConvertAction.EXCEPTION;

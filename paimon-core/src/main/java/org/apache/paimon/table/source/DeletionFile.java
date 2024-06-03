@@ -26,6 +26,7 @@ import org.apache.paimon.io.DataOutputView;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -44,7 +45,9 @@ import java.util.Optional;
  * </ul>
  */
 @Public
-public class DeletionFile {
+public class DeletionFile implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     private final String path;
     private final long offset;

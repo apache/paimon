@@ -25,13 +25,16 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.FileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.io.RollingFileWriter;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.mergetree.DropDeleteReader;
 import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.MergeTreeReaders;
 import org.apache.paimon.mergetree.SortedRun;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.FieldsComparator;
+import org.apache.paimon.utils.IOUtils;
 
 import javax.annotation.Nullable;
 
@@ -73,14 +76,32 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
     protected CompactResult rewriteCompaction(
             int outputLevel, boolean dropDelete, List<List<SortedRun>> sections) throws Exception {
         RollingFileWriter<KeyValue, DataFileMeta> writer =
-                writerFactory.createRollingMergeTreeFileWriter(outputLevel);
-        RecordReader<KeyValue> reader =
-                readerForMergeTree(sections, new ReducerMergeFunctionWrapper(mfFactory.create()));
-        if (dropDelete) {
-            reader = new DropDeleteReader(reader);
+                writerFactory.createRollingMergeTreeFileWriter(outputLevel, FileSource.COMPACT);
+        RecordReader<KeyValue> reader = null;
+        Exception collectedExceptions = null;
+        try {
+            reader =
+                    readerForMergeTree(
+                            sections, new ReducerMergeFunctionWrapper(mfFactory.create()));
+            if (dropDelete) {
+                reader = new DropDeleteReader(reader);
+            }
+            writer.write(new RecordReaderIterator<>(reader));
+        } catch (Exception e) {
+            collectedExceptions = e;
+        } finally {
+            try {
+                IOUtils.closeAll(reader, writer);
+            } catch (Exception e) {
+                collectedExceptions = ExceptionUtils.firstOrSuppressed(e, collectedExceptions);
+            }
         }
-        writer.write(new RecordReaderIterator<>(reader));
-        writer.close();
+
+        if (null != collectedExceptions) {
+            writer.abort();
+            throw collectedExceptions;
+        }
+
         List<DataFileMeta> before = extractFilesFromSections(sections);
         notifyRewriteCompactBefore(before);
         return new CompactResult(before, writer.result());

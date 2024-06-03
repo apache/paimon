@@ -18,8 +18,6 @@
 
 package org.apache.paimon.partition;
 
-import org.apache.paimon.operation.FileStoreCommitImpl;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,6 +32,8 @@ import java.time.format.DateTimeParseException;
 import java.time.format.ResolverStyle;
 import java.time.format.SignStyle;
 import java.time.temporal.ChronoField;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -50,7 +50,8 @@ import static java.time.temporal.ChronoField.YEAR;
 /** Time extractor to extract time from partition values. */
 public class PartitionTimeExtractor {
 
-    private static final Logger LOG = LoggerFactory.getLogger(FileStoreCommitImpl.class);
+    private static final Logger LOG = LoggerFactory.getLogger(PartitionTimeExtractor.class);
+
     private static final DateTimeFormatter TIMESTAMP_FORMATTER =
             new DateTimeFormatterBuilder()
                     .appendValue(YEAR, 1, 10, SignStyle.NORMAL)
@@ -90,7 +91,11 @@ public class PartitionTimeExtractor {
         this.formatter = formatter;
     }
 
-    public LocalDateTime extract(List<String> partitionKeys, List<Object> partitionValues) {
+    public LocalDateTime extract(LinkedHashMap<String, String> spec) {
+        return extract(new ArrayList<>(spec.keySet()), new ArrayList<>(spec.values()));
+    }
+
+    public LocalDateTime extract(List<String> partitionKeys, List<?> partitionValues) {
         LocalDateTime dateTime = null;
         try {
             String timestampString;
@@ -112,7 +117,9 @@ public class PartitionTimeExtractor {
                             .mapToObj(i -> partitionKeys.get(i) + ":" + partitionValues.get(i))
                             .collect(Collectors.joining(","));
             LOG.warn(
-                    "Parition {} can't be extract datetime to expire,Please check the partition expiration configuration or manually delete the partition using the drop-partition command. ",
+                    "Partition {} can't be extract datetime to expire."
+                            + " Please check the partition expiration configuration or"
+                            + " manually delete the partition using the drop-partition command.",
                     paritionInfos);
         }
         return dateTime;

@@ -19,21 +19,16 @@
 package org.apache.paimon.format.fs;
 
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.utils.IOUtils;
 
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.fs.PositionedReadable;
-import org.apache.hadoop.fs.Seekable;
 import org.apache.hadoop.fs.permission.FsPermission;
 import org.apache.hadoop.util.Progressable;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.URI;
 
 /** A read only {@link FileSystem} that wraps an {@link FileIO}. */
@@ -137,59 +132,5 @@ public class HadoopReadOnlyFileSystem extends FileSystem {
     @Override
     public boolean mkdirs(Path path, FsPermission fsPermission) {
         throw new UnsupportedOperationException();
-    }
-
-    /** A {@link InputStream} to wrap {@link SeekableInputStream} for Paimon's input streams. */
-    private static class FSDataWrappedInputStream extends InputStream
-            implements Seekable, PositionedReadable {
-
-        private final SeekableInputStream seekableInputStream;
-
-        private FSDataWrappedInputStream(SeekableInputStream seekableInputStream) {
-            this.seekableInputStream = seekableInputStream;
-        }
-
-        @Override
-        public int read() throws IOException {
-            return seekableInputStream.read();
-        }
-
-        @Override
-        public int read(long position, byte[] buffer, int offset, int length) throws IOException {
-            seekableInputStream.seek(position);
-            return seekableInputStream.read(buffer, offset, length);
-        }
-
-        @Override
-        public void readFully(long position, byte[] buffer, int offset, int length)
-                throws IOException {
-            seekableInputStream.seek(position);
-            IOUtils.readFully(seekableInputStream, buffer, offset, length);
-        }
-
-        @Override
-        public void readFully(long position, byte[] buffer) throws IOException {
-            readFully(position, buffer, 0, buffer.length);
-        }
-
-        @Override
-        public void seek(long pos) throws IOException {
-            seekableInputStream.seek(pos);
-        }
-
-        @Override
-        public long getPos() throws IOException {
-            return seekableInputStream.getPos();
-        }
-
-        @Override
-        public boolean seekToNewSource(long targetPos) {
-            return false;
-        }
-
-        @Override
-        public void close() throws IOException {
-            seekableInputStream.close();
-        }
     }
 }

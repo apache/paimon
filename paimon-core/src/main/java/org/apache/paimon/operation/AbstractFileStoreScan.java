@@ -35,7 +35,7 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.stats.BinaryTableStats;
+import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -79,7 +79,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private final SchemaManager schemaManager;
     private final TableSchema schema;
     protected final ScanBucketFilter bucketKeyFilter;
-    private final String branchName;
 
     private PartitionPredicate partitionFilter;
     private Snapshot specifiedSnapshot = null;
@@ -88,6 +87,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private ScanMode scanMode = ScanMode.ALL;
     private Filter<Integer> levelFilter = null;
     private Long dataFileTimeMills = null;
+    private Filter<String> fileNameFilter = null;
 
     private ManifestCacheFilter manifestCacheFilter = null;
     private ScanMetrics scanMetrics = null;
@@ -102,8 +102,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             ManifestList.Factory manifestListFactory,
             int numOfBuckets,
             boolean checkNumOfBuckets,
-            Integer scanManifestParallelism,
-            String branchName) {
+            Integer scanManifestParallelism) {
         this.partitionType = partitionType;
         this.bucketKeyFilter = bucketKeyFilter;
         this.snapshotManager = snapshotManager;
@@ -115,7 +114,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         this.checkNumOfBuckets = checkNumOfBuckets;
         this.tableSchemas = new ConcurrentHashMap<>();
         this.scanManifestParallelism = scanManifestParallelism;
-        this.branchName = branchName;
     }
 
     @Override
@@ -204,6 +202,12 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     @Override
     public FileStoreScan withManifestCacheFilter(ManifestCacheFilter manifestFilter) {
         this.manifestCacheFilter = manifestFilter;
+        return this;
+    }
+
+    @Override
+    public FileStoreScan withDataFileNameFilter(Filter<String> fileNameFilter) {
+        this.fileNameFilter = fileNameFilter;
         return this;
     }
 
@@ -397,7 +401,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         if (manifests == null) {
             snapshot =
                     specifiedSnapshot == null
-                            ? snapshotManager.latestSnapshot(branchName)
+                            ? snapshotManager.latestSnapshot()
                             : specifiedSnapshot;
             if (snapshot == null) {
                 manifests = Collections.emptyList();
@@ -450,7 +454,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             return true;
         }
 
-        BinaryTableStats stats = manifest.partitionStats();
+        SimpleStats stats = manifest.partitionStats();
         return partitionFilter == null
                 || partitionFilter.test(
                         manifest.numAddedFiles() + manifest.numDeletedFiles(),
@@ -491,7 +495,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                         manifest.fileSize(),
                         ManifestEntry.createCacheRowFilter(manifestCacheFilter, numOfBuckets),
                         ManifestEntry.createEntryRowFilter(
-                                partitionFilter, bucketFilter, numOfBuckets));
+                                partitionFilter, bucketFilter, fileNameFilter, numOfBuckets));
     }
 
     /** Note: Keep this thread-safe. */
@@ -506,7 +510,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                         // see SimpleFileEntrySerializer
                         ManifestEntry.createCacheRowFilter(manifestCacheFilter, numOfBuckets),
                         ManifestEntry.createEntryRowFilter(
-                                partitionFilter, bucketFilter, numOfBuckets));
+                                partitionFilter, bucketFilter, fileNameFilter, numOfBuckets));
     }
 
     // ------------------------------------------------------------------------

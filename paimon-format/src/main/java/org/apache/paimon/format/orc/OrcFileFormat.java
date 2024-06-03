@@ -24,16 +24,16 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
-import org.apache.paimon.format.TableStatsExtractor;
+import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.format.orc.filter.OrcFilters;
 import org.apache.paimon.format.orc.filter.OrcPredicateFunctionVisitor;
-import org.apache.paimon.format.orc.filter.OrcTableStatsExtractor;
+import org.apache.paimon.format.orc.filter.OrcSimpleStatsExtractor;
 import org.apache.paimon.format.orc.reader.OrcSplitReaderUtil;
 import org.apache.paimon.format.orc.writer.RowDataVectorizer;
 import org.apache.paimon.format.orc.writer.Vectorizer;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.statistics.FieldStatsCollector;
+import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -89,9 +89,9 @@ public class OrcFileFormat extends FileFormat {
     }
 
     @Override
-    public Optional<TableStatsExtractor> createStatsExtractor(
-            RowType type, FieldStatsCollector.Factory[] statsCollectors) {
-        return Optional.of(new OrcTableStatsExtractor(type, statsCollectors));
+    public Optional<SimpleStatsExtractor> createStatsExtractor(
+            RowType type, SimpleColStatsCollector.Factory[] statsCollectors) {
+        return Optional.of(new OrcSimpleStatsExtractor(type, statsCollectors));
     }
 
     @Override

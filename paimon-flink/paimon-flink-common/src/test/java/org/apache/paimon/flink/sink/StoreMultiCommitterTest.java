@@ -27,7 +27,6 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.flink.VersionedSerializerWrapper;
 import org.apache.paimon.flink.utils.TestingMetricUtils;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -642,13 +641,9 @@ class StoreMultiCommitterTest {
                         false,
                         true,
                         initialCommitUser,
-                        (user, metricGroup) ->
-                                new StoreMultiCommitter(
-                                        catalogLoader, initialCommitUser, metricGroup),
+                        context -> new StoreMultiCommitter(catalogLoader, context),
                         new RestoreAndFailCommittableStateManager<>(
-                                () ->
-                                        new VersionedSerializerWrapper<>(
-                                                new WrappedManifestCommittableSerializer())));
+                                WrappedManifestCommittableSerializer::new));
         return createTestHarness(operator);
     }
 
@@ -660,9 +655,7 @@ class StoreMultiCommitterTest {
                         false,
                         true,
                         initialCommitUser,
-                        (user, metricGroup) ->
-                                new StoreMultiCommitter(
-                                        catalogLoader, initialCommitUser, metricGroup),
+                        context -> new StoreMultiCommitter(catalogLoader, context),
                         new CommittableStateManager<WrappedManifestCommittable>() {
                             @Override
                             public void initializeState(

@@ -32,12 +32,13 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.io.RowDataRollingFileWriter;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.reader.RecordReaderIterator;
-import org.apache.paimon.statistics.FieldStatsCollector;
+import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.IOUtils;
@@ -77,7 +78,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     private final String fileCompression;
     private final String spillCompression;
     private SinkWriter sinkWriter;
-    private final FieldStatsCollector.Factory[] statsCollectors;
+    private final SimpleColStatsCollector.Factory[] statsCollectors;
     private final IOManager ioManager;
     private final FileIndexOptions fileIndexOptions;
 
@@ -101,7 +102,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             boolean spillable,
             String fileCompression,
             String spillCompression,
-            FieldStatsCollector.Factory[] statsCollectors,
+            SimpleColStatsCollector.Factory[] statsCollectors,
             MemorySize maxDiskSize,
             FileIndexOptions fileIndexOptions) {
         this.fileIO = fileIO;
@@ -171,6 +172,11 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     @Override
     public Collection<DataFileMeta> dataFiles() {
         return compactManager.allFiles();
+    }
+
+    @Override
+    public long maxSequenceNumber() {
+        return seqNumCounter.getValue() - 1;
     }
 
     @Override
@@ -251,7 +257,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
                 seqNumCounter,
                 fileCompression,
                 statsCollectors,
-                fileIndexOptions);
+                fileIndexOptions,
+                FileSource.APPEND);
     }
 
     private void trySyncLatestCompaction(boolean blocking)

@@ -31,6 +31,8 @@ import org.apache.paimon.table.source.Split;
 
 import org.junit.jupiter.api.Test;
 
+import javax.annotation.Nullable;
+
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -78,6 +80,60 @@ public class TableReadBenchmark extends TableBenchmark {
          */
     }
 
+    @Test
+    public void testOrcReadProjection() throws Exception {
+        innerTestProjection(
+                Collections.singletonMap("orc", prepareData(orc(), "orc")),
+                new int[] {0, 5, 10, 14});
+        /*
+         * OpenJDK 64-Bit Server VM 1.8.0_292-b10 on Mac OS X 10.16
+         * Apple M1 Pro
+         * read:                            Best/Avg Time(ms)    Row Rate(K/s)      Per Row(ns)   Relative
+         * ------------------------------------------------------------------------------------------------
+         * OPERATORTEST_read_read-orc            716 /  728           4187.4            238.8       1.0X
+         */
+    }
+
+    @Test
+    public void testOrcReadProjection1() throws Exception {
+        innerTestProjection(
+                Collections.singletonMap("orc", prepareData(orc(), "orc")), new int[] {10});
+        /*
+         * OpenJDK 64-Bit Server VM 1.8.0_292-b10 on Mac OS X 10.16
+         * Apple M1 Pro
+         * read:                            Best/Avg Time(ms)    Row Rate(K/s)      Per Row(ns)   Relative
+         * ------------------------------------------------------------------------------------------------
+         * OPERATORTEST_read_read-orc            716 /  728           4187.4            238.8       1.0X
+         */
+    }
+
+    @Test
+    public void testParquetReadProjection() throws Exception {
+        innerTestProjection(
+                Collections.singletonMap("parquet", prepareData(orc(), "parquet")),
+                new int[] {0, 5, 10, 14});
+        /*
+         * OpenJDK 64-Bit Server VM 1.8.0_292-b10 on Mac OS X 10.16
+         * Apple M1 Pro
+         * read:                            Best/Avg Time(ms)    Row Rate(K/s)      Per Row(ns)   Relative
+         * ------------------------------------------------------------------------------------------------
+         * OPERATORTEST_read_read-orc            716 /  728           4187.4            238.8       1.0X
+         */
+    }
+
+    @Test
+    public void testParquetReadProjection1() throws Exception {
+        innerTestProjection(
+                Collections.singletonMap("parquet", prepareData(orc(), "parquet")), new int[] {10});
+        /*
+         * OpenJDK 64-Bit Server VM 1.8.0_292-b10 on Mac OS X 10.16
+         * Apple M1 Pro
+         * read:                            Best/Avg Time(ms)    Row Rate(K/s)      Per Row(ns)   Relative
+         * ------------------------------------------------------------------------------------------------
+         * OPERATORTEST_read_read-orc            716 /  728           4187.4            238.8       1.0X
+         */
+    }
+
     private Options orc() {
         Options options = new Options();
         options.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_ORC);
@@ -97,6 +153,10 @@ public class TableReadBenchmark extends TableBenchmark {
     }
 
     private void innerTest(Map<String, Table> tables) {
+        innerTestProjection(tables, null);
+    }
+
+    private void innerTestProjection(Map<String, Table> tables, @Nullable int[] projection) {
         int readTime = 3;
         Benchmark benchmark =
                 new Benchmark("read", readTime * rowCount)
@@ -115,7 +175,10 @@ public class TableReadBenchmark extends TableBenchmark {
                             try {
                                 for (Split split : splits) {
                                     RecordReader<InternalRow> reader =
-                                            table.newReadBuilder().newRead().createReader(split);
+                                            table.newReadBuilder()
+                                                    .withProjection(projection)
+                                                    .newRead()
+                                                    .createReader(split);
                                     reader.forEachRemaining(row -> readCount.incrementAndGet());
                                 }
                                 System.out.printf("Finish read %d rows.\n", readCount.get());

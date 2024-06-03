@@ -26,18 +26,25 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.lookup.BulkLoader;
 import org.apache.paimon.lookup.RocksDBState;
 import org.apache.paimon.lookup.RocksDBStateFactory;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.MutableObjectIterator;
 import org.apache.paimon.utils.PartialRow;
 import org.apache.paimon.utils.TypeUtils;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
+
+import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -47,24 +54,41 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+
+import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_REFRESH_ASYNC;
+import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_REFRESH_ASYNC_PENDING_SNAPSHOT_COUNT;
 
 /** Lookup table of full cache. */
 public abstract class FullCacheLookupTable implements LookupTable {
+    private static final Logger LOG = LoggerFactory.getLogger(FullCacheLookupTable.class);
 
+    protected final Object lock = new Object();
     protected final Context context;
     protected final RowType projectedType;
+    protected final boolean refreshAsync;
 
     @Nullable protected final FieldsComparator userDefinedSeqComparator;
     protected final int appendUdsFieldNumber;
 
     protected RocksDBStateFactory stateFactory;
+    private final ExecutorService refreshExecutor;
+    private final AtomicReference<Exception> cachedException;
+    private final int maxPendingSnapshotCount;
+    private final FileStoreTable table;
+    private Future<?> refreshFuture;
     private LookupStreamingReader reader;
     private Predicate specificPartition;
 
     public FullCacheLookupTable(Context context) {
         this.context = context;
-        FileStoreTable table = context.table;
+        this.table = context.table;
         List<String> sequenceFields = new ArrayList<>();
         if (table.primaryKeys().size() > 0) {
             sequenceFields = new CoreOptions(table.options()).sequenceField();
@@ -91,7 +115,20 @@ public abstract class FullCacheLookupTable implements LookupTable {
             this.userDefinedSeqComparator = null;
             this.appendUdsFieldNumber = 0;
         }
+
+        Options options = Options.fromMap(context.table.options());
         this.projectedType = projectedType;
+        this.refreshAsync = options.get(LOOKUP_REFRESH_ASYNC);
+        this.refreshExecutor =
+                this.refreshAsync
+                        ? Executors.newSingleThreadExecutor(
+                                new ExecutorThreadFactory(
+                                        String.format(
+                                                "%s-lookup-refresh",
+                                                Thread.currentThread().getName())))
+                        : MoreExecutors.newDirectExecutorService();
+        this.cachedException = new AtomicReference<>();
+        this.maxPendingSnapshotCount = options.get(LOOKUP_REFRESH_ASYNC_PENDING_SNAPSHOT_COUNT);
     }
 
     @Override
@@ -110,7 +147,12 @@ public abstract class FullCacheLookupTable implements LookupTable {
     protected void bootstrap() throws Exception {
         Predicate scanPredicate =
                 PredicateBuilder.andNullable(context.tablePredicate, specificPartition);
-        this.reader = new LookupStreamingReader(context.table, context.projection, scanPredicate);
+        this.reader =
+                new LookupStreamingReader(
+                        context.table,
+                        context.projection,
+                        scanPredicate,
+                        context.requiredCachedBucketIds);
         BinaryExternalSortBuffer bulkLoadSorter =
                 RocksDBState.createBulkLoadSorter(
                         IOManager.create(context.tempPath.toString()), context.table.coreOptions());
@@ -145,6 +187,51 @@ public abstract class FullCacheLookupTable implements LookupTable {
 
     @Override
     public void refresh() throws Exception {
+        Long latestSnapshotId = table.snapshotManager().latestSnapshotId();
+        Long nextSnapshotId = reader.nextSnapshotId();
+        if (latestSnapshotId != null
+                && nextSnapshotId != null
+                && latestSnapshotId - nextSnapshotId > maxPendingSnapshotCount) {
+            LOG.warn(
+                    "The latest snapshot id {} is much greater than the next snapshot id {} for {}}, "
+                            + "you may need to increase the parallelism of lookup operator.",
+                    latestSnapshotId,
+                    nextSnapshotId,
+                    maxPendingSnapshotCount);
+            if (refreshFuture != null) {
+                // Wait the previous refresh task to be finished.
+                refreshFuture.get();
+            }
+            doRefresh();
+        } else {
+            Future<?> currentFuture = null;
+            try {
+                currentFuture =
+                        refreshExecutor.submit(
+                                () -> {
+                                    try {
+                                        doRefresh();
+                                    } catch (Exception e) {
+                                        LOG.error(
+                                                "Refresh lookup table {} failed",
+                                                context.table.name(),
+                                                e);
+                                        cachedException.set(e);
+                                    }
+                                });
+            } catch (RejectedExecutionException ignored) {
+                LOG.warn(
+                        "Add refresh task for lookup table {} failed",
+                        context.table.name(),
+                        ignored);
+            }
+            if (currentFuture != null) {
+                refreshFuture = currentFuture;
+            }
+        }
+    }
+
+    private void doRefresh() throws Exception {
         while (true) {
             try (RecordReaderIterator<InternalRow> batch =
                     new RecordReaderIterator<>(reader.nextBatch(false))) {
@@ -158,7 +245,14 @@ public abstract class FullCacheLookupTable implements LookupTable {
 
     @Override
     public final List<InternalRow> get(InternalRow key) throws IOException {
-        List<InternalRow> values = innerGet(key);
+        List<InternalRow> values;
+        if (refreshAsync) {
+            synchronized (lock) {
+                values = innerGet(key);
+            }
+        } else {
+            values = innerGet(key);
+        }
         if (appendUdsFieldNumber == 0) {
             return values;
         }
@@ -171,9 +265,23 @@ public abstract class FullCacheLookupTable implements LookupTable {
         return dropSequence;
     }
 
+    public void refresh(Iterator<InternalRow> input) throws IOException {
+        Predicate predicate = projectedPredicate();
+        while (input.hasNext()) {
+            InternalRow row = input.next();
+            if (refreshAsync) {
+                synchronized (lock) {
+                    refreshRow(row, predicate);
+                }
+            } else {
+                refreshRow(row, predicate);
+            }
+        }
+    }
+
     public abstract List<InternalRow> innerGet(InternalRow key) throws IOException;
 
-    public abstract void refresh(Iterator<InternalRow> input) throws IOException;
+    protected abstract void refreshRow(InternalRow row, Predicate predicate) throws IOException;
 
     @Nullable
     public Predicate projectedPredicate() {
@@ -188,8 +296,12 @@ public abstract class FullCacheLookupTable implements LookupTable {
 
     @Override
     public void close() throws IOException {
-        stateFactory.close();
-        FileIOUtils.deleteDirectory(context.tempPath);
+        try {
+            stateFactory.close();
+            FileIOUtils.deleteDirectory(context.tempPath);
+        } finally {
+            refreshExecutor.shutdown();
+        }
     }
 
     /** Bulk loader for the table. */
@@ -222,6 +334,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
         @Nullable public final Predicate projectedPredicate;
         public final File tempPath;
         public final List<String> joinKey;
+        public final Set<Integer> requiredCachedBucketIds;
 
         public Context(
                 FileStoreTable table,
@@ -229,13 +342,15 @@ public abstract class FullCacheLookupTable implements LookupTable {
                 @Nullable Predicate tablePredicate,
                 @Nullable Predicate projectedPredicate,
                 File tempPath,
-                List<String> joinKey) {
+                List<String> joinKey,
+                @Nullable Set<Integer> requiredCachedBucketIds) {
             this.table = table;
             this.projection = projection;
             this.tablePredicate = tablePredicate;
             this.projectedPredicate = projectedPredicate;
             this.tempPath = tempPath;
             this.joinKey = joinKey;
+            this.requiredCachedBucketIds = requiredCachedBucketIds;
         }
     }
 }

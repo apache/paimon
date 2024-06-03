@@ -137,8 +137,7 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
         recordCount++;
         InternalRow row = record.getValue();
 
-        RowKind rowKind =
-                rowKindGenerator == null ? row.getRowKind() : rowKindGenerator.generate(row);
+        RowKind rowKind = RowKindGenerator.getRowKind(rowKindGenerator, row);
         if (ignoreDelete && rowKind.isRetract()) {
             return;
         }

@@ -34,9 +34,9 @@ import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
-import org.apache.paimon.table.source.InnerStreamTableScan;
+import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
-import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.SnapshotManager;
@@ -65,12 +65,6 @@ public class PrivilegedFileStoreTable implements FileStoreTable {
     public SnapshotReader newSnapshotReader() {
         privilegeChecker.assertCanSelect(identifier);
         return wrapped.newSnapshotReader();
-    }
-
-    @Override
-    public SnapshotReader newSnapshotReader(String branchName) {
-        privilegeChecker.assertCanSelect(identifier);
-        return wrapped.newSnapshotReader(branchName);
     }
 
     @Override
@@ -211,6 +205,12 @@ public class PrivilegedFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public void replaceBranch(String fromBranch) {
+        privilegeChecker.assertCanInsert(identifier);
+        wrapped.replaceBranch(fromBranch);
+    }
+
+    @Override
     public ExpireSnapshots newExpireSnapshots() {
         privilegeChecker.assertCanInsert(identifier);
         return wrapped.newExpireSnapshots();
@@ -235,13 +235,13 @@ public class PrivilegedFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public InnerTableScan newScan() {
+    public DataTableScan newScan() {
         privilegeChecker.assertCanSelect(identifier);
         return wrapped.newScan();
     }
 
     @Override
-    public InnerStreamTableScan newStreamScan() {
+    public StreamDataTableScan newStreamScan() {
         privilegeChecker.assertCanSelect(identifier);
         return wrapped.newStreamScan();
     }
@@ -268,12 +268,6 @@ public class PrivilegedFileStoreTable implements FileStoreTable {
     public TableCommitImpl newCommit(String commitUser) {
         privilegeChecker.assertCanInsert(identifier);
         return wrapped.newCommit(commitUser);
-    }
-
-    @Override
-    public TableCommitImpl newCommit(String commitUser, String branchName) {
-        privilegeChecker.assertCanInsert(identifier);
-        return wrapped.newCommit(commitUser, branchName);
     }
 
     @Override

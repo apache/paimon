@@ -19,8 +19,8 @@
 package org.apache.paimon.flink.action.cdc;
 
 import org.apache.paimon.flink.action.cdc.SyncTableActionBase.SchemaRetrievalException;
+import org.apache.paimon.flink.action.cdc.format.AbstractRecordParser;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
-import org.apache.paimon.flink.action.cdc.format.RecordParser;
 import org.apache.paimon.schema.Schema;
 
 import org.apache.flink.configuration.ConfigOption;
@@ -59,7 +59,7 @@ public class MessageQueueSchemaUtils {
         int retry = 0;
         int retryInterval = 1000;
 
-        RecordParser recordParser =
+        AbstractRecordParser recordParser =
                 dataFormat.createParser(true, typeMapping, Collections.emptyList());
 
         while (true) {

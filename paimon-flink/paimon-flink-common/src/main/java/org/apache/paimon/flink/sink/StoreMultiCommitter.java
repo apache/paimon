@@ -26,9 +26,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.metrics.groups.OperatorMetricGroup;
-
-import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -48,8 +45,7 @@ public class StoreMultiCommitter
         implements Committer<MultiTableCommittable, WrappedManifestCommittable> {
 
     private final Catalog catalog;
-    private final String commitUser;
-    @Nullable private final OperatorMetricGroup flinkMetricGroup;
+    private final Context context;
 
     // To make the commit behavior consistent with that of Committer,
     //    StoreMultiCommitter manages multiple committers which are
@@ -60,22 +56,17 @@ public class StoreMultiCommitter
     private final boolean ignoreEmptyCommit;
     private final Map<String, String> dynamicOptions;
 
-    public StoreMultiCommitter(
-            Catalog.Loader catalogLoader,
-            String commitUser,
-            @Nullable OperatorMetricGroup flinkMetricGroup) {
-        this(catalogLoader, commitUser, flinkMetricGroup, false, Collections.emptyMap());
+    public StoreMultiCommitter(Catalog.Loader catalogLoader, Context context) {
+        this(catalogLoader, context, false, Collections.emptyMap());
     }
 
     public StoreMultiCommitter(
             Catalog.Loader catalogLoader,
-            String commitUser,
-            @Nullable OperatorMetricGroup flinkMetricGroup,
+            Context context,
             boolean ignoreEmptyCommit,
             Map<String, String> dynamicOptions) {
         this.catalog = catalogLoader.load();
-        this.commitUser = commitUser;
-        this.flinkMetricGroup = flinkMetricGroup;
+        this.context = context;
         this.ignoreEmptyCommit = ignoreEmptyCommit;
         this.dynamicOptions = dynamicOptions;
         this.tableCommitters = new HashMap<>();
@@ -202,8 +193,10 @@ public class StoreMultiCommitter
             }
             committer =
                     new StoreCommitter(
-                            table.newCommit(commitUser).ignoreEmptyCommit(ignoreEmptyCommit),
-                            flinkMetricGroup);
+                            table,
+                            table.newCommit(context.commitUser())
+                                    .ignoreEmptyCommit(ignoreEmptyCommit),
+                            context);
             tableCommitters.put(tableId, committer);
         }
 

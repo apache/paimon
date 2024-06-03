@@ -23,6 +23,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Filter;
 
 import java.io.Serializable;
 import java.util.Arrays;
@@ -100,6 +101,16 @@ public interface ReadBuilder extends Serializable {
     ReadBuilder withPartitionFilter(Map<String, String> partitionSpec);
 
     /**
+     * Push bucket filter. Note that this method cannot be used simultaneously with {@link
+     * #withShard(int, int)}.
+     *
+     * <p>Reason: Bucket filtering and sharding are different logical mechanisms for selecting
+     * subsets of table data. Applying both methods simultaneously introduces conflicting selection
+     * criteria.
+     */
+    ReadBuilder withBucketFilter(Filter<Integer> bucketFilter);
+
+    /**
      * Apply projection to the reader.
      *
      * <p>NOTE: Nested row projection is currently not supported.
@@ -121,6 +132,16 @@ public interface ReadBuilder extends Serializable {
 
     /** the row number pushed down. */
     ReadBuilder withLimit(int limit);
+
+    /**
+     * Specify the shard to be read, and allocate sharded files to read records. Note that this
+     * method cannot be used simultaneously with {@link #withBucketFilter(Filter)}.
+     *
+     * <p>Reason: Sharding and bucket filtering are different logical mechanisms for selecting
+     * subsets of table data. Applying both methods simultaneously introduces conflicting selection
+     * criteria.
+     */
+    ReadBuilder withShard(int indexOfThisSubtask, int numberOfParallelSubtasks);
 
     /** Create a {@link TableScan} to perform batch planning. */
     TableScan newScan();

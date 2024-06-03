@@ -23,8 +23,8 @@ import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.manifest.FileEntry.Identifier;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.stats.BinaryTableStats;
-import org.apache.paimon.stats.FieldStatsArraySerializer;
+import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
@@ -46,6 +46,7 @@ import java.util.Set;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Metadata of a manifest file. */
@@ -57,7 +58,7 @@ public class ManifestFileMeta {
     private final long fileSize;
     private final long numAddedFiles;
     private final long numDeletedFiles;
-    private final BinaryTableStats partitionStats;
+    private final SimpleStats partitionStats;
     private final long schemaId;
 
     public ManifestFileMeta(
@@ -65,7 +66,7 @@ public class ManifestFileMeta {
             long fileSize,
             long numAddedFiles,
             long numDeletedFiles,
-            BinaryTableStats partitionStats,
+            SimpleStats partitionStats,
             long schemaId) {
         this.fileName = fileName;
         this.fileSize = fileSize;
@@ -91,7 +92,7 @@ public class ManifestFileMeta {
         return numDeletedFiles;
     }
 
-    public BinaryTableStats partitionStats() {
+    public SimpleStats partitionStats() {
         return partitionStats;
     }
 
@@ -105,7 +106,7 @@ public class ManifestFileMeta {
         fields.add(new DataField(1, "_FILE_SIZE", new BigIntType(false)));
         fields.add(new DataField(2, "_NUM_ADDED_FILES", new BigIntType(false)));
         fields.add(new DataField(3, "_NUM_DELETED_FILES", new BigIntType(false)));
-        fields.add(new DataField(4, "_PARTITION_STATS", FieldStatsArraySerializer.schema()));
+        fields.add(new DataField(4, "_PARTITION_STATS", SimpleStatsConverter.schema()));
         fields.add(new DataField(5, "_SCHEMA_ID", new BigIntType(false)));
         return new RowType(fields);
     }
@@ -405,7 +406,8 @@ public class ManifestFileMeta {
 
             List<Predicate> predicateList =
                     partitions.stream()
-                            .map(rowArrayConverter::createEqualPredicate)
+                            .map(rowArrayConverter::convert)
+                            .map(values -> createPartitionPredicate(partitionType, values))
                             .collect(Collectors.toList());
             predicateOpt = Optional.of(PredicateBuilder.or(predicateList));
         } else {
