@@ -25,7 +25,7 @@ import org.apache.spark.sql.types._
 
 import java.sql.Date
 
-abstract class InsertOverwriteTestBase extends PaimonSparkTestBase {
+abstract class InsertOverwriteTableTestBase extends PaimonSparkTestBase {
 
   withPk.foreach {
     hasPk =>

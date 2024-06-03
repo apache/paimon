@@ -18,4 +18,4 @@
 
 package org.apache.paimon.spark.sql
 
-class InsertOverwriteTableTest extends InsertOverwriteTestBase {}
+class InsertOverwriteTableTest extends InsertOverwriteTableTestBase {}
