@@ -56,41 +56,41 @@ import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** An abstraction layer above {@link FileStoreScan} to provide input split generation. */
-public abstract class AbstractInnerTableScan implements InnerTableScan {
+public abstract class AbstractDataTableScan implements DataTableScan {
 
     private final CoreOptions options;
     protected final SnapshotReader snapshotReader;
 
-    protected AbstractInnerTableScan(CoreOptions options, SnapshotReader snapshotReader) {
+    protected AbstractDataTableScan(CoreOptions options, SnapshotReader snapshotReader) {
         this.options = options;
         this.snapshotReader = snapshotReader;
     }
 
     @VisibleForTesting
-    public AbstractInnerTableScan withBucket(int bucket) {
+    public AbstractDataTableScan withBucket(int bucket) {
         snapshotReader.withBucket(bucket);
         return this;
     }
 
     @Override
-    public AbstractInnerTableScan withBucketFilter(Filter<Integer> bucketFilter) {
+    public AbstractDataTableScan withBucketFilter(Filter<Integer> bucketFilter) {
         snapshotReader.withBucketFilter(bucketFilter);
         return this;
     }
 
     @Override
-    public AbstractInnerTableScan withPartitionFilter(Map<String, String> partitionSpec) {
+    public AbstractDataTableScan withPartitionFilter(Map<String, String> partitionSpec) {
         snapshotReader.withPartitionFilter(partitionSpec);
         return this;
     }
 
     @Override
-    public AbstractInnerTableScan withLevelFilter(Filter<Integer> levelFilter) {
+    public AbstractDataTableScan withLevelFilter(Filter<Integer> levelFilter) {
         snapshotReader.withLevelFilter(levelFilter);
         return this;
     }
 
-    public AbstractInnerTableScan withMetricsRegistry(MetricRegistry metricsRegistry) {
+    public AbstractDataTableScan withMetricsRegistry(MetricRegistry metricsRegistry) {
         snapshotReader.withMetricRegistry(metricsRegistry);
         return this;
     }

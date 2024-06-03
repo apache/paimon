@@ -22,6 +22,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.format.SimpleStatsCollector;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.statistics.FullSimpleColStatsCollector;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.stats.SimpleStatsConverter;
@@ -162,7 +163,8 @@ public class DataFileTestDataGenerator {
                         0,
                         level,
                         kvs.stream().filter(kv -> kv.valueKind().isRetract()).count(),
-                        null),
+                        null,
+                        FileSource.APPEND),
                 kvs);
     }
 

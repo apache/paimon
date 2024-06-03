@@ -56,7 +56,7 @@ public interface TagTimeExtractor {
 
         @Override
         public Optional<LocalDateTime> extract(long timeMilli, @Nullable Long watermark) {
-            if (watermark == null) {
+            if (watermark == null || watermark < 0) {
                 return Optional.empty();
             }
 

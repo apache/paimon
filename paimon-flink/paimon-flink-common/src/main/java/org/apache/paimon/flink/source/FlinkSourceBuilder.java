@@ -262,6 +262,7 @@ public class FlinkSourceBuilder {
         StreamingReadMode streamingReadMode = CoreOptions.streamReadType(conf);
 
         if (logSourceProvider != null && streamingReadMode != FILE) {
+            logSourceProvider.preCreateSource();
             if (startupMode != StartupMode.LATEST_FULL) {
                 return toDataStream(logSourceProvider.createSource(null));
             } else {

@@ -21,6 +21,7 @@ package org.apache.paimon.io;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.utils.ObjectSerializer;
 
@@ -55,7 +56,8 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 toStringArrayData(meta.extraFiles()),
                 meta.creationTime(),
                 meta.deleteRowCount().orElse(null),
-                meta.embeddedIndex());
+                meta.embeddedIndex(),
+                meta.fileSource().map(FileSource::toByteValue).orElse(null));
     }
 
     @Override
@@ -75,6 +77,7 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 fromStringArrayData(row.getArray(11)),
                 row.getTimestamp(12, 3),
                 row.isNullAt(13) ? null : row.getLong(13),
-                row.isNullAt(14) ? null : row.getBinary(14));
+                row.isNullAt(14) ? null : row.getBinary(14),
+                row.isNullAt(15) ? null : FileSource.fromByteValue(row.getByte(15)));
     }
 }

@@ -31,19 +31,20 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
 
-import java.util.List;
-
 import static org.apache.paimon.table.PrimaryKeyTableUtils.addKeyNamePrefix;
 
 /** Alphabetical order sorter to sort records by the given `orderColNames`. */
 public class OrderSorter extends TableSorter {
 
+    private final TableSortInfo tableSortInfo;
+
     public OrderSorter(
             StreamExecutionEnvironment batchTEnv,
             DataStream<RowData> origin,
             FileStoreTable table,
-            List<String> orderColNames) {
-        super(batchTEnv, origin, table, orderColNames);
+            TableSortInfo tableSortInfo) {
+        super(batchTEnv, origin, table, tableSortInfo.getSortColumns());
+        this.tableSortInfo = tableSortInfo;
     }
 
     @Override
@@ -75,6 +76,7 @@ public class OrderSorter extends TableSorter {
                         return keyProjection.apply(new FlinkRowWrapper(value)).copy();
                     }
                 },
-                row -> row);
+                row -> row,
+                tableSortInfo);
     }
 }

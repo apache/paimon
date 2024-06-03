@@ -38,10 +38,14 @@ CREATE TABLE my_table (
     product_id BIGINT,
     price DOUBLE,
     sales BIGINT
+) WITH (
+    'file.compression' = 'zstd'
 );
 ```
 {{< /tab >}}
 {{< /tabs >}}
+
+The recommended compression for the Append table is `'zstd'`.
 
 ## Automatic small file merging
 

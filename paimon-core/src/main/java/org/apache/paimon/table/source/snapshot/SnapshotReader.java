@@ -24,6 +24,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
@@ -65,6 +66,21 @@ public interface SnapshotReader {
     SnapshotReader withBucket(int bucket);
 
     SnapshotReader withBucketFilter(Filter<Integer> bucketFilter);
+
+    SnapshotReader withDataFileNameFilter(Filter<String> fileNameFilter);
+
+    default SnapshotReader withShard(
+            BucketMode bucketMode, int indexOfThisSubtask, int numberOfParallelSubtasks) {
+        if (bucketMode == BucketMode.BUCKET_UNAWARE) {
+            withDataFileNameFilter(
+                    file ->
+                            Math.abs(file.hashCode() % numberOfParallelSubtasks)
+                                    == indexOfThisSubtask);
+        } else {
+            withBucketFilter(bucket -> bucket % numberOfParallelSubtasks == indexOfThisSubtask);
+        }
+        return this;
+    }
 
     SnapshotReader withMetricRegistry(MetricRegistry registry);
 

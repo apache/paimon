@@ -32,6 +32,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadOnceTableScan;
+import org.apache.paimon.table.source.SingletonSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataField;
@@ -42,7 +43,6 @@ import org.apache.paimon.utils.ProjectedRow;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -121,31 +121,18 @@ public class AllTableOptionsTable implements ReadonlyTable {
 
         @Override
         public Plan innerPlan() {
-            return () ->
-                    Collections.singletonList(
-                            new AllTableSplit(
-                                    options(fileIO, allTablePaths).values().stream()
-                                            .flatMap(t -> t.values().stream())
-                                            .reduce(0, (a, b) -> a + b.size(), Integer::sum),
-                                    allTablePaths));
+            return () -> Collections.singletonList(new AllTableSplit(allTablePaths));
         }
     }
 
-    private static class AllTableSplit implements Split {
+    private static class AllTableSplit extends SingletonSplit {
 
         private static final long serialVersionUID = 1L;
 
-        private final long rowCount;
         private final Map<String, Map<String, Path>> allTablePaths;
 
-        private AllTableSplit(long rowCount, Map<String, Map<String, Path>> allTablePaths) {
-            this.rowCount = rowCount;
+        private AllTableSplit(Map<String, Map<String, Path>> allTablePaths) {
             this.allTablePaths = allTablePaths;
-        }
-
-        @Override
-        public long rowCount() {
-            return rowCount;
         }
 
         @Override
@@ -192,7 +179,7 @@ public class AllTableOptionsTable implements ReadonlyTable {
         }
 
         @Override
-        public RecordReader<InternalRow> createReader(Split split) throws IOException {
+        public RecordReader<InternalRow> createReader(Split split) {
             if (!(split instanceof AllTableSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }

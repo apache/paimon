@@ -35,13 +35,13 @@ import static org.apache.paimon.service.ServiceManager.PRIMARY_KEY_LOOKUP;
 /** Operator for address server to register addresses to {@link ServiceManager}. */
 public class QueryAddressRegister extends RichSinkFunction<InternalRow> {
 
-    private final Table table;
+    private final ServiceManager serviceManager;
 
     private transient int numberExecutors;
     private transient TreeMap<Integer, InetSocketAddress> executors;
 
     public QueryAddressRegister(Table table) {
-        this.table = table;
+        this.serviceManager = ((FileStoreTable) table).store().newServiceManager();
     }
 
     @Override
@@ -67,10 +67,14 @@ public class QueryAddressRegister extends RichSinkFunction<InternalRow> {
         executors.put(executorId, new InetSocketAddress(hostname, port));
 
         if (executors.size() == numberExecutors) {
-            FileStoreTable storeTable = (FileStoreTable) table;
-            ServiceManager manager = storeTable.store().newServiceManager();
-            manager.resetService(
+            serviceManager.resetService(
                     PRIMARY_KEY_LOOKUP, executors.values().toArray(new InetSocketAddress[0]));
         }
+    }
+
+    @Override
+    public void close() throws Exception {
+        super.close();
+        serviceManager.deleteService(PRIMARY_KEY_LOOKUP);
     }
 }

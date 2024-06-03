@@ -18,8 +18,6 @@
 
 package org.apache.paimon.partition;
 
-import org.apache.paimon.operation.FileStoreCommitImpl;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -52,7 +50,8 @@ import static java.time.temporal.ChronoField.YEAR;
 /** Time extractor to extract time from partition values. */
 public class PartitionTimeExtractor {
 
-    private static final Logger LOG = LoggerFactory.getLogger(FileStoreCommitImpl.class);
+    private static final Logger LOG = LoggerFactory.getLogger(PartitionTimeExtractor.class);
+
     private static final DateTimeFormatter TIMESTAMP_FORMATTER =
             new DateTimeFormatterBuilder()
                     .appendValue(YEAR, 1, 10, SignStyle.NORMAL)
@@ -118,7 +117,9 @@ public class PartitionTimeExtractor {
                             .mapToObj(i -> partitionKeys.get(i) + ":" + partitionValues.get(i))
                             .collect(Collectors.joining(","));
             LOG.warn(
-                    "Parition {} can't be extract datetime to expire,Please check the partition expiration configuration or manually delete the partition using the drop-partition command. ",
+                    "Partition {} can't be extract datetime to expire."
+                            + " Please check the partition expiration configuration or"
+                            + " manually delete the partition using the drop-partition command.",
                     paritionInfos);
         }
         return dateTime;

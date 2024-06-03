@@ -783,6 +783,12 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Test
+    public void testWithShard() throws Exception {
+        FileStoreTable table = createFileStoreTable(conf -> conf.set(BUCKET, 5));
+        innerTestWithShard(table);
+    }
+
+    @Test
     public void testSlowCommit() throws Exception {
         FileStoreTable table = createFileStoreTable();
         StreamTableWrite write = table.newWrite(commitUser);

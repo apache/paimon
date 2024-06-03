@@ -29,6 +29,7 @@ import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.metastore.TagPreviewCommitCallback;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
@@ -40,13 +41,13 @@ import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.DynamicBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.RowKeyExtractor;
+import org.apache.paimon.table.sink.RowKindGenerator;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.UnawareBucketRowKeyExtractor;
-import org.apache.paimon.table.source.InnerStreamTableScan;
-import org.apache.paimon.table.source.InnerStreamTableScanImpl;
-import org.apache.paimon.table.source.InnerTableScan;
-import org.apache.paimon.table.source.InnerTableScanImpl;
+import org.apache.paimon.table.source.DataTableBatchScan;
+import org.apache.paimon.table.source.DataTableStreamScan;
 import org.apache.paimon.table.source.SplitGenerator;
+import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.SnapshotReaderImpl;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
@@ -152,8 +153,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public InnerTableScan newScan() {
-        return new InnerTableScanImpl(
+    public DataTableBatchScan newScan() {
+        return new DataTableBatchScan(
+                bucketMode(),
                 tableSchema.primaryKeys().size() > 0,
                 coreOptions(),
                 newSnapshotReader(),
@@ -161,8 +163,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public InnerStreamTableScan newStreamScan() {
-        return new InnerStreamTableScanImpl(
+    public StreamDataTableScan newStreamScan() {
+        return new DataTableStreamScan(
+                bucketMode(),
                 coreOptions(),
                 newSnapshotReader(),
                 snapshotManager(),
@@ -288,8 +291,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 snapshotManager(),
                 store().newSnapshotDeletion(),
                 store().newTagManager(),
-                coreOptions().snapshotExpireCleanEmptyDirectories(),
-                coreOptions().changelogLifecycleDecoupled());
+                coreOptions().snapshotExpireCleanEmptyDirectories());
     }
 
     @Override
@@ -297,7 +299,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         return new ExpireChangelogImpl(
                 snapshotManager(),
                 tagManager(),
-                store().newSnapshotDeletion(),
+                store().newChangelogDeletion(),
                 coreOptions().snapshotExpireCleanEmptyDirectories());
     }
 
@@ -307,24 +309,14 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         Runnable snapshotExpire = null;
         if (!options.writeOnly()) {
             boolean changelogDecoupled = options.changelogLifecycleDecoupled();
-            ExpireSnapshots expireChangelog =
-                    newExpireChangelog()
-                            .maxDeletes(options.snapshotExpireLimit())
-                            .retainMin(options.changelogNumRetainMin())
-                            .retainMax(options.changelogNumRetainMax());
-            ExpireSnapshots expireSnapshots =
-                    newExpireSnapshots()
-                            .retainMax(options.snapshotNumRetainMax())
-                            .retainMin(options.snapshotNumRetainMin())
-                            .maxDeletes(options.snapshotExpireLimit());
-            long snapshotTimeRetain = options.snapshotTimeRetain().toMillis();
-            long changelogTimeRetain = options.changelogTimeRetain().toMillis();
+            ExpireConfig expireConfig = options.expireConfig();
+            ExpireSnapshots expireChangelog = newExpireChangelog().config(expireConfig);
+            ExpireSnapshots expireSnapshots = newExpireSnapshots().config(expireConfig);
             snapshotExpire =
                     () -> {
-                        long current = System.currentTimeMillis();
-                        expireSnapshots.olderThanMills(current - snapshotTimeRetain).expire();
+                        expireSnapshots.expire();
                         if (changelogDecoupled) {
-                            expireChangelog.olderThanMills(current - changelogTimeRetain).expire();
+                            expireChangelog.expire();
                         }
                     };
         }
@@ -535,6 +527,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public void replaceBranch(String fromBranch) {
+        branchManager().replaceBranch(fromBranch);
+    }
+
+    @Override
     public void rollbackTo(String tagName) {
         TagManager tagManager = tagManager();
         checkArgument(tagManager.tagExists(tagName), "Rollback tag '%s' doesn't exist.", tagName);
@@ -576,6 +573,10 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 fileIO,
                 store().newSnapshotDeletion(),
                 store().newTagDeletion());
+    }
+
+    protected RowKindGenerator rowKindGenerator() {
+        return RowKindGenerator.create(schema(), store().options());
     }
 
     @Override

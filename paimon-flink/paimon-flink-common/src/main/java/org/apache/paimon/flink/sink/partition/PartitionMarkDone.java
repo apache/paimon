@@ -26,7 +26,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionTimeExtractor;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.utils.RowDataPartitionComputer;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
 
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
@@ -63,7 +63,7 @@ public class PartitionMarkDone implements Closeable {
                     "mark-done-pending-partitions",
                     new ListSerializer<>(StringSerializer.INSTANCE));
 
-    private final RowDataPartitionComputer partitionComputer;
+    private final InternalRowPartitionComputer partitionComputer;
     private final PartitionMarkDoneTrigger trigger;
     private final List<PartitionMarkDoneAction> actions;
 
@@ -93,15 +93,20 @@ public class PartitionMarkDone implements Closeable {
 
         MetastoreClient.Factory metastoreClientFactory =
                 table.catalogEnvironment().metastoreClientFactory();
-        checkNotNull(
-                metastoreClientFactory, "Cannot mark done partition for table without metastore.");
-        checkArgument(
-                coreOptions.partitionedTableInMetastore(),
-                "Table should enable %s",
-                METASTORE_PARTITIONED_TABLE.key());
 
-        RowDataPartitionComputer partitionComputer =
-                new RowDataPartitionComputer(
+        String partitionMarkDownAction = options.get(PARTITION_MARK_DONE_ACTION);
+        if (partitionMarkDownAction.contains("done-partition")) {
+            checkNotNull(
+                    metastoreClientFactory,
+                    "Cannot mark done partition for table without metastore.");
+            checkArgument(
+                    coreOptions.partitionedTableInMetastore(),
+                    "Table should enable %s",
+                    METASTORE_PARTITIONED_TABLE.key());
+        }
+
+        InternalRowPartitionComputer partitionComputer =
+                new InternalRowPartitionComputer(
                         coreOptions.partitionDefaultName(),
                         table.schema().logicalPartitionType(),
                         partitionKeys.toArray(new String[0]));
@@ -116,7 +121,7 @@ public class PartitionMarkDone implements Closeable {
                         idleToDone);
 
         List<PartitionMarkDoneAction> actions =
-                Arrays.asList(options.get(PARTITION_MARK_DONE_ACTION).split(",")).stream()
+                Arrays.asList(partitionMarkDownAction.split(",")).stream()
                         .map(
                                 action -> {
                                     switch (action) {
@@ -136,7 +141,7 @@ public class PartitionMarkDone implements Closeable {
     }
 
     public PartitionMarkDone(
-            RowDataPartitionComputer partitionComputer,
+            InternalRowPartitionComputer partitionComputer,
             PartitionMarkDoneTrigger trigger,
             List<PartitionMarkDoneAction> actions) {
         this.partitionComputer = partitionComputer;

@@ -27,6 +27,7 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.options.description.DescribedEnum;
@@ -64,6 +65,7 @@ public class CoreOptions implements Serializable {
     public static final String FIELDS_PREFIX = "fields";
 
     public static final String AGG_FUNCTION = "aggregate-function";
+    public static final String DEFAULT_AGG_FUNCTION = "default-aggregate-function";
 
     public static final String IGNORE_RETRACT = "ignore-retract";
 
@@ -1111,6 +1113,12 @@ public class CoreOptions implements Serializable {
                                     + " vectors are generated when data is written, which marks the data for deletion."
                                     + " During read operations, by applying these index files, merging can be avoided.");
 
+    public static final ConfigOption<MemorySize> DELETION_VECTOR_INDEX_FILE_TARGET_SIZE =
+            key("deletion-vector.index-file.target-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(2))
+                    .withDescription("The target size of deletion vector index file.");
+
     public static final ConfigOption<Boolean> DELETION_FORCE_PRODUCE_CHANGELOG =
             key("delete.force-produce-changelog")
                     .booleanType()
@@ -1150,6 +1158,13 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription(
                             "Time field for record level expire, it should be a seconds INT.");
+
+    public static final ConfigOption<String> FIELDS_DEFAULT_AGG_FUNC =
+            key(FIELDS_PREFIX + "." + DEFAULT_AGG_FUNCTION)
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Default aggregate function of all fields for partial-update and aggregate merge function");
 
     private final Options options;
 
@@ -1260,7 +1275,15 @@ public class CoreOptions implements Serializable {
         return fileFormat.toLowerCase();
     }
 
+    public String fieldsDefaultFunc() {
+        return options.get(FIELDS_DEFAULT_AGG_FUNC);
+    }
+
     public boolean definedAggFunc() {
+        if (options.contains(FIELDS_DEFAULT_AGG_FUNC)) {
+            return true;
+        }
+
         for (String key : options.toMap().keySet()) {
             if (key.startsWith(FIELDS_PREFIX) && key.endsWith(AGG_FUNCTION)) {
                 return true;
@@ -1353,6 +1376,19 @@ public class CoreOptions implements Serializable {
 
     public boolean snapshotExpireCleanEmptyDirectories() {
         return options.get(SNAPSHOT_EXPIRE_CLEAN_EMPTY_DIRECTORIES);
+    }
+
+    public ExpireConfig expireConfig() {
+        return ExpireConfig.builder()
+                .snapshotRetainMax(snapshotNumRetainMax())
+                .snapshotRetainMin(snapshotNumRetainMin())
+                .snapshotTimeRetain(snapshotTimeRetain())
+                .snapshotMaxDeletes(snapshotExpireLimit())
+                .changelogRetainMax(options.getOptional(CHANGELOG_NUM_RETAINED_MAX).orElse(null))
+                .changelogRetainMin(options.getOptional(CHANGELOG_NUM_RETAINED_MIN).orElse(null))
+                .changelogTimeRetain(options.getOptional(CHANGELOG_TIME_RETAINED).orElse(null))
+                .changelogMaxDeletes(snapshotExpireLimit())
+                .build();
     }
 
     public int manifestMergeMinCount() {
@@ -1513,7 +1549,8 @@ public class CoreOptions implements Serializable {
 
     public LookupStrategy lookupStrategy() {
         return LookupStrategy.from(
-                options.get(CHANGELOG_PRODUCER).equals(ChangelogProducer.LOOKUP),
+                mergeEngine().equals(MergeEngine.FIRST_ROW),
+                changelogProducer().equals(ChangelogProducer.LOOKUP),
                 deletionVectorsEnabled());
     }
 
@@ -1784,6 +1821,10 @@ public class CoreOptions implements Serializable {
 
     public boolean deletionVectorsEnabled() {
         return options.get(DELETION_VECTORS_ENABLED);
+    }
+
+    public MemorySize deletionVectorIndexFileTargetSize() {
+        return options.get(DELETION_VECTOR_INDEX_FILE_TARGET_SIZE);
     }
 
     public FileIndexOptions indexColumnsOptions() {

@@ -135,6 +135,10 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
         TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
         TagManager tagManager = table.store().newTagManager();
 
+        // test watermark is Long.MIN_VALUE.
+        commit.commit(new ManifestCommittable(0, Long.MIN_VALUE));
+        assertThat(tagManager.allTagNames()).isEmpty();
+
         // test first create
         commit.commit(new ManifestCommittable(0, localZoneMills("2023-07-18T12:00:09")));
         assertThat(tagManager.allTagNames()).containsOnly("2023-07-18 11");

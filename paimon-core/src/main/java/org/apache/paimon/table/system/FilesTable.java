@@ -43,6 +43,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadOnceTableScan;
+import org.apache.paimon.table.source.SingletonSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
@@ -62,7 +63,6 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -134,7 +134,7 @@ public class FilesTable implements ReadonlyTable {
 
     @Override
     public InnerTableScan newScan() {
-        return new FilesScan(storeTable);
+        return new FilesScan();
     }
 
     @Override
@@ -150,15 +150,9 @@ public class FilesTable implements ReadonlyTable {
 
     private static class FilesScan extends ReadOnceTableScan {
 
-        private final FileStoreTable storeTable;
-
         @Nullable private LeafPredicate partitionPredicate;
         @Nullable private LeafPredicate bucketPredicate;
         @Nullable private LeafPredicate levelPredicate;
-
-        private FilesScan(FileStoreTable storeTable) {
-            this.storeTable = storeTable;
-        }
 
         @Override
         public InnerTableScan withFilter(Predicate pushdown) {
@@ -176,12 +170,51 @@ public class FilesTable implements ReadonlyTable {
 
         @Override
         public Plan innerPlan() {
-            // plan here, just set the result of plan to split
-            TableScan.Plan plan = tablePlan();
-            return () -> Collections.singletonList(new FilesSplit(plan.splits()));
+            return () ->
+                    Collections.singletonList(
+                            new FilesSplit(partitionPredicate, bucketPredicate, levelPredicate));
+        }
+    }
+
+    private static class FilesSplit extends SingletonSplit {
+
+        @Nullable private final LeafPredicate partitionPredicate;
+        @Nullable private final LeafPredicate bucketPredicate;
+        @Nullable private final LeafPredicate levelPredicate;
+
+        private FilesSplit(
+                @Nullable LeafPredicate partitionPredicate,
+                @Nullable LeafPredicate bucketPredicate,
+                @Nullable LeafPredicate levelPredicate) {
+            this.partitionPredicate = partitionPredicate;
+            this.bucketPredicate = bucketPredicate;
+            this.levelPredicate = levelPredicate;
         }
 
-        private TableScan.Plan tablePlan() {
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            FilesSplit that = (FilesSplit) o;
+            return Objects.equals(partitionPredicate, that.partitionPredicate)
+                    && Objects.equals(bucketPredicate, that.bucketPredicate)
+                    && Objects.equals(this.levelPredicate, that.levelPredicate);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(partitionPredicate, bucketPredicate, levelPredicate);
+        }
+
+        public List<Split> splits(FileStoreTable storeTable) {
+            return tablePlan(storeTable).splits();
+        }
+
+        private TableScan.Plan tablePlan(FileStoreTable storeTable) {
             InnerTableScan scan = storeTable.newScan();
             if (partitionPredicate != null) {
                 if (partitionPredicate.function() instanceof Equal) {
@@ -221,46 +254,6 @@ public class FilesTable implements ReadonlyTable {
         }
     }
 
-    private static class FilesSplit implements Split {
-
-        private static final long serialVersionUID = 1L;
-
-        private final List<Split> splits;
-
-        private FilesSplit(List<Split> splits) {
-            this.splits = splits;
-        }
-
-        @Override
-        public long rowCount() {
-            return splits.stream()
-                    .map(s -> (DataSplit) s)
-                    .mapToLong(s -> s.dataFiles().size())
-                    .sum();
-        }
-
-        public List<Split> splits() {
-            return splits;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            FilesSplit that = (FilesSplit) o;
-            return Objects.equals(splits, that.splits);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(splits);
-        }
-    }
-
     private static class FilesRead implements InnerTableRead {
 
         private final SchemaManager schemaManager;
@@ -292,12 +285,13 @@ public class FilesTable implements ReadonlyTable {
         }
 
         @Override
-        public RecordReader<InternalRow> createReader(Split split) throws IOException {
+        public RecordReader<InternalRow> createReader(Split split) {
             if (!(split instanceof FilesSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
             FilesSplit filesSplit = (FilesSplit) split;
-            if (filesSplit.splits().isEmpty()) {
+            List<Split> splits = filesSplit.splits(storeTable);
+            if (splits.isEmpty()) {
                 return new IteratorRecordReader<>(Collections.emptyIterator());
             }
 
@@ -332,7 +326,7 @@ public class FilesTable implements ReadonlyTable {
                                     });
                         }
                     };
-            for (Split dataSplit : filesSplit.splits()) {
+            for (Split dataSplit : splits) {
                 iteratorList.add(
                         Iterators.transform(
                                 ((DataSplit) dataSplit).dataFiles().iterator(),

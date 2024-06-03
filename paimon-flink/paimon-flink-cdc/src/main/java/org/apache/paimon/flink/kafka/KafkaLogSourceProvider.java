@@ -89,6 +89,11 @@ public class KafkaLogSourceProvider implements LogSourceProvider {
     }
 
     @Override
+    public void preCreateSource() {
+        // nothing to do before log source creating
+    }
+
+    @Override
     public KafkaSource<RowData> createSource(@Nullable Map<Integer, Long> bucketOffsets) {
         switch (consistency) {
             case TRANSACTIONAL:

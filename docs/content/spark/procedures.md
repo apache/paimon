@@ -124,5 +124,15 @@ This section introduce all available spark procedures about paimon.
           CALL sys.remove_orphan_files(table => 'default.T', older_than => '2023-10-31 12:00:00')
       </td>
     </tr>
+    <tr>
+      <td>repair</td>
+      <td>
+         Synchronize information from the file system to Metastore. Argument:
+            <li>database_or_table: empty or the target database name or the target table identifier.</li>
+      </td>
+      <td>
+          CALL sys.repair('test_db.T')
+      </td>
+    </tr>
     </tbody>
 </table>

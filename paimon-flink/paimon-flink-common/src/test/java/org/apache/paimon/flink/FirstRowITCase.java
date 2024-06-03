@@ -31,7 +31,6 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for first row merge engine. */
 public class FirstRowITCase extends CatalogITCaseBase {
@@ -45,23 +44,24 @@ public class FirstRowITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testIllegal() {
-        assertThatThrownBy(
-                        () ->
-                                sql(
-                                        "CREATE TABLE ILLEGAL_T (a INT, b INT, c STRING, PRIMARY KEY (a) NOT ENFORCED)"
-                                                + " WITH ('merge-engine'='first-row')"))
-                .hasRootCauseMessage(
-                        "Only support 'lookup' changelog-producer on FIRST_MERGE merge engine");
+    public void testBatchQueryNoChangelog() {
+        sql(
+                "CREATE TABLE T_NO_CHANGELOG (a INT, b INT, c STRING, PRIMARY KEY (a) NOT ENFORCED)"
+                        + " WITH ('merge-engine'='first-row')");
+        testBatchQuery("T_NO_CHANGELOG");
     }
 
     @Test
     public void testBatchQuery() {
-        batchSql("INSERT INTO T VALUES (1, 1, '1'), (1, 2, '2')");
-        List<Row> result = batchSql("SELECT * FROM T");
+        testBatchQuery("T");
+    }
+
+    private void testBatchQuery(String table) {
+        batchSql("INSERT INTO %s VALUES (1, 1, '1'), (1, 2, '2')", table);
+        List<Row> result = batchSql("SELECT * FROM %s", table);
         assertThat(result).containsExactlyInAnyOrder(Row.ofKind(RowKind.INSERT, 1, 1, "1"));
 
-        result = batchSql("SELECT c FROM T");
+        result = batchSql("SELECT c FROM %s", table);
         assertThat(result).containsExactlyInAnyOrder(Row.ofKind(RowKind.INSERT, "1"));
     }
 

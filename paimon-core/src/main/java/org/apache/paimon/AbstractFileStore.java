@@ -28,6 +28,7 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.metastore.AddPartitionTagCallback;
 import org.apache.paimon.metastore.MetastoreClient;
+import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
@@ -38,6 +39,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.service.ServiceManager;
 import org.apache.paimon.stats.StatsFile;
 import org.apache.paimon.stats.StatsFileHandler;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.sink.CallbackUtils;
 import org.apache.paimon.table.sink.TagCallback;
@@ -145,7 +147,12 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 pathFactory().indexFileFactory(),
                 indexManifestFileFactory().create(),
                 new HashIndexFile(fileIO, pathFactory().indexFileFactory()),
-                new DeletionVectorsIndexFile(fileIO, pathFactory().indexFileFactory()));
+                new DeletionVectorsIndexFile(
+                        fileIO,
+                        pathFactory().indexFileFactory(),
+                        bucketMode() == BucketMode.BUCKET_UNAWARE
+                                ? options.deletionVectorIndexFileTargetSize()
+                                : MemorySize.ofBytes(Long.MAX_VALUE)));
     }
 
     @Override
@@ -178,6 +185,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 schemaManager,
                 commitUser,
                 partitionType,
+                options.partitionDefaultName(),
                 pathFactory(),
                 snapshotManager(),
                 manifestFileFactory(),
@@ -191,12 +199,24 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 partitionType.getFieldCount() > 0 && options.dynamicPartitionOverwrite(),
                 newKeyComparator(),
                 options.branch(),
-                newStatsFileHandler());
+                newStatsFileHandler(),
+                bucketMode());
     }
 
     @Override
     public SnapshotDeletion newSnapshotDeletion() {
         return new SnapshotDeletion(
+                fileIO,
+                pathFactory(),
+                manifestFileFactory().create(),
+                manifestListFactory().create(),
+                newIndexFileHandler(),
+                newStatsFileHandler());
+    }
+
+    @Override
+    public ChangelogDeletion newChangelogDeletion() {
+        return new ChangelogDeletion(
                 fileIO,
                 pathFactory(),
                 manifestFileFactory().create(),

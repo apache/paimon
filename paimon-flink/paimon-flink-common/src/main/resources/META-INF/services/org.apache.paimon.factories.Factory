@@ -51,3 +51,5 @@ org.apache.paimon.flink.procedure.privilege.CreatePrivilegedUserProcedure
 org.apache.paimon.flink.procedure.privilege.DropPrivilegedUserProcedure
 org.apache.paimon.flink.procedure.privilege.GrantPrivilegeToUserProcedure
 org.apache.paimon.flink.procedure.privilege.RevokePrivilegeFromUserProcedure
+org.apache.paimon.flink.procedure.RepairProcedure
+org.apache.paimon.flink.procedure.ReplaceBranchProcedure

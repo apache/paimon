@@ -26,10 +26,13 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.FileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.io.RollingFileWriter;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.SortedRun;
 import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.FieldsComparator;
+import org.apache.paimon.utils.IOUtils;
 
 import javax.annotation.Nullable;
 
@@ -122,13 +125,16 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
         CloseableIterator<ChangelogResult> iterator = null;
         RollingFileWriter<KeyValue, DataFileMeta> compactFileWriter = null;
         RollingFileWriter<KeyValue, DataFileMeta> changelogFileWriter = null;
+        Exception collectedExceptions = null;
 
         try {
             iterator =
                     readerForMergeTree(sections, createMergeWrapper(outputLevel))
                             .toCloseableIterator();
             if (rewriteCompactFile) {
-                compactFileWriter = writerFactory.createRollingMergeTreeFileWriter(outputLevel);
+                compactFileWriter =
+                        writerFactory.createRollingMergeTreeFileWriter(
+                                outputLevel, FileSource.COMPACT);
             }
             if (produceChangelog) {
                 changelogFileWriter = writerFactory.createRollingChangelogFileWriter(outputLevel);
@@ -148,16 +154,20 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
                     }
                 }
             }
+        } catch (Exception e) {
+            collectedExceptions = e;
         } finally {
-            if (iterator != null) {
-                iterator.close();
+            try {
+                IOUtils.closeAll(iterator, compactFileWriter, changelogFileWriter);
+            } catch (Exception e) {
+                collectedExceptions = ExceptionUtils.firstOrSuppressed(e, collectedExceptions);
             }
-            if (compactFileWriter != null) {
-                compactFileWriter.close();
-            }
-            if (changelogFileWriter != null) {
-                changelogFileWriter.close();
-            }
+        }
+
+        if (null != collectedExceptions) {
+            compactFileWriter.abort();
+            changelogFileWriter.abort();
+            throw collectedExceptions;
         }
 
         List<DataFileMeta> before = extractFilesFromSections(sections);

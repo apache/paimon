@@ -96,7 +96,7 @@ Run the following command to submit a compaction job for the table.
     --table <table-name> \
     [--partition <partition-name>] \
     [--table_conf <table_conf>] \
-    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
 ```
 
 Example: compact table
