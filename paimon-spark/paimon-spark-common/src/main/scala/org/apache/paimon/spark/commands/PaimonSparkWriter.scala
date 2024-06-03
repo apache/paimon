@@ -18,20 +18,25 @@
 
 package org.apache.paimon.spark.commands
 
-import org.apache.paimon.index.BucketAssigner
-import org.apache.paimon.spark.SparkRow
-import org.apache.paimon.spark.SparkUtils.createIOManager
-import org.apache.paimon.spark.schema.SparkSystemColumns
+import org.apache.paimon.CoreOptions.WRITE_ONLY
+import org.apache.paimon.data.BinaryRow
+import org.apache.paimon.deletionvectors.{DeletionVector, DeletionVectorsMaintainer}
+import org.apache.paimon.index.{BucketAssigner, SimpleHashBucketAssigner}
+import org.apache.paimon.io.{CompactIncrement, DataIncrement, IndexIncrement}
+import org.apache.paimon.manifest.{FileKind, IndexManifestEntry}
+import org.apache.paimon.spark.{SparkRow, SparkTableWrite}
 import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
 import org.apache.paimon.spark.util.SparkRowUtils
 import org.apache.paimon.table.{BucketMode, FileStoreTable}
-import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageSerializer, RowPartitionKeyExtractor}
+import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageImpl, CommitMessageSerializer, RowPartitionKeyExtractor}
+import org.apache.paimon.utils.SerializationUtils
 
-import org.apache.spark.Partitioner
+import org.apache.spark.{Partitioner, TaskContext}
 import org.apache.spark.sql.{DataFrame, Dataset, Row, SparkSession}
 import org.apache.spark.sql.functions._
 
 import java.io.IOException
+import java.util.Collections.singletonMap
 
 import scala.collection.JavaConverters._
 
@@ -41,12 +46,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
 
   private lazy val rowType = table.rowType()
 
-  private lazy val bucketMode = table match {
-    case fileStoreTable: FileStoreTable =>
-      fileStoreTable.bucketMode
-    case _ =>
-      BucketMode.FIXED
-  }
+  private lazy val bucketMode = table.bucketMode
 
   private lazy val primaryKeyCols = tableSchema.trimmedPrimaryKeys().asScala
 
@@ -54,80 +54,82 @@ case class PaimonSparkWriter(table: FileStoreTable) {
 
   val writeBuilder: BatchWriteBuilder = table.newBatchWriteBuilder()
 
-  def write(data: Dataset[_]): Seq[CommitMessage] = {
+  def writeOnly(): PaimonSparkWriter = {
+    PaimonSparkWriter(table.copy(singletonMap(WRITE_ONLY.key(), "true")))
+  }
+
+  def write(data: Dataset[Row]): Seq[CommitMessage] = {
     val sparkSession = data.sparkSession
     import sparkSession.implicits._
 
-    val dataSchema = SparkSystemColumns.filterSparkSystemColumns(data.schema)
-    val rowkindColIdx = SparkRowUtils.getFieldIndex(data.schema, ROW_KIND_COL)
+    val rowKindColIdx = SparkRowUtils.getFieldIndex(data.schema, ROW_KIND_COL)
+    assert(
+      rowKindColIdx == -1 || rowKindColIdx == data.schema.length - 1,
+      "Row kind column should be the last field.")
 
     // append _bucket_ column as placeholder
     val withInitBucketCol = data.withColumn(BUCKET_COL, lit(-1))
     val bucketColIdx = withInitBucketCol.schema.size - 1
-
-    val originEncoderGroup = EncoderSerDeGroup(dataSchema)
     val encoderGroupWithBucketCol = EncoderSerDeGroup(withInitBucketCol.schema)
 
-    val withBucketCol =
-      assignBucketId(sparkSession, withInitBucketCol, bucketColIdx, encoderGroupWithBucketCol)
+    def newWrite(): SparkTableWrite = new SparkTableWrite(writeBuilder, rowType, rowKindColIdx)
 
-    val commitMessages = withBucketCol
-      .mapPartitions {
+    def writeWithoutBucket(): Dataset[Array[Byte]] = {
+      data.mapPartitions {
         iter =>
-          val ioManager = createIOManager
-          val write = writeBuilder.newWrite()
-          write.withIOManager(ioManager)
-          try {
-            iter.foreach {
-              row =>
-                val bucket = row.getInt(bucketColIdx)
-                val bucketColDropped =
-                  originEncoderGroup.internalToRow(encoderGroupWithBucketCol.rowToInternal(row))
-                val sparkRow = new SparkRow(
-                  rowType,
-                  bucketColDropped,
-                  SparkRowUtils.getRowKind(row, rowkindColIdx))
-                write.write(sparkRow, bucket)
+          {
+            val write = newWrite()
+            try {
+              iter.foreach(row => write.write(row))
+              write.finish().asScala
+            } finally {
+              write.close()
             }
-            val serializer = new CommitMessageSerializer
-            write.prepareCommit().asScala.map(serializer.serialize).toIterator
-
-          } finally {
-            write.close()
-            ioManager.close()
           }
       }
-      .collect()
-      .map(deserializeCommitMessage(serializer, _))
-
-    commitMessages.toSeq
-  }
-
-  def commit(commitMessages: Seq[CommitMessage]): Unit = {
-    val tableCommit = writeBuilder.newCommit()
-    try {
-      tableCommit.commit(commitMessages.toList.asJava)
-    } catch {
-      case e: Throwable => throw new RuntimeException(e);
-    } finally {
-      tableCommit.close()
     }
-  }
 
-  /** assign a valid bucket id for each of record. */
-  private def assignBucketId(
-      sparkSession: SparkSession,
-      withInitBucketCol: DataFrame,
-      bucketColIdx: Int,
-      encoderGroupWithBucketCol: EncoderSerDeGroup): Dataset[Row] = {
+    def writeWithBucketProcessor(
+        dataFrame: DataFrame,
+        processor: BucketProcessor): Dataset[Array[Byte]] = {
+      val repartitioned = repartitionByPartitionsAndBucket(
+        dataFrame.mapPartitions(processor.processPartition)(encoderGroupWithBucketCol.encoder))
+      repartitioned.mapPartitions {
+        iter =>
+          {
+            val write = newWrite()
+            try {
+              iter.foreach(row => write.write(row, row.getInt(bucketColIdx)))
+              write.finish().asScala
+            } finally {
+              write.close()
+            }
+          }
+      }
+    }
 
-    val encoderWithBucketCOl = encoderGroupWithBucketCol.encoder
+    def writeWithBucketAssigner(
+        dataFrame: DataFrame,
+        funcFactory: () => Row => Int): Dataset[Array[Byte]] = {
+      dataFrame.mapPartitions {
+        iter =>
+          {
+            val assigner = funcFactory.apply()
+            val write = newWrite()
+            try {
+              iter.foreach(row => write.write(row, assigner.apply(row)))
+              write.finish().asScala
+            } finally {
+              write.close()
+            }
+          }
+      }
+    }
 
-    bucketMode match {
-      case BucketMode.DYNAMIC =>
+    val written: Dataset[Array[Byte]] = bucketMode match {
+      case BucketMode.HASH_DYNAMIC =>
         assert(primaryKeyCols.nonEmpty, "Only primary-key table can support dynamic bucket.")
 
-        // Topology: input -> shuffle by special key & partition hash -> bucket-assigner -> shuffle by partition & bucket
         val numParallelism = Option(table.coreOptions.dynamicBucketAssignerParallelism)
           .map(_.toInt)
           .getOrElse {
@@ -139,41 +141,150 @@ case class PaimonSparkWriter(table: FileStoreTable) {
           .map(initialBuckets => Math.min(initialBuckets.toInt, numParallelism))
           .getOrElse(numParallelism)
 
-        val partitioned =
+        def partitionByKey(): DataFrame = {
           repartitionByKeyPartitionHash(
             sparkSession,
             withInitBucketCol,
             numParallelism,
             numAssigners)
-        val dynamicBucketProcessor =
-          DynamicBucketProcessor(
-            table,
-            bucketColIdx,
-            numParallelism,
-            numAssigners,
-            encoderGroupWithBucketCol)
-        repartitionByPartitionsAndBucket(
-          partitioned.mapPartitions(dynamicBucketProcessor.processPartition)(encoderWithBucketCOl))
+        }
 
-      case BucketMode.UNAWARE =>
-        assert(primaryKeyCols.isEmpty, "Only append table can support unaware bucket.")
-
-        // Topology: input -> bucket-assigner
-        val unawareBucketProcessor = UnawareBucketProcessor(bucketColIdx, encoderGroupWithBucketCol)
-        withInitBucketCol
-          .mapPartitions(unawareBucketProcessor.processPartition)(encoderWithBucketCOl)
-          .toDF()
-
-      case BucketMode.FIXED =>
+        if (table.snapshotManager().latestSnapshot() == null) {
+          // bootstrap mode
+          // Topology: input -> shuffle by special key & partition hash -> bucket-assigner
+          writeWithBucketAssigner(
+            partitionByKey(),
+            () => {
+              val extractor = new RowPartitionKeyExtractor(table.schema)
+              val assigner =
+                new SimpleHashBucketAssigner(
+                  numAssigners,
+                  TaskContext.getPartitionId(),
+                  table.coreOptions.dynamicBucketTargetRowNum)
+              row => {
+                val sparkRow = new SparkRow(rowType, row)
+                assigner.assign(
+                  extractor.partition(sparkRow),
+                  extractor.trimmedPrimaryKey(sparkRow).hashCode)
+              }
+            }
+          )
+        } else {
+          // Topology: input -> shuffle by special key & partition hash -> bucket-assigner -> shuffle by partition & bucket
+          writeWithBucketProcessor(
+            partitionByKey(),
+            DynamicBucketProcessor(
+              table,
+              bucketColIdx,
+              numParallelism,
+              numAssigners,
+              encoderGroupWithBucketCol))
+        }
+      case BucketMode.BUCKET_UNAWARE =>
+        // Topology: input ->
+        writeWithoutBucket()
+      case BucketMode.HASH_FIXED =>
         // Topology: input -> bucket-assigner -> shuffle by partition & bucket
-        val commonBucketProcessor =
-          CommonBucketProcessor(table, bucketColIdx, encoderGroupWithBucketCol)
-        repartitionByPartitionsAndBucket(
-          withInitBucketCol.mapPartitions(commonBucketProcessor.processPartition)(
-            encoderWithBucketCOl))
-
+        writeWithBucketProcessor(
+          withInitBucketCol,
+          CommonBucketProcessor(table, bucketColIdx, encoderGroupWithBucketCol))
       case _ =>
         throw new UnsupportedOperationException(s"Spark doesn't support $bucketMode mode.")
+    }
+
+    written
+      .collect()
+      .map(deserializeCommitMessage(serializer, _))
+      .toSeq
+  }
+
+  /**
+   * Write all the deletion vectors to the index files. If it's in unaware mode, one index file maps
+   * one deletion vector; else, one index file will contains all deletion vector with the same
+   * partition and bucket.
+   */
+  def persistDeletionVectors(deletionVectors: Dataset[SparkDeletionVectors]): Seq[CommitMessage] = {
+    val sparkSession = deletionVectors.sparkSession
+    import sparkSession.implicits._
+
+    val fileStore = table.store()
+    val lastSnapshotId = table.snapshotManager().latestSnapshotId()
+
+    def createOrRestoreDVMaintainer(
+        partition: BinaryRow,
+        bucket: Int): DeletionVectorsMaintainer = {
+      val deletionVectorsMaintainerFactory =
+        new DeletionVectorsMaintainer.Factory(fileStore.newIndexFileHandler())
+      fileStore.bucketMode() match {
+        case BucketMode.BUCKET_UNAWARE =>
+          deletionVectorsMaintainerFactory.create()
+        case _ =>
+          deletionVectorsMaintainerFactory.createOrRestore(lastSnapshotId, partition, bucket)
+      }
+    }
+
+    def commitDeletionVector(
+        sdv: SparkDeletionVectors,
+        serializer: CommitMessageSerializer): Array[Byte] = {
+      val partition = SerializationUtils.deserializeBinaryRow(sdv.partition)
+      val maintainer = createOrRestoreDVMaintainer(partition, sdv.bucket)
+      sdv.dataFileAndDeletionVector.foreach {
+        case (dataFileName, dv) =>
+          maintainer.notifyNewDeletion(dataFileName, DeletionVector.deserializeFromBytes(dv))
+      }
+
+      val commitMessage = new CommitMessageImpl(
+        partition,
+        sdv.bucket,
+        DataIncrement.emptyIncrement(),
+        CompactIncrement.emptyIncrement(),
+        new IndexIncrement(maintainer.prepareCommit()))
+
+      serializer.serialize(commitMessage)
+    }
+
+    val serializedCommits = deletionVectors
+      .groupByKey(_.partitionAndBucket)
+      .mapGroups {
+        case (_, iter: Iterator[SparkDeletionVectors]) =>
+          val serializer = new CommitMessageSerializer
+          val grouped = iter.reduce {
+            (sdv1, sdv2) =>
+              sdv1.copy(dataFileAndDeletionVector =
+                sdv1.dataFileAndDeletionVector ++ sdv2.dataFileAndDeletionVector)
+          }
+          commitDeletionVector(grouped, serializer)
+      }
+    serializedCommits
+      .collect()
+      .map(deserializeCommitMessage(serializer, _))
+  }
+
+  def buildCommitMessageFromIndexManifestEntry(
+      indexManifestEntries: Seq[IndexManifestEntry]): Seq[CommitMessage] = {
+    indexManifestEntries
+      .groupBy(entry => (entry.partition(), entry.bucket()))
+      .map {
+        case ((partition, bucket), entries) =>
+          val (added, removed) = entries.partition(_.kind() == FileKind.ADD)
+          new CommitMessageImpl(
+            partition,
+            bucket,
+            DataIncrement.emptyIncrement(),
+            CompactIncrement.emptyIncrement(),
+            new IndexIncrement(added.map(_.indexFile()).asJava, removed.map(_.indexFile()).asJava))
+      }
+      .toSeq
+  }
+
+  def commit(commitMessages: Seq[CommitMessage]): Unit = {
+    val tableCommit = writeBuilder.newCommit()
+    try {
+      tableCommit.commit(commitMessages.toList.asJava)
+    } catch {
+      case e: Throwable => throw new RuntimeException(e);
+    } finally {
+      tableCommit.close()
     }
   }
 
@@ -224,7 +335,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
     }
   }
 
-  case class ModPartitioner(partitions: Int) extends Partitioner {
+  private case class ModPartitioner(partitions: Int) extends Partitioner {
     override def numPartitions: Int = partitions
     override def getPartition(key: Any): Int = key.asInstanceOf[Int] % numPartitions
   }

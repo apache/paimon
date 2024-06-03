@@ -26,6 +26,7 @@ import org.apache.flink.core.io.SimpleVersionedSerializer;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 
 /**
  * {@link SimpleVersionedSerializer} for {@link MultiTableCommittable}. If a type info class is
@@ -52,21 +53,19 @@ public class MultiTableCommittableSerializer
     @Override
     public byte[] serialize(MultiTableCommittable committable) throws IOException {
         // first serialize all metadata
-        String database = committable.getDatabase();
-        int databaseLen = database.length();
-        String table = committable.getTable();
-        int tableLen = table.length();
+        byte[] database = committable.getDatabase().getBytes(StandardCharsets.UTF_8);
+        byte[] table = committable.getTable().getBytes(StandardCharsets.UTF_8);
 
-        int multiTableMetaLen = databaseLen + tableLen + 2 * 4;
+        int multiTableMetaLen = database.length + table.length + 2 * 4;
 
         // use committable serializer (of the same version) to serialize committable
         byte[] serializedCommittable = serializeCommittable(committable);
 
         return ByteBuffer.allocate(multiTableMetaLen + serializedCommittable.length)
-                .putInt(databaseLen)
-                .put(database.getBytes())
-                .putInt(tableLen)
-                .put(table.getBytes())
+                .putInt(database.length)
+                .put(database)
+                .putInt(table.length)
+                .put(table)
                 .put(serializedCommittable)
                 .array();
     }
@@ -83,17 +82,18 @@ public class MultiTableCommittableSerializer
         int databaseLen = buffer.getInt();
         byte[] databaseBytes = new byte[databaseLen];
         buffer.get(databaseBytes, 0, databaseLen);
-        String database = new String(databaseBytes);
+        String database = new String(databaseBytes, StandardCharsets.UTF_8);
+
         int tableLen = buffer.getInt();
         byte[] tableBytes = new byte[tableLen];
         buffer.get(tableBytes, 0, tableLen);
-        String table = new String(tableBytes);
-        int multiTableMetaLen = databaseLen + tableLen + 2 * 4;
+        String table = new String(tableBytes, StandardCharsets.UTF_8);
+        int multiTableMetaLen = 4 + databaseLen + 4 + tableLen;
 
         // use committable serializer (of the same version) to deserialize committable
         byte[] serializedCommittable = new byte[bytes.length - multiTableMetaLen];
 
-        buffer.get(serializedCommittable, 0, bytes.length - multiTableMetaLen);
+        buffer.get(serializedCommittable, 0, serializedCommittable.length);
         Committable committable = deserializeCommittable(committableVersion, serializedCommittable);
 
         return MultiTableCommittable.fromCommittable(

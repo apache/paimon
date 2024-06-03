@@ -53,8 +53,9 @@ public class FileStoreTableFactory {
 
     public static FileStoreTable create(FileIO fileIO, Options options) {
         Path tablePath = CoreOptions.path(options);
+        String branchName = CoreOptions.branch(options.toMap());
         TableSchema tableSchema =
-                new SchemaManager(fileIO, tablePath)
+                new SchemaManager(fileIO, tablePath, branchName)
                         .latest()
                         .orElseThrow(
                                 () ->

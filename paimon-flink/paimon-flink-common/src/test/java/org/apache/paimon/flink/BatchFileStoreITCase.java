@@ -28,6 +28,8 @@ import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -421,6 +423,22 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testIgnoreDeleteWithRowKindField() {
+        sql(
+                "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING, kind STRING) "
+                        + "WITH ('merge-engine' = 'deduplicate', 'ignore-delete' = 'true', 'bucket' = '1', 'rowkind.field' = 'kind')");
+
+        sql("INSERT INTO ignore_delete VALUES (1, 'A', '+I')");
+        assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "A", "+I"));
+
+        sql("INSERT INTO ignore_delete VALUES (1, 'A', '-D')");
+        assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "A", "+I"));
+
+        sql("INSERT INTO ignore_delete VALUES (1, 'B', '+I')");
+        assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "B", "+I"));
+    }
+
+    @Test
     public void testDeleteWithPkLookup() throws Exception {
         sql(
                 "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING) "
@@ -434,6 +452,31 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         assertThat(iterator.collect(2))
                 .containsExactlyInAnyOrder(
                         Row.ofKind(RowKind.INSERT, 1, "B"), Row.ofKind(RowKind.INSERT, 2, "B"));
+        iterator.close();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"none", "lookup", "input"})
+    public void testDeletePartitionWithChangelog(String producer) throws Exception {
+        sql(
+                "CREATE TABLE delete_table (pt INT, pk INT, v STRING, PRIMARY KEY(pt, pk) NOT ENFORCED) PARTITIONED BY (pt)   "
+                        + "WITH ('changelog-producer' = '"
+                        + producer
+                        + "', 'delete.force-produce-changelog'='true', 'bucket'='1')");
+        BlockingIterator<Row, Row> iterator = streamSqlBlockIter("SELECT * FROM delete_table");
+
+        sql("INSERT INTO delete_table VALUES (1, 1, 'A'), (2, 2, 'B')");
+        assertThat(iterator.collect(2))
+                .containsExactlyInAnyOrder(
+                        Row.ofKind(RowKind.INSERT, 1, 1, "A"),
+                        Row.ofKind(RowKind.INSERT, 2, 2, "B"));
+        sql("DELETE FROM delete_table WHERE pt = 1");
+        assertThat(iterator.collect(1))
+                .containsExactlyInAnyOrder(Row.ofKind(RowKind.DELETE, 1, 1, "A"));
+        sql("INSERT INTO delete_table VALUES (1, 1, 'B')");
+
+        assertThat(iterator.collect(1))
+                .containsExactlyInAnyOrder(Row.ofKind(RowKind.INSERT, 1, 1, "B"));
         iterator.close();
     }
 

@@ -56,7 +56,6 @@ import java.util.function.Supplier;
 import static org.apache.paimon.predicate.PredicateBuilder.and;
 import static org.apache.paimon.predicate.PredicateBuilder.pickTransformFieldMapping;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
-import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** {@link FileStore} for querying and updating {@link KeyValue}s. */
@@ -103,20 +102,16 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     @Override
     public BucketMode bucketMode() {
         if (options.bucket() == -1) {
-            return crossPartitionUpdate ? BucketMode.GLOBAL_DYNAMIC : BucketMode.DYNAMIC;
+            return crossPartitionUpdate ? BucketMode.CROSS_PARTITION : BucketMode.HASH_DYNAMIC;
         } else {
             checkArgument(!crossPartitionUpdate);
-            return BucketMode.FIXED;
+            return BucketMode.HASH_FIXED;
         }
     }
 
     @Override
     public KeyValueFileStoreScan newScan() {
-        return newScan(DEFAULT_MAIN_BRANCH);
-    }
-
-    public KeyValueFileStoreScan newScan(String branchName) {
-        return newScan(false, branchName);
+        return newScan(false);
     }
 
     @Override
@@ -163,7 +158,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     @Override
     public KeyValueFileStoreWrite newWrite(String commitUser, ManifestCacheFilter manifestFilter) {
         IndexMaintainer.Factory<KeyValue> indexFactory = null;
-        if (bucketMode() == BucketMode.DYNAMIC) {
+        if (bucketMode() == BucketMode.HASH_DYNAMIC) {
             indexFactory = new HashIndexMaintainer.Factory(newIndexFileHandler());
         }
         DeletionVectorsMaintainer.Factory deletionVectorsMaintainerFactory = null;
@@ -185,7 +180,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 pathFactory(),
                 format2PathFactory(),
                 snapshotManager(),
-                newScan(true, DEFAULT_MAIN_BRANCH).withManifestCacheFilter(manifestFilter),
+                newScan(true).withManifestCacheFilter(manifestFilter),
                 indexFactory,
                 deletionVectorsMaintainerFactory,
                 options,
@@ -209,12 +204,12 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
         return pathFactoryMap;
     }
 
-    private KeyValueFileStoreScan newScan(boolean forWrite, String branchName) {
+    private KeyValueFileStoreScan newScan(boolean forWrite) {
         ScanBucketFilter bucketFilter =
                 new ScanBucketFilter(bucketKeyType) {
                     @Override
                     public void pushdown(Predicate keyFilter) {
-                        if (bucketMode() != BucketMode.FIXED) {
+                        if (bucketMode() != BucketMode.HASH_FIXED) {
                             return;
                         }
 
@@ -240,7 +235,6 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 options.bucket(),
                 forWrite,
                 options.scanManifestParallelism(),
-                branchName,
                 options.deletionVectorsEnabled(),
                 options.mergeEngine());
     }

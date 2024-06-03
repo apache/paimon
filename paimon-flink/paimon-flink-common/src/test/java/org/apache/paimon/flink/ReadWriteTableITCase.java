@@ -136,6 +136,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 createTable(
                         Arrays.asList("currency STRING", "rate BIGINT", "dt String"),
                         Arrays.asList("currency", "dt"),
+                        Collections.emptyList(),
                         Collections.singletonList("dt"));
 
         insertInto(
@@ -266,6 +267,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 createTable(
                         Arrays.asList("currency STRING", "rate BIGINT", "dt String"),
                         Collections.emptyList(),
+                        Collections.singletonList("currency"),
                         Collections.singletonList("dt"));
 
         insertInto(
@@ -324,6 +326,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 createTable(
                         Arrays.asList("currency STRING", "rate BIGINT"),
                         Collections.singletonList("currency"),
+                        Collections.emptyList(),
                         Collections.emptyList());
 
         insertInto(table, "('US Dollar', 102)", "('Yen', 1)", "('Euro', 119)");
@@ -379,6 +382,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 createTable(
                         Arrays.asList("currency STRING", "rate BIGINT"),
                         Collections.emptyList(),
+                        Collections.singletonList("currency"),
                         Collections.emptyList());
 
         insertInto(
@@ -459,6 +463,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 createTable(
                         Arrays.asList("currency STRING", "rate BIGINT", "dt STRING"),
                         Arrays.asList("currency", "dt"),
+                        Collections.emptyList(),
                         Collections.singletonList("dt"));
 
         insertIntoFromTable(temporaryTable, table);
@@ -529,6 +534,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 createTable(
                         Arrays.asList("currency STRING", "rate BIGINT"),
                         Collections.singletonList("currency"),
+                        Collections.emptyList(),
                         Collections.emptyList());
 
         insertIntoFromTable(temporaryTable, table);
@@ -569,6 +575,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 createTable(
                         Arrays.asList("pk INT", "part0 INT", "part1 STRING", "v STRING"),
                         Arrays.asList("pk", "part0", "part1"),
+                        Collections.emptyList(),
                         Arrays.asList("part0", "part1"),
                         streamingReadOverwrite);
 
@@ -638,6 +645,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 createTable(
                         Arrays.asList("k0 INT", "k1 STRING", "v STRING"),
                         Collections.emptyList(),
+                        Collections.singletonList("k0"),
                         Collections.emptyList(),
                         staticPartitionOverwrite);
 
@@ -653,6 +661,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 createTable(
                         fieldsSpec,
                         Collections.emptyList(),
+                        Collections.singletonList("k1"),
                         Collections.singletonList("k0"),
                         staticPartitionOverwrite);
 
@@ -670,6 +679,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 createTable(
                         fieldsSpec,
                         Collections.emptyList(),
+                        Collections.singletonList("v"),
                         Arrays.asList("k0", "k1"),
                         staticPartitionOverwrite);
 
@@ -687,6 +697,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 createTable(
                         fieldsSpec,
                         Collections.emptyList(),
+                        Collections.singletonList("v"),
                         Arrays.asList("k0", "k1"),
                         staticPartitionOverwrite);
 
@@ -711,6 +722,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 createTable(
                         Arrays.asList("currency STRING", "rate BIGINT", "dt String"),
                         Arrays.asList("currency", "dt"),
+                        Collections.emptyList(),
                         Collections.singletonList("dt"),
                         streamingReadOverwrite);
 
@@ -757,6 +769,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                         Arrays.asList("currency STRING", "rate BIGINT", "dt STRING"),
                         Collections.singletonList("currency"),
                         Collections.emptyList(),
+                        Collections.emptyList(),
                         streamingReadOverwrite);
 
         insertInto(
@@ -794,6 +807,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                         Arrays.asList(
                                                 "currency STRING", "rate BIGINT", "dt String"),
                                         Collections.emptyList(),
+                                        Collections.singletonList("currency"),
                                         Collections.singletonList("dt"),
                                         streamingReadOverwrite))
                 .satisfies(
@@ -812,6 +826,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 createTable(
                         Arrays.asList("f0 INT", "f1 STRING"),
                         Collections.emptyList(),
+                        Collections.singletonList("f0"),
                         Collections.emptyList());
 
         // insert multiple times
@@ -904,6 +919,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 createTable(
                         Arrays.asList("f0 INT", "f1 STRING"),
                         Collections.emptyList(),
+                        Collections.singletonList("f0"),
                         Collections.emptyList());
 
         insertInto(
@@ -950,6 +966,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 createTable(
                         Arrays.asList("currency STRING", "rate BIGINT", "dt STRING"),
                         Arrays.asList("currency", "dt"),
+                        Collections.emptyList(),
                         Collections.singletonList("dt"));
 
         insertInto(
@@ -987,6 +1004,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 createTable(
                         Arrays.asList("currency STRING", "rate BIGINT"),
                         Collections.emptyList(),
+                        Collections.singletonList("currency"),
                         Collections.emptyList(),
                         Collections.singletonMap(INFER_SCAN_PARALLELISM.key(), "false"));
 
@@ -1025,6 +1043,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 createTable(
                         Arrays.asList("currency STRING", "rate BIGINT"),
                         Collections.emptyList(),
+                        Collections.singletonList("currency"),
                         Collections.emptyList(),
                         new HashMap<String, String>() {
                             {
@@ -1176,7 +1195,8 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                 + " dt STRING\n"
                                 + ") PARTITIONED BY (dt)\n"
                                 + "WITH (\n"
-                                + " 'bucket' = '2'\n"
+                                + " 'bucket' = '2',\n"
+                                + " 'bucket-key' = 'currency'\n"
                                 + ")",
                         table));
 
@@ -1195,6 +1215,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 createTable(
                         Arrays.asList("currency STRING", "rate BIGINT", "dt String"),
                         Collections.emptyList(),
+                        Collections.singletonList("currency"),
                         Collections.singletonList("dt"));
 
         assertThatThrownBy(
@@ -1341,6 +1362,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                 "rate BIGINT",
                                 "dt String"),
                         Arrays.asList("id", "dt"),
+                        Collections.emptyList(),
                         Collections.singletonList("dt"),
                         options);
 
@@ -1390,6 +1412,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                 "rate BIGINT",
                                 "dt String"),
                         Collections.emptyList(),
+                        Collections.singletonList("id"),
                         Collections.emptyList(),
                         options);
         insertInto(
@@ -1428,6 +1451,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                 "rate BIGINT",
                                 "dt String"),
                         Lists.newArrayList("id", "dt"),
+                        Collections.emptyList(),
                         Lists.newArrayList("dt"),
                         options);
         insertInto(
@@ -1457,6 +1481,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                 "rate BIGINT",
                                 "dt String"),
                         Collections.emptyList(),
+                        Collections.singletonList("id"),
                         Collections.singletonList("dt"),
                         options);
 
@@ -1498,6 +1523,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                 "rate BIGINT",
                                 "dt String"),
                         Arrays.asList("id", "dt"),
+                        Collections.emptyList(),
                         Collections.singletonList("dt"),
                         Collections.emptyMap());
 
@@ -1533,6 +1559,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                 "rate BIGINT",
                                 "dt String"),
                         Collections.emptyList(),
+                        Collections.singletonList("id"),
                         Collections.singletonList("dt"),
                         options);
 
@@ -1552,7 +1579,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testDeletePushDownWithPrimaryKey() throws Exception {
+    public void testDeleteWithPrimaryKeyFilter() throws Exception {
         // Step1: define table schema
         String table =
                 createTable(
@@ -1562,6 +1589,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                 "rate BIGINT",
                                 "dt String"),
                         Arrays.asList("id", "dt"),
+                        Collections.emptyList(),
                         Collections.singletonList("dt"),
                         Collections.emptyMap());
 
@@ -1616,6 +1644,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                 "dt String",
                                 "hh String"),
                         Arrays.asList("id", "dt", "hh"),
+                        Collections.emptyList(),
                         Arrays.asList("dt", "hh"),
                         Collections.emptyMap());
 
@@ -1744,6 +1773,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
         }
         options.put("path", getTempFilePath(UUID.randomUUID().toString()));
         options.put("bucket", "1");
+        options.put("bucket-key", "a");
 
         DynamicTableFactory.Context context =
                 new FactoryUtil.DefaultDynamicTableContext(

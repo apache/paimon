@@ -24,12 +24,14 @@ import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.VectoredReadable;
 
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.DirectoryNotEmptyException;
@@ -233,7 +235,8 @@ public class LocalFileIO implements FileIO {
     }
 
     /** Local {@link SeekableInputStream}. */
-    public static class LocalSeekableInputStream extends SeekableInputStream {
+    public static class LocalSeekableInputStream extends SeekableInputStream
+            implements VectoredReadable {
 
         private final FileInputStream in;
         private final FileChannel channel;
@@ -268,6 +271,15 @@ public class LocalFileIO implements FileIO {
         @Override
         public void close() throws IOException {
             in.close();
+        }
+
+        @Override
+        public int pread(long position, byte[] b, int off, int len) throws IOException {
+            if (len == 0) {
+                return 0;
+            }
+
+            return channel.read(ByteBuffer.wrap(b, off, len), position);
         }
     }
 

@@ -18,38 +18,44 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.annotation.Experimental;
+
 /**
- * Bucket mode of the table, it affects the writing process and also affects the data skipping in
+ * Bucket mode of the table, it affects the writing process and also affects the bucket skipping in
  * reading.
+ *
+ * @since 0.9
  */
+@Experimental
 public enum BucketMode {
 
     /**
      * The fixed number of buckets configured by the user can only be modified through offline
-     * commands. The data is distributed to the corresponding buckets according to bucket key
-     * (default is primary key), and the reading end can perform data skipping based on the
-     * filtering conditions of the bucket key.
+     * commands. The data is distributed to the corresponding buckets according to the hash value of
+     * bucket key (default is primary key), and the reading end can perform bucket skipping based on
+     * the filtering conditions of the bucket key.
      */
-    FIXED,
+    HASH_FIXED,
 
     /**
-     * The Dynamic bucket mode records which bucket the key corresponds to through the index files.
-     * This mode cannot support multiple concurrent writes or data skipping for reading filter
-     * conditions. This mode only works for changelog table.
+     * The dynamic bucket mode records which bucket the key corresponds to through the index files.
+     * The index records the correspondence between the hash value of the primary-key and the
+     * bucket. This mode cannot support multiple concurrent writes or bucket skipping for reading
+     * filter conditions. This mode only works for changelog table.
      */
-    DYNAMIC,
+    HASH_DYNAMIC,
 
     /**
-     * Compared with the DYNAMIC mode, this mode not only dynamically allocates buckets for
-     * Partition table, but also updates data across partitions. The primary key does not contain
-     * partition fields.
+     * The cross partition mode is for cross partition upsert (primary keys not contain all
+     * partition fields). It directly maintains the mapping of primary keys to partition and bucket,
+     * uses local disks, and initializes indexes by reading all existing keys in the table when
+     * starting stream write job.
      */
-    GLOBAL_DYNAMIC,
+    CROSS_PARTITION,
 
     /**
-     * Ignoring buckets can be equivalent to understanding that all data enters the global bucket,
-     * and data is randomly written to the table. The data in the bucket has no order relationship
-     * at all. This mode only works for append-only table.
+     * Ignoring bucket concept, although all data is written to bucket-0, the parallelism of reads
+     * and writes is unrestricted. This mode only works for append-only table.
      */
-    UNAWARE
+    BUCKET_UNAWARE
 }

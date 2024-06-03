@@ -109,10 +109,14 @@ public class TagAutoCreation {
                 return false;
             }
 
+            Long watermark = latestSnapshot.watermark();
+            if (watermark == null) {
+                return false;
+            }
+
             LocalDateTime snapshotTime =
                     LocalDateTime.ofInstant(
-                            Instant.ofEpochMilli(latestSnapshot.watermark()),
-                            ZoneId.systemDefault());
+                            Instant.ofEpochMilli(watermark), ZoneId.systemDefault());
 
             return isAfterOrEqual(LocalDateTime.now().minus(idlenessTimeout), snapshotTime);
         } else if (timeExtractor instanceof ProcessTimeExtractor) {
@@ -152,7 +156,9 @@ public class TagAutoCreation {
                 || isAfterOrEqual(time.minus(delay), periodHandler.nextTagTime(nextTag))) {
             LocalDateTime thisTag = periodHandler.normalizeToPreviousTag(time);
             String tagName = periodHandler.timeToTag(thisTag);
-            tagManager.createTag(snapshot, tagName, defaultTimeRetained, callbacks);
+            if (!tagManager.tagExists(tagName)) {
+                tagManager.createTag(snapshot, tagName, defaultTimeRetained, callbacks);
+            }
             nextTag = periodHandler.nextTagTime(thisTag);
 
             if (numRetainedMax != null) {

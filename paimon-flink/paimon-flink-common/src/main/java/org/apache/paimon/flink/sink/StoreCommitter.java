@@ -20,14 +20,14 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
+import org.apache.paimon.flink.sink.partition.PartitionMarkDone;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.TableCommit;
 import org.apache.paimon.table.sink.TableCommitImpl;
-
-import org.apache.flink.metrics.groups.OperatorMetricGroup;
 
 import javax.annotation.Nullable;
 
@@ -43,15 +43,27 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
 
     private final TableCommitImpl commit;
     @Nullable private final CommitterMetrics committerMetrics;
+    @Nullable private final PartitionMarkDone partitionMarkDone;
 
-    public StoreCommitter(TableCommit commit, @Nullable OperatorMetricGroup metricGroup) {
+    public StoreCommitter(FileStoreTable table, TableCommit commit, Context context) {
         this.commit = (TableCommitImpl) commit;
 
-        if (metricGroup != null) {
-            this.commit.withMetricRegistry(new FlinkMetricRegistry(metricGroup));
-            this.committerMetrics = new CommitterMetrics(metricGroup.getIOMetricGroup());
+        if (context.metricGroup() != null) {
+            this.commit.withMetricRegistry(new FlinkMetricRegistry(context.metricGroup()));
+            this.committerMetrics = new CommitterMetrics(context.metricGroup().getIOMetricGroup());
         } else {
             this.committerMetrics = null;
+        }
+
+        try {
+            this.partitionMarkDone =
+                    PartitionMarkDone.create(
+                            context.streamingCheckpointEnabled(),
+                            context.isRestored(),
+                            context.stateStore(),
+                            table);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 
@@ -99,15 +111,30 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
             throws IOException, InterruptedException {
         commit.commitMultiple(committables, false);
         calcNumBytesAndRecordsOut(committables);
+        if (partitionMarkDone != null) {
+            partitionMarkDone.notifyCommittable(committables);
+        }
     }
 
     @Override
     public int filterAndCommit(List<ManifestCommittable> globalCommittables) {
-        return commit.filterAndCommitMultiple(globalCommittables);
+        int committed = commit.filterAndCommitMultiple(globalCommittables);
+        if (partitionMarkDone != null) {
+            partitionMarkDone.notifyCommittable(globalCommittables);
+        }
+        return committed;
     }
 
     @Override
     public Map<Long, List<Committable>> groupByCheckpoint(Collection<Committable> committables) {
+        if (partitionMarkDone != null) {
+            try {
+                partitionMarkDone.snapshotState();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+
         Map<Long, List<Committable>> grouped = new HashMap<>();
         for (Committable c : committables) {
             grouped.computeIfAbsent(c.checkpointId(), k -> new ArrayList<>()).add(c);

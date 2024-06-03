@@ -175,9 +175,6 @@ public class TableSchema implements Serializable {
         if (bucketKeys.isEmpty()) {
             bucketKeys = trimmedPrimaryKeys();
         }
-        if (bucketKeys.isEmpty()) {
-            bucketKeys = fieldNames();
-        }
         return bucketKeys;
     }
 

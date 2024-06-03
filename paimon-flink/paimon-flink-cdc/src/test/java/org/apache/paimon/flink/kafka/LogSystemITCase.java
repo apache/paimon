@@ -66,6 +66,7 @@ public class LogSystemITCase extends KafkaTableTestBase {
                         "CREATE TABLE T (i INT, j INT) WITH ("
                                 + "'log.system'='kafka', "
                                 + "'bucket'='1', "
+                                + "'bucket-key'='i', "
                                 + "'log.consistency'='eventual', "
                                 + "'kafka.bootstrap.servers'='%s', "
                                 + "'kafka.topic'='T')",
@@ -220,6 +221,7 @@ public class LogSystemITCase extends KafkaTableTestBase {
                         "CREATE TABLE T (i INT, j INT) WITH ("
                                 + "'log.system'='kafka', "
                                 + "'bucket'='1', "
+                                + "'bucket-key'='i', "
                                 + "'log.system.partitions'='2', "
                                 + "'kafka.bootstrap.servers'='%s', "
                                 + "'kafka.topic'='Tt')",
@@ -232,6 +234,7 @@ public class LogSystemITCase extends KafkaTableTestBase {
                         "CREATE TABLE T2 (i INT, j INT) WITH ("
                                 + "'log.system'='kafka', "
                                 + "'bucket'='2', "
+                                + "'bucket-key'='i', "
                                 + "'kafka.bootstrap.servers'='%s', "
                                 + "'kafka.topic'='T2')",
                         getBootstrapServers()));
@@ -244,6 +247,7 @@ public class LogSystemITCase extends KafkaTableTestBase {
                         "CREATE TABLE T1 (i INT, j INT) WITH ("
                                 + "'log.system'='kafka', "
                                 + "'bucket'='1', "
+                                + "'bucket-key'='i', "
                                 + "'log.system.partitions'='2', "
                                 + "'kafka.bootstrap.servers'='%s')",
                         getBootstrapServers()));
@@ -262,6 +266,7 @@ public class LogSystemITCase extends KafkaTableTestBase {
                                                 "CREATE TABLE T (i INT, j INT) WITH ("
                                                         + "'log.system'='kafka', "
                                                         + "'bucket'='1', "
+                                                        + "'bucket-key'='i', "
                                                         + "'log.system.partitions'='2', "
                                                         + "'kafka.bootstrap.servers'='%s', "
                                                         + "'kafka.topic'='T1')",
@@ -283,6 +288,7 @@ public class LogSystemITCase extends KafkaTableTestBase {
                                                 "CREATE TABLE NOT_EXIST.T (i INT, j INT) WITH ("
                                                         + "'log.system'='kafka', "
                                                         + "'bucket'='1', "
+                                                        + "'bucket-key'='i', "
                                                         + "'log.system.partitions'='2', "
                                                         + "'kafka.bootstrap.servers'='%s', "
                                                         + "'kafka.topic'='T1')",
@@ -337,6 +343,7 @@ public class LogSystemITCase extends KafkaTableTestBase {
                             "CREATE TABLE T (a STRING, b STRING, c STRING) WITH ("
                                     + "'log.system'='kafka', "
                                     + "'bucket'='1', "
+                                    + "'bucket-key'='a', "
                                     + "'kafka.bootstrap.servers'='%s',"
                                     + "'kafka.topic'='%s'"
                                     + ")",
@@ -369,6 +376,7 @@ public class LogSystemITCase extends KafkaTableTestBase {
                                     + ") WITH ("
                                     + "'log.system'='kafka', "
                                     + "'bucket'='1', "
+                                    + "'bucket-key'='a', "
                                     + "'kafka.bootstrap.servers'='%s',"
                                     + "'kafka.topic'='%s'"
                                     + ")",

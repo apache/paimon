@@ -25,6 +25,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.reader.EmptyRecordReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.FileStoreTable;
@@ -33,6 +34,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadOnceTableScan;
+import org.apache.paimon.table.source.SingletonSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.BigIntType;
@@ -42,7 +44,6 @@ import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.SerializationUtils;
-import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
@@ -53,6 +54,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
@@ -123,33 +125,18 @@ public class StatisticTable implements ReadonlyTable {
 
         @Override
         public Plan innerPlan() {
-            long rowCount;
-            try {
-                rowCount = new SnapshotManager(fileIO, location).snapshotCount();
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-            return () ->
-                    Collections.singletonList(
-                            new StatisticTable.StatisticSplit(rowCount, location));
+            return () -> Collections.singletonList(new StatisticTable.StatisticSplit(location));
         }
     }
 
-    private static class StatisticSplit implements Split {
+    private static class StatisticSplit extends SingletonSplit {
 
         private static final long serialVersionUID = 1L;
 
-        private final long rowCount;
         private final Path location;
 
-        private StatisticSplit(long rowCount, Path location) {
+        private StatisticSplit(Path location) {
             this.location = location;
-            this.rowCount = rowCount;
-        }
-
-        @Override
-        public long rowCount() {
-            return rowCount;
         }
 
         @Override
@@ -204,16 +191,22 @@ public class StatisticTable implements ReadonlyTable {
             if (!(split instanceof StatisticTable.StatisticSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
-            Statistics statistics = dataTable.statistics().get();
-            Iterator<Statistics> statisticsIterator =
-                    Collections.singletonList(statistics).iterator();
-            Iterator<InternalRow> rows = Iterators.transform(statisticsIterator, this::toRow);
-            if (projection != null) {
-                rows =
-                        Iterators.transform(
-                                rows, row -> ProjectedRow.from(projection).replaceRow(row));
+
+            Optional<Statistics> statisticsOptional = dataTable.statistics();
+            if (statisticsOptional.isPresent()) {
+                Statistics statistics = statisticsOptional.get();
+                Iterator<Statistics> statisticsIterator =
+                        Collections.singletonList(statistics).iterator();
+                Iterator<InternalRow> rows = Iterators.transform(statisticsIterator, this::toRow);
+                if (projection != null) {
+                    rows =
+                            Iterators.transform(
+                                    rows, row -> ProjectedRow.from(projection).replaceRow(row));
+                }
+                return new IteratorRecordReader<>(rows);
+            } else {
+                return new EmptyRecordReader<>();
             }
-            return new IteratorRecordReader<>(rows);
         }
 
         private InternalRow toRow(Statistics statistics) {

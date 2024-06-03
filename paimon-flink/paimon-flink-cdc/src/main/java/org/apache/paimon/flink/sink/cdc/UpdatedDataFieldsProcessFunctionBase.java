@@ -40,7 +40,6 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
 /** Base class for update data fields process function. */
 public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends ProcessFunction<I, O> {
@@ -63,6 +62,9 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
             Arrays.asList(DataTypeRoot.FLOAT, DataTypeRoot.DOUBLE);
 
     private static final List<DataTypeRoot> DECIMAL_TYPES = Arrays.asList(DataTypeRoot.DECIMAL);
+
+    private static final List<DataTypeRoot> TIMESTAMP_TYPES =
+            Arrays.asList(DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE);
 
     protected UpdatedDataFieldsProcessFunctionBase(Catalog.Loader catalogLoader) {
         this.catalogLoader = catalogLoader;
@@ -175,6 +177,14 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
                     : ConvertAction.CONVERT;
         }
 
+        oldIdx = TIMESTAMP_TYPES.indexOf(oldType.getTypeRoot());
+        newIdx = TIMESTAMP_TYPES.indexOf(newType.getTypeRoot());
+        if (oldIdx >= 0 && newIdx >= 0) {
+            return DataTypeChecks.getPrecision(oldType) <= DataTypeChecks.getPrecision(newType)
+                    ? ConvertAction.CONVERT
+                    : ConvertAction.IGNORE;
+        }
+
         return ConvertAction.EXCEPTION;
     }
 
@@ -193,13 +203,17 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
                 // we compare by ignoring nullable, because partition keys and primary keys might be
                 // nullable in source database, but they can't be null in Paimon
                 if (oldField.type().equalsIgnoreNullable(newField.type())) {
-                    if (!Objects.equals(oldField.description(), newField.description())) {
+                    // update column comment
+                    if (newField.description() != null
+                            && !newField.description().equals(oldField.description())) {
                         result.add(
                                 SchemaChange.updateColumnComment(
                                         new String[] {newField.name()}, newField.description()));
                     }
                 } else {
+                    // update column type
                     result.add(SchemaChange.updateColumnType(newField.name(), newField.type()));
+                    // update column comment
                     if (newField.description() != null) {
                         result.add(
                                 SchemaChange.updateColumnComment(
@@ -207,6 +221,7 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
                     }
                 }
             } else {
+                // add column
                 result.add(
                         SchemaChange.addColumn(
                                 newField.name(), newField.type(), newField.description(), null));

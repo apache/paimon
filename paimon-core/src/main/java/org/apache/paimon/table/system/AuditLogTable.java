@@ -38,12 +38,13 @@ import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.source.InnerStreamTableScan;
+import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
+import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingContext;
@@ -133,17 +134,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     }
 
     @Override
-    public SnapshotReader newSnapshotReader(String branchName) {
-        return new AuditLogDataReader(dataTable.newSnapshotReader(branchName));
-    }
-
-    @Override
-    public InnerTableScan newScan() {
+    public DataTableScan newScan() {
         return new AuditLogBatchScan(dataTable.newScan());
     }
 
     @Override
-    public InnerStreamTableScan newStreamScan() {
+    public StreamDataTableScan newStreamScan() {
         return new AuditLogStreamScan(dataTable.newStreamScan());
     }
 
@@ -281,6 +277,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public SnapshotReader withDataFileNameFilter(Filter<String> fileNameFilter) {
+            snapshotReader.withDataFileNameFilter(fileNameFilter);
+            return this;
+        }
+
+        @Override
         public SnapshotReader withMetricRegistry(MetricRegistry registry) {
             snapshotReader.withMetricRegistry(registry);
             return this;
@@ -312,11 +314,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
     }
 
-    private class AuditLogBatchScan implements InnerTableScan {
+    private class AuditLogBatchScan implements DataTableScan {
 
-        private final InnerTableScan batchScan;
+        private final DataTableScan batchScan;
 
-        private AuditLogBatchScan(InnerTableScan batchScan) {
+        private AuditLogBatchScan(DataTableScan batchScan) {
             this.batchScan = batchScan;
         }
 
@@ -365,18 +367,24 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         public List<BinaryRow> listPartitions() {
             return batchScan.listPartitions();
         }
+
+        @Override
+        public DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
+            batchScan.withShard(indexOfThisSubtask, numberOfParallelSubtasks);
+            return this;
+        }
     }
 
-    private class AuditLogStreamScan implements InnerStreamTableScan {
+    private class AuditLogStreamScan implements StreamDataTableScan {
 
-        private final InnerStreamTableScan streamScan;
+        private final StreamDataTableScan streamScan;
 
-        private AuditLogStreamScan(InnerStreamTableScan streamScan) {
+        private AuditLogStreamScan(StreamDataTableScan streamScan) {
             this.streamScan = streamScan;
         }
 
         @Override
-        public InnerStreamTableScan withFilter(Predicate predicate) {
+        public StreamDataTableScan withFilter(Predicate predicate) {
             convert(predicate).ifPresent(streamScan::withFilter);
             return this;
         }
@@ -424,8 +432,14 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public InnerStreamTableScan withMetricsRegistry(MetricRegistry metricsRegistry) {
+        public StreamDataTableScan withMetricsRegistry(MetricRegistry metricsRegistry) {
             streamScan.withMetricsRegistry(metricsRegistry);
+            return this;
+        }
+
+        @Override
+        public DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
+            streamScan.withShard(indexOfThisSubtask, numberOfParallelSubtasks);
             return this;
         }
     }

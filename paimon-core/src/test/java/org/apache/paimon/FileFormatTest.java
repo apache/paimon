@@ -36,12 +36,13 @@ import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.apache.paimon.format.orc.OrcFileFormatFactory.IDENTIFIER;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -99,12 +100,13 @@ public class FileFormatTest {
                 .hasMessage("Unrecognized codec: _unsupported");
     }
 
-    @Test
-    public void testCreateFileFormat() {
+    @ParameterizedTest
+    @ValueSource(strings = {"orc", "Orc", "ORC"})
+    public void testCreateFileFormat(String identifier) {
         Options tableOptions = new Options();
-        tableOptions.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.fromValue(IDENTIFIER));
+        tableOptions.set(CoreOptions.FILE_FORMAT, identifier);
         tableOptions.set(CoreOptions.READ_BATCH_SIZE, 1024);
-        tableOptions.setString(IDENTIFIER + ".hello", "world");
+        tableOptions.setString(identifier.toLowerCase() + ".hello", "world");
         FileFormat fileFormat = CoreOptions.createFileFormat(tableOptions, CoreOptions.FILE_FORMAT);
         assertThat(fileFormat instanceof OrcFileFormat).isTrue();
 
@@ -113,15 +115,16 @@ public class FileFormatTest {
         assertThat(orcFileFormat.formatContext().readBatchSize()).isEqualTo(1024);
     }
 
-    @Test
-    public void testFileFormatOption() {
+    @ParameterizedTest
+    @ValueSource(strings = {"orc", "Orc", "ORC"})
+    public void testFileFormatOption(String identifier) {
         Options tableOptions = new Options();
-        tableOptions.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.fromValue(IDENTIFIER));
+        tableOptions.set(CoreOptions.FILE_FORMAT, identifier);
         tableOptions.set(CoreOptions.READ_BATCH_SIZE, 1024);
-        tableOptions.setString(IDENTIFIER + ".hello", "world");
+        tableOptions.setString(identifier + ".hello", "world");
         FileFormatDiscover fileFormatDiscover =
                 FileFormatDiscover.of(new CoreOptions(tableOptions));
-        FileFormat fileFormat = fileFormatDiscover.discover(IDENTIFIER);
+        FileFormat fileFormat = fileFormatDiscover.discover(identifier);
         assertThat(fileFormat instanceof OrcFileFormat).isTrue();
         OrcFileFormat orcFileFormat = (OrcFileFormat) fileFormat;
         assertThat(orcFileFormat.formatContext().formatOptions().get("hello")).isEqualTo("world");
@@ -130,7 +133,7 @@ public class FileFormatTest {
 
     public FileFormat createFileFormat(String codec) {
         Options tableOptions = new Options();
-        tableOptions.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        tableOptions.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
         tableOptions.setString("avro.codec", codec);
         return CoreOptions.createFileFormat(tableOptions, CoreOptions.FILE_FORMAT);
     }

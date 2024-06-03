@@ -192,7 +192,7 @@ public class FlinkSourceBuilder {
                         limit,
                         table instanceof FileStoreTable
                                 ? ((FileStoreTable) table).bucketMode()
-                                : BucketMode.FIXED));
+                                : BucketMode.HASH_FIXED));
     }
 
     private DataStream<RowData> buildAlignedContinuousFileSource() {
@@ -204,7 +204,7 @@ public class FlinkSourceBuilder {
                         limit,
                         table instanceof FileStoreTable
                                 ? ((FileStoreTable) table).bucketMode()
-                                : BucketMode.FIXED));
+                                : BucketMode.HASH_FIXED));
     }
 
     private DataStream<RowData> toDataStream(Source<RowData, ?, ?> source) {
@@ -262,6 +262,7 @@ public class FlinkSourceBuilder {
         StreamingReadMode streamingReadMode = CoreOptions.streamReadType(conf);
 
         if (logSourceProvider != null && streamingReadMode != FILE) {
+            logSourceProvider.preCreateSource();
             if (startupMode != StartupMode.LATEST_FULL) {
                 return toDataStream(logSourceProvider.createSource(null));
             } else {

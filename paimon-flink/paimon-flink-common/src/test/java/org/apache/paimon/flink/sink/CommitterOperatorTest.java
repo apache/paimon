@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.flink.VersionedSerializerWrapper;
 import org.apache.paimon.flink.utils.TestingMetricUtils;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.CompactIncrement;
@@ -561,7 +560,9 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
 
         StreamTableCommit commit = table.newCommit(initialCommitUser);
         OperatorMetricGroup metricGroup = UnregisteredMetricsGroup.createOperatorMetricGroup();
-        StoreCommitter committer = new StoreCommitter(commit, metricGroup);
+        StoreCommitter committer =
+                new StoreCommitter(
+                        table, commit, Committer.createContext("", metricGroup, true, false, null));
         committer.commit(Collections.singletonList(manifestCommittable));
         CommitterMetrics metrics = committer.getCommitterMetrics();
         assertThat(metrics.getNumBytesOutCounter().getCount()).isEqualTo(285);
@@ -578,9 +579,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                         table,
                         null,
                         new RestoreAndFailCommittableStateManager<>(
-                                () ->
-                                        new VersionedSerializerWrapper<>(
-                                                new ManifestCommittableSerializer())));
+                                ManifestCommittableSerializer::new));
         OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
                 createTestHarness(operator);
         testHarness.open();
@@ -676,9 +675,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                         table,
                         null,
                         new RestoreAndFailCommittableStateManager<>(
-                                () ->
-                                        new VersionedSerializerWrapper<>(
-                                                new ManifestCommittableSerializer())));
+                                ManifestCommittableSerializer::new));
         return createTestHarness(operator);
     }
 
@@ -726,11 +723,15 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         return new CommitterOperator<>(
                 true,
                 true,
+                true,
                 commitUser == null ? initialCommitUser : commitUser,
-                (user, metricGroup) ->
+                context ->
                         new StoreCommitter(
-                                table.newStreamWriteBuilder().withCommitUser(user).newCommit(),
-                                metricGroup),
+                                table,
+                                table.newStreamWriteBuilder()
+                                        .withCommitUser(context.commitUser())
+                                        .newCommit(),
+                                context),
                 committableStateManager);
     }
 
@@ -742,11 +743,15 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         return new CommitterOperator<Committable, ManifestCommittable>(
                 true,
                 true,
+                true,
                 commitUser == null ? initialCommitUser : commitUser,
-                (user, metricGroup) ->
+                context ->
                         new StoreCommitter(
-                                table.newStreamWriteBuilder().withCommitUser(user).newCommit(),
-                                metricGroup),
+                                table,
+                                table.newStreamWriteBuilder()
+                                        .withCommitUser(context.commitUser())
+                                        .newCommit(),
+                                context),
                 committableStateManager) {
             @Override
             public void initializeState(StateInitializationContext context) throws Exception {

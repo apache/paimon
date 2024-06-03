@@ -42,7 +42,7 @@ public class SparkE2eTest extends E2eReaderTestBase {
         String warehousePath = TEST_DATA_DIR + "/" + UUID.randomUUID() + "_warehouse";
         final String table = "T";
         final String sparkTable = String.format("paimon.default.%s", table);
-        runSql(
+        runBatchSql(
                 String.join(
                         "\n",
                         createCatalogSql("my_spark", warehousePath),

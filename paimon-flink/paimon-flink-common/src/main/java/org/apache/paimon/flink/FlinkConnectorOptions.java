@@ -48,6 +48,8 @@ public class FlinkConnectorOptions {
 
     public static final String TABLE_DYNAMIC_OPTION_PREFIX = "paimon";
 
+    public static final int MIN_CLUSTERING_SAMPLE_FACTOR = 20;
+
     @ExcludeFromDocumentation("Confused without log system")
     public static final ConfigOption<String> LOG_SYSTEM =
             ConfigOptions.key("log.system")
@@ -311,6 +313,19 @@ public class FlinkConnectorOptions {
                             "Specific dynamic partition refresh interval for lookup, "
                                     + "scan all partitions and obtain corresponding partition.");
 
+    public static final ConfigOption<Boolean> LOOKUP_REFRESH_ASYNC =
+            ConfigOptions.key("lookup.refresh.async")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to refresh lookup table in an async thread.");
+
+    public static final ConfigOption<Integer> LOOKUP_REFRESH_ASYNC_PENDING_SNAPSHOT_COUNT =
+            ConfigOptions.key("lookup.refresh.async.pending-snapshot-count")
+                    .intType()
+                    .defaultValue(5)
+                    .withDescription(
+                            "If the pending snapshot count exceeds the threshold, lookup operator will refresh the table in sync.");
+
     public static final ConfigOption<Boolean> SINK_AUTO_TAG_FOR_SAVEPOINT =
             ConfigOptions.key("sink.savepoint.auto-tag")
                     .booleanType()
@@ -331,6 +346,83 @@ public class FlinkConnectorOptions {
                     .noDefaultValue()
                     .withDescription(
                             "Sink committer memory to control heap memory of global committer.");
+
+    public static final ConfigOption<Boolean> SINK_COMMITTER_OPERATOR_CHAINING =
+            ConfigOptions.key("sink.committer-operator-chaining")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Allow sink committer and writer operator to be chained together");
+
+    public static final ConfigOption<Duration> PARTITION_IDLE_TIME_TO_DONE =
+            key("partition.idle-time-to-done")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Set a time duration when a partition has no new data after this time duration, "
+                                    + "mark the done status to indicate that the data is ready.");
+
+    public static final ConfigOption<Duration> PARTITION_TIME_INTERVAL =
+            key("partition.time-interval")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "You can specify time interval for partition, for example, "
+                                    + "daily partition is '1 d', hourly partition is '1 h'.");
+
+    public static final ConfigOption<String> PARTITION_MARK_DONE_ACTION =
+            key("partition.mark-done-action")
+                    .stringType()
+                    .defaultValue("success-file")
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "Action to mark a partition done is to notify the downstream application that the partition"
+                                                    + " has finished writing, the partition is ready to be read.")
+                                    .linebreak()
+                                    .text("1. 'success-file': add '_success' file to directory.")
+                                    .linebreak()
+                                    .text(
+                                            "2. 'done-partition': add 'xxx.done' partition to metastore.")
+                                    .linebreak()
+                                    .text(
+                                            "Both can be configured at the same time: 'done-partition,success-file'.")
+                                    .build());
+
+    public static final ConfigOption<String> CLUSTERING_COLUMNS =
+            key("sink.clustering.by-columns")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Specifies the column name(s) used for comparison during range partitioning, in the format 'columnName1,columnName2'. "
+                                    + "If not set or set to an empty string, it indicates that the range partitioning feature is not enabled. "
+                                    + "This option will be effective only for bucket unaware table without primary keys and batch execution mode.");
+
+    public static final ConfigOption<String> CLUSTERING_STRATEGY =
+            key("sink.clustering.strategy")
+                    .stringType()
+                    .defaultValue("auto")
+                    .withDescription(
+                            "Specifies the comparison algorithm used for range partitioning, including 'zorder', 'hilbert', and 'order', "
+                                    + "corresponding to the z-order curve algorithm, hilbert curve algorithm, and basic type comparison algorithm, "
+                                    + "respectively. When not configured, it will automatically determine the algorithm based on the number of columns "
+                                    + "in 'sink.clustering.by-columns'. 'order' is used for 1 column, 'zorder' for less than 5 columns, "
+                                    + "and 'hilbert' for 5 or more columns.");
+
+    public static final ConfigOption<Boolean> CLUSTERING_SORT_IN_CLUSTER =
+            key("sink.clustering.sort-in-cluster")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Indicates whether to further sort data belonged to each sink task after range partitioning.");
+
+    public static final ConfigOption<Integer> CLUSTERING_SAMPLE_FACTOR =
+            key("sink.clustering.sample-factor")
+                    .intType()
+                    .defaultValue(100)
+                    .withDescription(
+                            "Specifies the sample factor. Let S represent the total number of samples, F represent the sample factor, "
+                                    + "and P represent the sink parallelism, then S=F×P. The minimum allowed sample factor is 20.");
 
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();

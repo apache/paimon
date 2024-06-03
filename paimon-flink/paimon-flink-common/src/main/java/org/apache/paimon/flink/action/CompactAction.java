@@ -79,13 +79,13 @@ public class CompactAction extends TableActionBase {
                 conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING;
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         switch (fileStoreTable.bucketMode()) {
-            case UNAWARE:
+            case BUCKET_UNAWARE:
                 {
                     buildForUnawareBucketCompaction(env, fileStoreTable, isStreaming);
                     break;
                 }
-            case FIXED:
-            case DYNAMIC:
+            case HASH_FIXED:
+            case HASH_DYNAMIC:
             default:
                 {
                     buildForTraditionalCompaction(env, fileStoreTable, isStreaming);

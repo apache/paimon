@@ -18,6 +18,7 @@
 
 package org.apache.paimon.deletionvectors;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.RecordReader;
 
@@ -28,18 +29,19 @@ import java.io.IOException;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A {@link RecordReader} which apply {@link DeletionVector} to filter record. */
-public class ApplyDeletionVectorReader<T> implements RecordReader<T> {
+public class ApplyDeletionVectorReader implements RecordReader<InternalRow> {
 
-    private final RecordReader<T> reader;
+    private final RecordReader<InternalRow> reader;
 
     private final DeletionVector deletionVector;
 
-    public ApplyDeletionVectorReader(RecordReader<T> reader, DeletionVector deletionVector) {
+    public ApplyDeletionVectorReader(
+            RecordReader<InternalRow> reader, DeletionVector deletionVector) {
         this.reader = reader;
         this.deletionVector = deletionVector;
     }
 
-    public RecordReader<T> reader() {
+    public RecordReader<InternalRow> reader() {
         return reader;
     }
 
@@ -49,8 +51,8 @@ public class ApplyDeletionVectorReader<T> implements RecordReader<T> {
 
     @Nullable
     @Override
-    public RecordIterator<T> readBatch() throws IOException {
-        RecordIterator<T> batch = reader.readBatch();
+    public RecordIterator<InternalRow> readBatch() throws IOException {
+        RecordIterator<InternalRow> batch = reader.readBatch();
 
         if (batch == null) {
             return null;
@@ -60,7 +62,8 @@ public class ApplyDeletionVectorReader<T> implements RecordReader<T> {
                 batch instanceof FileRecordIterator,
                 "There is a bug, RecordIterator in ApplyDeletionVectorReader must be RecordWithPositionIterator");
 
-        return new ApplyDeletionFileRecordIterator<>((FileRecordIterator<T>) batch, deletionVector);
+        return new ApplyDeletionFileRecordIterator(
+                (FileRecordIterator<InternalRow>) batch, deletionVector);
     }
 
     @Override

@@ -216,6 +216,42 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testSequenceGroupWithDefaultAggFunc() {
+        sql(
+                "CREATE TABLE SG ("
+                        + "k INT, a INT, b INT, g_1 INT, c INT, d INT, g_2 INT, PRIMARY KEY (k) NOT ENFORCED)"
+                        + " WITH ("
+                        + "'merge-engine'='partial-update', "
+                        + "'fields.g_1.sequence-group'='a,b', "
+                        + "'fields.g_2.sequence-group'='c,d', "
+                        + "'fields.default-aggregate-function'='last_non_null_value');");
+
+        sql("INSERT INTO SG VALUES (1, 1, 1, 1, 1, 1, 1)");
+
+        // g_2 should not be updated
+        sql("INSERT INTO SG VALUES (1, 2, 2, 2, 2, 2, CAST(NULL AS INT))");
+
+        // select *
+        assertThat(sql("SELECT * FROM SG")).containsExactlyInAnyOrder(Row.of(1, 2, 2, 2, 1, 1, 1));
+
+        // projection
+        assertThat(sql("SELECT c, d FROM SG")).containsExactlyInAnyOrder(Row.of(1, 1));
+
+        // g_1 should not be updated
+        sql("INSERT INTO SG VALUES (1, 3, 3, 1, 3, 3, 3)");
+
+        assertThat(sql("SELECT * FROM SG")).containsExactlyInAnyOrder(Row.of(1, 2, 2, 2, 3, 3, 3));
+
+        // d should not be updated by null
+        sql("INSERT INTO SG VALUES (1, 3, 3, 3, 2, 2, CAST(NULL AS INT))");
+        sql("INSERT INTO SG VALUES (1, 4, 4, 4, 2, 2, CAST(NULL AS INT))");
+        sql("INSERT INTO SG VALUES (1, 5, 5, 3, 5, CAST(NULL AS INT), 4)");
+
+        assertThat(sql("SELECT a, b FROM SG")).containsExactlyInAnyOrder(Row.of(4, 4));
+        assertThat(sql("SELECT c, d FROM SG")).containsExactlyInAnyOrder(Row.of(5, 3));
+    }
+
+    @Test
     public void testInvalidSequenceGroup() {
         Assertions.assertThatThrownBy(
                         () ->
@@ -317,6 +353,46 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
         // b is not updated to null
         // c updated to null
         assertThat(sql("SELECT a, b, c FROM AGG")).containsExactlyInAnyOrder(Row.of(6, 3, null));
+    }
+
+    @Test
+    public void testPartialUpdateWithDefaultAndFieldAggregation() {
+        sql(
+                "CREATE TABLE AGG ("
+                        + "k INT, a INT, b INT, g_1 INT, c VARCHAR, g_2 INT, PRIMARY KEY (k) NOT ENFORCED)"
+                        + " WITH ("
+                        + "'merge-engine'='partial-update', "
+                        + "'fields.a.aggregate-function'='sum', "
+                        + "'fields.g_1.sequence-group'='a', "
+                        + "'fields.g_2.sequence-group'='c', "
+                        + "'fields.default-aggregate-function'='last_non_null_value');");
+        // a in group g_1 with sum agg
+        // b not in group
+        // c in group g_2 without agg
+
+        sql("INSERT INTO AGG VALUES (1, 1, 1, 1, '1', 1)");
+
+        // g_2 should not be updated
+        sql("INSERT INTO AGG VALUES (1, 2, 2, 2, '2', CAST(NULL AS INT))");
+
+        // select *
+        assertThat(sql("SELECT * FROM AGG")).containsExactlyInAnyOrder(Row.of(1, 3, 2, 2, "1", 1));
+
+        // projection
+        assertThat(sql("SELECT a, c FROM AGG")).containsExactlyInAnyOrder(Row.of(3, "1"));
+
+        // g_1 should not be updated
+        sql("INSERT INTO AGG VALUES (1, 3, 3, 1, '3', 3)");
+
+        assertThat(sql("SELECT * FROM AGG")).containsExactlyInAnyOrder(Row.of(1, 6, 3, 2, "3", 3));
+
+        sql(
+                "INSERT INTO AGG VALUES (1, CAST(NULL AS INT), CAST(NULL AS INT), 2, CAST(NULL AS VARCHAR), 4)");
+
+        // a keep the last accumulator
+        // b is not updated to null
+        // c is updated to "3" for default agg func last_non_null_value
+        assertThat(sql("SELECT a, b, c FROM AGG")).containsExactlyInAnyOrder(Row.of(6, 3, "3"));
     }
 
     @Test

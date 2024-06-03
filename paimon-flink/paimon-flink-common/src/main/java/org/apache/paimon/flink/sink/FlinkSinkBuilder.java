@@ -20,7 +20,11 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.sink.index.GlobalDynamicBucketSink;
+import org.apache.paimon.flink.sorter.TableSortInfo;
+import org.apache.paimon.flink.sorter.TableSorter;
+import org.apache.paimon.flink.sorter.TableSorter.OrderType;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -34,14 +38,27 @@ import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.Row;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_SAMPLE_FACTOR;
+import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_STRATEGY;
+import static org.apache.paimon.flink.FlinkConnectorOptions.MIN_CLUSTERING_SAMPLE_FACTOR;
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
+import static org.apache.paimon.flink.sorter.TableSorter.OrderType.HILBERT;
+import static org.apache.paimon.flink.sorter.TableSorter.OrderType.ORDER;
+import static org.apache.paimon.flink.sorter.TableSorter.OrderType.ZORDER;
+import static org.apache.paimon.table.BucketMode.BUCKET_UNAWARE;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /**
  * DataStream API for building Flink Sink.
@@ -51,12 +68,15 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 @Public
 public class FlinkSinkBuilder {
 
+    private static final Logger LOG = LoggerFactory.getLogger(FlinkSinkBuilder.class);
+
     private final FileStoreTable table;
 
     private DataStream<RowData> input;
     @Nullable private Map<String, String> overwritePartition;
     @Nullable private Integer parallelism;
     private Boolean boundedInput = null;
+    @Nullable private TableSortInfo tableSortInfo;
 
     // ============== for extension ==============
 
@@ -119,8 +139,88 @@ public class FlinkSinkBuilder {
         return this;
     }
 
+    /** Clustering the input data if possible. */
+    public FlinkSinkBuilder clusteringIfPossible(
+            String clusteringColumns,
+            String clusteringStrategy,
+            boolean sortInCluster,
+            int sampleFactor) {
+        // The clustering will be skipped if the clustering columns are empty or the execution
+        // mode is STREAMING or the table type is illegal.
+        if (clusteringColumns == null || clusteringColumns.isEmpty()) {
+            return this;
+        }
+        checkState(input != null, "The input stream should be specified earlier.");
+        if (boundedInput == null) {
+            boundedInput = !FlinkSink.isStreaming(input);
+        }
+        if (!boundedInput || !table.bucketMode().equals(BUCKET_UNAWARE)) {
+            LOG.warn(
+                    "Clustering is enabled; however, it has been skipped as "
+                            + "it only supports the bucket unaware table without primary keys and "
+                            + "BATCH execution mode.");
+            return this;
+        }
+        // If the clustering is not skipped, check the clustering column names and sample
+        // factor value.
+        List<String> columns = Arrays.asList(clusteringColumns.split(","));
+        List<String> fieldNames = table.schema().fieldNames();
+        checkState(
+                new HashSet<>(fieldNames).containsAll(new HashSet<>(columns)),
+                String.format(
+                        "Field names %s should contains all clustering column names %s.",
+                        fieldNames, columns));
+        checkState(
+                sampleFactor >= MIN_CLUSTERING_SAMPLE_FACTOR,
+                "The minimum allowed "
+                        + CLUSTERING_SAMPLE_FACTOR.key()
+                        + " is "
+                        + MIN_CLUSTERING_SAMPLE_FACTOR
+                        + ".");
+        TableSortInfo.Builder sortInfoBuilder = new TableSortInfo.Builder();
+        if (clusteringStrategy.equals(CLUSTERING_STRATEGY.defaultValue())) {
+            if (columns.size() == 1) {
+                sortInfoBuilder.setSortStrategy(ORDER);
+            } else if (columns.size() < 5) {
+                sortInfoBuilder.setSortStrategy(ZORDER);
+            } else {
+                sortInfoBuilder.setSortStrategy(HILBERT);
+            }
+        } else {
+            sortInfoBuilder.setSortStrategy(OrderType.of(clusteringStrategy));
+        }
+        int upstreamParallelism = input.getParallelism();
+        String sinkParallelismValue =
+                table.options().get(FlinkConnectorOptions.SINK_PARALLELISM.key());
+        int sinkParallelism =
+                sinkParallelismValue == null
+                        ? upstreamParallelism
+                        : Integer.parseInt(sinkParallelismValue);
+        sortInfoBuilder
+                .setSortColumns(columns)
+                .setSortInCluster(sortInCluster)
+                .setSinkParallelism(sinkParallelism);
+        int globalSampleSize = sinkParallelism * sampleFactor;
+        // If the adaptive scheduler is not enabled, the local sample size is determined by the
+        // division of global sample size by the upstream parallelism, which limits total
+        // received data of global sample node. If the adaptive scheduler is enabled, the
+        // local sample size will equal to sinkParallelism * minimum sample factor.
+        int localSampleSize =
+                upstreamParallelism > 0
+                        ? Math.max(sampleFactor, globalSampleSize / upstreamParallelism)
+                        : sinkParallelism * MIN_CLUSTERING_SAMPLE_FACTOR;
+        this.tableSortInfo =
+                sortInfoBuilder
+                        .setRangeNumber(sinkParallelism)
+                        .setGlobalSampleSize(globalSampleSize)
+                        .setLocalSampleSize(localSampleSize)
+                        .build();
+        return this;
+    }
+
     /** Build {@link DataStreamSink}. */
     public DataStreamSink<?> build() {
+        input = trySortInput(input);
         DataStream<InternalRow> input = MapToInternalRow.map(this.input, table.rowType());
         if (table.coreOptions().localMergeEnabled() && table.schema().primaryKeys().size() > 0) {
             input =
@@ -134,13 +234,13 @@ public class FlinkSinkBuilder {
 
         BucketMode bucketMode = table.bucketMode();
         switch (bucketMode) {
-            case FIXED:
+            case HASH_FIXED:
                 return buildForFixedBucket(input);
-            case DYNAMIC:
+            case HASH_DYNAMIC:
                 return buildDynamicBucketSink(input, false);
-            case GLOBAL_DYNAMIC:
+            case CROSS_PARTITION:
                 return buildDynamicBucketSink(input, true);
-            case UNAWARE:
+            case BUCKET_UNAWARE:
                 return buildUnawareBucketSink(input);
             default:
                 throw new UnsupportedOperationException("Unsupported bucket mode: " + bucketMode);
@@ -180,5 +280,15 @@ public class FlinkSinkBuilder {
         return new RowUnawareBucketSink(
                         table, overwritePartition, logSinkFunction, parallelism, boundedInput)
                 .sinkFrom(input);
+    }
+
+    private DataStream<RowData> trySortInput(DataStream<RowData> input) {
+        if (tableSortInfo != null) {
+            TableSorter sorter =
+                    TableSorter.getSorter(
+                            input.getExecutionEnvironment(), input, table, tableSortInfo);
+            return sorter.sort();
+        }
+        return input;
     }
 }

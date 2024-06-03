@@ -39,7 +39,6 @@ import java.util.List;
 import static org.apache.paimon.predicate.PredicateBuilder.and;
 import static org.apache.paimon.predicate.PredicateBuilder.pickTransformFieldMapping;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
-import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 
 /** {@link FileStore} for reading and writing {@link InternalRow}. */
 public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
@@ -66,16 +65,12 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
 
     @Override
     public BucketMode bucketMode() {
-        return options.bucket() == -1 ? BucketMode.UNAWARE : BucketMode.FIXED;
+        return options.bucket() == -1 ? BucketMode.BUCKET_UNAWARE : BucketMode.HASH_FIXED;
     }
 
     @Override
     public AppendOnlyFileStoreScan newScan() {
-        return newScan(DEFAULT_MAIN_BRANCH);
-    }
-
-    public AppendOnlyFileStoreScan newScan(String branchName) {
-        return newScan(false, branchName);
+        return newScan(false);
     }
 
     @Override
@@ -106,17 +101,17 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 rowType,
                 pathFactory(),
                 snapshotManager(),
-                newScan(true, DEFAULT_MAIN_BRANCH).withManifestCacheFilter(manifestFilter),
+                newScan(true).withManifestCacheFilter(manifestFilter),
                 options,
                 tableName);
     }
 
-    private AppendOnlyFileStoreScan newScan(boolean forWrite, String branchName) {
+    private AppendOnlyFileStoreScan newScan(boolean forWrite) {
         ScanBucketFilter bucketFilter =
                 new ScanBucketFilter(bucketKeyType) {
                     @Override
                     public void pushdown(Predicate predicate) {
-                        if (bucketMode() != BucketMode.FIXED) {
+                        if (bucketMode() != BucketMode.HASH_FIXED) {
                             return;
                         }
 
@@ -146,7 +141,6 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 options.bucket(),
                 forWrite,
                 options.scanManifestParallelism(),
-                branchName,
                 options.fileIndexReadEnabled());
     }
 

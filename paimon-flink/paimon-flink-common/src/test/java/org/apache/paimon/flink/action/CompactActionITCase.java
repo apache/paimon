@@ -62,6 +62,7 @@ public class CompactActionITCase extends CompactActionITCaseBase {
                 prepareTable(
                         Arrays.asList("dt", "hh"),
                         Arrays.asList("dt", "hh", "k"),
+                        Collections.emptyList(),
                         Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "true"));
 
         writeData(
@@ -106,7 +107,10 @@ public class CompactActionITCase extends CompactActionITCaseBase {
 
         FileStoreTable table =
                 prepareTable(
-                        Arrays.asList("dt", "hh"), Arrays.asList("dt", "hh", "k"), tableOptions);
+                        Arrays.asList("dt", "hh"),
+                        Arrays.asList("dt", "hh", "k"),
+                        Collections.emptyList(),
+                        tableOptions);
 
         // base records
         writeData(
@@ -169,7 +173,11 @@ public class CompactActionITCase extends CompactActionITCaseBase {
         tableOptions.put(CoreOptions.COMPACTION_MAX_FILE_NUM.key(), "2");
 
         FileStoreTable table =
-                prepareTable(Collections.singletonList("k"), Collections.emptyList(), tableOptions);
+                prepareTable(
+                        Collections.singletonList("k"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        tableOptions);
 
         // base records
         writeData(
@@ -206,7 +214,11 @@ public class CompactActionITCase extends CompactActionITCaseBase {
         tableOptions.put(CoreOptions.COMPACTION_MAX_FILE_NUM.key(), "2");
 
         FileStoreTable table =
-                prepareTable(Collections.singletonList("k"), Collections.emptyList(), tableOptions);
+                prepareTable(
+                        Collections.singletonList("k"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        tableOptions);
 
         // base records
         writeData(
@@ -230,7 +242,10 @@ public class CompactActionITCase extends CompactActionITCaseBase {
     @Test
     public void testTableConf() throws Exception {
         prepareTable(
-                Arrays.asList("dt", "hh"), Arrays.asList("dt", "hh", "k"), Collections.emptyMap());
+                Arrays.asList("dt", "hh"),
+                Arrays.asList("dt", "hh", "k"),
+                Collections.emptyList(),
+                Collections.emptyMap());
 
         CompactAction compactAction =
                 createAction(
@@ -250,10 +265,13 @@ public class CompactActionITCase extends CompactActionITCaseBase {
     }
 
     private FileStoreTable prepareTable(
-            List<String> partitionKeys, List<String> primaryKeys, Map<String, String> tableOptions)
+            List<String> partitionKeys,
+            List<String> primaryKeys,
+            List<String> bucketKey,
+            Map<String, String> tableOptions)
             throws Exception {
         FileStoreTable table =
-                createFileStoreTable(ROW_TYPE, partitionKeys, primaryKeys, tableOptions);
+                createFileStoreTable(ROW_TYPE, partitionKeys, primaryKeys, bucketKey, tableOptions);
 
         StreamWriteBuilder streamWriteBuilder =
                 table.newStreamWriteBuilder().withCommitUser(commitUser);

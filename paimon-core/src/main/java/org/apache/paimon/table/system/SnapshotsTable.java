@@ -26,6 +26,9 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.predicate.Equal;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.LeafPredicateExtractor;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
@@ -34,6 +37,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadOnceTableScan;
+import org.apache.paimon.table.source.SingletonSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.BigIntType;
@@ -46,6 +50,8 @@ import org.apache.paimon.utils.SerializationUtils;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -140,37 +146,24 @@ public class SnapshotsTable implements ReadonlyTable {
 
         @Override
         public InnerTableScan withFilter(Predicate predicate) {
-            // TODO
+            // do filter in read
             return this;
         }
 
         @Override
         public Plan innerPlan() {
-            long rowCount;
-            try {
-                rowCount = new SnapshotManager(fileIO, location).snapshotCount();
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-            return () -> Collections.singletonList(new SnapshotsSplit(rowCount, location));
+            return () -> Collections.singletonList(new SnapshotsSplit(location));
         }
     }
 
-    private static class SnapshotsSplit implements Split {
+    private static class SnapshotsSplit extends SingletonSplit {
 
         private static final long serialVersionUID = 1L;
 
-        private final long rowCount;
         private final Path location;
 
-        private SnapshotsSplit(long rowCount, Path location) {
+        private SnapshotsSplit(Path location) {
             this.location = location;
-            this.rowCount = rowCount;
-        }
-
-        @Override
-        public long rowCount() {
-            return rowCount;
         }
 
         @Override
@@ -195,6 +188,7 @@ public class SnapshotsTable implements ReadonlyTable {
 
         private final FileIO fileIO;
         private int[][] projection;
+        @Nullable private Long specificSnapshot;
 
         public SnapshotsRead(FileIO fileIO) {
             this.fileIO = fileIO;
@@ -202,7 +196,15 @@ public class SnapshotsTable implements ReadonlyTable {
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
-            // TODO
+            if (predicate == null) {
+                return this;
+            }
+
+            LeafPredicate snapshotPred =
+                    predicate.visit(LeafPredicateExtractor.INSTANCE).get("snapshot_id");
+            if (snapshotPred != null && snapshotPred.function() instanceof Equal) {
+                specificSnapshot = (Long) snapshotPred.literals().get(0);
+            }
             return this;
         }
 
@@ -222,8 +224,13 @@ public class SnapshotsTable implements ReadonlyTable {
             if (!(split instanceof SnapshotsSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
-            Path location = ((SnapshotsSplit) split).location;
-            Iterator<Snapshot> snapshots = new SnapshotManager(fileIO, location).snapshots();
+            SnapshotManager snapshotManager =
+                    new SnapshotManager(fileIO, ((SnapshotsSplit) split).location);
+            Iterator<Snapshot> snapshots =
+                    specificSnapshot != null
+                            ? Collections.singletonList(snapshotManager.snapshot(specificSnapshot))
+                                    .iterator()
+                            : snapshotManager.snapshots();
             Iterator<InternalRow> rows = Iterators.transform(snapshots, this::toRow);
             if (projection != null) {
                 rows =

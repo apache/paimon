@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.mergetree.SortedRun;
 import org.apache.paimon.stats.StatsTestUtils;
 
@@ -41,7 +42,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.stats.StatsTestUtils.newTableStats;
+import static org.apache.paimon.stats.StatsTestUtils.newSimpleStats;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link IntervalPartition}. */
@@ -173,8 +174,8 @@ public class IntervalPartitionTest {
                 25,
                 minKey,
                 maxKey,
-                newTableStats(left, right),
-                StatsTestUtils.newEmptyTableStats(), // not used
+                newSimpleStats(left, right),
+                StatsTestUtils.newEmptySimpleStats(), // not used
                 0,
                 24,
                 0,
@@ -182,7 +183,8 @@ public class IntervalPartitionTest {
                 Collections.emptyList(),
                 Timestamp.fromEpochMillis(100000),
                 0L,
-                null);
+                null,
+                FileSource.APPEND);
     }
 
     private List<Map<SortedRun, Integer>> toMultiset(List<List<SortedRun>> sections) {

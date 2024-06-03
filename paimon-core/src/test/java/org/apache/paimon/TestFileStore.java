@@ -39,6 +39,7 @@ import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.operation.SplitRead;
+import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReaderIterator;
@@ -65,6 +66,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -151,53 +153,48 @@ public class TestFileStore extends KeyValueFileStore {
         return super.newCommit(commitUser);
     }
 
+    public ExpireSnapshots newExpire(int numRetainedMin, int numRetainedMax, long millisRetained) {
+        return newExpire(numRetainedMin, numRetainedMax, millisRetained, true);
+    }
+
     public ExpireSnapshots newExpire(
             int numRetainedMin,
             int numRetainedMax,
             long millisRetained,
             boolean snapshotExpireCleanEmptyDirectories) {
-        return newExpire(
-                numRetainedMin,
-                numRetainedMax,
-                millisRetained,
-                snapshotExpireCleanEmptyDirectories,
-                false);
-    }
-
-    public ExpireSnapshots newExpire(int numRetainedMin, int numRetainedMax, long millisRetained) {
-        return newExpire(numRetainedMin, numRetainedMax, millisRetained, true, false);
-    }
-
-    public ExpireSnapshots newExpire(
-            int numRetainedMin,
-            int numRetainedMax,
-            long millisRetained,
-            boolean snapshotExpireCleanEmptyDirectories,
-            boolean changelogDecoupled) {
         return new ExpireSnapshotsImpl(
                         snapshotManager(),
                         newSnapshotDeletion(),
                         new TagManager(fileIO, options.path()),
-                        snapshotExpireCleanEmptyDirectories,
-                        changelogDecoupled)
-                .retainMax(numRetainedMax)
-                .retainMin(numRetainedMin)
-                .olderThanMills(System.currentTimeMillis() - millisRetained);
+                        snapshotExpireCleanEmptyDirectories)
+                .config(
+                        ExpireConfig.builder()
+                                .snapshotRetainMax(numRetainedMax)
+                                .snapshotRetainMin(numRetainedMin)
+                                .snapshotTimeRetain(Duration.ofMillis(millisRetained))
+                                .build());
+    }
+
+    public ExpireSnapshots newExpire(
+            ExpireConfig expireConfig, boolean snapshotExpireCleanEmptyDirectories) {
+        return new ExpireSnapshotsImpl(
+                        snapshotManager(),
+                        newSnapshotDeletion(),
+                        new TagManager(fileIO, options.path()),
+                        snapshotExpireCleanEmptyDirectories)
+                .config(expireConfig);
     }
 
     public ExpireSnapshots newChangelogExpire(
-            int numRetainedMin,
-            int numRetainedMax,
-            long millisRetained,
-            boolean snapshotExpireCleanEmptyDirectories) {
-        return new ExpireChangelogImpl(
+            ExpireConfig config, boolean snapshotExpireCleanEmptyDirectories) {
+        ExpireChangelogImpl impl =
+                new ExpireChangelogImpl(
                         snapshotManager(),
                         new TagManager(fileIO, options.path()),
-                        newSnapshotDeletion(),
-                        snapshotExpireCleanEmptyDirectories)
-                .retainMin(numRetainedMin)
-                .retainMax(numRetainedMax)
-                .olderThanMills(System.currentTimeMillis() - millisRetained);
+                        newChangelogDeletion(),
+                        snapshotExpireCleanEmptyDirectories);
+        impl.config(config);
+        return impl;
     }
 
     public List<Snapshot> commitData(
@@ -731,8 +728,8 @@ public class TestFileStore extends KeyValueFileStore {
                     CoreOptions.MANIFEST_TARGET_FILE_SIZE,
                     MemorySize.parse((ThreadLocalRandom.current().nextInt(16) + 1) + "kb"));
 
-            conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.fromValue(format));
-            conf.set(CoreOptions.MANIFEST_FORMAT, CoreOptions.FileFormatType.fromValue(format));
+            conf.set(CoreOptions.FILE_FORMAT, format);
+            conf.set(CoreOptions.MANIFEST_FORMAT, format);
             conf.set(CoreOptions.PATH, root);
             conf.set(CoreOptions.BUCKET, numBuckets);
 

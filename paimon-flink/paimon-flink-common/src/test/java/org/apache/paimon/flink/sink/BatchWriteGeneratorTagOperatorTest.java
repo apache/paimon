@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.flink.VersionedSerializerWrapper;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestCommittableSerializer;
 import org.apache.paimon.table.FileStoreTable;
@@ -60,9 +59,7 @@ public class BatchWriteGeneratorTagOperatorTest extends CommitterOperatorTest {
                         table,
                         initialCommitUser,
                         new RestoreAndFailCommittableStateManager<>(
-                                () ->
-                                        new VersionedSerializerWrapper<>(
-                                                new ManifestCommittableSerializer())));
+                                ManifestCommittableSerializer::new));
         committerOperator.open();
 
         TableCommitImpl tableCommit = table.newCommit(initialCommitUser);

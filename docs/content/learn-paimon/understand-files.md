@@ -450,12 +450,12 @@ file belongs to exactly one sorted run.
 By default, sorted runs number depends on `num-sorted-run.compaction-trigger`, see [Compaction for Primary Key Table]({{< ref "/maintenance/write-performance#compaction" >}}),
 this means that there are at least 5 files in a bucket. If you want to reduce this number, you can keep fewer files, but write performance may suffer.
 
-### Understand Files for Append Queue Table
+### Understand Files for Bucketed Append Table
 
 By default, Append also does automatic compaction to reduce the number of small files.
 
-However, for Bucket's Append table, it will only compact the files within the Bucket for sequential
-purposes, which may keep more small files. See [Append Queue Table]({{< ref "append-table/append-queue-table" >}}).
+However, for Bucketed Append table, it will only compact the files within the Bucket for sequential
+purposes, which may keep more small files. See [Bucketed Append]({{< ref "append-table/bucketed-append" >}}).
 
 ### Understand Full-Compaction
 

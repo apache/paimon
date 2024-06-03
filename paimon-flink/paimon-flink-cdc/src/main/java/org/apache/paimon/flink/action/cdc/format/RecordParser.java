@@ -24,9 +24,10 @@ import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
@@ -43,7 +44,6 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -51,7 +51,7 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.fieldNameCaseConvert;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.listCaseConvert;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.recordKeyDuplicateErrMsg;
@@ -102,7 +102,13 @@ public abstract class RecordParser
             }
 
             Schema.Builder builder = Schema.newBuilder();
-            recordOpt.get().fieldTypes().forEach(builder::column);
+            recordOpt
+                    .get()
+                    .fields()
+                    .forEach(
+                            field ->
+                                    builder.column(
+                                            field.name(), field.type(), field.description()));
             builder.primaryKey(extractPrimaryKeys());
             return builder.build();
         } catch (Exception e) {
@@ -122,10 +128,9 @@ public abstract class RecordParser
     }
 
     // use STRING type in default when we cannot get origin data types (most cases)
-    protected LinkedHashMap<String, DataType> fillDefaultTypes(JsonNode record) {
-        LinkedHashMap<String, DataType> fieldTypes = new LinkedHashMap<>();
-        record.fieldNames().forEachRemaining(name -> fieldTypes.put(name, DataTypes.STRING()));
-        return fieldTypes;
+    protected void fillDefaultTypes(JsonNode record, RowType.Builder rowTypeBuilder) {
+        record.fieldNames()
+                .forEachRemaining(name -> rowTypeBuilder.field(name, DataTypes.STRING()));
     }
 
     @Override
@@ -139,9 +144,8 @@ public abstract class RecordParser
         }
     }
 
-    protected Map<String, String> extractRowData(
-            JsonNode record, LinkedHashMap<String, DataType> paimonFieldTypes) {
-        paimonFieldTypes.putAll(fillDefaultTypes(record));
+    protected Map<String, String> extractRowData(JsonNode record, RowType.Builder rowTypeBuilder) {
+        fillDefaultTypes(record, rowTypeBuilder);
         Map<String, Object> recordMap =
                 convertValue(record, new TypeReference<Map<String, Object>>() {});
         Map<String, String> rowData =
@@ -162,19 +166,19 @@ public abstract class RecordParser
                                             }
                                             return Objects.toString(entry.getValue());
                                         }));
-        evalComputedColumns(rowData, paimonFieldTypes);
+        evalComputedColumns(rowData, rowTypeBuilder);
         return rowData;
     }
 
     // generate values for computed columns
     protected void evalComputedColumns(
-            Map<String, String> rowData, LinkedHashMap<String, DataType> paimonFieldTypes) {
+            Map<String, String> rowData, RowType.Builder rowTypeBuilder) {
         computedColumns.forEach(
                 computedColumn -> {
                     rowData.put(
                             computedColumn.columnName(),
                             computedColumn.eval(rowData.get(computedColumn.fieldReference())));
-                    paimonFieldTypes.put(computedColumn.columnName(), computedColumn.columnType());
+                    rowTypeBuilder.field(computedColumn.columnName(), computedColumn.columnType());
                 });
     }
 
@@ -191,32 +195,23 @@ public abstract class RecordParser
 
     protected void processRecord(
             JsonNode jsonNode, RowKind rowKind, List<RichCdcMultiplexRecord> records) {
-        LinkedHashMap<String, DataType> paimonFieldTypes = new LinkedHashMap<>(jsonNode.size());
-        Map<String, String> rowData = this.extractRowData(jsonNode, paimonFieldTypes);
-        records.add(createRecord(rowKind, rowData, paimonFieldTypes));
+        RowType.Builder rowTypeBuilder = RowType.builder();
+        Map<String, String> rowData = this.extractRowData(jsonNode, rowTypeBuilder);
+        records.add(createRecord(rowKind, rowData, rowTypeBuilder.build().getFields()));
     }
 
     /** Handle case sensitivity here. */
     private RichCdcMultiplexRecord createRecord(
-            RowKind rowKind,
-            Map<String, String> data,
-            LinkedHashMap<String, DataType> paimonFieldTypes) {
+            RowKind rowKind, Map<String, String> data, List<DataField> paimonFields) {
         String databaseName = getDatabaseName();
         String tableName = getTableName();
-        paimonFieldTypes =
-                mapKeyCaseConvert(
-                        paimonFieldTypes,
-                        caseSensitive,
-                        columnDuplicateErrMsg(tableName == null ? "UNKNOWN" : tableName));
+        paimonFields = fieldNameCaseConvert(paimonFields, caseSensitive, tableName);
+
         data = mapKeyCaseConvert(data, caseSensitive, recordKeyDuplicateErrMsg(data));
         List<String> primaryKeys = listCaseConvert(extractPrimaryKeys(), caseSensitive);
 
         return new RichCdcMultiplexRecord(
-                databaseName,
-                tableName,
-                paimonFieldTypes,
-                primaryKeys,
-                new CdcRecord(rowKind, data));
+                databaseName, tableName, paimonFields, primaryKeys, new CdcRecord(rowKind, data));
     }
 
     protected void setRoot(CdcSourceRecord record) {

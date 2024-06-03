@@ -21,11 +21,11 @@ package org.apache.paimon.manifest;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.format.TableStatsCollector;
+import org.apache.paimon.format.SimpleStatsCollector;
 import org.apache.paimon.io.DataFileTestDataGenerator;
-import org.apache.paimon.statistics.FieldStatsCollector;
-import org.apache.paimon.statistics.FullFieldStatsCollector;
-import org.apache.paimon.stats.FieldStatsArraySerializer;
+import org.apache.paimon.statistics.FullSimpleColStatsCollector;
+import org.apache.paimon.statistics.SimpleColStatsCollector;
+import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.utils.Preconditions;
 
 import java.util.ArrayList;
@@ -85,17 +85,17 @@ public class ManifestTestDataGenerator {
         Preconditions.checkArgument(
                 !entries.isEmpty(), "Manifest entries are empty. Invalid test data.");
 
-        TableStatsCollector collector =
-                new TableStatsCollector(
+        SimpleStatsCollector collector =
+                new SimpleStatsCollector(
                         TestKeyValueGenerator.DEFAULT_PART_TYPE,
                         IntStream.range(0, TestKeyValueGenerator.DEFAULT_PART_TYPE.getFieldCount())
                                 .mapToObj(
                                         i ->
-                                                (FieldStatsCollector.Factory)
-                                                        FullFieldStatsCollector::new)
-                                .toArray(FieldStatsCollector.Factory[]::new));
-        FieldStatsArraySerializer serializer =
-                new FieldStatsArraySerializer(TestKeyValueGenerator.DEFAULT_PART_TYPE);
+                                                (SimpleColStatsCollector.Factory)
+                                                        FullSimpleColStatsCollector::new)
+                                .toArray(SimpleColStatsCollector.Factory[]::new));
+        SimpleStatsConverter serializer =
+                new SimpleStatsConverter(TestKeyValueGenerator.DEFAULT_PART_TYPE);
 
         long numAddedFiles = 0;
         long numDeletedFiles = 0;

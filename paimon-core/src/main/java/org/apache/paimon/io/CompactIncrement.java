@@ -18,6 +18,7 @@
 
 package org.apache.paimon.io;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
@@ -87,5 +88,10 @@ public class CompactIncrement {
                 changelogFiles.stream()
                         .map(DataFileMeta::fileName)
                         .collect(Collectors.joining(",\n")));
+    }
+
+    public static CompactIncrement emptyIncrement() {
+        return new CompactIncrement(
+                Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
     }
 }

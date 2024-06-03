@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.FileSystemCatalogOptions;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.schema.SchemaChange;
@@ -51,6 +52,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
@@ -649,6 +651,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         new String[] {"a", "b", "c"}),
                 Collections.emptyList(),
                 Collections.singletonList("a"),
+                Collections.emptyList(),
                 new HashMap<>());
 
         MySqlSyncTableAction action =
@@ -1115,6 +1118,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         new String[] {"pk", "_date", "_timestamp"}),
                 Collections.emptyList(),
                 Collections.singletonList("pk"),
+                Collections.emptyList(),
                 options);
 
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
@@ -1308,6 +1312,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                 RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"k"}),
                 Collections.emptyList(),
                 Collections.singletonList("k"),
+                Collections.emptyList(),
                 Collections.singletonMap(BUCKET.key(), "1"));
 
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
@@ -1323,5 +1328,89 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
         FileStoreTable table = getFileStoreTable();
         assertThat(table.options().get(BUCKET.key())).isEqualTo("1");
+    }
+
+    @Test
+    @Timeout(60)
+    public void testColumnCommentChangeInExistingTable() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put("bucket", "1");
+        options.put("sink.parallelism", "1");
+
+        RowType rowType =
+                RowType.builder()
+                        .field("pk", DataTypes.INT().notNull(), "pk comment")
+                        .field("c1", DataTypes.DATE(), "c1 comment")
+                        .field("c2", DataTypes.VARCHAR(10).notNull(), "c2 comment")
+                        .build();
+
+        createFileStoreTable(
+                rowType,
+                Collections.emptyList(),
+                Collections.singletonList("pk"),
+                Collections.emptyList(),
+                options);
+
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", DATABASE_NAME);
+        mySqlConfig.put("table-name", "test_exist_column_comment_change");
+
+        // Flink cdc 2.3 does not support collecting field comments, and existing paimon table field
+        // comments will not be changed.
+        MySqlSyncTableAction action =
+                syncTableActionBuilder(mySqlConfig)
+                        .withPrimaryKeys("pk")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        FileStoreTable table = getFileStoreTable();
+        Map<String, DataField> actual =
+                table.schema().fields().stream()
+                        .collect(Collectors.toMap(DataField::name, Function.identity()));
+        assertThat(actual.get("pk").description()).isEqualTo("pk comment");
+        assertThat(actual.get("c1").description()).isEqualTo("c1 comment");
+        assertThat(actual.get("c2").description()).isEqualTo("c2 comment");
+    }
+
+    @Test
+    @Timeout(60)
+    public void testWriteOnlyAndSchemaEvolution() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "write_only_and_schema_evolution");
+        mySqlConfig.put("table-name", "t");
+
+        Map<String, String> tableConfig = getBasicTableConfig();
+        tableConfig.put(CoreOptions.WRITE_ONLY.key(), "true");
+
+        MySqlSyncTableAction action =
+                syncTableActionBuilder(mySqlConfig).withTableConfig(tableConfig).build();
+
+        runActionWithDefaultEnv(action);
+        FileStoreTable table = getFileStoreTable();
+
+        try (Statement statement = getStatement()) {
+            statement.executeUpdate("USE write_only_and_schema_evolution");
+            statement.executeUpdate("INSERT INTO t VALUES (1, 'one'), (2, 'two')");
+            RowType rowType =
+                    RowType.of(
+                            new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                            new String[] {"k", "v1"});
+            List<String> primaryKeys = Collections.singletonList("k");
+            List<String> expected = Arrays.asList("+I[1, one]", "+I[2, two]");
+            waitForResult(expected, table, rowType, primaryKeys);
+
+            statement.executeUpdate("ALTER TABLE t ADD COLUMN v2 INT");
+            statement.executeUpdate("UPDATE t SET v2 = 1 WHERE k = 1");
+
+            rowType =
+                    RowType.of(
+                            new DataType[] {
+                                DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.INT()
+                            },
+                            new String[] {"k", "v1", "v2"});
+            expected = Arrays.asList("+I[1, one, 1]", "+I[2, two, NULL]");
+            waitForResult(expected, table, rowType, primaryKeys);
+        }
     }
 }

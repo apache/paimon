@@ -67,7 +67,10 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD;
+import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.apache.paimon.table.sink.KeyAndBucketExtractor.bucket;
 import static org.apache.paimon.table.sink.KeyAndBucketExtractor.bucketKeyHashCode;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -125,9 +128,11 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
     public void testBranchBatchReadWrite() throws Exception {
         FileStoreTable table = createFileStoreTable();
         generateBranch(table);
-        writeBranchData(table);
-        List<Split> splits = toSplits(table.newSnapshotReader(BRANCH_NAME).read().dataSplits());
-        TableRead read = table.newRead();
+
+        FileStoreTable tableBranch = createFileStoreTable(BRANCH_NAME);
+        writeBranchData(tableBranch);
+        List<Split> splits = toSplits(tableBranch.newSnapshotReader().read().dataSplits());
+        TableRead read = tableBranch.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
                         Arrays.asList(
@@ -305,15 +310,18 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
     public void testBranchStreamingReadWrite() throws Exception {
         FileStoreTable table = createFileStoreTable();
         generateBranch(table);
-        writeBranchData(table);
+
+        FileStoreTable tableBranch = createFileStoreTable(BRANCH_NAME);
+        writeBranchData(tableBranch);
 
         List<Split> splits =
                 toSplits(
-                        table.newSnapshotReader(BRANCH_NAME)
+                        tableBranch
+                                .newSnapshotReader()
                                 .withMode(ScanMode.DELTA)
                                 .read()
                                 .dataSplits());
-        TableRead read = table.newRead();
+        TableRead read = tableBranch.newRead();
 
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(
@@ -481,6 +489,23 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                                         .equal(1, BinaryString.fromString("b")))
                         .createReader(plan.splits());
         reader.forEachRemaining(row -> assertThat(row.getString(1).toString()).isEqualTo("b"));
+    }
+
+    @Test
+    public void testWithShardAppendTable() throws Exception {
+        FileStoreTable table = createFileStoreTable(conf -> conf.set(BUCKET, -1));
+        innerTestWithShard(table);
+    }
+
+    @Test
+    public void testWithShardBucketedTable() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(BUCKET, 5);
+                            conf.set(BUCKET_KEY, "a");
+                        });
+        innerTestWithShard(table);
     }
 
     @Test
@@ -681,7 +706,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                         serializer
                                 .toBinaryRow(rowData(i, random.nextInt(), random.nextLong()))
                                 .copy();
-                int bucket = bucket(bucketKeyHashCode(data), numOfBucket);
+                int bucket = bucket(bucketKeyHashCode(row(data.getInt(1))), numOfBucket);
                 dataPerBucket.compute(
                         bucket,
                         (k, v) -> {
@@ -801,7 +826,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
 
     private void writeBranchData(FileStoreTable table) throws Exception {
         StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser, BRANCH_NAME);
+        StreamTableCommit commit = table.newCommit(commitUser);
 
         write.write(rowData(1, 10, 100L));
         write.write(rowData(2, 20, 200L));
@@ -827,9 +852,34 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         Options conf = new Options();
         conf.set(CoreOptions.PATH, tablePath.toString());
         configure.accept(conf);
+        if (!conf.contains(BUCKET_KEY) && conf.get(BUCKET) != -1) {
+            conf.set(BUCKET_KEY, "a");
+        }
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
                         new SchemaManager(LocalFileIO.create(), tablePath),
+                        new Schema(
+                                ROW_TYPE.getFields(),
+                                Collections.singletonList("pt"),
+                                Collections.emptyList(),
+                                conf.toMap(),
+                                ""));
+        return new AppendOnlyFileStoreTable(FileIOFinder.find(tablePath), tablePath, tableSchema);
+    }
+
+    @Override
+    protected FileStoreTable createFileStoreTable(String branch, Consumer<Options> configure)
+            throws Exception {
+        Options conf = new Options();
+        conf.set(CoreOptions.PATH, tablePath.toString());
+        conf.set(CoreOptions.BRANCH, branch);
+        configure.accept(conf);
+        if (!conf.contains(BUCKET_KEY) && conf.get(BUCKET) != -1) {
+            conf.set(BUCKET_KEY, "a");
+        }
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), tablePath, branch),
                         new Schema(
                                 ROW_TYPE.getFields(),
                                 Collections.singletonList("pt"),

@@ -23,7 +23,7 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.InnerTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
-import org.apache.paimon.table.source.InnerStreamTableScan;
+import org.apache.paimon.table.source.StreamDataTableScan;
 
 import java.time.Duration;
 import java.util.Collections;
@@ -87,7 +87,7 @@ public interface ReadonlyTable extends InnerTable {
     }
 
     @Override
-    default InnerStreamTableScan newStreamScan() {
+    default StreamDataTableScan newStreamScan() {
         throw new UnsupportedOperationException(
                 String.format(
                         "Readonly Table %s does not support newStreamScan.",
@@ -187,6 +187,14 @@ public interface ReadonlyTable extends InnerTable {
         throw new UnsupportedOperationException(
                 String.format(
                         "Readonly Table %s does not support mergeBranch.",
+                        this.getClass().getSimpleName()));
+    }
+  
+    @Override
+    default void replaceBranch(String fromBranch) {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support replaceBranch.",
                         this.getClass().getSimpleName()));
     }
 

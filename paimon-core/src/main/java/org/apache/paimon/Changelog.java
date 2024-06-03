@@ -23,6 +23,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import javax.annotation.Nullable;
@@ -36,6 +37,7 @@ import java.util.Map;
  * one source:
  * <li>The changelog file. Eg: from the changelog-producer = 'input'
  */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class Changelog extends Snapshot {
 
     public Changelog(Snapshot snapshot) {

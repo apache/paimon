@@ -81,7 +81,9 @@ There are several ways to add this jar to Hive.
 
 NOTE: 
 
-* If you are using HDFS, make sure that the environment variable `HADOOP_HOME` or `HADOOP_CONF_DIR` is set.
+* If you are using HDFS :
+  * Make sure that the environment variable `HADOOP_HOME` or `HADOOP_CONF_DIR` is set.
+  * You can set `paimon.hadoop-load-default-config` =`false` to disable loading the default value from `core-default.xml`、`hdfs-default.xml`, which may lead smaller size for split.
 * With hive cbo, it may lead to some incorrect query results, such as to query `struct` type with `not null` predicate, you can disable the cbo by `set hive.cbo.enable=false;` command.
 
 ## Hive SQL: access Paimon Tables already in Hive metastore

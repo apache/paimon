@@ -99,7 +99,11 @@ public class DeleteActionITCase extends ActionITCaseBase {
         Map<String, String> options = new HashMap<>();
         FileStoreTable table =
                 createFileStoreTable(
-                        ROW_TYPE, Collections.emptyList(), Collections.singletonList("k"), options);
+                        ROW_TYPE,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        Collections.emptyList(),
+                        options);
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamWriteBuilder streamWriteBuilder =
                 table.newStreamWriteBuilder().withCommitUser(commitUser);

@@ -43,6 +43,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 
 import static org.apache.paimon.CoreOptions.SCAN_BOUNDED_WATERMARK;
@@ -66,7 +67,7 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
             List<String> joinKey) {
         this.executorFactory = executorFactory;
 
-        if (table.bucketMode() != BucketMode.FIXED) {
+        if (table.bucketMode() != BucketMode.HASH_FIXED) {
             throw new UnsupportedOperationException(
                     "Unsupported mode for partial lookup: " + table.bucketMode());
         }
@@ -149,9 +150,15 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
     }
 
     public static PrimaryKeyPartialLookupTable createLocalTable(
-            FileStoreTable table, int[] projection, File tempPath, List<String> joinKey) {
+            FileStoreTable table,
+            int[] projection,
+            File tempPath,
+            List<String> joinKey,
+            Set<Integer> requireCachedBucketIds) {
         return new PrimaryKeyPartialLookupTable(
-                filter -> new LocalQueryExecutor(table, projection, tempPath, filter),
+                filter ->
+                        new LocalQueryExecutor(
+                                table, projection, tempPath, filter, requireCachedBucketIds),
                 table,
                 joinKey);
     }
@@ -175,7 +182,11 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
         private final StreamTableScan scan;
 
         private LocalQueryExecutor(
-                FileStoreTable table, int[] projection, File tempPath, @Nullable Predicate filter) {
+                FileStoreTable table,
+                int[] projection,
+                File tempPath,
+                @Nullable Predicate filter,
+                Set<Integer> requireCachedBucketIds) {
             this.tableQuery =
                     table.newLocalTableQuery()
                             .withValueProjection(Projection.of(projection).toNestedIndexes())
@@ -185,7 +196,14 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
             dynamicOptions.put(STREAM_SCAN_MODE.key(), FILE_MONITOR.getValue());
             dynamicOptions.put(SCAN_BOUNDED_WATERMARK.key(), null);
             this.scan =
-                    table.copy(dynamicOptions).newReadBuilder().withFilter(filter).newStreamScan();
+                    table.copy(dynamicOptions)
+                            .newReadBuilder()
+                            .withFilter(filter)
+                            .withBucketFilter(
+                                    requireCachedBucketIds == null
+                                            ? null
+                                            : requireCachedBucketIds::contains)
+                            .newStreamScan();
         }
 
         @Override

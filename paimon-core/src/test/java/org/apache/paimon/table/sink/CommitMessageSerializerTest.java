@@ -42,11 +42,13 @@ public class CommitMessageSerializerTest {
         DataIncrement dataIncrement = randomNewFilesIncrement();
         CompactIncrement compactIncrement = randomCompactIncrement();
         IndexIncrement indexIncrement =
-                new IndexIncrement(Arrays.asList(randomIndexFile(), randomIndexFile()));
+                new IndexIncrement(
+                        Arrays.asList(randomIndexFile(), randomIndexFile()),
+                        Arrays.asList(randomIndexFile(), randomIndexFile()));
         CommitMessageImpl committable =
                 new CommitMessageImpl(row(0), 1, dataIncrement, compactIncrement, indexIncrement);
         CommitMessageImpl newCommittable =
-                (CommitMessageImpl) serializer.deserialize(2, serializer.serialize(committable));
+                (CommitMessageImpl) serializer.deserialize(3, serializer.serialize(committable));
         assertThat(newCommittable.compactIncrement()).isEqualTo(committable.compactIncrement());
         assertThat(newCommittable.newFilesIncrement()).isEqualTo(committable.newFilesIncrement());
         assertThat(newCommittable.indexIncrement()).isEqualTo(committable.indexIncrement());

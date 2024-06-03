@@ -41,14 +41,10 @@ import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.PlanImpl;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.SplitGenerator;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
-import org.apache.paimon.utils.TypeUtils;
-
-import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -60,10 +56,10 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiConsumer;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.operation.FileStoreScan.Plan.groupByPartFiles;
+import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
 
 /** Implementation of {@link SnapshotReader}. */
@@ -142,23 +138,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Override
     public SnapshotReader withPartitionFilter(Map<String, String> partitionSpec) {
         if (partitionSpec != null) {
-            List<String> partitionKeys = tableSchema.partitionKeys();
-            RowType rowType = tableSchema.logicalPartitionType();
-            PredicateBuilder predicateBuilder = new PredicateBuilder(rowType);
-            List<Predicate> partitionFilters =
-                    partitionSpec.entrySet().stream()
-                            .map(
-                                    m -> {
-                                        int index = partitionKeys.indexOf(m.getKey());
-                                        Object value =
-                                                TypeUtils.castFromStringInternal(
-                                                        m.getValue(),
-                                                        rowType.getTypeAt(index),
-                                                        false);
-                                        return predicateBuilder.equal(index, value);
-                                    })
-                            .collect(Collectors.toList());
-            scan.withPartitionFilter(PredicateBuilder.and(partitionFilters));
+            Predicate partitionPredicate =
+                    createPartitionPredicate(
+                            partitionSpec,
+                            tableSchema.logicalPartitionType(),
+                            options.partitionDefaultName());
+            scan.withPartitionFilter(partitionPredicate);
         }
         return this;
     }
@@ -236,6 +221,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
         return this;
     }
 
+    @Override
+    public SnapshotReader withDataFileNameFilter(Filter<String> fileNameFilter) {
+        scan.withDataFileNameFilter(fileNameFilter);
+        return this;
+    }
+
     /** Get splits from {@link FileKind#ADD} files. */
     @Override
     public Plan read() {
@@ -284,12 +275,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                 ? splitGenerator.splitForStreaming(bucketFiles)
                                 : splitGenerator.splitForBatch(bucketFiles);
 
-                IndexFileMeta deletionIndexFile =
+                List<IndexFileMeta> deletionIndexFiles =
                         deletionVectors
-                                ? indexFileHandler
-                                        .scan(snapshotId, DELETION_VECTORS_INDEX, partition, bucket)
-                                        .orElse(null)
-                                : null;
+                                ? indexFileHandler.scan(
+                                        snapshotId, DELETION_VECTORS_INDEX, partition, bucket)
+                                : Collections.emptyList();
                 for (SplitGenerator.SplitGroup splitGroup : splitGroups) {
                     List<DataFileMeta> dataFiles = splitGroup.files;
                     String bucketPath = pathFactory.bucketPath(partition, bucket).toString();
@@ -298,7 +288,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                             .withBucketPath(bucketPath);
                     if (deletionVectors) {
                         builder.withDataDeletionFiles(
-                                getDeletionFiles(dataFiles, deletionIndexFile));
+                                getDeletionFiles(dataFiles, deletionIndexFiles));
                     }
 
                     splits.add(builder.build());
@@ -373,16 +363,15 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                 .isStreaming(isStreaming)
                                 .withBucketPath(pathFactory.bucketPath(part, bucket).toString());
                 if (deletionVectors) {
-                    IndexFileMeta beforeDeletionIndex =
-                            indexFileHandler
-                                    .scan(beforeSnapshotId, DELETION_VECTORS_INDEX, part, bucket)
-                                    .orElse(null);
-                    IndexFileMeta deletionIndex =
-                            indexFileHandler
-                                    .scan(plan.snapshotId(), DELETION_VECTORS_INDEX, part, bucket)
-                                    .orElse(null);
-                    builder.withBeforeDeletionFiles(getDeletionFiles(before, beforeDeletionIndex));
-                    builder.withDataDeletionFiles(getDeletionFiles(data, deletionIndex));
+                    List<IndexFileMeta> beforeDeletionIndexes =
+                            indexFileHandler.scan(
+                                    beforeSnapshotId, DELETION_VECTORS_INDEX, part, bucket);
+                    List<IndexFileMeta> deletionIndexes =
+                            indexFileHandler.scan(
+                                    plan.snapshotId(), DELETION_VECTORS_INDEX, part, bucket);
+                    builder.withBeforeDeletionFiles(
+                            getDeletionFiles(before, beforeDeletionIndexes));
+                    builder.withDataDeletionFiles(getDeletionFiles(data, deletionIndexes));
                 }
                 splits.add(builder.build());
             }
@@ -412,14 +401,22 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     private List<DeletionFile> getDeletionFiles(
-            List<DataFileMeta> dataFiles, @Nullable IndexFileMeta indexFileMeta) {
+            List<DataFileMeta> dataFiles, List<IndexFileMeta> indexFileMetas) {
         List<DeletionFile> deletionFiles = new ArrayList<>(dataFiles.size());
-        Map<String, Pair<Integer, Integer>> deletionRanges =
-                indexFileMeta == null ? null : indexFileMeta.deletionVectorsRanges();
+        Map<String, IndexFileMeta> dataFileToIndexFileMeta = new HashMap<>();
+        for (IndexFileMeta indexFileMeta : indexFileMetas) {
+            if (indexFileMeta.deletionVectorsRanges() != null) {
+                for (String dataFileName : indexFileMeta.deletionVectorsRanges().keySet()) {
+                    dataFileToIndexFileMeta.put(dataFileName, indexFileMeta);
+                }
+            }
+        }
         for (DataFileMeta file : dataFiles) {
-            if (deletionRanges != null) {
-                Pair<Integer, Integer> range = deletionRanges.get(file.fileName());
-                if (range != null) {
+            IndexFileMeta indexFileMeta = dataFileToIndexFileMeta.get(file.fileName());
+            if (indexFileMeta != null) {
+                Map<String, Pair<Integer, Integer>> ranges = indexFileMeta.deletionVectorsRanges();
+                if (ranges != null && ranges.containsKey(file.fileName())) {
+                    Pair<Integer, Integer> range = ranges.get(file.fileName());
                     deletionFiles.add(
                             new DeletionFile(
                                     indexFileHandler.filePath(indexFileMeta).toString(),

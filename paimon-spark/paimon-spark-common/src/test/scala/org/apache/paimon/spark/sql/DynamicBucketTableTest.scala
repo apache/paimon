@@ -102,6 +102,6 @@ class DynamicBucketTableTest extends PaimonSparkTestBase {
     val error = intercept[UnsupportedOperationException] {
       spark.sql("INSERT INTO T VALUES ('1', 'a', 'p')")
     }.getMessage
-    assert(error.contains("Spark doesn't support GLOBAL_DYNAMIC mode"))
+    assert(error.contains("Spark doesn't support CROSS_PARTITION mode"))
   }
 }

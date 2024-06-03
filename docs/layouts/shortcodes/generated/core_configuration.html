@@ -33,6 +33,12 @@ under the License.
             <td>Whether to create underlying storage when reading and writing the table.</td>
         </tr>
         <tr>
+            <td><h5>branch</h5></td>
+            <td style="word-wrap: break-word;">"main"</td>
+            <td>String</td>
+            <td>Specify branch name.</td>
+        </tr>
+        <tr>
             <td><h5>bucket</h5></td>
             <td style="word-wrap: break-word;">-1</td>
             <td>Integer</td>
@@ -177,10 +183,22 @@ under the License.
             <td>The TTL in rocksdb index for cross partition upsert (primary keys not contain all partition fields), this can avoid maintaining too many indexes and lead to worse and worse performance, but please note that this may also cause data duplication.</td>
         </tr>
         <tr>
+            <td><h5>delete.force-produce-changelog</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Force produce changelog in delete sql, or you can use 'streaming-read-overwrite' to read changelog from overwrite commit.</td>
+        </tr>
+        <tr>
             <td><h5>deletion-vectors.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether to enable deletion vectors mode. In this mode, index files containing deletion vectors are generated when data is written, which marks the data for deletion. During read operations, by applying these index files, merging can be avoided.</td>
+        </tr>
+        <tr>
+            <td><h5>deletion-vector.index-file.target-size</h5></td>
+            <td style="word-wrap: break-word;">2 mb</td>
+            <td>MemorySize</td>
+            <td>The target size of deletion vector index file.</td>
         </tr>
         <tr>
             <td><h5>dynamic-bucket.assigner-parallelism</h5></td>
@@ -205,6 +223,12 @@ under the License.
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
             <td>Whether only overwrite dynamic partition when overwriting a partitioned table with dynamic partition columns. Works only when the table has partition keys.</td>
+        </tr>
+        <tr>
+            <td><h5>fields.default-aggregate-function</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Default aggregate function of all fields for partial-update and aggregate merge function</td>
         </tr>
         <tr>
             <td><h5>file-index.in-manifest-threshold</h5></td>
@@ -238,9 +262,9 @@ under the License.
         </tr>
         <tr>
             <td><h5>file.format</h5></td>
-            <td style="word-wrap: break-word;">orc</td>
-            <td><p>Enum</p></td>
-            <td>Specify the message format of data files, currently orc, parquet and avro are supported.<br /><br />Possible values:<ul><li>"orc": ORC file format.</li><li>"parquet": Parquet file format.</li><li>"avro": Avro file format.</li></ul></td>
+            <td style="word-wrap: break-word;">"orc"</td>
+            <td>String</td>
+            <td>Specify the message format of data files, currently orc, parquet and avro are supported.</td>
         </tr>
         <tr>
             <td><h5>file.format.per.level</h5></td>
@@ -268,9 +292,9 @@ under the License.
         </tr>
         <tr>
             <td><h5>incremental-between-scan-mode</h5></td>
-            <td style="word-wrap: break-word;">delta</td>
+            <td style="word-wrap: break-word;">auto</td>
             <td><p>Enum</p></td>
-            <td>Scan kind when Read incremental changes between start snapshot (exclusive) and end snapshot, 'delta' for scan newly changed files between snapshots, 'changelog' scan changelog files between snapshots.<br /><br />Possible values:<ul><li>"delta": Scan newly changed files between snapshots.</li><li>"changelog": Scan changelog files between snapshots.</li></ul></td>
+            <td>Scan kind when Read incremental changes between start snapshot (exclusive) and end snapshot. <br /><br />Possible values:<ul><li>"auto": Scan changelog files for the table which produces changelog files. Otherwise, scan newly changed files.</li><li>"delta": Scan newly changed files between snapshots.</li><li>"changelog": Scan changelog files between snapshots.</li></ul></td>
         </tr>
         <tr>
             <td><h5>incremental-between-timestamp</h5></td>
@@ -335,9 +359,9 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
         </tr>
         <tr>
             <td><h5>manifest.format</h5></td>
-            <td style="word-wrap: break-word;">avro</td>
-            <td><p>Enum</p></td>
-            <td>Specify the message format of manifest files.<br /><br />Possible values:<ul><li>"orc": ORC file format.</li><li>"parquet": Parquet file format.</li><li>"avro": Avro file format.</li></ul></td>
+            <td style="word-wrap: break-word;">"avro"</td>
+            <td>String</td>
+            <td>Specify the message format of manifest files.</td>
         </tr>
         <tr>
             <td><h5>manifest.full-compaction-threshold-size</h5></td>
@@ -466,6 +490,18 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">1024</td>
             <td>Integer</td>
             <td>Read batch size for orc and parquet.</td>
+        </tr>
+        <tr>
+            <td><h5>record-level.expire-time</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>Record level expire time for primary key table, expiration happens in compaction, there is no strong guarantee to expire records in time. You must specific 'record-level.time-field' too.</td>
+        </tr>
+        <tr>
+            <td><h5>record-level.time-field</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Time field for record level expire, it should be a seconds INT.</td>
         </tr>
         <tr>
             <td><h5>rowkind.field</h5></td>

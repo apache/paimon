@@ -231,7 +231,7 @@ public class MergeFileSplitReadTest {
             read.withKeyProjection(keyProjection);
         }
         if (valueProjection != null) {
-            read.withValueProjection(valueProjection);
+            read.withProjection(valueProjection);
         }
 
         List<KeyValue> result = new ArrayList<>();

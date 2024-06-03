@@ -23,6 +23,9 @@ import org.apache.paimon.data.BinaryRow;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import static org.apache.paimon.io.DataFileTestUtils.row;
+import static org.assertj.core.api.Assertions.assertThat;
+
 /** Tests for {@link SimpleHashBucketAssigner}. */
 public class SimpleHashBucketAssignerTest {
 
@@ -65,5 +68,21 @@ public class SimpleHashBucketAssignerTest {
             int bucket = simpleHashBucketAssigner.assign(binaryRow, hash++);
             Assertions.assertThat(bucket).isEqualTo(0);
         }
+    }
+
+    @Test
+    public void testPartitionCopy() {
+        SimpleHashBucketAssigner assigner = new SimpleHashBucketAssigner(1, 0, 5);
+
+        BinaryRow partition = row(1);
+        assertThat(assigner.assign(partition, 0)).isEqualTo(0);
+        assertThat(assigner.assign(partition, 1)).isEqualTo(0);
+
+        partition.setInt(0, 2);
+        assertThat(assigner.assign(partition, 5)).isEqualTo(0);
+        assertThat(assigner.assign(partition, 6)).isEqualTo(0);
+
+        assertThat(assigner.currentPartitions()).contains(row(1));
+        assertThat(assigner.currentPartitions()).contains(row(2));
     }
 }
