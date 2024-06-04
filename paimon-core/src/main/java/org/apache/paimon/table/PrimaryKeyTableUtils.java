@@ -58,7 +58,7 @@ public class PrimaryKeyTableUtils {
 
         switch (mergeEngine) {
             case DEDUPLICATE:
-                return DeduplicateMergeFunction.factory();
+                return DeduplicateMergeFunction.factory(conf);
             case PARTIAL_UPDATE:
                 return PartialUpdateMergeFunction.factory(conf, rowType, tableSchema.primaryKeys());
             case AGGREGATE:
@@ -69,7 +69,7 @@ public class PrimaryKeyTableUtils {
                         tableSchema.primaryKeys());
             case FIRST_ROW:
                 return FirstRowMergeFunction.factory(
-                        new RowType(extractor.keyFields(tableSchema)), rowType);
+                        conf, new RowType(extractor.keyFields(tableSchema)), rowType);
             default:
                 throw new UnsupportedOperationException("Unsupported merge engine: " + mergeEngine);
         }
