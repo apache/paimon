@@ -26,7 +26,7 @@ under the License.
 
 # Changelog Producer
 
-Streaming queries will continuously produce the latest changes.
+Streaming write can continuously produce the latest changes for streaming read.
 
 By specifying the `changelog-producer` table property when creating the table, users can choose the pattern of changes produced from table files.
 
