@@ -21,7 +21,6 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StartingScanner.ScannedResult;
@@ -34,7 +33,6 @@ import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
 /** {@link TableScan} implementation for batch planning. */
 public class DataTableBatchScan extends AbstractDataTableScan {
 
-    private final BucketMode bucketMode;
     private final DefaultValueAssigner defaultValueAssigner;
 
     private StartingScanner startingScanner;
@@ -43,13 +41,11 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     private Integer pushDownLimit;
 
     public DataTableBatchScan(
-            BucketMode bucketMode,
             boolean pkTable,
             CoreOptions options,
             SnapshotReader snapshotReader,
             DefaultValueAssigner defaultValueAssigner) {
         super(options, snapshotReader);
-        this.bucketMode = bucketMode;
         this.hasNext = true;
         this.defaultValueAssigner = defaultValueAssigner;
         if (pkTable && (options.deletionVectorsEnabled() || options.mergeEngine() == FIRST_ROW)) {
@@ -125,7 +121,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
 
     @Override
     public DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
-        snapshotReader.withShard(bucketMode, indexOfThisSubtask, numberOfParallelSubtasks);
+        snapshotReader.withShard(indexOfThisSubtask, numberOfParallelSubtasks);
         return this;
     }
 }
