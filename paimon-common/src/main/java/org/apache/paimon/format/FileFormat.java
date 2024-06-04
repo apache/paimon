@@ -104,9 +104,12 @@ public abstract class FileFormat {
     }
 
     public static FileFormat getFileFormat(Options options, String formatIdentifier) {
-        int readBatchSize = options.get(CoreOptions.READ_BATCH_SIZE);
-        return FileFormat.fromIdentifier(
-                formatIdentifier,
-                new FormatContext(options.removePrefix(formatIdentifier + "."), readBatchSize));
+        FormatContext context =
+                new FormatContext(
+                        options.removePrefix(formatIdentifier + "."),
+                        options.get(CoreOptions.READ_BATCH_SIZE),
+                        options.get(CoreOptions.FILE_COMPRESSION_ZSTD_LEVEL),
+                        options.get(CoreOptions.FILE_BLOCK_SIZE));
+        return FileFormat.fromIdentifier(formatIdentifier, context);
     }
 }

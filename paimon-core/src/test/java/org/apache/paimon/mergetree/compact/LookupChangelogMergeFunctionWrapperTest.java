@@ -392,7 +392,8 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                         new RowType(
                                                 Lists.list(new DataField(0, "f0", new IntType()))),
                                         new RowType(
-                                                Lists.list(new DataField(1, "f1", new IntType())))),
+                                                Lists.list(new DataField(1, "f1", new IntType()))),
+                                        false),
                         highLevel::contains);
 
         // Without level-0

@@ -424,6 +424,13 @@ public class FlinkConnectorOptions {
                             "Specifies the sample factor. Let S represent the total number of samples, F represent the sample factor, "
                                     + "and P represent the sink parallelism, then S=F×P. The minimum allowed sample factor is 20.");
 
+    public static final ConfigOption<Long> END_INPUT_WATERMARK =
+            key("end-input.watermark")
+                    .longType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Optional endInput watermark used in case of batch mode or bounded stream.");
+
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();
         final List<ConfigOption<?>> list = new ArrayList<>(fields.length);

@@ -52,11 +52,11 @@ class PartitionMarkDoneTriggerTest {
                 };
 
         PartitionTimeExtractor extractor = new PartitionTimeExtractor("$dt", "yyyy-MM-dd");
-        Duration timeInternal = Duration.ofDays(1);
+        Duration timeInterval = Duration.ofDays(1);
         Duration idleTime = Duration.ofMinutes(15);
         PartitionMarkDoneTrigger trigger =
                 new PartitionMarkDoneTrigger(
-                        state, extractor, timeInternal, idleTime, toEpochMillis("2024-02-01"));
+                        state, extractor, timeInterval, idleTime, toEpochMillis("2024-02-01"));
 
         // test not reach partition end + idle time
         trigger.notifyPartition("dt=2024-02-02", toEpochMillis("2024-02-01"));
@@ -91,7 +91,7 @@ class PartitionMarkDoneTriggerTest {
         pendingPartitions.add("dt=2024-02-04");
         trigger =
                 new PartitionMarkDoneTrigger(
-                        state, extractor, timeInternal, idleTime, toEpochMillis("2024-02-06"));
+                        state, extractor, timeInterval, idleTime, toEpochMillis("2024-02-06"));
         partitions = trigger.donePartitions(toEpochMillis("2024-02-06"));
         assertThat(partitions).isEmpty();
         partitions = trigger.donePartitions(toEpochMillis("2024-02-06") + idleTime.toMillis() + 1);

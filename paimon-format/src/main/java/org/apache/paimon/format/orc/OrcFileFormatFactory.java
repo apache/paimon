@@ -19,9 +19,6 @@
 package org.apache.paimon.format.orc;
 
 import org.apache.paimon.format.FileFormatFactory;
-import org.apache.paimon.options.Options;
-
-import java.util.Properties;
 
 /** Factory to create {@link OrcFileFormat}. */
 public class OrcFileFormatFactory implements FileFormatFactory {
@@ -35,21 +32,6 @@ public class OrcFileFormatFactory implements FileFormatFactory {
 
     @Override
     public OrcFileFormat create(FormatContext formatContext) {
-        return new OrcFileFormat(
-                new FormatContext(
-                        supplyDefaultOptions(formatContext.formatOptions()),
-                        formatContext.readBatchSize()));
-    }
-
-    private Options supplyDefaultOptions(Options options) {
-        if (!options.containsKey("compress")) {
-            Properties properties = new Properties();
-            options.addAllToProperties(properties);
-            properties.setProperty("compress", "lz4");
-            Options newOptions = new Options();
-            properties.forEach((k, v) -> newOptions.setString(k.toString(), v.toString()));
-            return newOptions;
-        }
-        return options;
+        return new OrcFileFormat(formatContext);
     }
 }

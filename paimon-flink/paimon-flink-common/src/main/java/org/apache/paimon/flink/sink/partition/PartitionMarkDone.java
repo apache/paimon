@@ -93,12 +93,17 @@ public class PartitionMarkDone implements Closeable {
 
         MetastoreClient.Factory metastoreClientFactory =
                 table.catalogEnvironment().metastoreClientFactory();
-        checkNotNull(
-                metastoreClientFactory, "Cannot mark done partition for table without metastore.");
-        checkArgument(
-                coreOptions.partitionedTableInMetastore(),
-                "Table should enable %s",
-                METASTORE_PARTITIONED_TABLE.key());
+
+        String partitionMarkDownAction = options.get(PARTITION_MARK_DONE_ACTION);
+        if (partitionMarkDownAction.contains("done-partition")) {
+            checkNotNull(
+                    metastoreClientFactory,
+                    "Cannot mark done partition for table without metastore.");
+            checkArgument(
+                    coreOptions.partitionedTableInMetastore(),
+                    "Table should enable %s",
+                    METASTORE_PARTITIONED_TABLE.key());
+        }
 
         InternalRowPartitionComputer partitionComputer =
                 new InternalRowPartitionComputer(
@@ -116,7 +121,7 @@ public class PartitionMarkDone implements Closeable {
                         idleToDone);
 
         List<PartitionMarkDoneAction> actions =
-                Arrays.asList(options.get(PARTITION_MARK_DONE_ACTION).split(",")).stream()
+                Arrays.asList(partitionMarkDownAction.split(",")).stream()
                         .map(
                                 action -> {
                                     switch (action) {

@@ -86,6 +86,8 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
 
     private transient String commitUser;
 
+    private final Long endInputWatermark;
+
     public CommitterOperator(
             boolean streamingCheckpointEnabled,
             boolean forceSingleParallelism,
@@ -93,12 +95,31 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
             String initialCommitUser,
             Committer.Factory<CommitT, GlobalCommitT> committerFactory,
             CommittableStateManager<GlobalCommitT> committableStateManager) {
+        this(
+                streamingCheckpointEnabled,
+                forceSingleParallelism,
+                chaining,
+                initialCommitUser,
+                committerFactory,
+                committableStateManager,
+                null);
+    }
+
+    public CommitterOperator(
+            boolean streamingCheckpointEnabled,
+            boolean forceSingleParallelism,
+            boolean chaining,
+            String initialCommitUser,
+            Committer.Factory<CommitT, GlobalCommitT> committerFactory,
+            CommittableStateManager<GlobalCommitT> committableStateManager,
+            Long endInputWatermark) {
         this.streamingCheckpointEnabled = streamingCheckpointEnabled;
         this.forceSingleParallelism = forceSingleParallelism;
         this.initialCommitUser = initialCommitUser;
         this.committablesPerCheckpoint = new TreeMap<>();
         this.committerFactory = checkNotNull(committerFactory);
         this.committableStateManager = committableStateManager;
+        this.endInputWatermark = endInputWatermark;
         setChainingStrategy(chaining ? ChainingStrategy.ALWAYS : ChainingStrategy.NEVER);
     }
 
@@ -158,6 +179,10 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
     @Override
     public void endInput() throws Exception {
         endInput = true;
+        if (endInputWatermark != null) {
+            currentWatermark = endInputWatermark;
+        }
+
         if (streamingCheckpointEnabled) {
             return;
         }

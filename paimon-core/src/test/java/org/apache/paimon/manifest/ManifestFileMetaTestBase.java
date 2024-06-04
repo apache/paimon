@@ -128,6 +128,7 @@ public abstract class ManifestFileMetaTestBase {
                         new SchemaManager(fileIO, path),
                         getPartitionType(),
                         avro,
+                        "zstd",
                         new FileStorePathFactory(
                                 path,
                                 getPartitionType(),

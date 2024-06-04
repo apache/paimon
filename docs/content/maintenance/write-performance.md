@@ -210,11 +210,9 @@ layers to be in Avro format.
 
 ## File Compression
 
-By default, Paimon uses high-performance compression algorithms such as LZ4 and SNAPPY, but their compression rates
-are not so good. If you want to reduce the write/read performance, you can modify the compression algorithm:
+By default, Paimon uses zstd with level 1, you can modify the compression algorithm:
 
-1. `'file.compression'`: Default file compression format. If you need a higher compression rate, I recommend using `'ZSTD'`.
-2. `'file.compression.per.level'`: Define different compression policies for different level. For example `'0:lz4,1:zstd'`.
+`'file.compression.zstd-level'`: Default zstd level is 1. For higher compression rates, it can be configured to 9, but the read and write speed will significantly decrease.
 
 ## Stability
 

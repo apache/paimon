@@ -24,7 +24,6 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.predicate.Predicate;
@@ -206,9 +205,13 @@ public class ManifestsTable implements ReadonlyTable {
             return Collections.emptyList();
         }
         FileStorePathFactory fileStorePathFactory = dataTable.store().pathFactory();
-        FileFormat fileFormat = coreOptions.manifestFormat();
         ManifestList manifestList =
-                new ManifestList.Factory(dataTable.fileIO(), fileFormat, fileStorePathFactory, null)
+                new ManifestList.Factory(
+                                dataTable.fileIO(),
+                                coreOptions.manifestFormat(),
+                                coreOptions.manifestCompression(),
+                                fileStorePathFactory,
+                                null)
                         .create();
         return snapshot.allManifests(manifestList);
     }

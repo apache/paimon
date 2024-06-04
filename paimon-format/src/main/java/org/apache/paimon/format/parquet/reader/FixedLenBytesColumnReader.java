@@ -70,7 +70,7 @@ public class FixedLenBytesColumnReader<VECTOR extends WritableColumnVector>
             WritableBytesVector bytesVector = (WritableBytesVector) column;
             for (int i = 0; i < num; i++) {
                 if (runLenDecoder.readInteger() == maxDefLevel) {
-                    byte[] bytes = readDataBinary(bytesLen).getBytes();
+                    byte[] bytes = readDataBinary(bytesLen).getBytesUnsafe();
                     bytesVector.appendBytes(rowId + i, bytes, 0, bytes.length);
                 } else {
                     bytesVector.setNullAt(rowId + i);
