@@ -119,6 +119,28 @@ public class FileUtils {
     }
 
     /**
+     * 列出目录下的 FileStatus
+     */
+    public static Stream<FileStatus> listVersionedFileStatusAskwang(FileIO fileIO, Path dir, String prefix) throws IOException {
+        if (!fileIO.exists(dir)) {
+            return Stream.empty();
+        }
+
+        // hadoop的FileStatus[] 转换为 paimon 的 FileStatus[]，为什么要这么做？
+        // org.apache.hadoop.fs.FileStatus[] ->  org.apache.paimon.fs.FileStatus[]
+        FileStatus[] statuses = fileIO.listStatus(dir);
+        if (statuses == null) {
+            throw new RuntimeException(
+                String.format(
+                    "The return value is null of the listStatus for the '%s' directory.",
+                    dir));
+        }
+        return Arrays.stream(statuses)
+            .filter(name -> name.getPath().getName().startsWith(prefix));
+    }
+
+
+    /**
      * List versioned directories for the directory.
      *
      * @return file status stream

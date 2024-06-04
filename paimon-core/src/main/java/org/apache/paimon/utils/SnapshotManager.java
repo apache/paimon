@@ -23,6 +23,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.SeekableInputStream;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -47,6 +48,7 @@ import java.util.stream.Stream;
 
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.BranchManager.getBranchPath;
+import static org.apache.paimon.utils.FileUtils.listVersionedFileStatusAskwang;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 
 /** Manager for {@link Snapshot}, providing utility methods related to paths and snapshot hints. */
@@ -590,22 +592,23 @@ public class SnapshotManager implements Serializable {
         if (!fileIO.exists(dir)) {
             return null;
         }
-        Long snapshotId = readHint(EARLIEST);
+        Long snapshotId = readHintAskwang(EARLIEST);
         if (snapshotId != null && fileIO.exists(file.apply(snapshotId))) {
             return snapshotId;
         }
         // (a, b) -> Math.min(a, b)  <==> Math:min
-        return findByListFiles(Math::min, dir, prefix);
+        return findByListFilesAskwang(Math::min, dir, prefix);
     }
 
     /**
+     * askwang-start
      * 查找 LATEST snapshot id
      */
     private Long findLatestAskwang(Path dir, String prefix, Function<Long, Path> file) throws IOException {
         if (!fileIO.exists(dir)) {
             return null;
         }
-        Long snapshotId = readHint(LATEST);
+        Long snapshotId = readHintAskwang(LATEST);
         if (snapshotId != null && snapshotId > 0) {
             // check next snapshotId not existed
             Long nextSnapshotId = snapshotId + 1;
@@ -634,11 +637,10 @@ public class SnapshotManager implements Serializable {
      *  - schema id 及对应 schema
      */
     private Stream<Long> listVersionedFilesAskwang(FileIO fileIO, Path dir, String prefix) throws IOException {
-        // askwang-todo: listStatus 需考虑更多的情况，比如目录不存在、目录为空
+        // askwang-done: listStatus 需考虑更多的情况，比如目录不存在、目录为空
         FileStatus[] fileStatuses = fileIO.listStatus(dir);
         // "EARLIEST".substring("snapshot-".length()); will throw StringIndexOutOfBoundsException, so filter first
-        return Arrays.stream(fileStatuses)
-            .filter(fileStatus -> fileStatus.getPath().getName().startsWith(prefix))
+        return listVersionedFileStatusAskwang(fileIO, dir, prefix)
             .map(FileStatus::getPath)
             .map(Path::getName)
             .map(name -> name.substring(prefix.length())).map(Long::parseLong);
@@ -661,6 +663,43 @@ public class SnapshotManager implements Serializable {
             try {
                 TimeUnit.MILLISECONDS.sleep(READ_HINT_RETRY_INTERVAL);
             } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(e);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 思路:
+     * 1、读取的文件路径名 path
+     * 2、InputStream 读取对应 path
+     * 3、原方法 readHint 有两层重试机制，异常处理也更周到。
+     */
+    public Long readHintAskwang(String fileName) throws IOException {
+        Path dir = snapshotDirectory();
+        StringBuilder sBuilder = new StringBuilder();
+        Path path = new Path(dir, fileName);
+        if (!fileIO.exists(path)) {
+            return null;
+        }
+        int retryNum = 0;
+        while (retryNum++ <= READ_HINT_RETRY_NUM) {
+            try (InputStream in = fileIO.newInputStream(path)){
+                BufferedReader br = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
+                String line;
+                while ((line = br.readLine()) != null) {
+                    sBuilder.append(line);
+                }
+                return Optional.of(sBuilder.toString()).map(Long::parseLong).orElse(null);
+            } catch (IOException ignored) {
+                // read failed do nothing.
+            }
+            // no return. represent read path failed. sleep.
+            try {
+                TimeUnit.MILLISECONDS.sleep(READ_HINT_RETRY_INTERVAL);
+            } catch (InterruptedException e) {
+                // sleep时抛异常需中断线程。
                 Thread.currentThread().interrupt();
                 throw new RuntimeException(e);
             }
@@ -694,7 +733,11 @@ public class SnapshotManager implements Serializable {
         fileIO.overwriteFileUtf8(hintFile, String.valueOf(snapshotId));
     }
 
-    // snapshot dir; overwrite hdfs file;
+    /**
+     * askwang-start
+     * snapshot dir; overwrite hdfs file;
+     *
+     */
     public void commitEarliestHintAskwang(long snapshotId) throws IOException {
         Path path = new Path(snapshotDirectory(), EARLIEST);
         String content = String.valueOf(snapshotId);

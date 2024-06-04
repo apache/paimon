@@ -278,6 +278,7 @@ public interface FileIO extends Serializable {
         IOException exception = null;
         while (retryNumber++ < 5) {
             try {
+                // askwang-todo: path判断没必要放在循环内部。
                 if (!exists(path)) {
                     return Optional.empty();
                 }

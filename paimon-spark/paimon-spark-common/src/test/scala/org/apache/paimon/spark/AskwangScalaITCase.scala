@@ -15,7 +15,6 @@ class AskwangScalaITCase extends PaimonSparkTestBase {
     getMapPartitionsResult(rdd).foreach(println)
 
     println("-----after partitionBy-----")
-    // akwang-todo: 使用 CustomPartitioner 报错 Task not serializable
     val partitionedRdd = rdd.partitionBy(new HashPartitioner(4))
     getMapPartitionsResult(partitionedRdd).foreach(println)
   }

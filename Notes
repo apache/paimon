@@ -1,4 +1,14 @@
 
+principles:
 - Learn from project and do your things based on this project.
-- commit type: note, recode, newcode.
 - Very clearly to code, so you can copy or write it.
+
+commit type:
+- note: code comments
+- recode: imitate writing code
+- newcode: add some new codes
+
+tag:
+- askwang-start: method recode main entry
+- askwang-todo: need to learn or change.
+- askwang-done: todo has been finished.

@@ -130,7 +130,8 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             // write the hint file in order to see the earliest snapshot directly next time
             // should avoid duplicate writes when the file exists
             if (snapshotManager.readHint(SnapshotManager.EARLIEST) == null) {
-                // askwang-todo: 这种条件下应该写入 earliestId 为 EARLIEST 值
+                // askwang-done: 这种条件下应该写入 earliestId 为 EARLIEST 值
+                // pr: https://github.com/apache/paimon/pull/3398
                 writeEarliestHint(endExclusiveId);
             }
 
