@@ -18,7 +18,6 @@
 
 package org.apache.paimon.manifest;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -60,10 +59,11 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             ManifestEntrySerializer serializer,
             FormatReaderFactory readerFactory,
             FormatWriterFactory writerFactory,
+            String compression,
             PathFactory pathFactory,
             long suggestedFileSize,
             @Nullable SegmentsCache<String> cache) {
-        super(fileIO, serializer, readerFactory, writerFactory, pathFactory, cache);
+        super(fileIO, serializer, readerFactory, writerFactory, compression, pathFactory, cache);
         this.schemaManager = schemaManager;
         this.partitionType = partitionType;
         this.writerFactory = writerFactory;
@@ -93,11 +93,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
 
     public RollingFileWriter<ManifestEntry, ManifestFileMeta> createRollingWriter() {
         return new RollingFileWriter<>(
-                () ->
-                        new ManifestEntryWriter(
-                                writerFactory,
-                                pathFactory.newPath(),
-                                CoreOptions.FILE_COMPRESSION.defaultValue()),
+                () -> new ManifestEntryWriter(writerFactory, pathFactory.newPath(), compression),
                 suggestedFileSize);
     }
 
@@ -157,6 +153,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         private final SchemaManager schemaManager;
         private final RowType partitionType;
         private final FileFormat fileFormat;
+        private final String compression;
         private final FileStorePathFactory pathFactory;
         private final long suggestedFileSize;
         @Nullable private final SegmentsCache<String> cache;
@@ -166,6 +163,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                 SchemaManager schemaManager,
                 RowType partitionType,
                 FileFormat fileFormat,
+                String compression,
                 FileStorePathFactory pathFactory,
                 long suggestedFileSize,
                 @Nullable SegmentsCache<String> cache) {
@@ -173,6 +171,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             this.schemaManager = schemaManager;
             this.partitionType = partitionType;
             this.fileFormat = fileFormat;
+            this.compression = compression;
             this.pathFactory = pathFactory;
             this.suggestedFileSize = suggestedFileSize;
             this.cache = cache;
@@ -187,6 +186,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                     new ManifestEntrySerializer(),
                     fileFormat.createReaderFactory(entryType),
                     fileFormat.createWriterFactory(entryType),
+                    compression,
                     pathFactory.manifestFileFactory(),
                     suggestedFileSize,
                     cache);
@@ -199,6 +199,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                     new SimpleFileEntrySerializer(),
                     fileFormat.createReaderFactory(entryType),
                     fileFormat.createWriterFactory(entryType),
+                    compression,
                     pathFactory.manifestFileFactory(),
                     cache);
         }

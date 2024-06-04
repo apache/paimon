@@ -87,7 +87,7 @@ public abstract class FormatReadWriteTest {
         FileFormat format = fileFormat();
 
         PositionOutputStream out = fileIO.newOutputStream(file, false);
-        FormatWriter writer = format.createWriterFactory(rowType).create(out, null);
+        FormatWriter writer = format.createWriterFactory(rowType).create(out, "zstd");
         writer.addElement(GenericRow.of(1, 1L));
         writer.addElement(GenericRow.of(2, 2L));
         writer.addElement(GenericRow.of(3, null));
@@ -118,7 +118,7 @@ public abstract class FormatReadWriteTest {
         FileFormat format = fileFormat();
 
         PositionOutputStream out = fileIO.newOutputStream(file, false);
-        FormatWriter writer = format.createWriterFactory(rowType).create(out, null);
+        FormatWriter writer = format.createWriterFactory(rowType).create(out, "zstd");
         writer.addElement(expected);
         writer.flush();
         writer.finish();

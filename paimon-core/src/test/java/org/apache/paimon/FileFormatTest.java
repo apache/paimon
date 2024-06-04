@@ -111,8 +111,8 @@ public class FileFormatTest {
         assertThat(fileFormat instanceof OrcFileFormat).isTrue();
 
         OrcFileFormat orcFileFormat = (OrcFileFormat) fileFormat;
-        assertThat(orcFileFormat.formatContext().formatOptions().get("hello")).isEqualTo("world");
-        assertThat(orcFileFormat.formatContext().readBatchSize()).isEqualTo(1024);
+        assertThat(orcFileFormat.orcProperties().get("orc.hello")).isEqualTo("world");
+        assertThat(orcFileFormat.readBatchSize()).isEqualTo(1024);
     }
 
     @ParameterizedTest
@@ -127,8 +127,8 @@ public class FileFormatTest {
         FileFormat fileFormat = fileFormatDiscover.discover(identifier);
         assertThat(fileFormat instanceof OrcFileFormat).isTrue();
         OrcFileFormat orcFileFormat = (OrcFileFormat) fileFormat;
-        assertThat(orcFileFormat.formatContext().formatOptions().get("hello")).isEqualTo("world");
-        assertThat(orcFileFormat.formatContext().readBatchSize()).isEqualTo(1024);
+        assertThat(orcFileFormat.orcProperties().get("orc.hello")).isEqualTo("world");
+        assertThat(orcFileFormat.readBatchSize()).isEqualTo(1024);
     }
 
     public FileFormat createFileFormat(String codec) {

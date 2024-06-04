@@ -31,6 +31,6 @@ public class AvroFileFormatFactory implements FileFormatFactory {
 
     @Override
     public FileFormat create(FormatContext formatContext) {
-        return new AvroFileFormat(formatContext.formatOptions());
+        return new AvroFileFormat(formatContext);
     }
 }

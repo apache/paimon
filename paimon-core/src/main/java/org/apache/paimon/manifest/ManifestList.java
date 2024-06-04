@@ -44,9 +44,10 @@ public class ManifestList extends ObjectsFile<ManifestFileMeta> {
             ManifestFileMetaSerializer serializer,
             FormatReaderFactory readerFactory,
             FormatWriterFactory writerFactory,
+            String compression,
             PathFactory pathFactory,
             @Nullable SegmentsCache<String> cache) {
-        super(fileIO, serializer, readerFactory, writerFactory, pathFactory, cache);
+        super(fileIO, serializer, readerFactory, writerFactory, compression, pathFactory, cache);
     }
 
     /**
@@ -63,16 +64,19 @@ public class ManifestList extends ObjectsFile<ManifestFileMeta> {
 
         private final FileIO fileIO;
         private final FileFormat fileFormat;
+        private final String compression;
         private final FileStorePathFactory pathFactory;
         @Nullable private final SegmentsCache<String> cache;
 
         public Factory(
                 FileIO fileIO,
                 FileFormat fileFormat,
+                String compression,
                 FileStorePathFactory pathFactory,
                 @Nullable SegmentsCache<String> cache) {
             this.fileIO = fileIO;
             this.fileFormat = fileFormat;
+            this.compression = compression;
             this.pathFactory = pathFactory;
             this.cache = cache;
         }
@@ -84,6 +88,7 @@ public class ManifestList extends ObjectsFile<ManifestFileMeta> {
                     new ManifestFileMetaSerializer(),
                     fileFormat.createReaderFactory(metaType),
                     fileFormat.createWriterFactory(metaType),
+                    compression,
                     pathFactory.manifestListFactory(),
                     cache);
         }

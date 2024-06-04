@@ -40,12 +40,14 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
             FileIO fileIO,
             FormatReaderFactory readerFactory,
             FormatWriterFactory writerFactory,
+            String compression,
             PathFactory pathFactory) {
         super(
                 fileIO,
                 new IndexManifestEntrySerializer(),
                 readerFactory,
                 writerFactory,
+                compression,
                 pathFactory,
                 null);
     }
@@ -68,11 +70,17 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
 
         private final FileIO fileIO;
         private final FileFormat fileFormat;
+        private final String compression;
         private final FileStorePathFactory pathFactory;
 
-        public Factory(FileIO fileIO, FileFormat fileFormat, FileStorePathFactory pathFactory) {
+        public Factory(
+                FileIO fileIO,
+                FileFormat fileFormat,
+                String compression,
+                FileStorePathFactory pathFactory) {
             this.fileIO = fileIO;
             this.fileFormat = fileFormat;
+            this.compression = compression;
             this.pathFactory = pathFactory;
         }
 
@@ -82,6 +90,7 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
                     fileIO,
                     fileFormat.createReaderFactory(schema),
                     fileFormat.createWriterFactory(schema),
+                    compression,
                     pathFactory.indexManifestFileFactory());
         }
     }
