@@ -75,6 +75,10 @@ public abstract class FormatReadWriteTest {
 
     protected abstract FileFormat fileFormat();
 
+    protected boolean supportNestedNested() {
+        return true;
+    }
+
     @Test
     public void testSimpleTypes() throws IOException {
         RowType rowType = DataTypes.ROW(DataTypes.INT().notNull(), DataTypes.BIGINT());
@@ -160,7 +164,7 @@ public abstract class FormatReadWriteTest {
                         .field("decimal2", DataTypes.DECIMAL(38, 2))
                         .field("decimal3", DataTypes.DECIMAL(10, 1));
 
-        if (formatType.equals("avro") || formatType.equals("orc")) {
+        if (supportNestedNested()) {
             builder.field(
                     "rowArray",
                     DataTypes.ARRAY(
@@ -215,7 +219,7 @@ public abstract class FormatReadWriteTest {
                         Decimal.fromBigDecimal(new BigDecimal("12312455.22"), 38, 2),
                         Decimal.fromBigDecimal(new BigDecimal("12455.1"), 10, 1));
 
-        if (formatType.equals("avro") || formatType.equals("orc")) {
+        if (supportNestedNested()) {
             values = new ArrayList<>(values);
             values.add(
                     new GenericArray(
