@@ -27,8 +27,7 @@ import org.apache.paimon.utils.ParameterUtils;
 
 import org.apache.flink.table.procedure.ProcedureContext;
 
-import java.util.UUID;
-
+import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -53,7 +52,11 @@ public class DropPartitionProcedure extends ProcedureBase {
 
         FileStoreTable fileStoreTable =
                 (FileStoreTable) catalog.getTable(Identifier.fromString(tableId));
-        FileStoreCommit commit = fileStoreTable.store().newCommit(UUID.randomUUID().toString());
+        FileStoreCommit commit =
+                fileStoreTable
+                        .store()
+                        .newCommit(
+                                createCommitUser(fileStoreTable.coreOptions().toConfiguration()));
         commit.dropPartitions(
                 ParameterUtils.getPartitions(partitionStrings),
                 BatchWriteBuilder.COMMIT_IDENTIFIER);

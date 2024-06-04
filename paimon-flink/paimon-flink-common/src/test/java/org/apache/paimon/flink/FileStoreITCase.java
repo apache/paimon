@@ -63,6 +63,7 @@ import org.apache.flink.testutils.junit.extensions.parameterized.Parameters;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -386,6 +387,24 @@ public class FileStoreITCase extends AbstractTestBase {
         assertThat(transformation).isInstanceOf(SourceTransformation.class);
         assertThat(((SourceTransformation<?, ?, ?>) transformation).getSource().getBoundedness())
                 .isEqualTo(Boundedness.BOUNDED);
+    }
+
+    @TestTemplate
+    public void testCommitUserWithPrefix() throws Exception {
+        String commitUserPrefix = "commitUserPrefix";
+
+        FileStoreTable table = buildFileStoreTable(new int[0], new int[] {2});
+        table =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.COMMIT_USER_PREFIX.key(), commitUserPrefix));
+        // write
+        new FlinkSinkBuilder(table).forRowData(buildTestSource(env, isBatch)).build();
+        env.execute();
+
+        Assertions.assertNotNull(table.snapshotManager().latestSnapshot());
+        Assertions.assertTrue(
+                table.snapshotManager().latestSnapshot().commitUser().startsWith(commitUserPrefix));
     }
 
     private void innerTestContinuous(FileStoreTable table) throws Exception {

@@ -53,12 +53,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 import static org.apache.paimon.CoreOptions.MergeEngine.PARTIAL_UPDATE;
+import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Flink table sink that supports row level update and delete. */
@@ -160,8 +160,12 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
 
     @Override
     public Optional<Long> executeDeletion() {
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
         FileStoreCommit commit =
-                ((FileStoreTable) table).store().newCommit(UUID.randomUUID().toString());
+                fileStoreTable
+                        .store()
+                        .newCommit(
+                                createCommitUser(fileStoreTable.coreOptions().toConfiguration()));
         long identifier = BatchWriteBuilder.COMMIT_IDENTIFIER;
         if (deletePredicate == null) {
             commit.truncateTable(identifier);

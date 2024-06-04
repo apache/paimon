@@ -51,6 +51,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.ConfigOptions.key;
@@ -1183,7 +1184,13 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Default aggregate function of all fields for partial-update and aggregate merge function");
+                            "Default aggregate function of all fields for partial-update and aggregate merge function.");
+
+    public static final ConfigOption<String> COMMIT_USER_PREFIX =
+            key("commit.user-prefix")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("Specifies the commit user prefix.");
 
     private final Options options;
 
@@ -1300,6 +1307,13 @@ public class CoreOptions implements Serializable {
 
     public String fieldsDefaultFunc() {
         return options.get(FIELDS_DEFAULT_AGG_FUNC);
+    }
+
+    public static String createCommitUser(Options options) {
+        String commitUserPrefix = options.get(COMMIT_USER_PREFIX);
+        return commitUserPrefix == null
+                ? UUID.randomUUID().toString()
+                : commitUserPrefix + "_" + UUID.randomUUID();
     }
 
     public boolean definedAggFunc() {

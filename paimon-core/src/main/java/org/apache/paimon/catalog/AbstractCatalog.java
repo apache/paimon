@@ -50,9 +50,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
@@ -170,7 +170,11 @@ public abstract class AbstractCatalog implements Catalog {
             throws TableNotExistException {
         Table table = getTable(identifier);
         FileStoreTable fileStoreTable = (FileStoreTable) table;
-        FileStoreCommit commit = fileStoreTable.store().newCommit(UUID.randomUUID().toString());
+        FileStoreCommit commit =
+                fileStoreTable
+                        .store()
+                        .newCommit(
+                                createCommitUser(fileStoreTable.coreOptions().toConfiguration()));
         commit.dropPartitions(
                 Collections.singletonList(partitionSpec), BatchWriteBuilder.COMMIT_IDENTIFIER);
     }
