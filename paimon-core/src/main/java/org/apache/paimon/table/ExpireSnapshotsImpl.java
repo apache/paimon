@@ -146,7 +146,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             // write the hint file in order to see the earliest snapshot directly next time
             // should avoid duplicate writes when the file exists
             if (snapshotManager.readHint(SnapshotManager.EARLIEST) == null) {
-                writeEarliestHint(endExclusiveId);
+                writeEarliestHint(earliestId);
             }
 
             // fast exit
