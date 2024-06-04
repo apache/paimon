@@ -608,11 +608,7 @@ public class SnapshotManager implements Serializable {
     }
 
     public void deleteLatestHint() throws IOException {
-        deleteLatestHint(DEFAULT_MAIN_BRANCH);
-    }
-
-    public void deleteLatestHint(String branchName) throws IOException {
-        Path snapshotDir = snapshotDirByBranch(branchName);
+        Path snapshotDir = snapshotDirectory();
         Path hintFile = new Path(snapshotDir, LATEST);
         fileIO.delete(hintFile, false);
     }

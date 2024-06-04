@@ -45,6 +45,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.apache.paimon.utils.FileUtils.listVersionedDirectories;
+import static org.apache.paimon.utils.FileUtils.listVersionedFileStatus;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Manager for {@code Branch}. */
@@ -360,9 +361,12 @@ public class BranchManager {
                 !branchName.equals(DEFAULT_MAIN_BRANCH),
                 "Branch name '%s' do not use in merge branch.",
                 branchName);
+        checkArgument(!StringUtils.isBlank(branchName), "Branch name '%s' is blank.", branchName);
         checkArgument(branchExists(branchName), "Branch name '%s' doesn't exist.", branchName);
-        Long earliestSnapshotId = snapshotManager.earliestSnapshotId(branchName);
-        Snapshot earliestSnapshot = snapshotManager.snapshot(branchName, earliestSnapshotId);
+
+        Long earliestSnapshotId = snapshotManager.copyWithBranch(branchName).earliestSnapshotId();
+        Snapshot earliestSnapshot =
+                snapshotManager.copyWithBranch(branchName).snapshot(earliestSnapshotId);
         long earliestSchemaId = earliestSnapshot.schemaId();
 
         try {
@@ -402,23 +406,24 @@ public class BranchManager {
                                     deleteTagPaths.stream())
                             .collect(Collectors.toList());
 
-            // Delete latest snapshot
+            // Delete latest snapshot hint
             snapshotManager.deleteLatestHint();
 
             fileIO.deleteFilesQuietly(deletePaths);
             fileIO.copyFilesUtf8(
-                    snapshotManager.branchSnapshotDirectory(branchName),
+                    snapshotManager.copyWithBranch(branchName).snapshotDirectory(),
                     snapshotManager.snapshotDirectory());
             fileIO.copyFilesUtf8(
-                    schemaManager.branchSchemaDirectory(branchName),
+                    schemaManager.copyWithBranch(branchName).schemaDirectory(),
                     schemaManager.schemaDirectory());
             fileIO.copyFilesUtf8(
-                    tagManager.branchTagDirectory(branchName), tagManager.tagDirectory());
+                    tagManager.copyWithBranch(branchName).tagDirectory(),
+                    tagManager.tagDirectory());
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(
                             "Exception occurs when merge branch '%s' (directory in %s).",
-                            branchName, getBranchPath(tablePath, branchName)),
+                            branchName, getBranchPath(fileIO, tablePath, branchName)),
                     e);
         }
     }

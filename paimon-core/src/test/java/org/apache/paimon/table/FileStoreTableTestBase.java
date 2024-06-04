@@ -30,6 +30,7 @@ import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.JoinedRow;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -98,6 +99,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
@@ -113,6 +115,7 @@ import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
+import static org.apache.paimon.utils.FileUtils.listVersionedFileStatus;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -1166,14 +1169,14 @@ public abstract class FileStoreTableTestBase {
     @Test
     public void testMergeBranch() throws Exception {
         FileStoreTable table = createFileStoreTable();
-
         generateBranch(table);
+        FileStoreTable tableBranch = createFileStoreTable(BRANCH_NAME);
 
         // Verify branch1 and the main branch have the same data
         assertThat(
                         getResult(
-                                table.newRead(),
-                                toSplits(table.newSnapshotReader("branch1").read().dataSplits()),
+                                tableBranch.newRead(),
+                                toSplits(tableBranch.newSnapshotReader().read().dataSplits()),
                                 BATCH_ROW_TO_STRING))
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
@@ -1191,8 +1194,8 @@ public abstract class FileStoreTableTestBase {
                                 "Branch name 'main' do not use in merge branch."));
 
         // Write data to branch1
-        try (StreamTableWrite write = table.newWrite(commitUser);
-                StreamTableCommit commit = table.newCommit(commitUser, "branch1")) {
+        try (StreamTableWrite write = tableBranch.newWrite(commitUser);
+                StreamTableCommit commit = tableBranch.newCommit(commitUser)) {
             write.write(rowData(2, 20, 200L));
             commit.commit(1, write.prepareCommit(false, 2));
         }
@@ -1200,8 +1203,8 @@ public abstract class FileStoreTableTestBase {
         // Validate data in branch1
         assertThat(
                         getResult(
-                                table.newRead(),
-                                toSplits(table.newSnapshotReader("branch1").read().dataSplits()),
+                                tableBranch.newRead(),
+                                toSplits(tableBranch.newSnapshotReader().read().dataSplits()),
                                 BATCH_ROW_TO_STRING))
                 .containsExactlyInAnyOrder(
                         "0|0|0|binary|varbinary|mapKey:mapVal|multiset",
@@ -1216,7 +1219,7 @@ public abstract class FileStoreTableTestBase {
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
         // Merge branch1 to main branch
-        table.mergeBranch("branch1");
+        table.mergeBranch(BRANCH_NAME);
 
         // After merge branch1, verify branch1 and the main branch have the same data
         assertThat(
@@ -1232,7 +1235,8 @@ public abstract class FileStoreTableTestBase {
         SnapshotManager snapshotManager = new SnapshotManager(new TraceableFileIO(), tablePath);
         Snapshot branchSnapshot =
                 Snapshot.fromPath(
-                        new TraceableFileIO(), snapshotManager.branchSnapshotPath("branch1", 2));
+                        new TraceableFileIO(),
+                        snapshotManager.copyWithBranch(BRANCH_NAME).snapshotPath(2));
         Snapshot snapshot =
                 Snapshot.fromPath(new TraceableFileIO(), snapshotManager.snapshotPath(2));
         assertThat(branchSnapshot.equals(snapshot)).isTrue();
@@ -1241,13 +1245,14 @@ public abstract class FileStoreTableTestBase {
         SchemaManager schemaManager = new SchemaManager(new TraceableFileIO(), tablePath);
         TableSchema branchSchema =
                 SchemaManager.fromPath(
-                        new TraceableFileIO(), schemaManager.branchSchemaPath("branch1", 0));
+                        new TraceableFileIO(),
+                        schemaManager.copyWithBranch(BRANCH_NAME).toSchemaPath(0));
         TableSchema schema0 = schemaManager.schema(0);
         assertThat(branchSchema.equals(schema0)).isTrue();
 
         // Write two rows data to branch1 again
-        try (StreamTableWrite write = table.newWrite(commitUser);
-                StreamTableCommit commit = table.newCommit(commitUser, "branch1")) {
+        try (StreamTableWrite write = tableBranch.newWrite(commitUser);
+                StreamTableCommit commit = tableBranch.newCommit(commitUser)) {
             write.write(rowData(3, 30, 300L));
             write.write(rowData(4, 40, 400L));
             commit.commit(2, write.prepareCommit(false, 3));
@@ -1256,8 +1261,8 @@ public abstract class FileStoreTableTestBase {
         // Verify data in branch1
         assertThat(
                         getResult(
-                                table.newRead(),
-                                toSplits(table.newSnapshotReader("branch1").read().dataSplits()),
+                                tableBranch.newRead(),
+                                toSplits(tableBranch.newSnapshotReader().read().dataSplits()),
                                 BATCH_ROW_TO_STRING))
                 .containsExactlyInAnyOrder(
                         "0|0|0|binary|varbinary|mapKey:mapVal|multiset",

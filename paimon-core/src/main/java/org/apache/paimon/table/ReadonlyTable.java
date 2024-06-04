@@ -189,7 +189,7 @@ public interface ReadonlyTable extends InnerTable {
                         "Readonly Table %s does not support mergeBranch.",
                         this.getClass().getSimpleName()));
     }
-  
+
     @Override
     default void replaceBranch(String fromBranch) {
         throw new UnsupportedOperationException(
