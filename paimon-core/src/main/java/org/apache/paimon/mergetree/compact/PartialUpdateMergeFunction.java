@@ -67,6 +67,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     public static final String SEQUENCE_GROUP = "sequence-group";
 
     private final InternalRow.FieldGetter[] getters;
+    private final boolean ignoreDelete;
     private final Map<Integer, SequenceGenerator> fieldSequences;
     private final boolean fieldSequenceEnabled;
     private final Map<Integer, FieldAggregator> fieldAggregators;
@@ -78,10 +79,12 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
     protected PartialUpdateMergeFunction(
             InternalRow.FieldGetter[] getters,
+            boolean ignoreDelete,
             Map<Integer, SequenceGenerator> fieldSequences,
             Map<Integer, FieldAggregator> fieldAggregators,
             boolean fieldSequenceEnabled) {
         this.getters = getters;
+        this.ignoreDelete = ignoreDelete;
         this.fieldSequences = fieldSequences;
         this.fieldAggregators = fieldAggregators;
         this.fieldSequenceEnabled = fieldSequenceEnabled;
@@ -100,6 +103,10 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         currentKey = kv.key();
 
         if (kv.valueKind().isRetract()) {
+            if (ignoreDelete) {
+                return;
+            }
+
             if (fieldSequenceEnabled) {
                 retractWithSequenceGroup(kv);
                 return;
@@ -216,12 +223,14 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
         private static final long serialVersionUID = 1L;
 
+        private final boolean ignoreDelete;
         private final List<DataType> tableTypes;
         private final Map<Integer, SequenceGenerator> fieldSequences;
 
         private final Map<Integer, FieldAggregator> fieldAggregators;
 
         private Factory(Options options, RowType rowType, List<String> primaryKeys) {
+            this.ignoreDelete = options.get(CoreOptions.IGNORE_DELETE);
             this.tableTypes = rowType.getFieldTypes();
 
             List<String> fieldNames = rowType.getFieldNames();
@@ -307,12 +316,14 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
                 return new PartialUpdateMergeFunction(
                         createFieldGetters(Projection.of(projection).project(tableTypes)),
+                        ignoreDelete,
                         projectedSequences,
                         projectedAggregators,
                         !fieldSequences.isEmpty());
             } else {
                 return new PartialUpdateMergeFunction(
                         createFieldGetters(tableTypes),
+                        ignoreDelete,
                         fieldSequences,
                         fieldAggregators,
                         !fieldSequences.isEmpty());

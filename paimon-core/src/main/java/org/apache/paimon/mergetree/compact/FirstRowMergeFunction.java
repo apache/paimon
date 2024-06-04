@@ -18,10 +18,11 @@
 
 package org.apache.paimon.mergetree.compact;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 
@@ -35,10 +36,12 @@ public class FirstRowMergeFunction implements MergeFunction<KeyValue> {
     private final InternalRowSerializer valueSerializer;
     private KeyValue first;
     public boolean containsHighLevel;
+    private final boolean ignoreDelete;
 
-    protected FirstRowMergeFunction(RowType keyType, RowType valueType) {
+    protected FirstRowMergeFunction(RowType keyType, RowType valueType, boolean ignoreDelete) {
         this.keySerializer = new InternalRowSerializer(keyType);
         this.valueSerializer = new InternalRowSerializer(valueType);
+        this.ignoreDelete = ignoreDelete;
     }
 
     @Override
@@ -49,10 +52,16 @@ public class FirstRowMergeFunction implements MergeFunction<KeyValue> {
 
     @Override
     public void add(KeyValue kv) {
-        Preconditions.checkArgument(
-                kv.valueKind().isAdd(),
-                "By default, First row merge engine can not accept DELETE/UPDATE_BEFORE records.\n"
-                        + "You can config 'ignore-delete' to ignore the DELETE/UPDATE_BEFORE records.");
+        if (kv.valueKind().isRetract()) {
+            if (ignoreDelete) {
+                return;
+            } else {
+                throw new IllegalArgumentException(
+                        "By default, First row merge engine can not accept DELETE/UPDATE_BEFORE records.\n"
+                                + "You can config 'first-row.ignore-delete' to ignore the DELETE/UPDATE_BEFORE records.");
+            }
+        }
+
         if (first == null) {
             this.first = kv.copy(keySerializer, valueSerializer);
         }
@@ -66,8 +75,10 @@ public class FirstRowMergeFunction implements MergeFunction<KeyValue> {
         return first;
     }
 
-    public static MergeFunctionFactory<KeyValue> factory(RowType keyType, RowType valueType) {
-        return new FirstRowMergeFunction.Factory(keyType, valueType);
+    public static MergeFunctionFactory<KeyValue> factory(
+            Options options, RowType keyType, RowType valueType) {
+        return new FirstRowMergeFunction.Factory(
+                keyType, valueType, options.get(CoreOptions.IGNORE_DELETE));
     }
 
     private static class Factory implements MergeFunctionFactory<KeyValue> {
@@ -75,15 +86,17 @@ public class FirstRowMergeFunction implements MergeFunction<KeyValue> {
         private static final long serialVersionUID = 1L;
         private final RowType keyType;
         private final RowType valueType;
+        private final boolean ignoreDelete;
 
-        public Factory(RowType keyType, RowType valueType) {
+        public Factory(RowType keyType, RowType valueType, boolean ignoreDelete) {
             this.keyType = keyType;
             this.valueType = valueType;
+            this.ignoreDelete = ignoreDelete;
         }
 
         @Override
         public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
-            return new FirstRowMergeFunction(keyType, valueType);
+            return new FirstRowMergeFunction(keyType, valueType, ignoreDelete);
         }
     }
 }
