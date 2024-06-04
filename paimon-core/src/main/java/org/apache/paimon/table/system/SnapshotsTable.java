@@ -27,8 +27,12 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.predicate.Equal;
+import org.apache.paimon.predicate.GreaterOrEqual;
+import org.apache.paimon.predicate.GreaterThan;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.LeafPredicateExtractor;
+import org.apache.paimon.predicate.LessOrEqual;
+import org.apache.paimon.predicate.LessThan;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
@@ -51,8 +55,6 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
-import javax.annotation.Nullable;
-
 import java.io.IOException;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -63,6 +65,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
@@ -188,7 +191,8 @@ public class SnapshotsTable implements ReadonlyTable {
 
         private final FileIO fileIO;
         private int[][] projection;
-        @Nullable private Long specificSnapshot;
+        private Optional<Long> optionalFilterSnapshotIdMax = Optional.empty();
+        private Optional<Long> optionalFilterSnapshotIdMin = Optional.empty();
 
         public SnapshotsRead(FileIO fileIO) {
             this.fileIO = fileIO;
@@ -202,9 +206,35 @@ public class SnapshotsTable implements ReadonlyTable {
 
             LeafPredicate snapshotPred =
                     predicate.visit(LeafPredicateExtractor.INSTANCE).get("snapshot_id");
-            if (snapshotPred != null && snapshotPred.function() instanceof Equal) {
-                specificSnapshot = (Long) snapshotPred.literals().get(0);
+            if (snapshotPred != null) {
+                if (snapshotPred.function() instanceof Equal) {
+                    optionalFilterSnapshotIdMin =
+                            Optional.of((Long) snapshotPred.literals().get(0));
+                    optionalFilterSnapshotIdMax =
+                            Optional.of((Long) snapshotPred.literals().get(0));
+                }
+
+                if (snapshotPred.function() instanceof GreaterThan) {
+                    optionalFilterSnapshotIdMin =
+                            Optional.of((Long) snapshotPred.literals().get(0) + 1);
+                }
+
+                if (snapshotPred.function() instanceof GreaterOrEqual) {
+                    optionalFilterSnapshotIdMin =
+                            Optional.of((Long) snapshotPred.literals().get(0));
+                }
+
+                if (snapshotPred.function() instanceof LessThan) {
+                    optionalFilterSnapshotIdMax =
+                            Optional.of((Long) snapshotPred.literals().get(0) - 1);
+                }
+
+                if (snapshotPred.function() instanceof LessOrEqual) {
+                    optionalFilterSnapshotIdMax =
+                            Optional.of((Long) snapshotPred.literals().get(0));
+                }
             }
+
             return this;
         }
 
@@ -227,10 +257,9 @@ public class SnapshotsTable implements ReadonlyTable {
             SnapshotManager snapshotManager =
                     new SnapshotManager(fileIO, ((SnapshotsSplit) split).location);
             Iterator<Snapshot> snapshots =
-                    specificSnapshot != null
-                            ? Collections.singletonList(snapshotManager.snapshot(specificSnapshot))
-                                    .iterator()
-                            : snapshotManager.snapshots();
+                    snapshotManager.snapshotsWithinRange(
+                            optionalFilterSnapshotIdMax, optionalFilterSnapshotIdMin);
+
             Iterator<InternalRow> rows = Iterators.transform(snapshots, this::toRow);
             if (projection != null) {
                 rows =
