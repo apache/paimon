@@ -114,7 +114,7 @@ public class FlinkEndInputWatermarkITCase extends CatalogITCaseBase {
     @TestTemplate
     public void testEndInputWatermarkBySQL() throws Exception {
         batchSql(
-                "INSERT INTO T /*+ OPTIONS('end.input.watermark'= '%s') */ VALUES (1, 11, 111), (2, 22, 222)",
+                "INSERT INTO T /*+ OPTIONS('end-input.watermark'= '%s') */ VALUES (1, 11, 111), (2, 22, 222)",
                 String.valueOf(END_INPUT_WATERMARK));
 
         FileStoreTable table = paimonTable("T");

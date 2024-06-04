@@ -425,7 +425,7 @@ public class FlinkConnectorOptions {
                                     + "and P represent the sink parallelism, then S=F×P. The minimum allowed sample factor is 20.");
 
     public static final ConfigOption<Long> END_INPUT_WATERMARK =
-            key("end.input.watermark")
+            key("end-input.watermark")
                     .longType()
                     .noDefaultValue()
                     .withDescription(
