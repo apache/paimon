@@ -553,16 +553,23 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     public void testIgnoreDelete() throws Exception {
         sql(
                 "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING) "
-                        + "WITH ('merge-engine' = 'deduplicate', 'ignore-delete' = 'true', 'bucket' = '1')");
-        BlockingIterator<Row, Row> iterator = streamSqlBlockIter("SELECT * FROM ignore_delete");
+                        + "WITH ('merge-engine' = 'deduplicate', 'ignore-delete' = 'true')");
+
+        BlockingIterator<Row, Row> iterator =
+                streamSqlBlockIter(
+                        "SELECT * FROM ignore_delete /*+ OPTIONS('continuous.discovery-interval' = '1s') */");
 
         sql("INSERT INTO ignore_delete VALUES (1, 'A'), (2, 'B')");
         sql("DELETE FROM ignore_delete WHERE pk = 1");
         sql("INSERT INTO ignore_delete VALUES (1, 'B')");
 
-        assertThat(iterator.collect(2))
-                .containsExactlyInAnyOrder(
-                        Row.ofKind(RowKind.INSERT, 1, "B"), Row.ofKind(RowKind.INSERT, 2, "B"));
+        // no -D[1, 'A'] but exist -U[1, 'A']
+        assertThat(iterator.collect(4))
+                .containsExactly(
+                        Row.ofKind(RowKind.INSERT, 1, "A"),
+                        Row.ofKind(RowKind.INSERT, 2, "B"),
+                        Row.ofKind(RowKind.UPDATE_BEFORE, 1, "A"),
+                        Row.ofKind(RowKind.UPDATE_AFTER, 1, "B"));
         iterator.close();
     }
 

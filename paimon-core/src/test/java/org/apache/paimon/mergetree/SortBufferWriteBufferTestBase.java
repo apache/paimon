@@ -257,6 +257,7 @@ public abstract class SortBufferWriteBufferTestBase {
         @Override
         protected MergeFunction<KeyValue> createMergeFunction() {
             return FirstRowMergeFunction.factory(
+                            new Options(),
                             new RowType(Lists.list(new DataField(0, "f0", new IntType()))),
                             new RowType(Lists.list(new DataField(1, "f1", new BigIntType()))))
                     .create();

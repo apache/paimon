@@ -423,6 +423,22 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testIgnoreDeleteCompatible() {
+        sql(
+                "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING) "
+                        + "WITH ('merge-engine' = 'deduplicate', 'write-only' = 'true')");
+
+        sql("INSERT INTO ignore_delete VALUES (1, 'A')");
+        // write delete records
+        sql("DELETE FROM ignore_delete WHERE pk = 1");
+        assertThat(sql("SELECT * FROM ignore_delete")).isEmpty();
+
+        // set ignore-delete and read
+        sql("ALTER TABLE ignore_delete set ('ignore-delete' = 'true')");
+        assertThat(sql("SELECT * FROM ignore_delete")).containsExactlyInAnyOrder(Row.of(1, "A"));
+    }
+
+    @Test
     public void testIgnoreDeleteWithRowKindField() {
         sql(
                 "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING, kind STRING) "

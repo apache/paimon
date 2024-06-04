@@ -424,18 +424,18 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
         sql(
                 "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, a STRING, b STRING) WITH ("
                         + " 'merge-engine' = 'partial-update',"
-                        + " 'ignore-delete' = 'true'"
+                        + " 'ignore-delete' = 'true',"
+                        + " 'changelog-producer' = 'lookup'"
                         + ")");
         if (localMerge) {
             sql("ALTER TABLE ignore_delete SET ('local-merge-buffer-size' = '256 kb')");
         }
 
+        sql("INSERT INTO ignore_delete VALUES (1, CAST (NULL AS STRING), 'apple')");
+
         String id =
                 TestValuesTableFactory.registerData(
-                        Arrays.asList(
-                                Row.ofKind(RowKind.INSERT, 1, null, "apple"),
-                                Row.ofKind(RowKind.DELETE, 1, null, "apple"),
-                                Row.ofKind(RowKind.INSERT, 1, "A", null)));
+                        Collections.singletonList(Row.ofKind(RowKind.DELETE, 1, null, "apple")));
         streamSqlIter(
                         "CREATE TEMPORARY TABLE input (pk INT PRIMARY KEY NOT ENFORCED, a STRING, b STRING) "
                                 + "WITH ('connector'='values', 'bounded'='true', 'data-id'='%s', "
@@ -444,17 +444,30 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
                 .close();
         sEnv.executeSql("INSERT INTO ignore_delete SELECT * FROM input").await();
 
+        sql("INSERT INTO ignore_delete VALUES (1, 'A', CAST (NULL AS STRING))");
+
+        // batch read
         assertThat(sql("SELECT * FROM ignore_delete"))
                 .containsExactlyInAnyOrder(Row.of(1, "A", "apple"));
+
+        // streaming read results has -U
+        BlockingIterator<Row, Row> iterator =
+                streamSqlBlockIter(
+                        "SELECT * FROM ignore_delete /*+ OPTIONS('scan.timestamp-millis' = '0') */");
+        assertThat(iterator.collect(3))
+                .containsExactly(
+                        Row.ofKind(RowKind.INSERT, 1, null, "apple"),
+                        Row.ofKind(RowKind.UPDATE_BEFORE, 1, null, "apple"),
+                        Row.ofKind(RowKind.UPDATE_AFTER, 1, "A", "apple"));
+        iterator.close();
     }
 
     @Test
-    public void testIgnoreDeleteInReader() throws Exception {
+    public void testIgnoreDeleteCompatible() throws Exception {
         sql(
                 "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, a STRING, b STRING) WITH ("
                         + " 'merge-engine' = 'deduplicate',"
-                        + " 'write-only' = 'true',"
-                        + " 'bucket' = '1')");
+                        + " 'write-only' = 'true')");
         sql("INSERT INTO ignore_delete VALUES (1, CAST (NULL AS STRING), 'apple')");
         // write delete records
         sql("DELETE FROM ignore_delete WHERE pk = 1");
@@ -466,7 +479,6 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
         Map<String, String> newOptions = new HashMap<>();
         newOptions.put(
                 CoreOptions.MERGE_ENGINE.key(), CoreOptions.MergeEngine.PARTIAL_UPDATE.toString());
-        newOptions.put(CoreOptions.BUCKET.key(), "1");
         newOptions.put(CoreOptions.IGNORE_DELETE.key(), "true");
         SchemaUtils.forceCommit(
                 new SchemaManager(LocalFileIO.create(), new Path(path, "default.db/ignore_delete")),
