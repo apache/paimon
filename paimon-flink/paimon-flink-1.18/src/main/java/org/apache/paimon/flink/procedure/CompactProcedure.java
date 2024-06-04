@@ -75,9 +75,28 @@ public class CompactProcedure extends ProcedureBase {
             String partitions,
             String orderStrategy,
             String orderByColumns,
+            String tableOptions)
+            throws Exception {
+        return call(
+                procedureContext,
+                tableId,
+                partitions,
+                orderStrategy,
+                orderByColumns,
+                tableOptions,
+                "");
+    }
+
+    public String[] call(
+            ProcedureContext procedureContext,
+            String tableId,
+            String partitions,
+            String orderStrategy,
+            String orderByColumns,
             String tableOptions,
             String whereSql)
             throws Exception {
+
         String warehouse = catalog.warehouse();
         Map<String, String> catalogOptions = catalog.options();
         Map<String, String> tableConf =
