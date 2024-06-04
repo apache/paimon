@@ -32,6 +32,7 @@ import org.apache.paimon.flink.sink.StoreMultiCommitter;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.flink.sink.StoreSinkWriteImpl;
 import org.apache.paimon.flink.sink.WrappedManifestCommittableSerializer;
+import org.apache.paimon.manifest.ManifestCommittableLegacyV2Serializer;
 import org.apache.paimon.manifest.WrappedManifestCommittable;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -65,16 +66,19 @@ public class FlinkCdcMultiTableSink implements Serializable {
     private final double commitCpuCores;
     @Nullable private final MemorySize commitHeapMemory;
     private final boolean commitChaining;
+    private boolean stateCompatibleForLegacyV2;
 
     public FlinkCdcMultiTableSink(
             Catalog.Loader catalogLoader,
             double commitCpuCores,
             @Nullable MemorySize commitHeapMemory,
-            boolean commitChaining) {
+            boolean commitChaining,
+            boolean stateCompatibleForLegacyV2) {
         this.catalogLoader = catalogLoader;
         this.commitCpuCores = commitCpuCores;
         this.commitHeapMemory = commitHeapMemory;
         this.commitChaining = commitChaining;
+        this.stateCompatibleForLegacyV2 = stateCompatibleForLegacyV2;
     }
 
     private StoreSinkWrite.WithWriteBufferProvider createWriteProvider() {
@@ -158,6 +162,12 @@ public class FlinkCdcMultiTableSink implements Serializable {
     }
 
     protected CommittableStateManager<WrappedManifestCommittable> createCommittableStateManager() {
+        if (stateCompatibleForLegacyV2) {
+            return new RestoreAndFailCommittableStateManager<>(
+                    () ->
+                            new WrappedManifestCommittableSerializer(
+                                    new ManifestCommittableLegacyV2Serializer()));
+        }
         return new RestoreAndFailCommittableStateManager<>(
                 WrappedManifestCommittableSerializer::new);
     }

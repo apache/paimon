@@ -266,5 +266,11 @@ under the License.
             <td>Integer</td>
             <td>Defines a custom parallelism for the unaware-bucket table compaction job. By default, if this option is not defined, the planner will derive the parallelism for each statement individually by also considering the global configuration.</td>
         </tr>
+        <tr>
+            <td><h5>state.compatible-for-less-than-08</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If the user attempts to upgrade from a version less than Paimon 0.8.0 to 0.8.1(+), this option can be set to true to ensure flink's state compatibility.</td>
+        </tr>
     </tbody>
 </table>

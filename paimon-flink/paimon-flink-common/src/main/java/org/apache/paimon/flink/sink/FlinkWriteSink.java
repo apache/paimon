@@ -19,12 +19,16 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.manifest.ManifestCommittableLegacyV2Serializer;
 import org.apache.paimon.manifest.ManifestCommittableSerializer;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 
 import javax.annotation.Nullable;
 
 import java.util.Map;
+
+import static org.apache.paimon.flink.FlinkConnectorOptions.STATE_COMPATIBLE_FOR_LEGACY_V2;
 
 /** A {@link FlinkSink} to write records. */
 public abstract class FlinkWriteSink<T> extends FlinkSink<T> {
@@ -55,6 +59,11 @@ public abstract class FlinkWriteSink<T> extends FlinkSink<T> {
 
     @Override
     protected CommittableStateManager<ManifestCommittable> createCommittableStateManager() {
+        Options options = Options.fromMap(table.options());
+        if (options.get(STATE_COMPATIBLE_FOR_LEGACY_V2)) {
+            return new RestoreAndFailCommittableStateManager<>(
+                    ManifestCommittableLegacyV2Serializer::new);
+        }
         return new RestoreAndFailCommittableStateManager<>(ManifestCommittableSerializer::new);
     }
 }

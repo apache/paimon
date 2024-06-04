@@ -41,7 +41,12 @@ public class WrappedManifestCommittableSerializer
     private final ManifestCommittableSerializer manifestCommittableSerializer;
 
     public WrappedManifestCommittableSerializer() {
-        this.manifestCommittableSerializer = new ManifestCommittableSerializer();
+        this(new ManifestCommittableSerializer());
+    }
+
+    public WrappedManifestCommittableSerializer(
+            ManifestCommittableSerializer manifestCommittableSerializer) {
+        this.manifestCommittableSerializer = manifestCommittableSerializer;
     }
 
     @Override

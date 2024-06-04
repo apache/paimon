@@ -20,6 +20,7 @@ package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.serializer.VersionedSerializer;
 import org.apache.paimon.io.DataInputDeserializer;
+import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
@@ -90,8 +91,13 @@ public class ManifestCommittableSerializer implements VersionedSerializer<Manife
         Map<Integer, Long> offsets = deserializeOffsets(view);
         int fileCommittableSerializerVersion = view.readInt();
         List<CommitMessage> fileCommittables =
-                commitMessageSerializer.deserializeList(fileCommittableSerializerVersion, view);
+                deserializeCommitMessage(fileCommittableSerializerVersion, view);
         return new ManifestCommittable(identifier, watermark, offsets, fileCommittables);
+    }
+
+    protected List<CommitMessage> deserializeCommitMessage(int version, DataInputView view)
+            throws IOException {
+        return commitMessageSerializer.deserializeList(version, view);
     }
 
     private Map<Integer, Long> deserializeOffsets(DataInputDeserializer view) throws IOException {

@@ -431,6 +431,13 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "Optional endInput watermark used in case of batch mode or bounded stream.");
 
+    public static final ConfigOption<Boolean> STATE_COMPATIBLE_FOR_LEGACY_V2 =
+            key("state.compatible-for-less-than-08")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If the user attempts to upgrade from a version less than Paimon 0.8.0 to 0.8.1(+), this option can be set to true to ensure flink's state compatibility.");
+
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();
         final List<ConfigOption<?>> list = new ArrayList<>(fields.length);

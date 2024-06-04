@@ -66,6 +66,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     private double committerCpu;
     @Nullable private MemorySize committerMemory;
     private boolean commitChaining;
+    private boolean stateCompatibleForLegacyV2;
 
     // Paimon catalog used to check and create tables. There will be two
     //     places where this catalog is used. 1) in processing function,
@@ -102,6 +103,8 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         this.committerCpu = options.get(FlinkConnectorOptions.SINK_COMMITTER_CPU);
         this.committerMemory = options.get(FlinkConnectorOptions.SINK_COMMITTER_MEMORY);
         this.commitChaining = options.get(FlinkConnectorOptions.SINK_COMMITTER_OPERATOR_CHAINING);
+        this.stateCompatibleForLegacyV2 =
+                options.get(FlinkConnectorOptions.STATE_COMPATIBLE_FOR_LEGACY_V2);
         return this;
     }
 
@@ -163,7 +166,11 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
 
         FlinkCdcMultiTableSink sink =
                 new FlinkCdcMultiTableSink(
-                        catalogLoader, committerCpu, committerMemory, commitChaining);
+                        catalogLoader,
+                        committerCpu,
+                        committerMemory,
+                        commitChaining,
+                        stateCompatibleForLegacyV2);
         sink.sinkFrom(partitioned);
     }
 

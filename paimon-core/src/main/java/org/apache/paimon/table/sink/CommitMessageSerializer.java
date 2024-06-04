@@ -105,7 +105,7 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
         return list;
     }
 
-    private CommitMessage deserialize(int version, DataInputView view) throws IOException {
+    protected CommitMessage deserialize(int version, DataInputView view) throws IOException {
         ObjectSerializer<DataFileMeta> dataFileSerializer;
         if (version == CURRENT_VERSION) {
             dataFileSerializer = this.dataFileSerializer;

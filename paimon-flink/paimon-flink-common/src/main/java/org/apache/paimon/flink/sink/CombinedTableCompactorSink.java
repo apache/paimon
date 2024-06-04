@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.append.MultiTableAppendOnlyCompactionTask;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.manifest.ManifestCommittableLegacyV2Serializer;
 import org.apache.paimon.manifest.WrappedManifestCommittable;
 import org.apache.paimon.options.Options;
 
@@ -44,6 +45,7 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.END_INPUT_WATERMARK;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_OPERATOR_CHAINING;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_MANAGED_WRITER_BUFFER_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
+import static org.apache.paimon.flink.FlinkConnectorOptions.STATE_COMPATIBLE_FOR_LEGACY_V2;
 import static org.apache.paimon.flink.sink.FlinkSink.assertBatchConfiguration;
 import static org.apache.paimon.flink.sink.FlinkSink.assertStreamingConfiguration;
 import static org.apache.paimon.flink.utils.ManagedMemoryUtils.declareManagedMemory;
@@ -181,6 +183,12 @@ public class CombinedTableCompactorSink implements Serializable {
     }
 
     protected CommittableStateManager<WrappedManifestCommittable> createCommittableStateManager() {
+        if (options.get(STATE_COMPATIBLE_FOR_LEGACY_V2)) {
+            return new RestoreAndFailCommittableStateManager<>(
+                    () ->
+                            new WrappedManifestCommittableSerializer(
+                                    new ManifestCommittableLegacyV2Serializer()));
+        }
         return new RestoreAndFailCommittableStateManager<>(
                 WrappedManifestCommittableSerializer::new);
     }
