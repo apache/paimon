@@ -53,6 +53,8 @@ public class FirstRowMergeFunction implements MergeFunction<KeyValue> {
     @Override
     public void add(KeyValue kv) {
         if (kv.valueKind().isRetract()) {
+            // In 0.7- versions, the delete records might be written into data file even when
+            // ignore-delete configured, so ignoreDelete still needs to be checked
             if (ignoreDelete) {
                 return;
             } else {

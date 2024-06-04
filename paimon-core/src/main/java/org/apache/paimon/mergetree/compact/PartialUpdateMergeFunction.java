@@ -103,6 +103,8 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         currentKey = kv.key();
 
         if (kv.valueKind().isRetract()) {
+            // In 0.7- versions, the delete records might be written into data file even when
+            // ignore-delete configured, so ignoreDelete still needs to be checked
             if (ignoreDelete) {
                 return;
             }
