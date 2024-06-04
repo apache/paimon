@@ -14,6 +14,7 @@
 # limitations under the License.
 
 ### action factories
+org.apache.paimon.flink.action.CloneActionFactory
 org.apache.paimon.flink.action.CompactActionFactory
 org.apache.paimon.flink.action.CompactDatabaseActionFactory
 org.apache.paimon.flink.action.DropPartitionActionFactory
