@@ -220,6 +220,6 @@ public final class SafeBinaryArray implements InternalArray {
 
     @Override
     public double[] toDoubleArray() {
-        return new double[0];
+        throw new UnsupportedOperationException();
     }
 }

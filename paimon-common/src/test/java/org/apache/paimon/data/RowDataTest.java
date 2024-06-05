@@ -104,6 +104,7 @@ public class RowDataTest {
         assertThat(row.getRowKind()).isEqualTo(RowKind.DELETE);
 
         // test get
+        assertThat(row.isNullAt(0)).isFalse();
         assertThat(row.getBoolean(0)).isTrue();
         assertThat(row.getByte(1)).isEqualTo((byte) 1);
         assertThat(row.getShort(2)).isEqualTo((short) 2);
@@ -127,6 +128,11 @@ public class RowDataTest {
         assertThat(row.getBinary(15)).isEqualTo(bytes);
         assertThat(row.getTimestamp(16, 3)).isEqualTo(timestamp1);
         assertThat(row.getTimestamp(17, 9)).isEqualTo(timestamp2);
+
+        // test isNull
+        binaryRow.setNullAt(10);
+        row = new SafeBinaryRow(binaryRow.getFieldCount(), binaryRow.toBytes(), 0);
+        assertThat(row.isNullAt(10)).isTrue();
     }
 
     private BinaryRow getBinaryRow() {

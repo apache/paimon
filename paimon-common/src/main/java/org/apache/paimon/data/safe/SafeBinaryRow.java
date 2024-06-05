@@ -186,11 +186,6 @@ public final class SafeBinaryRow implements InternalRow {
     }
 
     @Override
-    public InternalMap getMap(int pos) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
     public InternalRow getRow(int pos, int numFields) {
         return readNestedRow(bytes, numFields, offset, getLong(pos));
     }
@@ -199,6 +194,11 @@ public final class SafeBinaryRow implements InternalRow {
             byte[] bytes, int numFields, int baseOffset, long offsetAndSize) {
         int offset = (int) (offsetAndSize >> 32);
         return new SafeBinaryRow(numFields, bytes, offset + baseOffset);
+    }
+
+    @Override
+    public InternalMap getMap(int pos) {
+        throw new UnsupportedOperationException();
     }
 
     @Override
