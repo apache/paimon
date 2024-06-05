@@ -34,7 +34,7 @@ public class AddPartitionCommitCallback implements CommitCallback {
 
     private static final Cache<BinaryRow, Boolean> ADDED_PARTITIONS =
             CacheBuilder.newBuilder()
-                    // assume the table schema will stay the same for a period of time
+                    // avoid extreme situations
                     .expireAfterAccess(Duration.ofMinutes(30))
                     // estimated cache size
                     .maximumSize(300)
