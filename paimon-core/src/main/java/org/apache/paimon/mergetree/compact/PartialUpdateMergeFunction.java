@@ -145,6 +145,11 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                     row.setField(i, field);
                 }
             } else {
+                if (isEmptySequenceGroup(kv, seqComparator)) {
+                    // skip null sequence group
+                    continue;
+                }
+
                 if (seqComparator.compare(kv.value(), row) >= 0) {
                     int index = i;
 
@@ -165,11 +170,26 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         }
     }
 
+    private boolean isEmptySequenceGroup(KeyValue kv, UserDefinedSeqComparator comparator) {
+        for (int fieldIndex : comparator.compareFields()) {
+            if (getters[fieldIndex].getFieldOrNull(kv.value()) != null) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private void retractWithSequenceGroup(KeyValue kv) {
         for (int i = 0; i < getters.length; i++) {
             UserDefinedSeqComparator seqComparator = fieldSeqComparators.get(i);
             if (seqComparator != null) {
                 FieldAggregator aggregator = fieldAggregators.get(i);
+                if (isEmptySequenceGroup(kv, seqComparator)) {
+                    // skip null sequence group
+                    continue;
+                }
+
                 if (seqComparator.compare(kv.value(), row) >= 0) {
                     int index = i;
 

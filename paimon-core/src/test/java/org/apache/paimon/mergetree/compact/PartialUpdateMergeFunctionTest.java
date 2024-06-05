@@ -115,6 +115,12 @@ public class PartialUpdateMergeFunctionTest {
                 PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"))
                         .create();
         func.reset();
+        // test null sequence field
+        add(func, 1, null, null, null, null, 1, 1, 1, 3);
+        add(func, 1, 2, 2, null, null, 2, 2, 1, 3);
+        validate(func, 1, null, null, null, null, 2, 2, 1, 3);
+        func.reset();
+
         add(func, 1, 1, 1, 1, 1, 1, 1, 1, 3);
         add(func, 1, 2, 2, 2, 2, 2, 1, 1, null);
         validate(func, 1, 2, 2, 2, 2, 1, 1, 1, 3);
@@ -708,6 +714,14 @@ public class PartialUpdateMergeFunctionTest {
         // f5 in f1, f2 group with last_value agg
         // f6 in f7, f8 group with last_not_null agg
         // f7, f8 sequence group 2
+
+        // test null retract
+        add(func, 1, null, null, 1, 1, 1, 1, 1, 1);
+        validate(func, 1, null, null, null, null, null, 1, 1, 1);
+
+        add(func, RowKind.DELETE, 1, null, null, 1, 1, 1, 0, 1, 1);
+        validate(func, 1, null, null, null, null, null, 1, 1, 1);
+
         add(func, 1, 1, 1, 1, 1, 1, 1, 1, 1);
         add(func, 1, 1, 2, 1, 2, 2, null, 2, 0);
         validate(func, 1, 1, 2, 2, 1, 2, 1, 2, 0);
