@@ -32,7 +32,7 @@ import java.util.List;
 /** A {@link CommitCallback} to add newly created partitions to metastore. */
 public class AddPartitionCommitCallback implements CommitCallback {
 
-    private static final Cache<BinaryRow, Boolean> ADDED_PARTITIONS =
+    private final Cache<BinaryRow, Boolean> cache =
             CacheBuilder.newBuilder()
                     // avoid extreme situations
                     .expireAfterAccess(Duration.ofMinutes(30))
@@ -58,13 +58,13 @@ public class AddPartitionCommitCallback implements CommitCallback {
 
     private void addPartition(BinaryRow partition) {
         try {
-            boolean added = ADDED_PARTITIONS.get(partition, () -> false);
+            boolean added = cache.get(partition, () -> false);
             if (added) {
                 return;
             }
 
             client.addPartition(partition);
-            ADDED_PARTITIONS.put(partition, true);
+            cache.put(partition, true);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
