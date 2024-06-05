@@ -24,7 +24,6 @@ import org.apache.paimon.consumer.Consumer;
 import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.snapshot.AllDeltaFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.BoundedChecker;
 import org.apache.paimon.table.source.snapshot.CompactionChangelogFollowUpScanner;
@@ -53,7 +52,6 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
 
     private static final Logger LOG = LoggerFactory.getLogger(DataTableStreamScan.class);
 
-    private final BucketMode bucketMode;
     private final CoreOptions options;
     private final SnapshotManager snapshotManager;
     private final boolean supportStreamingReadOverwrite;
@@ -70,14 +68,12 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
     @Nullable private Long nextSnapshotId;
 
     public DataTableStreamScan(
-            BucketMode bucketMode,
             CoreOptions options,
             SnapshotReader snapshotReader,
             SnapshotManager snapshotManager,
             boolean supportStreamingReadOverwrite,
             DefaultValueAssigner defaultValueAssigner) {
         super(options, snapshotReader);
-        this.bucketMode = bucketMode;
         this.options = options;
         this.snapshotManager = snapshotManager;
         this.supportStreamingReadOverwrite = supportStreamingReadOverwrite;
@@ -286,7 +282,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
 
     @Override
     public DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
-        snapshotReader.withShard(bucketMode, indexOfThisSubtask, numberOfParallelSubtasks);
+        snapshotReader.withShard(indexOfThisSubtask, numberOfParallelSubtasks);
         return this;
     }
 }

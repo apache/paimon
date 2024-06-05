@@ -227,6 +227,19 @@ public class SnapshotReaderImpl implements SnapshotReader {
         return this;
     }
 
+    @Override
+    public SnapshotReader withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
+        if (splitGenerator.alwaysRawConvertible()) {
+            withDataFileNameFilter(
+                    file ->
+                            Math.abs(file.hashCode() % numberOfParallelSubtasks)
+                                    == indexOfThisSubtask);
+        } else {
+            withBucketFilter(bucket -> bucket % numberOfParallelSubtasks == indexOfThisSubtask);
+        }
+        return this;
+    }
+
     /** Get splits from {@link FileKind#ADD} files. */
     @Override
     public Plan read() {

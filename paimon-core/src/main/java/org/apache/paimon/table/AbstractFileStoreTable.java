@@ -155,7 +155,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public DataTableBatchScan newScan() {
         return new DataTableBatchScan(
-                bucketMode(),
                 tableSchema.primaryKeys().size() > 0,
                 coreOptions(),
                 newSnapshotReader(),
@@ -165,7 +164,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public StreamDataTableScan newStreamScan() {
         return new DataTableStreamScan(
-                bucketMode(),
                 coreOptions(),
                 newSnapshotReader(),
                 snapshotManager(),
