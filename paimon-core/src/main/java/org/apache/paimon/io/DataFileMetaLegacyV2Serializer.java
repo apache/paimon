@@ -18,26 +18,54 @@
 
 package org.apache.paimon.io;
 
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.safe.SafeBinaryRow;
 import org.apache.paimon.stats.BinaryTableStats;
+import org.apache.paimon.stats.FieldStatsArraySerializer;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ObjectSerializer;
+
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.apache.paimon.utils.InternalRowUtils.fromStringArrayData;
 import static org.apache.paimon.utils.InternalRowUtils.toStringArrayData;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
+import static org.apache.paimon.utils.SerializationUtils.newBytesType;
+import static org.apache.paimon.utils.SerializationUtils.newStringType;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
-/** Serializer for {@link DataFileMeta}. */
-public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
+/** A legacy version serializer for {@link DataFileMeta}. */
+public class DataFileMetaLegacyV2Serializer extends ObjectSerializer<DataFileMeta> {
 
     private static final long serialVersionUID = 1L;
 
-    public DataFileMetaSerializer() {
-        super(DataFileMeta.schema());
+    public DataFileMetaLegacyV2Serializer() {
+        super(schemaForLessThan08());
+    }
+
+    private static RowType schemaForLessThan08() {
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "_FILE_NAME", newStringType(false)));
+        fields.add(new DataField(1, "_FILE_SIZE", new BigIntType(false)));
+        fields.add(new DataField(2, "_ROW_COUNT", new BigIntType(false)));
+        fields.add(new DataField(3, "_MIN_KEY", newBytesType(false)));
+        fields.add(new DataField(4, "_MAX_KEY", newBytesType(false)));
+        fields.add(new DataField(5, "_KEY_STATS", FieldStatsArraySerializer.schema()));
+        fields.add(new DataField(6, "_VALUE_STATS", FieldStatsArraySerializer.schema()));
+        fields.add(new DataField(7, "_MIN_SEQUENCE_NUMBER", new BigIntType(false)));
+        fields.add(new DataField(8, "_MAX_SEQUENCE_NUMBER", new BigIntType(false)));
+        fields.add(new DataField(9, "_SCHEMA_ID", new BigIntType(false)));
+        fields.add(new DataField(10, "_LEVEL", new IntType(false)));
+        fields.add(new DataField(11, "_EXTRA_FILES", new ArrayType(false, newStringType(false))));
+        fields.add(new DataField(12, "_CREATION_TIME", DataTypes.TIMESTAMP_MILLIS()));
+        return new RowType(fields);
     }
 
     @Override
@@ -55,17 +83,11 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 meta.schemaId(),
                 meta.level(),
                 toStringArrayData(meta.extraFiles()),
-                meta.creationTime(),
-                meta.deleteRowCount().orElse(null),
-                meta.embeddedIndex());
+                meta.creationTime());
     }
 
     @Override
     public DataFileMeta fromRow(InternalRow row) {
-        if (row instanceof BinaryRow) {
-            byte[] bytes = ((BinaryRow) row).toBytes();
-            row = new SafeBinaryRow(row.getFieldCount(), bytes, 0);
-        }
         return new DataFileMeta(
                 row.getString(0).toString(),
                 row.getLong(1),
@@ -80,7 +102,7 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 row.getInt(10),
                 fromStringArrayData(row.getArray(11)),
                 row.getTimestamp(12, 3),
-                row.isNullAt(13) ? null : row.getLong(13),
-                row.isNullAt(14) ? null : row.getBinary(14));
+                null,
+                null);
     }
 }
