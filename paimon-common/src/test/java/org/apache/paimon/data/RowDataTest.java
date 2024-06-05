@@ -18,6 +18,7 @@
 
 package org.apache.paimon.data;
 
+import org.apache.paimon.data.safe.SafeBinaryRow;
 import org.apache.paimon.data.serializer.InternalArraySerializer;
 import org.apache.paimon.data.serializer.InternalMapSerializer;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
@@ -89,6 +90,43 @@ public class RowDataTest {
         InternalRow nestedRow = row.getRow(0, 18);
         testGetters(nestedRow);
         testSetters(nestedRow);
+    }
+
+    @Test
+    public void testSafeBinaryRow() {
+        BinaryRow binaryRow = getBinaryRow();
+        SafeBinaryRow row = new SafeBinaryRow(binaryRow.getFieldCount(), binaryRow.toBytes(), 0);
+        assertThat(row.getFieldCount()).isEqualTo(18);
+
+        // test header
+        assertThat(row.getRowKind()).isEqualTo(RowKind.INSERT);
+        row.setRowKind(RowKind.DELETE);
+        assertThat(row.getRowKind()).isEqualTo(RowKind.DELETE);
+
+        // test get
+        assertThat(row.getBoolean(0)).isTrue();
+        assertThat(row.getByte(1)).isEqualTo((byte) 1);
+        assertThat(row.getShort(2)).isEqualTo((short) 2);
+        assertThat(row.getInt(3)).isEqualTo(3);
+        assertThat(row.getLong(4)).isEqualTo(4L);
+        assertThat(row.getFloat(5)).isEqualTo(5f);
+        assertThat(row.getDouble(6)).isEqualTo(6d);
+        assertThat(row.getString(8)).isEqualTo(str);
+        assertThat(row.getString(9)).isEqualTo(str);
+        assertThat(row.getDecimal(10, 5, 0)).isEqualTo(decimal1);
+        assertThat(row.getDecimal(11, 20, 0)).isEqualTo(decimal2);
+        assertThat(row.getArray(12).size()).isEqualTo(2);
+        assertThat(row.getArray(12).isNullAt(0)).isFalse();
+        assertThat(row.getArray(12).getInt(0)).isEqualTo(15);
+        assertThat(row.getArray(12).isNullAt(1)).isFalse();
+        assertThat(row.getArray(12).getInt(1)).isEqualTo(16);
+        // TODO support map
+        // assertThat(row.getMap(13)).isEqualTo(map);
+        assertThat(row.getRow(14, 2).getInt(0)).isEqualTo(15);
+        assertThat(row.getRow(14, 2).getInt(1)).isEqualTo(16);
+        assertThat(row.getBinary(15)).isEqualTo(bytes);
+        assertThat(row.getTimestamp(16, 3)).isEqualTo(timestamp1);
+        assertThat(row.getTimestamp(17, 9)).isEqualTo(timestamp2);
     }
 
     private BinaryRow getBinaryRow() {

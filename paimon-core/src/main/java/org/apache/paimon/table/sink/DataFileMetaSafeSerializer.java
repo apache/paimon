@@ -16,11 +16,14 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.io;
+package org.apache.paimon.table.sink;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.safe.SafeBinaryRow;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.stats.BinaryTableStats;
 import org.apache.paimon.utils.ObjectSerializer;
 
@@ -29,12 +32,12 @@ import static org.apache.paimon.utils.InternalRowUtils.toStringArrayData;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
-/** Serializer for {@link DataFileMeta}. */
-public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
+/** Serializer for {@link DataFileMeta} with safe deserializer. */
+public class DataFileMetaSafeSerializer extends ObjectSerializer<DataFileMeta> {
 
     private static final long serialVersionUID = 1L;
 
-    public DataFileMetaSerializer() {
+    public DataFileMetaSafeSerializer() {
         super(DataFileMeta.schema());
     }
 
@@ -60,6 +63,10 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
 
     @Override
     public DataFileMeta fromRow(InternalRow row) {
+        if (row instanceof BinaryRow) {
+            byte[] bytes = ((BinaryRow) row).toBytes();
+            row = new SafeBinaryRow(row.getFieldCount(), bytes, 0);
+        }
         return new DataFileMeta(
                 row.getString(0).toString(),
                 row.getLong(1),
