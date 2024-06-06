@@ -435,6 +435,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.ofMebiBytes(128))
                     .withDescription("Target size of a file.");
 
+    public static final ConfigOption<Boolean> FORCE_EXPIRE =
+            key("commit.force-expire")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to force a expiration before commit.");
+
     public static final ConfigOption<Integer> NUM_SORTED_RUNS_COMPACTION_TRIGGER =
             key("num-sorted-run.compaction-trigger")
                     .intType()
@@ -1541,6 +1547,10 @@ public class CoreOptions implements Serializable {
 
     public boolean commitForceCompact() {
         return options.get(COMMIT_FORCE_COMPACT);
+    }
+
+    public boolean forceExpire() {
+        return options.get(FORCE_EXPIRE);
     }
 
     public int maxSizeAmplificationPercent() {
