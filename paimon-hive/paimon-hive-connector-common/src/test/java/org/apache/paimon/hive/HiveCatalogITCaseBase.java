@@ -650,10 +650,7 @@ public abstract class HiveCatalogITCaseBase {
                         "Could not execute ALTER TABLE my_hive.test_db.t1 RENAME TO my_hive.test_db.t2");
 
         // the target table name has upper case.
-        assertThatThrownBy(() -> tEnv.executeSql("ALTER TABLE t1 RENAME TO T1"))
-                .hasMessage("Table name [T1] cannot contain upper case in the catalog.");
-
-        tEnv.executeSql("ALTER TABLE t1 RENAME TO t3").await();
+        tEnv.executeSql("ALTER TABLE t1 RENAME TO T3").await();
 
         // hive read
         List<String> tables = hiveShell.executeQuery("SHOW TABLES");
@@ -804,15 +801,11 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testUpperCase() {
-        assertThatThrownBy(
-                        () ->
-                                tEnv.executeSql(
-                                                "CREATE TABLE T ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
-                                        .await())
-                .hasRootCauseMessage(
-                        String.format(
-                                "Table name [%s] cannot contain upper case in the catalog.", "T"));
+    public void testUpperCase() throws Exception {
+        tEnv.executeSql("CREATE TABLE T ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
+                .await();
+        List<String> tables = hiveShell.executeQuery("SHOW TABLES");
+        assertThat(tables.contains("t")).isTrue();
 
         assertThatThrownBy(
                         () ->

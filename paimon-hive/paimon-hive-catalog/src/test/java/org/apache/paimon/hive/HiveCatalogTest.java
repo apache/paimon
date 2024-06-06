@@ -52,7 +52,7 @@ import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTORECONNECTURLK
 import static org.apache.paimon.hive.HiveCatalog.PAIMON_TABLE_TYPE_VALUE;
 import static org.apache.paimon.hive.HiveCatalog.TABLE_TYPE_PROP;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 /** Tests for {@link HiveCatalog}. */
@@ -82,25 +82,31 @@ public class HiveCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testCheckIdentifierUpperCase() throws Exception {
-        catalog.createDatabase("test_db", false);
-        assertThatThrownBy(
-                        () ->
-                                catalog.createTable(
-                                        Identifier.create("TEST_DB", "new_table"),
-                                        DEFAULT_TABLE_SCHEMA,
-                                        false))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Database name [TEST_DB] cannot contain upper case in the catalog.");
+    public void testSupportIdentifierUpperCase() throws Exception {
+        // create database with upper case
+        catalog.createDatabase("TEST_DB", false);
+        assertThat(catalog.listDatabases()).contains("test_db");
 
-        assertThatThrownBy(
-                        () ->
-                                catalog.createTable(
-                                        Identifier.create("test_db", "NEW_TABLE"),
-                                        DEFAULT_TABLE_SCHEMA,
-                                        false))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Table name [NEW_TABLE] cannot contain upper case in the catalog.");
+        // create table with upper case
+        catalog.createTable(
+                Identifier.create("test_db", "INIT_TABLE"), DEFAULT_TABLE_SCHEMA, false);
+        assertTrue(catalog.tableExists(new Identifier("test_db", "init_table")));
+        assertThat(catalog.listTables("test_db")).containsExactly("init_table");
+
+        // alter table with upper-case
+        SchemaChange schemaChange = SchemaChange.setOption("hive.table.owner", "Hms");
+        catalog.alterTable(
+                Identifier.create("test_db", "INIT_TABLE"), Arrays.asList(schemaChange), false);
+        Table table = ((HiveCatalog) catalog).getHmsClient().getTable("test_db", "init_table");
+        Map<String, String> tableProperties = table.getParameters();
+        assertThat(tableProperties).containsEntry("table.owner", "Hms");
+
+        // rename table name with upper case
+        catalog.renameTable(
+                new Identifier("test_db", "init_table"),
+                new Identifier("test_db", "NEW_TABLE"),
+                false);
+        assertThat(catalog.listTables("test_db")).containsExactly("new_table");
     }
 
     private static final String HADOOP_CONF_DIR =
@@ -170,6 +176,12 @@ public class HiveCatalogTest extends CatalogTestBase {
                 HiveCatalog.createHiveConf(
                         null, null, HadoopUtils.getHadoopConfiguration(new Options()));
         assertThat(hiveConf.get("hive.metastore.uris")).isEqualTo("dummy-hms");
+    }
+
+    @Test
+    public void testCreateDbUpperCase() throws Exception {
+        catalog.createDatabase("DBB", false);
+        assertThat(catalog.listDatabases()).contains("dbb");
     }
 
     @Test

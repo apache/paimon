@@ -48,6 +48,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -235,9 +236,12 @@ public abstract class AbstractCatalog implements Catalog {
     public void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
             throws TableAlreadyExistException, DatabaseNotExistException {
         checkNotSystemTable(identifier, "createTable");
-        validateIdentifierNameCaseInsensitive(identifier);
         validateFieldNameCaseInsensitive(schema.rowType().getFieldNames());
         validateAutoCreateClose(schema.options());
+
+        if (!caseSensitive()) {
+            identifier = formatIdentifier(identifier);
+        }
 
         if (!databaseExists(identifier.getDatabaseName())) {
             throw new DatabaseNotExistException(identifier.getDatabaseName());
@@ -255,6 +259,13 @@ public abstract class AbstractCatalog implements Catalog {
         createTableImpl(identifier, schema);
     }
 
+    /** If identifier is case insensitive, format it to lower case. */
+    protected Identifier formatIdentifier(Identifier identifier) {
+        return new Identifier(
+                identifier.getDatabaseName().toLowerCase(Locale.ROOT),
+                identifier.getObjectName().toLowerCase(Locale.ROOT));
+    }
+
     protected abstract void createTableImpl(Identifier identifier, Schema schema);
 
     @Override
@@ -262,7 +273,11 @@ public abstract class AbstractCatalog implements Catalog {
             throws TableNotExistException, TableAlreadyExistException {
         checkNotSystemTable(fromTable, "renameTable");
         checkNotSystemTable(toTable, "renameTable");
-        validateIdentifierNameCaseInsensitive(toTable);
+
+        if (!caseSensitive()) {
+            fromTable = formatIdentifier(fromTable);
+            toTable = formatIdentifier(toTable);
+        }
 
         if (!tableExists(fromTable)) {
             if (ignoreIfNotExists) {
@@ -285,8 +300,11 @@ public abstract class AbstractCatalog implements Catalog {
             Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
         checkNotSystemTable(identifier, "alterTable");
-        validateIdentifierNameCaseInsensitive(identifier);
         validateFieldNameCaseInsensitiveInSchemaChange(changes);
+
+        if (!caseSensitive()) {
+            identifier = formatIdentifier(identifier);
+        }
 
         if (!tableExists(identifier)) {
             if (ignoreIfNotExists) {
@@ -468,11 +486,6 @@ public abstract class AbstractCatalog implements Catalog {
                 String.format(
                         "%s name %s cannot contain upper case in the catalog.",
                         type, illegalNames));
-    }
-
-    protected void validateIdentifierNameCaseInsensitive(Identifier identifier) {
-        validateCaseInsensitive(caseSensitive(), "Database", identifier.getDatabaseName());
-        validateCaseInsensitive(caseSensitive(), "Table", identifier.getObjectName());
     }
 
     private void validateFieldNameCaseInsensitiveInSchemaChange(List<SchemaChange> changes) {

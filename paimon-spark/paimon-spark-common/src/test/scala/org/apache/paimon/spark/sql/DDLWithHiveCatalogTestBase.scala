@@ -21,7 +21,10 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.spark.PaimonHiveTestBase
 
 import org.apache.spark.sql.{Row, SparkSession}
+import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Assertions
+
+import scala.collection.JavaConverters.mapAsJavaMapConverter
 
 abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
 
@@ -123,6 +126,36 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
           spark.sql(s"DROP DATABASE paimon_db CASCADE")
       }
     }
+  }
+
+  test("Paimon DDL with hive catalog: create/alter/rename table using upper case") {
+    Seq(paimonHiveCatalogName).foreach {
+      catalogName =>
+        spark.sql(s"USE $catalogName")
+        spark.sql(s"CREATE DATABASE paimon_db")
+        spark.sql(s"USE paimon_db")
+
+        // create table with upper case
+        spark.sql(
+          s"CREATE TABLE PAIMON_TBL (id int, name string, dt string) using paimon TBLPROPERTIES ('file.format' = 'parquet')")
+        checkAnswer(spark.sql("show tables").select("tableName"), Row("paimon_tbl") :: Nil)
+
+        // alter table with upper case
+        spark.sql(s"ALTER TABLE PAIMON_TBL SET TBLPROPERTIES ('write-only' = 'false')")
+        val options = rowsToMap(spark.sql("SELECT * FROM `paimon_tbl$options`").collect())
+        assertThat(options).containsEntry("write-only", "false");
+
+        // rename table with upper case
+        spark.sql(s"ALTER TABLE paimon_tbl RENAME TO NEW_PAIMON_TBL")
+        checkAnswer(spark.sql("show tables").select("tableName"), Row("new_paimon_tbl") :: Nil)
+
+        spark.sql(s"drop table new_paimon_tbl")
+        spark.sql(s"drop database paimon_db")
+    }
+  }
+
+  def rowsToMap(rows: Array[Row]): java.util.Map[String, String] = {
+    rows.map(row => (row.getString(0), row.getString(1))).toMap.asJava
   }
 
   def supportDefaultDatabaseWithSessionCatalog = true

@@ -545,22 +545,29 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     public void repairTable(Identifier identifier) throws TableNotExistException {
         checkNotSystemTable(identifier, "repairTable");
-        validateIdentifierNameCaseInsensitive(identifier);
+
+        if (!caseSensitive()) {
+            identifier = formatIdentifier(identifier);
+        }
+
+        //  Variable should be final in lambda expression
+        Identifier newIdentifier = identifier;
 
         TableSchema tableSchema =
-                tableSchemaInFileSystem(getDataTableLocation(identifier))
-                        .orElseThrow(() -> new TableNotExistException(identifier));
-        Table newTable = createHiveTable(identifier, tableSchema);
+                tableSchemaInFileSystem(getDataTableLocation(newIdentifier))
+                        .orElseThrow(() -> new TableNotExistException(newIdentifier));
+        Table newTable = createHiveTable(newIdentifier, tableSchema);
         try {
             try {
                 Table table =
-                        client.getTable(identifier.getDatabaseName(), identifier.getObjectName());
+                        client.getTable(
+                                newIdentifier.getDatabaseName(), newIdentifier.getObjectName());
                 checkArgument(
                         isPaimonTable(table),
                         "Table %s is not a paimon table in hive metastore.",
-                        identifier.getFullName());
+                        newIdentifier.getFullName());
                 if (!newTable.getSd().getCols().equals(table.getSd().getCols())) {
-                    alterTableToHms(table, identifier, tableSchema);
+                    alterTableToHms(table, newIdentifier, tableSchema);
                 }
             } catch (NoSuchObjectException e) {
                 // hive table does not exist.
@@ -572,9 +579,9 @@ public class HiveCatalog extends AbstractCatalog {
                 // Do not close client, it is for HiveCatalog
                 @SuppressWarnings("resource")
                 HiveMetastoreClient metastoreClient =
-                        new HiveMetastoreClient(identifier, tableSchema, client);
+                        new HiveMetastoreClient(newIdentifier, tableSchema, client);
                 List<BinaryRow> partitions =
-                        getTable(identifier).newReadBuilder().newScan().listPartitions();
+                        getTable(newIdentifier).newReadBuilder().newScan().listPartitions();
                 for (BinaryRow partition : partitions) {
                     metastoreClient.addPartition(partition);
                 }
