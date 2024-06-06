@@ -18,13 +18,16 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFileMeta08Serializer;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
+import org.apache.paimon.utils.ObjectSerializer;
 import org.apache.paimon.utils.SerializationUtils;
 
 import javax.annotation.Nullable;
@@ -46,6 +49,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class DataSplit implements Split {
 
     private static final long serialVersionUID = 7L;
+    private static final long MAGIC = -2394839472490812314L;
+    private static final int VERSION = 2;
 
     private long snapshotId = 0;
     private BinaryRow partition;
@@ -224,6 +229,8 @@ public class DataSplit implements Split {
     }
 
     public void serialize(DataOutputView out) throws IOException {
+        out.writeLong(MAGIC);
+        out.writeInt(VERSION);
         out.writeLong(snapshotId);
         SerializationUtils.serializeBinaryRow(partition, out);
         out.writeInt(bucket);
@@ -249,13 +256,46 @@ public class DataSplit implements Split {
         out.writeBoolean(rawConvertible);
     }
 
+    @VisibleForTesting
+    // this method is only used in test, used for testing compatible between version 0.8 and version
+    // 0.9
+    // do not use this method in any other place except test
+    void serialize08(DataOutputView out) throws IOException {
+        out.writeLong(snapshotId);
+        SerializationUtils.serializeBinaryRow(partition, out);
+        out.writeInt(bucket);
+        out.writeUTF(bucketPath);
+
+        DataFileMeta08Serializer dataFileSer = new DataFileMeta08Serializer();
+        out.writeInt(beforeFiles.size());
+        for (DataFileMeta file : beforeFiles) {
+            dataFileSer.serialize(file, out);
+        }
+
+        DeletionFile.serializeList(out, beforeDeletionFiles);
+
+        out.writeInt(dataFiles.size());
+        for (DataFileMeta file : dataFiles) {
+            dataFileSer.serialize(file, out);
+        }
+
+        DeletionFile.serializeList(out, dataDeletionFiles);
+
+        out.writeBoolean(isStreaming);
+
+        out.writeBoolean(rawConvertible);
+    }
+
     public static DataSplit deserialize(DataInputView in) throws IOException {
-        long snapshotId = in.readLong();
+        long magic = in.readLong();
+        int version = magic == MAGIC ? in.readInt() : 1;
+        // version 1 does not write magic number in, so the first long is snapshot id.
+        long snapshotId = version == 1 ? magic : in.readLong();
         BinaryRow partition = SerializationUtils.deserializeBinaryRow(in);
         int bucket = in.readInt();
         String bucketPath = in.readUTF();
 
-        DataFileMetaSerializer dataFileSer = new DataFileMetaSerializer();
+        ObjectSerializer<DataFileMeta> dataFileSer = getFileMetaSerde(version);
         int beforeNumber = in.readInt();
         List<DataFileMeta> beforeFiles = new ArrayList<>(beforeNumber);
         for (int i = 0; i < beforeNumber; i++) {
@@ -293,6 +333,21 @@ public class DataSplit implements Split {
             builder.withDataDeletionFiles(dataDeletionFiles);
         }
         return builder.build();
+    }
+
+    private static ObjectSerializer<DataFileMeta> getFileMetaSerde(int version) {
+        if (version == 1) {
+            return new DataFileMeta08Serializer();
+        } else if (version == 2) {
+            return new DataFileMetaSerializer();
+        } else {
+            throw new UnsupportedOperationException(
+                    "Expecting DataSplit version to be smaller or equal than "
+                            + VERSION
+                            + ", but found "
+                            + version
+                            + ".");
+        }
     }
 
     public static Builder builder() {

@@ -59,4 +59,57 @@ public class SplitTest {
         DataSplit newSplit = DataSplit.deserialize(new DataInputDeserializer(out.toByteArray()));
         assertThat(newSplit).isEqualTo(split);
     }
+
+    @Test
+    public void testSerializerCompatible() throws IOException {
+        DataFileTestDataGenerator gen = DataFileTestDataGenerator.builder().build();
+        DataFileTestDataGenerator.Data data = gen.next();
+        List<DataFileMeta> files = new ArrayList<>();
+        List<DataFileMeta> files2 = new ArrayList<>();
+        for (int i = 0; i < ThreadLocalRandom.current().nextInt(10); i++) {
+            DataFileMeta meta = gen.next().meta;
+            files.add(meta);
+            files2.add(
+                    new DataFileMeta(
+                            meta.fileName(),
+                            meta.fileSize(),
+                            meta.rowCount(),
+                            meta.minKey(),
+                            meta.maxKey(),
+                            meta.keyStats(),
+                            meta.valueStats(),
+                            meta.minSequenceNumber(),
+                            meta.maxSequenceNumber(),
+                            meta.schemaId(),
+                            meta.level(),
+                            meta.extraFiles(),
+                            meta.creationTime(),
+                            meta.deleteRowCount().orElse(null),
+                            meta.embeddedIndex(),
+                            null));
+        }
+        DataSplit split =
+                DataSplit.builder()
+                        .withSnapshot(ThreadLocalRandom.current().nextLong(100))
+                        .withPartition(data.partition)
+                        .withBucket(data.bucket)
+                        .withDataFiles(files)
+                        .withBucketPath("my path")
+                        .build();
+
+        DataSplit split2 =
+                DataSplit.builder()
+                        .withSnapshot(split.snapshotId())
+                        .withPartition(data.partition)
+                        .withBucket(data.bucket)
+                        .withDataFiles(files2)
+                        .withBucketPath("my path")
+                        .build();
+
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        split.serialize08(new DataOutputViewStreamWrapper(out));
+
+        DataSplit newSplit = DataSplit.deserialize(new DataInputDeserializer(out.toByteArray()));
+        assertThat(newSplit).isEqualTo(split2);
+    }
 }
