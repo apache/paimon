@@ -49,6 +49,7 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.InstantiationUtil;
 
+import org.apache.parquet.filter2.compat.FilterCompat;
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -230,7 +231,8 @@ public class ParquetReadWriteTest {
                         RowType.builder()
                                 .fields(fieldTypes, new String[] {"f7", "f2", "f4"})
                                 .build(),
-                        500);
+                        500,
+                        FilterCompat.NOOP);
 
         AtomicInteger cnt = new AtomicInteger(0);
         RecordReader<InternalRow> reader =
@@ -273,7 +275,8 @@ public class ParquetReadWriteTest {
                         RowType.builder()
                                 .fields(fieldTypes, new String[] {"f7", "f2", "f4", "f99"})
                                 .build(),
-                        500);
+                        500,
+                        FilterCompat.NOOP);
 
         AtomicInteger cnt = new AtomicInteger(0);
         RecordReader<InternalRow> reader =
@@ -311,7 +314,8 @@ public class ParquetReadWriteTest {
                 new ParquetReaderFactory(
                         new Options(),
                         RowType.builder().fields(fieldTypes, new String[] {"f7"}).build(),
-                        batchSize);
+                        batchSize,
+                        FilterCompat.NOOP);
 
         AtomicInteger cnt = new AtomicInteger(0);
         try (RecordReader<InternalRow> reader =
@@ -360,7 +364,8 @@ public class ParquetReadWriteTest {
     }
 
     private int testReadingFile(List<Integer> expected, Path path) throws IOException {
-        ParquetReaderFactory format = new ParquetReaderFactory(new Options(), ROW_TYPE, 500);
+        ParquetReaderFactory format =
+                new ParquetReaderFactory(new Options(), ROW_TYPE, 500, FilterCompat.NOOP);
 
         // validate java serialization
         try {
