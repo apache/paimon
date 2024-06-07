@@ -209,6 +209,60 @@ public interface BinaryWriter {
         }
     }
 
+    static ValueSetter createValueSetter(DataType elementType,Serializer<?> serializer) {
+        // ordered by type root definition
+        switch (elementType.getTypeRoot()) {
+            case CHAR:
+            case VARCHAR:
+                return (writer, pos, value) -> writer.writeString(pos, (BinaryString) value);
+            case BOOLEAN:
+                return (writer, pos, value) -> writer.writeBoolean(pos, (boolean) value);
+            case BINARY:
+            case VARBINARY:
+                return (writer, pos, value) -> writer.writeBinary(pos, (byte[]) value);
+            case DECIMAL:
+                final int decimalPrecision = getPrecision(elementType);
+                return (writer, pos, value) ->
+                        writer.writeDecimal(pos, (Decimal) value, decimalPrecision);
+            case TINYINT:
+                return (writer, pos, value) -> writer.writeByte(pos, (byte) value);
+            case SMALLINT:
+                return (writer, pos, value) -> writer.writeShort(pos, (short) value);
+            case INTEGER:
+            case DATE:
+            case TIME_WITHOUT_TIME_ZONE:
+                return (writer, pos, value) -> writer.writeInt(pos, (int) value);
+            case BIGINT:
+                return (writer, pos, value) -> writer.writeLong(pos, (long) value);
+            case FLOAT:
+                return (writer, pos, value) -> writer.writeFloat(pos, (float) value);
+            case DOUBLE:
+                return (writer, pos, value) -> writer.writeDouble(pos, (double) value);
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                final int timestampPrecision = getPrecision(elementType);
+                return (writer, pos, value) ->
+                        writer.writeTimestamp(pos, (Timestamp) value, timestampPrecision);
+            case ARRAY:
+                return (writer, pos, value) ->
+                        writer.writeArray(
+                                pos,
+                                (InternalArray) value,
+                                (InternalArraySerializer) serializer);
+            case MULTISET:
+            case MAP:
+                return (writer, pos, value) ->
+                        writer.writeMap(
+                                pos, (InternalMap) value, (InternalMapSerializer) serializer);
+            case ROW:
+                return (writer, pos, value) ->
+                        writer.writeRow(
+                                pos, (InternalRow) value, (InternalRowSerializer) serializer);
+            default:
+                throw new IllegalArgumentException();
+        }
+    }
+
     /** Accessor for setting the elements of a binary writer during runtime. */
     interface ValueSetter extends Serializable {
         void setValue(BinaryWriter writer, int pos, Object value);
