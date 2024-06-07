@@ -47,7 +47,6 @@ import org.apache.paimon.types.SmallIntType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarCharType;
-import org.apache.paimon.utils.InstantiationUtil;
 
 import org.apache.parquet.filter2.compat.FilterCompat;
 import org.junit.jupiter.api.RepeatedTest;
@@ -366,13 +365,6 @@ public class ParquetReadWriteTest {
     private int testReadingFile(List<Integer> expected, Path path) throws IOException {
         ParquetReaderFactory format =
                 new ParquetReaderFactory(new Options(), ROW_TYPE, 500, FilterCompat.NOOP);
-
-        // validate java serialization
-        try {
-            InstantiationUtil.clone(format);
-        } catch (ClassNotFoundException e) {
-            throw new IOException(e);
-        }
 
         RecordReader<InternalRow> reader =
                 format.createReader(

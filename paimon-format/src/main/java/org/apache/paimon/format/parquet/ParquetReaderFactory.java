@@ -69,8 +69,6 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
     private static final Logger LOG = LoggerFactory.getLogger(ParquetReaderFactory.class);
 
-    private static final long serialVersionUID = 1L;
-
     private static final String ALLOCATION_SIZE = "parquet.read.allocation.size";
 
     private final Options conf;
