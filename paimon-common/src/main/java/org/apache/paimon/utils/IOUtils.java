@@ -21,6 +21,7 @@ package org.apache.paimon.utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -89,6 +90,13 @@ public final class IOUtils {
     // ------------------------------------------------------------------------
     //  Stream input skipping
     // ------------------------------------------------------------------------
+
+    /** Reads all into a bytes. */
+    public static byte[] readFully(InputStream in, boolean close) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        copyBytes(in, output, BLOCKSIZE, close);
+        return output.toByteArray();
+    }
 
     /**
      * Reads len bytes in a loop.

@@ -21,7 +21,6 @@ package org.apache.paimon.table.sink;
 import org.apache.paimon.data.serializer.VersionedSerializer;
 import org.apache.paimon.index.IndexFileMetaSerializer;
 import org.apache.paimon.io.CompactIncrement;
-import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataInputView;
@@ -42,11 +41,11 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
 
     private static final int CURRENT_VERSION = 2;
 
-    private final DataFileMetaSerializer dataFileSerializer;
+    private final DataFileMetaSafeSerializer dataFileSerializer;
     private final IndexFileMetaSerializer indexEntrySerializer;
 
     public CommitMessageSerializer() {
-        this.dataFileSerializer = new DataFileMetaSerializer();
+        this.dataFileSerializer = new DataFileMetaSafeSerializer();
         this.indexEntrySerializer = new IndexFileMetaSerializer();
     }
 
