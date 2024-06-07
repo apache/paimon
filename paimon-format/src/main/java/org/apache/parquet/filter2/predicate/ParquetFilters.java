@@ -73,7 +73,7 @@ public class ParquetFilters {
         return result != null ? FilterCompat.get(result) : FilterCompat.NOOP;
     }
 
-    @SuppressWarnings("unchecked")
+    @SuppressWarnings({"unchecked", "rawtypes"})
     private static class ConvertFilterToParquet implements FunctionVisitor<FilterPredicate> {
 
         @Override
@@ -148,13 +148,6 @@ public class ParquetFilters {
         public FilterPredicate visitNotIn(FieldRef fieldRef, List<Object> literals) {
             throw new UnsupportedOperationException();
         }
-    }
-
-    private static <
-                    C extends Comparable<C>,
-                    COL extends Operators.Column<C> & Operators.SupportsLtGt>
-            FilterPredicate isNull(COL col, C value) {
-        return FilterApi.eq(col, null);
     }
 
     private static Operators.Column<?> toParquetColumn(FieldRef fieldRef) {
