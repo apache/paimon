@@ -58,15 +58,17 @@ public class ParquetFilters {
 
     public static FilterCompat.Filter convert(List<Predicate> predicates) {
         FilterPredicate result = null;
-        for (Predicate predicate : predicates) {
-            try {
-                FilterPredicate parquetFilter = predicate.visit(CONVERTER);
-                if (result == null) {
-                    result = parquetFilter;
-                } else {
-                    result = FilterApi.and(result, parquetFilter);
+        if (predicates != null) {
+            for (Predicate predicate : predicates) {
+                try {
+                    FilterPredicate parquetFilter = predicate.visit(CONVERTER);
+                    if (result == null) {
+                        result = parquetFilter;
+                    } else {
+                        result = FilterApi.and(result, parquetFilter);
+                    }
+                } catch (UnsupportedOperationException ignore) {
                 }
-            } catch (UnsupportedOperationException ignore) {
             }
         }
 
