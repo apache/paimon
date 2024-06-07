@@ -28,6 +28,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.Projection;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
 
@@ -36,6 +37,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -58,7 +60,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
     private final InternalRow.FieldGetter[] getters;
     private final boolean ignoreDelete;
-    private final Map<Integer, UserDefinedSeqComparator> fieldSeqComparators;
+    private final Map<Integer, FieldsComparator> fieldSeqComparators;
     private final boolean fieldSequenceEnabled;
     private final Map<Integer, FieldAggregator> fieldAggregators;
 
@@ -70,7 +72,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     protected PartialUpdateMergeFunction(
             InternalRow.FieldGetter[] getters,
             boolean ignoreDelete,
-            Map<Integer, UserDefinedSeqComparator> fieldSeqComparators,
+            Map<Integer, FieldsComparator> fieldSeqComparators,
             Map<Integer, FieldAggregator> fieldAggregators,
             boolean fieldSequenceEnabled) {
         this.getters = getters;
@@ -135,7 +137,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     private void updateWithSequenceGroup(KeyValue kv) {
         for (int i = 0; i < getters.length; i++) {
             Object field = getters[i].getFieldOrNull(kv.value());
-            UserDefinedSeqComparator seqComparator = fieldSeqComparators.get(i);
+            FieldsComparator seqComparator = fieldSeqComparators.get(i);
             FieldAggregator aggregator = fieldAggregators.get(i);
             Object accumulator = getters[i].getFieldOrNull(row);
             if (seqComparator == null) {
@@ -170,7 +172,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         }
     }
 
-    private boolean isEmptySequenceGroup(KeyValue kv, UserDefinedSeqComparator comparator) {
+    private boolean isEmptySequenceGroup(KeyValue kv, FieldsComparator comparator) {
         for (int fieldIndex : comparator.compareFields()) {
             if (getters[fieldIndex].getFieldOrNull(kv.value()) != null) {
                 return false;
@@ -181,8 +183,10 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     }
 
     private void retractWithSequenceGroup(KeyValue kv) {
+        Set<Integer> updatedSequenceFields = new HashSet<>();
+
         for (int i = 0; i < getters.length; i++) {
-            UserDefinedSeqComparator seqComparator = fieldSeqComparators.get(i);
+            FieldsComparator seqComparator = fieldSeqComparators.get(i);
             if (seqComparator != null) {
                 FieldAggregator aggregator = fieldAggregators.get(i);
                 if (isEmptySequenceGroup(kv, seqComparator)) {
@@ -197,7 +201,10 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                     if (Arrays.stream(seqComparator.compareFields())
                             .anyMatch(field -> field == index)) {
                         for (int field : seqComparator.compareFields()) {
-                            row.setField(field, getters[field].getFieldOrNull(kv.value()));
+                            if (!updatedSequenceFields.contains(field)) {
+                                row.setField(field, getters[field].getFieldOrNull(kv.value()));
+                                updatedSequenceFields.add(field);
+                            }
                         }
                     } else {
                         // retract normal field
@@ -245,7 +252,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
         private final List<DataType> tableTypes;
 
-        private final Map<Integer, UserDefinedSeqComparator> fieldSeqComparators;
+        private final Map<Integer, FieldsComparator> fieldSeqComparators;
 
         private final Map<Integer, FieldAggregator> fieldAggregators;
 
@@ -308,7 +315,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         @Override
         public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
             if (projection != null) {
-                Map<Integer, UserDefinedSeqComparator> projectedSeqComparators = new HashMap<>();
+                Map<Integer, FieldsComparator> projectedSeqComparators = new HashMap<>();
                 Map<Integer, FieldAggregator> projectedAggregators = new HashMap<>();
                 int[] projects = Projection.of(projection).toTopLevelIndexes();
                 Map<Integer, Integer> indexMap = new HashMap<>();
@@ -385,7 +392,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             int[] topProjects = Projection.of(projection).toTopLevelIndexes();
             Set<Integer> indexSet = Arrays.stream(topProjects).boxed().collect(Collectors.toSet());
             for (int index : topProjects) {
-                UserDefinedSeqComparator comparator = fieldSeqComparators.get(index);
+                FieldsComparator comparator = fieldSeqComparators.get(index);
                 if (comparator == null) {
                     continue;
                 }
