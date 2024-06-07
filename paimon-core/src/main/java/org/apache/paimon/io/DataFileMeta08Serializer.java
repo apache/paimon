@@ -83,7 +83,7 @@ public class DataFileMeta08Serializer implements Serializable {
         }
     }
 
-    private void serialize(DataFileMeta meta, DataOutputView target) throws IOException {
+    public void serialize(DataFileMeta meta, DataOutputView target) throws IOException {
         GenericRow row =
                 GenericRow.of(
                         BinaryString.fromString(meta.fileName()),
@@ -113,7 +113,7 @@ public class DataFileMeta08Serializer implements Serializable {
         return records;
     }
 
-    private DataFileMeta deserialize(DataInputView in) throws IOException {
+    public DataFileMeta deserialize(DataInputView in) throws IOException {
         byte[] bytes = new byte[in.readInt()];
         in.readFully(bytes);
         SafeBinaryRow row = new SafeBinaryRow(rowSerializer.getArity(), bytes, 0);

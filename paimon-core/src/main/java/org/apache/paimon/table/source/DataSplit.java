@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMeta08Serializer;
@@ -27,7 +26,7 @@ import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
-import org.apache.paimon.utils.ObjectSerializer;
+import org.apache.paimon.utils.FunctionWithIOException;
 import org.apache.paimon.utils.SerializationUtils;
 
 import javax.annotation.Nullable;
@@ -256,36 +255,6 @@ public class DataSplit implements Split {
         out.writeBoolean(rawConvertible);
     }
 
-    @VisibleForTesting
-    // this method is only used in test, used for testing compatible between version 0.8 and version
-    // 0.9
-    // do not use this method in any other place except test
-    void serialize08(DataOutputView out) throws IOException {
-        out.writeLong(snapshotId);
-        SerializationUtils.serializeBinaryRow(partition, out);
-        out.writeInt(bucket);
-        out.writeUTF(bucketPath);
-
-        DataFileMeta08Serializer dataFileSer = new DataFileMeta08Serializer();
-        out.writeInt(beforeFiles.size());
-        for (DataFileMeta file : beforeFiles) {
-            dataFileSer.serialize(file, out);
-        }
-
-        DeletionFile.serializeList(out, beforeDeletionFiles);
-
-        out.writeInt(dataFiles.size());
-        for (DataFileMeta file : dataFiles) {
-            dataFileSer.serialize(file, out);
-        }
-
-        DeletionFile.serializeList(out, dataDeletionFiles);
-
-        out.writeBoolean(isStreaming);
-
-        out.writeBoolean(rawConvertible);
-    }
-
     public static DataSplit deserialize(DataInputView in) throws IOException {
         long magic = in.readLong();
         int version = magic == MAGIC ? in.readInt() : 1;
@@ -295,11 +264,12 @@ public class DataSplit implements Split {
         int bucket = in.readInt();
         String bucketPath = in.readUTF();
 
-        ObjectSerializer<DataFileMeta> dataFileSer = getFileMetaSerde(version);
+        FunctionWithIOException<DataInputView, DataFileMeta> dataFileSer =
+                getFileMetaSerde(version);
         int beforeNumber = in.readInt();
         List<DataFileMeta> beforeFiles = new ArrayList<>(beforeNumber);
         for (int i = 0; i < beforeNumber; i++) {
-            beforeFiles.add(dataFileSer.deserialize(in));
+            beforeFiles.add(dataFileSer.apply(in));
         }
 
         List<DeletionFile> beforeDeletionFiles = DeletionFile.deserializeList(in);
@@ -307,7 +277,7 @@ public class DataSplit implements Split {
         int fileNumber = in.readInt();
         List<DataFileMeta> dataFiles = new ArrayList<>(fileNumber);
         for (int i = 0; i < fileNumber; i++) {
-            dataFiles.add(dataFileSer.deserialize(in));
+            dataFiles.add(dataFileSer.apply(in));
         }
 
         List<DeletionFile> dataDeletionFiles = DeletionFile.deserializeList(in);
@@ -335,11 +305,14 @@ public class DataSplit implements Split {
         return builder.build();
     }
 
-    private static ObjectSerializer<DataFileMeta> getFileMetaSerde(int version) {
+    private static FunctionWithIOException<DataInputView, DataFileMeta> getFileMetaSerde(
+            int version) {
         if (version == 1) {
-            return new DataFileMeta08Serializer();
+            DataFileMeta08Serializer serializer = new DataFileMeta08Serializer();
+            return serializer::deserialize;
         } else if (version == 2) {
-            return new DataFileMetaSerializer();
+            DataFileMetaSerializer serializer = new DataFileMetaSerializer();
+            return serializer::deserialize;
         } else {
             throw new UnsupportedOperationException(
                     "Expecting DataSplit version to be smaller or equal than "
