@@ -33,8 +33,8 @@ import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import javax.annotation.Nullable;
 
 import java.util.Map;
-import java.util.UUID;
 
+import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
 
 /** Sink for dynamic bucket table. */
@@ -55,7 +55,7 @@ public abstract class DynamicBucketSink<T> extends FlinkWriteSink<Tuple2<T, Inte
             extractorFunction();
 
     public DataStreamSink<?> build(DataStream<T> input, @Nullable Integer parallelism) {
-        String initialCommitUser = UUID.randomUUID().toString();
+        String initialCommitUser = createCommitUser(table.coreOptions().toConfiguration());
 
         // Topology:
         // input -- shuffle by key hash --> bucket-assigner -- shuffle by partition & bucket -->

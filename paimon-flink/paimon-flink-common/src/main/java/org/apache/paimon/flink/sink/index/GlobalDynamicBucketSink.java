@@ -44,8 +44,8 @@ import javax.annotation.Nullable;
 
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
+import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.crosspartition.IndexBootstrap.bootstrapType;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_CROSS_PARTITION_MANAGED_MEMORY;
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
@@ -68,8 +68,6 @@ public class GlobalDynamicBucketSink extends FlinkWriteSink<Tuple2<InternalRow, 
     }
 
     public DataStreamSink<?> build(DataStream<InternalRow> input, @Nullable Integer parallelism) {
-        String initialCommitUser = UUID.randomUUID().toString();
-
         TableSchema schema = table.schema();
         CoreOptions options = table.coreOptions();
         RowType rowType = schema.logicalRowType();
@@ -128,6 +126,6 @@ public class GlobalDynamicBucketSink extends FlinkWriteSink<Tuple2<InternalRow, 
                 partition(bucketAssigned, new RowWithBucketChannelComputer(schema), parallelism);
 
         // 4. writer and committer
-        return sinkFrom(partitionByBucket, initialCommitUser);
+        return sinkFrom(partitionByBucket, createCommitUser(options.toConfiguration()));
     }
 }
