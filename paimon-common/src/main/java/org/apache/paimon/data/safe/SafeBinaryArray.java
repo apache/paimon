@@ -25,12 +25,9 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
-import org.apache.paimon.memory.MemorySegment;
-import org.apache.paimon.memory.MemorySegmentUtils;
+import org.apache.paimon.memory.BytesUtils;
 
 import static org.apache.paimon.data.BinaryArray.calculateHeaderInBytes;
-import static org.apache.paimon.memory.MemorySegment.BYTE_ARRAY_BASE_OFFSET;
-import static org.apache.paimon.memory.MemorySegment.UNSAFE;
 import static org.apache.paimon.memory.MemorySegmentUtils.BIT_BYTE_INDEX_MASK;
 import static org.apache.paimon.memory.MemorySegmentUtils.byteIndex;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -45,7 +42,7 @@ public final class SafeBinaryArray implements InternalArray {
 
     public SafeBinaryArray(byte[] bytes, int offset) {
         checkArgument(bytes.length > offset + 4);
-        final int size = UNSAFE.getInt(bytes, offset + BYTE_ARRAY_BASE_OFFSET);
+        final int size = BytesUtils.getInt(bytes, offset);
         assert size >= 0 : "size (" + size + ") should >= 0";
 
         this.size = size;
@@ -83,50 +80,36 @@ public final class SafeBinaryArray implements InternalArray {
     public short getShort(int pos) {
         int fieldOffset = getElementOffset(pos, 2);
         checkArgument(bytes.length >= fieldOffset + 2);
-        return UNSAFE.getShort(bytes, fieldOffset + BYTE_ARRAY_BASE_OFFSET);
+        return BytesUtils.getShort(bytes, fieldOffset);
     }
 
     @Override
     public int getInt(int pos) {
         int fieldOffset = getElementOffset(pos, 4);
         checkArgument(bytes.length >= fieldOffset + 4);
-        return UNSAFE.getInt(bytes, fieldOffset + BYTE_ARRAY_BASE_OFFSET);
+        return BytesUtils.getInt(bytes, fieldOffset);
     }
 
     @Override
     public long getLong(int pos) {
         int fieldOffset = getElementOffset(pos, 8);
         checkArgument(bytes.length >= fieldOffset + 8);
-        return UNSAFE.getLong(bytes, fieldOffset + BYTE_ARRAY_BASE_OFFSET);
+        return BytesUtils.getLong(bytes, fieldOffset);
     }
 
     @Override
     public float getFloat(int pos) {
-        int fieldOffset = getElementOffset(pos, 4);
-        checkArgument(bytes.length >= fieldOffset + 4);
-        return UNSAFE.getFloat(bytes, fieldOffset + BYTE_ARRAY_BASE_OFFSET);
+        return Float.intBitsToFloat(getInt(pos));
     }
 
     @Override
     public double getDouble(int pos) {
-        int fieldOffset = getElementOffset(pos, 8);
-        checkArgument(bytes.length >= fieldOffset + 8);
-        return UNSAFE.getDouble(bytes, fieldOffset + BYTE_ARRAY_BASE_OFFSET);
-    }
-
-    private MemorySegment[] toSegmentArray() {
-        return new MemorySegment[] {MemorySegment.wrap(bytes)};
+        return Double.longBitsToDouble(getLong(pos));
     }
 
     @Override
     public BinaryString getString(int pos) {
-        int fieldOffset = getElementOffset(pos, 8);
-        long offsetAndLen = getLong(pos);
-        BinaryString string =
-                MemorySegmentUtils.readBinaryString(
-                        toSegmentArray(), offset, fieldOffset, offsetAndLen);
-        checkArgument(bytes.length >= string.getOffset() + string.getSizeInBytes());
-        return string;
+        return BinaryString.fromBytes(getBinary(pos));
     }
 
     @Override
@@ -154,13 +137,13 @@ public final class SafeBinaryArray implements InternalArray {
         final int subOffset = (int) (longValue >> 32);
 
         checkArgument(bytes.length >= offset + subOffset + 8);
-        final long millisecond = UNSAFE.getLong(bytes, offset + subOffset + BYTE_ARRAY_BASE_OFFSET);
+        final long millisecond = BytesUtils.getLong(bytes, offset + subOffset);
         return Timestamp.fromEpochMillis(millisecond, nanoOfMillisecond);
     }
 
     @Override
     public byte[] getBinary(int pos) {
-        return getString(pos).toBytes();
+        return BytesUtils.readBinary(bytes, offset, getElementOffset(pos, 8), getLong(pos));
     }
 
     @Override

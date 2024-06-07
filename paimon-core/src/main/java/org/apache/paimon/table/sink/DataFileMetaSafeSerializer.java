@@ -18,14 +18,20 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.safe.SafeBinaryRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataInputView;
+import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.stats.BinaryTableStats;
-import org.apache.paimon.utils.ObjectSerializer;
+
+import java.io.IOException;
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.apache.paimon.utils.InternalRowUtils.fromStringArrayData;
 import static org.apache.paimon.utils.InternalRowUtils.toStringArrayData;
@@ -33,40 +39,58 @@ import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
 /** Serializer for {@link DataFileMeta} with safe deserializer. */
-public class DataFileMetaSafeSerializer extends ObjectSerializer<DataFileMeta> {
+public class DataFileMetaSafeSerializer implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
+    protected final InternalRowSerializer rowSerializer;
+
     public DataFileMetaSafeSerializer() {
-        super(DataFileMeta.schema());
+        this.rowSerializer = InternalSerializers.create(DataFileMeta.schema());
     }
 
-    @Override
-    public InternalRow toRow(DataFileMeta meta) {
-        return GenericRow.of(
-                BinaryString.fromString(meta.fileName()),
-                meta.fileSize(),
-                meta.rowCount(),
-                serializeBinaryRow(meta.minKey()),
-                serializeBinaryRow(meta.maxKey()),
-                meta.keyStats().toRow(),
-                meta.valueStats().toRow(),
-                meta.minSequenceNumber(),
-                meta.maxSequenceNumber(),
-                meta.schemaId(),
-                meta.level(),
-                toStringArrayData(meta.extraFiles()),
-                meta.creationTime(),
-                meta.deleteRowCount().orElse(null),
-                meta.embeddedIndex());
-    }
-
-    @Override
-    public DataFileMeta fromRow(InternalRow row) {
-        if (row instanceof BinaryRow) {
-            byte[] bytes = ((BinaryRow) row).toBytes();
-            row = new SafeBinaryRow(row.getFieldCount(), bytes, 0);
+    public final void serializeList(List<DataFileMeta> records, DataOutputView target)
+            throws IOException {
+        target.writeInt(records.size());
+        for (DataFileMeta t : records) {
+            serialize(t, target);
         }
+    }
+
+    private void serialize(DataFileMeta meta, DataOutputView target) throws IOException {
+        GenericRow row =
+                GenericRow.of(
+                        BinaryString.fromString(meta.fileName()),
+                        meta.fileSize(),
+                        meta.rowCount(),
+                        serializeBinaryRow(meta.minKey()),
+                        serializeBinaryRow(meta.maxKey()),
+                        meta.keyStats().toRow(),
+                        meta.valueStats().toRow(),
+                        meta.minSequenceNumber(),
+                        meta.maxSequenceNumber(),
+                        meta.schemaId(),
+                        meta.level(),
+                        toStringArrayData(meta.extraFiles()),
+                        meta.creationTime(),
+                        meta.deleteRowCount().orElse(null),
+                        meta.embeddedIndex());
+        rowSerializer.serialize(row, target);
+    }
+
+    public final List<DataFileMeta> deserializeList(DataInputView source) throws IOException {
+        int size = source.readInt();
+        List<DataFileMeta> records = new ArrayList<>(size);
+        for (int i = 0; i < size; i++) {
+            records.add(deserialize(source));
+        }
+        return records;
+    }
+
+    private DataFileMeta deserialize(DataInputView in) throws IOException {
+        byte[] bytes = new byte[in.readInt()];
+        in.readFully(bytes);
+        SafeBinaryRow row = new SafeBinaryRow(rowSerializer.getArity(), bytes, 0);
         return new DataFileMeta(
                 row.getString(0).toString(),
                 row.getLong(1),
