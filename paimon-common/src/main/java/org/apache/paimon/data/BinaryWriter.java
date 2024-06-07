@@ -24,7 +24,6 @@ import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.TimestampType;
@@ -155,7 +154,6 @@ public interface BinaryWriter {
     }
 
     static ValueSetter createValueSetter(DataType elementType, Serializer<?> serializer) {
-        Serializer<?> finalSerializer = createSerializerIfNeed(elementType, serializer);
         // ordered by type root definition
         switch (elementType.getTypeRoot()) {
             case CHAR:
@@ -190,35 +188,29 @@ public interface BinaryWriter {
                 return (writer, pos, value) ->
                         writer.writeTimestamp(pos, (Timestamp) value, timestampPrecision);
             case ARRAY:
+                final Serializer<?> arraySerializer =
+                        serializer == null ? InternalSerializers.create(elementType) : serializer;
                 return (writer, pos, value) ->
                         writer.writeArray(
                                 pos,
                                 (InternalArray) value,
-                                (InternalArraySerializer) finalSerializer);
+                                (InternalArraySerializer) arraySerializer);
             case MULTISET:
             case MAP:
+                final Serializer<?> mapSerializer =
+                        serializer == null ? InternalSerializers.create(elementType) : serializer;
                 return (writer, pos, value) ->
                         writer.writeMap(
-                                pos, (InternalMap) value, (InternalMapSerializer) finalSerializer);
+                                pos, (InternalMap) value, (InternalMapSerializer) mapSerializer);
             case ROW:
+                final Serializer<?> rowSerializer =
+                        serializer == null ? InternalSerializers.create(elementType) : serializer;
                 return (writer, pos, value) ->
                         writer.writeRow(
-                                pos, (InternalRow) value, (InternalRowSerializer) finalSerializer);
+                                pos, (InternalRow) value, (InternalRowSerializer) rowSerializer);
             default:
                 throw new IllegalArgumentException();
         }
-    }
-
-    static Serializer<?> createSerializerIfNeed(DataType elementType, Serializer<?> serializer) {
-        Serializer<?> finalSerializer = serializer;
-        DataTypeRoot typeRoot = elementType.getTypeRoot();
-        if (finalSerializer == null
-                && (typeRoot == DataTypeRoot.MAP
-                        || typeRoot == DataTypeRoot.ROW
-                        || typeRoot == DataTypeRoot.ARRAY)) {
-            finalSerializer = InternalSerializers.create(elementType);
-        }
-        return finalSerializer;
     }
 
     /** Accessor for setting the elements of a binary writer during runtime. */
