@@ -209,7 +209,7 @@ public interface BinaryWriter {
         }
     }
 
-    static ValueSetter createValueSetter(DataType elementType,Serializer<?> serializer) {
+    static ValueSetter createValueSetter(DataType elementType, Serializer<?> serializer) {
         // ordered by type root definition
         switch (elementType.getTypeRoot()) {
             case CHAR:
@@ -246,9 +246,7 @@ public interface BinaryWriter {
             case ARRAY:
                 return (writer, pos, value) ->
                         writer.writeArray(
-                                pos,
-                                (InternalArray) value,
-                                (InternalArraySerializer) serializer);
+                                pos, (InternalArray) value, (InternalArraySerializer) serializer);
             case MULTISET:
             case MAP:
                 return (writer, pos, value) ->
