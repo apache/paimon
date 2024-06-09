@@ -36,6 +36,7 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
@@ -136,6 +137,12 @@ public class HiveMigrator implements Migrator {
         // create paimon table if not exists
         Identifier identifier = Identifier.create(targetDatabase, targetTable);
         boolean alreadyExist = hiveCatalog.tableExists(identifier);
+
+        Preconditions.checkArgument(
+                !coreOptions
+                        .formatType()
+                        .equals(sourceHiveTable.getSd().getSerdeInfo().toString()));
+
         if (!alreadyExist) {
             Schema schema =
                     from(
