@@ -145,8 +145,7 @@ public class HiveMigrator implements Migrator {
         // add a check for migrate when set file format in options
         if (!StringUtils.isEmpty(options.get(FILE_FORMAT))) {
             Preconditions.checkArgument(
-                    coreOptions
-                            .formatType()
+                    options.get(FILE_FORMAT)
                             .equals(parseFormat(sourceHiveTable.getSd().getSerdeInfo().toString())),
                     String.format(
                             "file.format %s need keep the same with file format %s in hive table",
