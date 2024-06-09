@@ -139,7 +139,11 @@ public class HiveMigrator implements Migrator {
         boolean alreadyExist = hiveCatalog.tableExists(identifier);
 
         Preconditions.checkArgument(
-                coreOptions.formatType().equals(sourceHiveTable.getSd().getSerdeInfo().toString()));
+                coreOptions.formatType().equals(sourceHiveTable.getSd().getSerdeInfo().toString()),
+                String.format(
+                        "file.format %s need keep the same with file format %s in hive table",
+                        coreOptions.formatType(),
+                        sourceHiveTable.getSd().getSerdeInfo().toString()));
 
         if (!alreadyExist) {
             Schema schema =
