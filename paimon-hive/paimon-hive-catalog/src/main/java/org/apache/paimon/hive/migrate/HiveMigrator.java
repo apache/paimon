@@ -37,6 +37,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
@@ -58,6 +59,7 @@ import java.util.concurrent.Future;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.hive.HiveTypeUtils.toPaimonType;
 import static org.apache.paimon.utils.FileUtils.COMMON_IO_FORK_JOIN_POOL;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -81,6 +83,7 @@ public class HiveMigrator implements Migrator {
     private final String targetTable;
     private final CoreOptions coreOptions;
     private Boolean delete = true;
+    private final Map<String, String> options;
 
     public HiveMigrator(
             HiveCatalog hiveCatalog,
@@ -97,6 +100,7 @@ public class HiveMigrator implements Migrator {
         this.targetDatabase = targetDatabase;
         this.targetTable = targetTable;
         this.coreOptions = new CoreOptions(options);
+        this.options = options;
     }
 
     public static List<Migrator> databaseMigrators(
@@ -138,12 +142,17 @@ public class HiveMigrator implements Migrator {
         Identifier identifier = Identifier.create(targetDatabase, targetTable);
         boolean alreadyExist = hiveCatalog.tableExists(identifier);
 
-        Preconditions.checkArgument(
-                coreOptions.formatType().equals(sourceHiveTable.getSd().getSerdeInfo().toString()),
-                String.format(
-                        "file.format %s need keep the same with file format %s in hive table",
-                        coreOptions.formatType(),
-                        sourceHiveTable.getSd().getSerdeInfo().toString()));
+        // add a check for migrate when set file format in options
+        if (!StringUtils.isEmpty(options.get(FILE_FORMAT))) {
+            Preconditions.checkArgument(
+                    coreOptions
+                            .formatType()
+                            .equals(parseFormat(sourceHiveTable.getSd().getSerdeInfo().toString())),
+                    String.format(
+                            "file.format %s need keep the same with file format %s in hive table",
+                            coreOptions.formatType(),
+                            parseFormat(sourceHiveTable.getSd().getSerdeInfo().toString())));
+        }
 
         if (!alreadyExist) {
             Schema schema =
