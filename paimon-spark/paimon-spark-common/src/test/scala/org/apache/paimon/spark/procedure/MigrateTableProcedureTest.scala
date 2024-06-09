@@ -62,10 +62,10 @@ class MigrateTableProcedureTest extends PaimonHiveTestBase {
           // If format not accurate to hive format then throw exception
           assertThrows[RuntimeException] {
             spark.sql(
-              s"CALL sys.migrate_table(source_type => 'hive', source_table => '$hiveDbName.hive_tbl', options => 'file.format=orc')")
+              s"CALL sys.migrate_table(source_type => 'hive', table => '$hiveDbName.hive_tbl', options => 'file.format=orc')")
           }
           spark.sql(
-            s"CALL sys.migrate_table(source_type => 'hive', source_table => '$hiveDbName.hive_tbl', options => 'file.format=parquet')")
+            s"CALL sys.migrate_table(source_type => 'hive', table => '$hiveDbName.hive_tbl', options => 'file.format=parquet')")
         }
       }
     })
