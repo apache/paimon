@@ -109,14 +109,9 @@ public class DataTableBatchScan extends AbstractDataTableScan {
      * merged.
      */
     private long getRowCountForSplit(DataSplit split) {
-        if (split.convertToRawFiles().isPresent()) {
-            return split.convertToRawFiles().get().stream()
-                    .map(RawFile::rowCount)
-                    .reduce(Long::sum)
-                    .orElse(0L);
-        } else {
-            return 0L;
-        }
+        return split.convertToRawFiles()
+                .map(files -> files.stream().map(RawFile::rowCount).reduce(Long::sum).orElse(0L))
+                .orElse(0L);
     }
 
     @Override
