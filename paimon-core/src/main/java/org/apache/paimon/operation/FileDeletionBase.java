@@ -307,9 +307,14 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     }
 
     protected void cleanUnusedManifests(
-            Snapshot snapshot, Set<String> skippingSet, boolean deleteChangelog) {
-        cleanUnusedManifestList(snapshot.baseManifestList(), skippingSet);
-        cleanUnusedManifestList(snapshot.deltaManifestList(), skippingSet);
+            Snapshot snapshot,
+            Set<String> skippingSet,
+            boolean deleteDataManifestLists,
+            boolean deleteChangelog) {
+        if (deleteDataManifestLists) {
+            cleanUnusedManifestList(snapshot.baseManifestList(), skippingSet);
+            cleanUnusedManifestList(snapshot.deltaManifestList(), skippingSet);
+        }
         if (deleteChangelog && snapshot.changelogManifestList() != null) {
             cleanUnusedManifestList(snapshot.changelogManifestList(), skippingSet);
         }

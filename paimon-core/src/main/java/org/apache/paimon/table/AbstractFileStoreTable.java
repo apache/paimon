@@ -570,6 +570,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 tagManager(),
                 fileIO,
                 store().newSnapshotDeletion(),
+                store().newChangelogDeletion(),
                 store().newTagDeletion());
     }
 
