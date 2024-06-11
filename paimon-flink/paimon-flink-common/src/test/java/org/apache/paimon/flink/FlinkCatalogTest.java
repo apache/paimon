@@ -433,8 +433,8 @@ public class FlinkCatalogTest {
                 new CatalogDatabaseImpl(Collections.singletonMap("haa", "ccc"), null);
         catalog.createDatabase(path1.getDatabaseName(), database, false);
         assertThat(catalog.databaseExists(path1.getDatabaseName())).isTrue();
-        // TODO filesystem catalog will ignore all properties
-        assertThat(catalog.getDatabase(path1.getDatabaseName()).getProperties().isEmpty()).isTrue();
+        assertThat(catalog.getDatabase(path1.getDatabaseName()).getProperties())
+                .isEqualTo(Collections.singletonMap("haa", "ccc"));
 
         // File system catalog doesn't support path for database.
         CatalogDatabaseImpl databaseWithPath =
