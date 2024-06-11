@@ -34,7 +34,7 @@ case class PaimonIncompatiblePHRRules(session: SparkSession) extends Rule[Logica
           if t.resolved =>
         assert(names.length == ident.numFields, "Names and values of partition don't match")
         val resolver = session.sessionState.conf.resolver
-        val schema = table.schema()
+        val schema = table.schema
         val partitionSpec = names.zipWithIndex.map {
           case (name, index) =>
             val field = schema.find(f => resolver(f.name, name)).getOrElse {

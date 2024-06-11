@@ -53,7 +53,7 @@ case class MergeIntoPaimonTable(
 
   override val table: FileStoreTable = v2Table.getTable.asInstanceOf[FileStoreTable]
 
-  lazy val tableSchema: StructType = v2Table.schema()
+  lazy val tableSchema: StructType = v2Table.schema
 
   lazy val filteredTargetPlan: LogicalPlan = {
     val filtersOnlyTarget = getExpressionOnlyRelated(mergeCondition, targetTable)
