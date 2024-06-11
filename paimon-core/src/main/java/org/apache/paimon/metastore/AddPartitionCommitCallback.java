@@ -18,14 +18,28 @@
 
 package org.apache.paimon.metastore;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.CommitMessage;
 
+import org.apache.paimon.shade.guava30.com.google.common.cache.Cache;
+import org.apache.paimon.shade.guava30.com.google.common.cache.CacheBuilder;
+
+import java.time.Duration;
 import java.util.List;
 
 /** A {@link CommitCallback} to add newly created partitions to metastore. */
 public class AddPartitionCommitCallback implements CommitCallback {
+
+    private final Cache<BinaryRow, Boolean> cache =
+            CacheBuilder.newBuilder()
+                    // avoid extreme situations
+                    .expireAfterAccess(Duration.ofMinutes(30))
+                    // estimated cache size
+                    .maximumSize(300)
+                    .softValues()
+                    .build();
 
     private final MetastoreClient client;
 
@@ -39,14 +53,21 @@ public class AddPartitionCommitCallback implements CommitCallback {
                 .flatMap(c -> c.fileCommittables().stream())
                 .map(CommitMessage::partition)
                 .distinct()
-                .forEach(
-                        p -> {
-                            try {
-                                client.addPartition(p);
-                            } catch (Exception e) {
-                                throw new RuntimeException(e);
-                            }
-                        });
+                .forEach(this::addPartition);
+    }
+
+    private void addPartition(BinaryRow partition) {
+        try {
+            boolean added = cache.get(partition, () -> false);
+            if (added) {
+                return;
+            }
+
+            client.addPartition(partition);
+            cache.put(partition, true);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override

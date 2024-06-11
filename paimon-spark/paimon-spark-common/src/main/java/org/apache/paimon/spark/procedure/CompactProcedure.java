@@ -74,9 +74,9 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
@@ -310,7 +310,7 @@ public class CompactProcedure extends BaseProcedure {
             throw new RuntimeException("serialize compaction task failed");
         }
 
-        String commitUser = UUID.randomUUID().toString();
+        String commitUser = createCommitUser(table.coreOptions().toConfiguration());
         JavaRDD<byte[]> commitMessageJavaRDD =
                 javaSparkContext
                         .parallelize(serializedTasks)

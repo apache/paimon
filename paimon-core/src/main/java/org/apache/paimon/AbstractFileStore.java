@@ -214,7 +214,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 manifestFileFactory().create(),
                 manifestListFactory().create(),
                 newIndexFileHandler(),
-                newStatsFileHandler());
+                newStatsFileHandler(),
+                options.changelogProducer() != CoreOptions.ChangelogProducer.NONE);
     }
 
     @Override

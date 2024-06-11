@@ -85,7 +85,7 @@ public class ExpireSnapshotsTest {
                         TestKeyValueGenerator.DEFAULT_PART_TYPE.getFieldNames(),
                         TestKeyValueGenerator.getPrimaryKeys(
                                 TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED),
-                        Collections.emptyMap(),
+                        store.options().toMap(),
                         null));
     }
 

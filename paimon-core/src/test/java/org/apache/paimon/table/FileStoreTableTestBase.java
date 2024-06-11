@@ -30,6 +30,7 @@ import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.JoinedRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -387,7 +388,8 @@ public abstract class FileStoreTableTestBase {
     }
 
     protected void innerTestWithShard(FileStoreTable table) throws Exception {
-        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableWrite write =
+                table.newWrite(commitUser).withIOManager(IOManager.create(tempDir.toString()));
         write.write(rowData(1, 1, 2L));
         write.write(rowData(1, 3, 4L));
         write.write(rowData(1, 5, 6L));

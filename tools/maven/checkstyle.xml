@@ -182,6 +182,13 @@ This file is based on the checkstyle file of Apache Beam.
 			<property name="illegalPattern" value="true"/>
 			<property name="message" value="Use com.fasterxml.jackson instead of jettison."/>
 		</module>
+		<!-- forbid the use of flink.shaded.guava31.com.google.common -->
+		<module name="Regexp">
+			<property name="format" value="import static org\.apache\.flink\.shaded\.guava31\.com\.google\.common\.base\.Preconditions"/>
+			<property name="illegalPattern" value="true"/>
+			<property name="message"
+					  value="Use Paimon's Preconditions instead of Guava's Preconditions"/>
+		</module>
 
 		<!-- Enforce Java-style array declarations -->
 		<module name="ArrayTypeStyle"/>

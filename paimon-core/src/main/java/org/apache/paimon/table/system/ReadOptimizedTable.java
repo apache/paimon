@@ -99,7 +99,6 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     @Override
     public DataTableBatchScan newScan() {
         return new DataTableBatchScan(
-                dataTable.bucketMode(),
                 dataTable.schema().primaryKeys().size() > 0,
                 coreOptions(),
                 newSnapshotReader(),
@@ -109,7 +108,6 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     @Override
     public StreamDataTableScan newStreamScan() {
         return new DataTableStreamScan(
-                dataTable.bucketMode(),
                 coreOptions(),
                 newSnapshotReader(),
                 snapshotManager(),

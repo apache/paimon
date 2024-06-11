@@ -283,6 +283,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public SnapshotReader withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
+            snapshotReader.withShard(indexOfThisSubtask, numberOfParallelSubtasks);
+            return this;
+        }
+
+        @Override
         public SnapshotReader withMetricRegistry(MetricRegistry registry) {
             snapshotReader.withMetricRegistry(registry);
             return this;

@@ -23,6 +23,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
@@ -39,24 +40,45 @@ import java.util.function.Predicate;
 /** Delete snapshot files. */
 public class SnapshotDeletion extends FileDeletionBase<Snapshot> {
 
+    private final boolean produceChangelog;
+
     public SnapshotDeletion(
             FileIO fileIO,
             FileStorePathFactory pathFactory,
             ManifestFile manifestFile,
             ManifestList manifestList,
             IndexFileHandler indexFileHandler,
-            StatsFileHandler statsFileHandler) {
+            StatsFileHandler statsFileHandler,
+            boolean produceChangelog) {
         super(fileIO, pathFactory, manifestFile, manifestList, indexFileHandler, statsFileHandler);
+        this.produceChangelog = produceChangelog;
     }
 
     @Override
     public void cleanUnusedDataFiles(Snapshot snapshot, Predicate<ManifestEntry> skipper) {
-        cleanUnusedDataFiles(snapshot.deltaManifestList(), skipper);
+        if (changelogDecoupled && !produceChangelog) {
+            // Skip clean the 'APPEND' data files.If we do not have the file source information
+            // eg: the old version table file, we just skip clean this here, let it done by
+            // ExpireChangelogImpl
+            Predicate<ManifestEntry> enriched =
+                    manifestEntry ->
+                            skipper.test(manifestEntry)
+                                    || (manifestEntry.file().fileSource().orElse(FileSource.APPEND)
+                                            == FileSource.APPEND);
+            cleanUnusedDataFiles(snapshot.deltaManifestList(), enriched);
+        } else {
+            cleanUnusedDataFiles(snapshot.deltaManifestList(), skipper);
+        }
     }
 
     @Override
     public void cleanUnusedManifests(Snapshot snapshot, Set<String> skippingSet) {
-        cleanUnusedManifests(snapshot, skippingSet, !changelogDecoupled);
+        // delay clean the base and delta manifest lists when changelog decoupled enabled
+        cleanUnusedManifests(
+                snapshot,
+                skippingSet,
+                !changelogDecoupled || produceChangelog,
+                !changelogDecoupled);
     }
 
     @VisibleForTesting

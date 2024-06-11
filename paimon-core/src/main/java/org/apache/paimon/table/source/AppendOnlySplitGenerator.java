@@ -45,6 +45,11 @@ public class AppendOnlySplitGenerator implements SplitGenerator {
     }
 
     @Override
+    public boolean alwaysRawConvertible() {
+        return true;
+    }
+
+    @Override
     public List<SplitGroup> splitForBatch(List<DataFileMeta> input) {
         List<DataFileMeta> files = new ArrayList<>(input);
         files.sort(fileComparator(bucketMode == BucketMode.BUCKET_UNAWARE));
