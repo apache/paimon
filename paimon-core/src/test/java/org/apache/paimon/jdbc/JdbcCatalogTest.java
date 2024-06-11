@@ -35,7 +35,6 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link JdbcCatalog}. */
 public class JdbcCatalogTest extends CatalogTestBase {
@@ -94,22 +93,16 @@ public class JdbcCatalogTest extends CatalogTestBase {
     @Test
     public void testCheckIdentifierUpperCase() throws Exception {
         catalog.createDatabase("test_db", false);
-        assertThatThrownBy(
-                        () ->
-                                catalog.createTable(
-                                        Identifier.create("TEST_DB", "new_table"),
-                                        DEFAULT_TABLE_SCHEMA,
-                                        false))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Database name [TEST_DB] cannot contain upper case in the catalog.");
+        // create table with upper case
+        catalog.createTable(
+                Identifier.create("test_db", "INIT_TABLE"), DEFAULT_TABLE_SCHEMA, false);
+        assertThat(catalog.tableExists(new Identifier("test_db", "init_table"))).isTrue();
 
-        assertThatThrownBy(
-                        () ->
-                                catalog.createTable(
-                                        Identifier.create("test_db", "NEW_TABLE"),
-                                        DEFAULT_TABLE_SCHEMA,
-                                        false))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Table name [NEW_TABLE] cannot contain upper case in the catalog.");
+        // rename table name with upper case
+        catalog.renameTable(
+                new Identifier("test_db", "init_table"),
+                new Identifier("test_db", "NEW_TABLE"),
+                false);
+        assertThat(catalog.tableExists(new Identifier("test_db", "new_table"))).isTrue();
     }
 }
