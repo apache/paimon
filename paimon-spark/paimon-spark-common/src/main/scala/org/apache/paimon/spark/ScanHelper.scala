@@ -46,7 +46,7 @@ trait ScanHelper {
   def reshuffleSplits(splits: Array[Split]): Array[Split] = {
     if (splits.length < leafNodeDefaultParallelism) {
       val (toReshuffle, reserved) = splits.partition {
-        case split: DataSplit => split.beforeFiles().isEmpty && split.convertToRawFiles.isPresent
+        case split: DataSplit => split.beforeFiles().isEmpty && split.rawConvertible()
         case _ => false
       }
       val reshuffled = reshuffleSplits0(toReshuffle.collect { case ds: DataSplit => ds })
