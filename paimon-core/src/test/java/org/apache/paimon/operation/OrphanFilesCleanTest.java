@@ -170,7 +170,7 @@ public class OrphanFilesCleanTest {
 
         // first check, nothing will be deleted because the default olderThan interval is 1 day
         OrphanFilesClean orphanFilesClean = new OrphanFilesClean(table);
-        assertThat(orphanFilesClean.clean()).isEqualTo(0);
+        assertThat(orphanFilesClean.clean().size()).isEqualTo(0);
 
         // second check
         orphanFilesClean = new OrphanFilesClean(table);
@@ -357,7 +357,7 @@ public class OrphanFilesCleanTest {
 
         // first check, nothing will be deleted because the default olderThan interval is 1 day
         OrphanFilesClean orphanFilesClean = new OrphanFilesClean(table);
-        assertThat(orphanFilesClean.clean()).isEqualTo(0);
+        assertThat(orphanFilesClean.clean().size()).isEqualTo(0);
 
         // second check
         orphanFilesClean = new OrphanFilesClean(table);
@@ -392,7 +392,7 @@ public class OrphanFilesCleanTest {
 
         OrphanFilesClean orphanFilesClean = new OrphanFilesClean(table);
         setOlderThan(orphanFilesClean);
-        assertThat(orphanFilesClean.clean()).isGreaterThan(0);
+        assertThat(orphanFilesClean.clean().size()).isGreaterThan(0);
     }
 
     private void writeData(

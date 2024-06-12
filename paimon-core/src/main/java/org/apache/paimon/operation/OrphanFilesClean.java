@@ -95,6 +95,7 @@ public class OrphanFilesClean {
     private int deletedFilesNum = 0;
     private final List<Path> deleteFiles;
     private long olderThanMillis = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(1);
+    private boolean isDryRun = false;
 
     public OrphanFilesClean(FileStoreTable table) {
         this.snapshotManager = table.snapshotManager();
@@ -118,10 +119,15 @@ public class OrphanFilesClean {
         return this;
     }
 
-    public int clean() throws IOException, ExecutionException, InterruptedException {
+    public OrphanFilesClean dryRun(boolean dryRun) {
+        this.isDryRun = dryRun;
+        return this;
+    }
+
+    public List<Path> clean() throws IOException, ExecutionException, InterruptedException {
         if (snapshotManager.earliestSnapshotId() == null) {
             LOG.info("No snapshot found, skip removing.");
-            return 0;
+            return Collections.emptyList();
         }
 
         // specially handle the snapshot directory
@@ -142,14 +148,17 @@ public class OrphanFilesClean {
         Set<String> deleted = new HashSet<>(candidates.keySet());
         deleted.removeAll(usedFiles);
 
-        for (String file : deleted) {
-            Path path = candidates.get(file);
-            deleteFileOrDirQuietly(path);
+        if (!isDryRun) {
+            for (String file : deleted) {
+                Path path = candidates.get(file);
+                deleteFileOrDirQuietly(path);
+            }
         }
+
         deletedFilesNum += deleted.size();
         deleteFiles.addAll(deleted.stream().map(candidates::get).collect(Collectors.toList()));
 
-        return deletedFilesNum;
+        return deleteFiles;
     }
 
     @VisibleForTesting

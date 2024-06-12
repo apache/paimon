@@ -169,7 +169,8 @@ All available procedures are listed below.
       <td>remove_orphan_files</td>
       <td>
          CALL [catalog.]sys.remove_orphan_files('identifier')<br/><br/>
-         CALL [catalog.]sys.remove_orphan_files('identifier', 'olderThan')
+         CALL [catalog.]sys.remove_orphan_files('identifier', 'olderThan')<br/><br/>
+         CALL [catalog.]sys.remove_orphan_files('identifier', 'olderThan', 'dryRun')
       </td>
       <td>
          To remove the orphan data files and metadata files. Arguments:
@@ -177,8 +178,11 @@ All available procedures are listed below.
             <li>olderThan: to avoid deleting newly written files, this procedure only 
                deletes orphan files older than 1 day by default. This argument can modify the interval.
             </li>
+            <li>dryRun: when true, view only orphan files, don't actually remove files. Default is false.</li>
       </td>
-      <td>CALL remove_orphan_files('default.T', '2023-10-31 12:00:00')</td>
+      <td>CALL remove_orphan_files('default.T', '2023-10-31 12:00:00')<br/><br/>
+          CALL remove_orphan_files('default.T', '2023-10-31 12:00:00', true) 
+      </td>
    </tr>
    <tr>
       <td>reset_consumer</td>
