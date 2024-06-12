@@ -179,7 +179,7 @@ public abstract class SortBufferWriteBufferTestBase {
         protected MergeFunction<KeyValue> createMergeFunction() {
             Options options = new Options();
             return PartialUpdateMergeFunction.factory(
-                            options, RowType.of(DataTypes.BIGINT()), ImmutableList.of("key"))
+                            options, RowType.of(DataTypes.BIGINT()), ImmutableList.of("f0"))
                     .create();
         }
     }

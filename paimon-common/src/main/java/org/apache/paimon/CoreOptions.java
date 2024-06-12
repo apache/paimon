@@ -65,6 +65,8 @@ public class CoreOptions implements Serializable {
 
     public static final String FIELDS_PREFIX = "fields";
 
+    public static final String FIELDS_SEPARATOR = ",";
+
     public static final String AGG_FUNCTION = "aggregate-function";
     public static final String DEFAULT_AGG_FUNCTION = "default-aggregate-function";
 
