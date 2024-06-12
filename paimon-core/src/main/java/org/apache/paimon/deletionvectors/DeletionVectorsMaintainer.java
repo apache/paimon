@@ -20,9 +20,11 @@ package org.apache.paimon.deletionvectors;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.utils.PathFactory;
 
 import javax.annotation.Nullable;
 
@@ -89,13 +91,12 @@ public class DeletionVectorsMaintainer {
     }
 
     /**
-     * Prepares to commit: write new deletion vectors index file if any modifications have been
-     * made.
+     * Write new deletion vectors index file if any modifications have been made.
      *
      * @return A list containing the metadata of the deletion vectors index file, or an empty list
      *     if no changes need to be committed.
      */
-    public List<IndexFileMeta> prepareCommit() {
+    public List<IndexFileMeta> writeDeletionVectorsIndex() {
         if (modified) {
             modified = false;
             return indexFileHandler.writeDeletionVectorsIndex(deletionVectors);
@@ -112,6 +113,14 @@ public class DeletionVectorsMaintainer {
      */
     public Optional<DeletionVector> deletionVectorOf(String fileName) {
         return Optional.ofNullable(deletionVectors.get(fileName));
+    }
+
+    public FileIO fileIO() {
+        return indexFileHandler.fileIO();
+    }
+
+    public PathFactory pathFactory() {
+        return indexFileHandler.pathFactory();
     }
 
     @VisibleForTesting

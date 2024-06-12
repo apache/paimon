@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.options.Options;
@@ -46,7 +45,6 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL;
-import static org.apache.paimon.flink.FlinkConnectorOptions.prepareCommitWaitCompaction;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 
 /**
@@ -238,10 +236,11 @@ public class MultiTablesStoreCompactOperator
         CoreOptions.ChangelogProducer changelogProducer =
                 fileStoreTable.coreOptions().changelogProducer();
         boolean waitCompaction;
-        if (fileStoreTable.coreOptions().writeOnly()) {
+        CoreOptions coreOptions = fileStoreTable.coreOptions();
+        if (coreOptions.writeOnly()) {
             waitCompaction = false;
         } else {
-            waitCompaction = prepareCommitWaitCompaction(options);
+            waitCompaction = coreOptions.changelogProducerLookupWait();
             int deltaCommits = -1;
             if (options.contains(FULL_COMPACTION_DELTA_COMMITS)) {
                 deltaCommits = options.get(FULL_COMPACTION_DELTA_COMMITS);
@@ -273,7 +272,7 @@ public class MultiTablesStoreCompactOperator
         }
 
         if (changelogProducer == CoreOptions.ChangelogProducer.LOOKUP
-                && !options.get(FlinkConnectorOptions.CHANGELOG_PRODUCER_LOOKUP_WAIT)) {
+                && !coreOptions.changelogProducerLookupWait()) {
             return (table, commitUser, state, ioManager, memoryPool, metricGroup) ->
                     new AsyncLookupSinkWrite(
                             table,

@@ -249,7 +249,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                     compactionMetrics == null
                             ? null
                             : compactionMetrics.createReporter(partition, bucket),
-                    options.deletionVectorsEnabled());
+                    dvMaintainer,
+                    options.changelogProducerLookupWait());
         }
     }
 

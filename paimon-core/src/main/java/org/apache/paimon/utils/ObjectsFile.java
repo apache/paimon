@@ -68,6 +68,10 @@ public class ObjectsFile<T> {
                 cache == null ? null : new ObjectsCache<>(cache, serializer, this::createIterator);
     }
 
+    public FileIO fileIO() {
+        return fileIO;
+    }
+
     public long fileSize(String fileName) {
         try {
             return fileIO.getFileSize(pathFactory.toPath(fileName));

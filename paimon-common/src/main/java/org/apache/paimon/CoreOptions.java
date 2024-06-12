@@ -1194,6 +1194,17 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("Specifies the commit user prefix.");
 
+    public static final ConfigOption<Boolean> CHANGELOG_PRODUCER_LOOKUP_WAIT =
+            key("changelog-producer.lookup-wait")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "When "
+                                    + CoreOptions.CHANGELOG_PRODUCER.key()
+                                    + " is set to "
+                                    + ChangelogProducer.LOOKUP.name()
+                                    + ", commit will wait for changelog generation by lookup.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -1891,6 +1902,10 @@ public class CoreOptions implements Serializable {
     @Nullable
     public String recordLevelTimeField() {
         return options.get(RECORD_LEVEL_TIME_FIELD);
+    }
+
+    public boolean changelogProducerLookupWait() {
+        return options.get(CHANGELOG_PRODUCER_LOOKUP_WAIT);
     }
 
     /** Specifies the merge engine for table with primary key. */

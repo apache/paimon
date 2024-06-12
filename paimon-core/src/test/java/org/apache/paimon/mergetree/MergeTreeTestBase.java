@@ -458,6 +458,7 @@ public abstract class MergeTreeTestBase {
                 options.numSortedRunStopTrigger(),
                 new TestRewriter(),
                 null,
+                null,
                 false);
     }
 
@@ -478,6 +479,7 @@ public abstract class MergeTreeTestBase {
                     minFileSize,
                     numSortedRunStopTrigger,
                     rewriter,
+                    null,
                     null,
                     false);
         }

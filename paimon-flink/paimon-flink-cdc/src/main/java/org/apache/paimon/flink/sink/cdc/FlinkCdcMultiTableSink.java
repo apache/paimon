@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.sink.CommittableStateManager;
 import org.apache.paimon.flink.sink.Committer;
 import org.apache.paimon.flink.sink.CommitterOperator;
@@ -88,8 +87,7 @@ public class FlinkCdcMultiTableSink implements Serializable {
                         state,
                         ioManager,
                         isOverwrite,
-                        FlinkConnectorOptions.prepareCommitWaitCompaction(
-                                table.coreOptions().toConfiguration()),
+                        table.coreOptions().changelogProducerLookupWait(),
                         true,
                         memoryPoolFactory,
                         metricGroup);

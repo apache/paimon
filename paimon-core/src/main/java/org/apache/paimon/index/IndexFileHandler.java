@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVectorIndexFileMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
@@ -63,6 +64,14 @@ public class IndexFileHandler {
         this.indexManifestFile = indexManifestFile;
         this.hashIndex = hashIndex;
         this.deletionVectorsIndex = deletionVectorsIndex;
+    }
+
+    public FileIO fileIO() {
+        return indexManifestFile.fileIO();
+    }
+
+    public PathFactory pathFactory() {
+        return pathFactory;
     }
 
     public DeletionVectorsIndexFile deletionVectorsIndex() {

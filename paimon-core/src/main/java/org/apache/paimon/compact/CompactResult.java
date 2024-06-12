@@ -20,6 +20,8 @@ package org.apache.paimon.compact;
 
 import org.apache.paimon.io.DataFileMeta;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -30,6 +32,8 @@ public class CompactResult {
     private final List<DataFileMeta> before;
     private final List<DataFileMeta> after;
     private final List<DataFileMeta> changelog;
+
+    @Nullable private CompactDeletionFile deletionFile;
 
     public CompactResult() {
         this(Collections.emptyList(), Collections.emptyList());
@@ -62,9 +66,22 @@ public class CompactResult {
         return changelog;
     }
 
+    public void setDeletionFile(CompactDeletionFile deletionFile) {
+        this.deletionFile = deletionFile;
+    }
+
+    @Nullable
+    public CompactDeletionFile deletionFile() {
+        return deletionFile;
+    }
+
     public void merge(CompactResult that) {
         before.addAll(that.before);
         after.addAll(that.after);
         changelog.addAll(that.changelog);
+
+        if (deletionFile != null || that.deletionFile != null) {
+            throw new UnsupportedOperationException();
+        }
     }
 }

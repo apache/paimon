@@ -238,7 +238,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
         sdv.bucket,
         DataIncrement.emptyIncrement(),
         CompactIncrement.emptyIncrement(),
-        new IndexIncrement(maintainer.prepareCommit()))
+        new IndexIncrement(maintainer.writeDeletionVectorsIndex()))
 
       serializer.serialize(commitMessage)
     }
