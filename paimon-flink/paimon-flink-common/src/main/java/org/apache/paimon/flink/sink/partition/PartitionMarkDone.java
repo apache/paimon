@@ -23,16 +23,11 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.partition.PartitionTimeExtractor;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 
-import org.apache.flink.api.common.state.ListState;
-import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.state.OperatorStateStore;
-import org.apache.flink.api.common.typeutils.base.ListSerializer;
-import org.apache.flink.api.common.typeutils.base.StringSerializer;
 import org.apache.flink.table.utils.PartitionPathUtils;
 
 import javax.annotation.Nullable;
@@ -40,9 +35,7 @@ import javax.annotation.Nullable;
 import java.io.Closeable;
 import java.io.IOException;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -51,17 +44,12 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.flink.FlinkConnectorOptions.PARTITION_IDLE_TIME_TO_DONE;
 import static org.apache.paimon.flink.FlinkConnectorOptions.PARTITION_MARK_DONE_ACTION;
-import static org.apache.paimon.flink.FlinkConnectorOptions.PARTITION_TIME_INTERVAL;
+import static org.apache.paimon.flink.FlinkConnectorOptions.PARTITION_MARK_DONE_WHEN_END_INPUT;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Mark partition done. */
 public class PartitionMarkDone implements Closeable {
-
-    private static final ListStateDescriptor<List<String>> PENDING_PARTITIONS_STATE_DESC =
-            new ListStateDescriptor<>(
-                    "mark-done-pending-partitions",
-                    new ListSerializer<>(StringSerializer.INSTANCE));
 
     private final InternalRowPartitionComputer partitionComputer;
     private final PartitionMarkDoneTrigger trigger;
@@ -74,28 +62,69 @@ public class PartitionMarkDone implements Closeable {
             OperatorStateStore stateStore,
             FileStoreTable table)
             throws Exception {
-        if (!isStreaming) {
+        CoreOptions coreOptions = table.coreOptions();
+        Options options = coreOptions.toConfiguration();
+
+        if (closePartitionMarkDone(isStreaming, table, options)) {
             return null;
+        }
+
+        InternalRowPartitionComputer partitionComputer =
+                new InternalRowPartitionComputer(
+                        coreOptions.partitionDefaultName(),
+                        table.schema().logicalPartitionType(),
+                        table.partitionKeys().toArray(new String[0]));
+
+        PartitionMarkDoneTrigger trigger =
+                PartitionMarkDoneTrigger.create(coreOptions, isRestored, stateStore);
+
+        List<PartitionMarkDoneAction> actions =
+                Arrays.asList(options.get(PARTITION_MARK_DONE_ACTION).split(",")).stream()
+                        .map(
+                                action -> {
+                                    switch (action) {
+                                        case "success-file":
+                                            return new SuccessFileMarkDoneAction(
+                                                    table.fileIO(), table.location());
+                                        case "done-partition":
+                                            return new AddDonePartitionAction(
+                                                    checkMetastoreAndCreateMetastoreClient(
+                                                            table, coreOptions, options));
+                                        default:
+                                            throw new UnsupportedOperationException(action);
+                                    }
+                                })
+                        .collect(Collectors.toList());
+
+        return new PartitionMarkDone(partitionComputer, trigger, actions);
+    }
+
+    private static boolean closePartitionMarkDone(
+            boolean isStreaming, FileStoreTable table, Options options) {
+        boolean partitionMarkDoneWhenEndInput = options.get(PARTITION_MARK_DONE_WHEN_END_INPUT);
+        if (!isStreaming && !partitionMarkDoneWhenEndInput) {
+            return true;
+        }
+
+        Duration idleToDone = options.get(PARTITION_IDLE_TIME_TO_DONE);
+        if (isStreaming && idleToDone == null) {
+            return true;
         }
 
         List<String> partitionKeys = table.partitionKeys();
         if (partitionKeys.isEmpty()) {
-            return null;
+            return true;
         }
 
-        CoreOptions coreOptions = table.coreOptions();
-        Options options = coreOptions.toConfiguration();
+        return false;
+    }
 
-        Duration idleToDone = options.get(PARTITION_IDLE_TIME_TO_DONE);
-        if (idleToDone == null) {
-            return null;
-        }
-
+    private static MetastoreClient checkMetastoreAndCreateMetastoreClient(
+            FileStoreTable table, CoreOptions coreOptions, Options options) {
         MetastoreClient.Factory metastoreClientFactory =
                 table.catalogEnvironment().metastoreClientFactory();
 
-        String partitionMarkDownAction = options.get(PARTITION_MARK_DONE_ACTION);
-        if (partitionMarkDownAction.contains("done-partition")) {
+        if (options.get(PARTITION_MARK_DONE_ACTION).contains("done-partition")) {
             checkNotNull(
                     metastoreClientFactory,
                     "Cannot mark done partition for table without metastore.");
@@ -105,39 +134,7 @@ public class PartitionMarkDone implements Closeable {
                     METASTORE_PARTITIONED_TABLE.key());
         }
 
-        InternalRowPartitionComputer partitionComputer =
-                new InternalRowPartitionComputer(
-                        coreOptions.partitionDefaultName(),
-                        table.schema().logicalPartitionType(),
-                        partitionKeys.toArray(new String[0]));
-
-        PartitionMarkDoneTrigger trigger =
-                new PartitionMarkDoneTrigger(
-                        new PartitionMarkDoneTriggerState(isRestored, stateStore),
-                        new PartitionTimeExtractor(
-                                coreOptions.partitionTimestampPattern(),
-                                coreOptions.partitionTimestampFormatter()),
-                        options.get(PARTITION_TIME_INTERVAL),
-                        idleToDone);
-
-        List<PartitionMarkDoneAction> actions =
-                Arrays.asList(partitionMarkDownAction.split(",")).stream()
-                        .map(
-                                action -> {
-                                    switch (action) {
-                                        case "success-file":
-                                            return new SuccessFileMarkDoneAction(
-                                                    table.fileIO(), table.location());
-                                        case "done-partition":
-                                            return new AddDonePartitionAction(
-                                                    metastoreClientFactory.create());
-                                        default:
-                                            throw new UnsupportedOperationException(action);
-                                    }
-                                })
-                        .collect(Collectors.toList());
-
-        return new PartitionMarkDone(partitionComputer, trigger, actions);
+        return metastoreClientFactory.create();
     }
 
     public PartitionMarkDone(
@@ -149,7 +146,7 @@ public class PartitionMarkDone implements Closeable {
         this.actions = actions;
     }
 
-    public void notifyCommittable(List<ManifestCommittable> committables) {
+    public void notifyCommittable(List<ManifestCommittable> committables, boolean endInput) {
         Set<BinaryRow> partitions = new HashSet<>();
         for (ManifestCommittable committable : committables) {
             committable.fileCommittables().stream()
@@ -162,7 +159,7 @@ public class PartitionMarkDone implements Closeable {
                 .map(PartitionPathUtils::generatePartitionPath)
                 .forEach(trigger::notifyPartition);
 
-        for (String partition : trigger.donePartitions()) {
+        for (String partition : trigger.donePartitions(endInput)) {
             try {
                 for (PartitionMarkDoneAction action : actions) {
                     action.markDone(partition);
@@ -181,32 +178,6 @@ public class PartitionMarkDone implements Closeable {
     public void close() throws IOException {
         for (PartitionMarkDoneAction action : actions) {
             action.close();
-        }
-    }
-
-    private static class PartitionMarkDoneTriggerState implements PartitionMarkDoneTrigger.State {
-
-        private final boolean isRestored;
-        private final ListState<List<String>> pendingPartitionsState;
-
-        private PartitionMarkDoneTriggerState(boolean isRestored, OperatorStateStore stateStore)
-                throws Exception {
-            this.isRestored = isRestored;
-            this.pendingPartitionsState = stateStore.getListState(PENDING_PARTITIONS_STATE_DESC);
-        }
-
-        @Override
-        public List<String> restore() throws Exception {
-            List<String> pendingPartitions = new ArrayList<>();
-            if (isRestored) {
-                pendingPartitions.addAll(pendingPartitionsState.get().iterator().next());
-            }
-            return pendingPartitions;
-        }
-
-        @Override
-        public void update(List<String> partitions) throws Exception {
-            pendingPartitionsState.update(Collections.singletonList(partitions));
         }
     }
 }
