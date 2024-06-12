@@ -297,11 +297,11 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         + "MODIFY COLUMN v1 VARCHAR(20), "
                         // I'd love to change COMMENT to DEFAULT
                         // however debezium parser seems to have a bug here
-                        + "ADD COLUMN (v5 DOUBLE, v6 DECIMAL(5, 3), `$% ^,& *(` VARCHAR(10) COMMENT 'Hi, v700 DOUBLE \\', v701 INT a test'), "
+                        + "ADD COLUMN (v5 DOUBLE, v6 DECIMAL(5, 3), `$% ^,& *(` VARCHAR(10), v7 INTEGER COMMENT 'Hi, v700 DOUBLE \\', v701 INT a test'), "
                         + "MODIFY v2 BIGINT");
         statement.executeUpdate(
                 "INSERT INTO schema_evolution_multiple VALUES "
-                        + "(2, 'long_string_two', 2000000000000, 'string_2', 20, 20.5, 20.002, 'test_2')");
+                        + "(2, 'long_string_two', 2000000000000, 'string_2', 20, 20.5, 20.002, 'test_2', 200)");
         rowType =
                 RowType.of(
                         new DataType[] {
@@ -312,13 +312,16 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             DataTypes.INT(),
                             DataTypes.DOUBLE(),
                             DataTypes.DECIMAL(5, 3),
-                            DataTypes.VARCHAR(10)
+                            DataTypes.VARCHAR(10),
+                            DataTypes.INT(),
                         },
-                        new String[] {"_id", "v1", "v2", "v3", "v4", "v5", "v6", "$% ^,& *("});
+                        new String[] {
+                            "_id", "v1", "v2", "v3", "v4", "v5", "v6", "$% ^,& *(", "v7"
+                        });
         expected =
                 Arrays.asList(
-                        "+I[1, one, 10, string_1, NULL, NULL, NULL, NULL]",
-                        "+I[2, long_string_two, 2000000000000, string_2, 20, 20.5, 20.002, test_2]");
+                        "+I[1, one, 10, string_1, NULL, NULL, NULL, NULL, NULL]",
+                        "+I[2, long_string_two, 2000000000000, string_2, 20, 20.5, 20.002, test_2, 200]");
         waitForResult(expected, table, rowType, primaryKeys);
     }
 
