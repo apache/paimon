@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.TagCreationMode;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -93,12 +94,12 @@ public abstract class FlinkSink<T> implements Serializable {
                                                 .key(),
                                         ExecutionConfigOptions.UpsertMaterialize.NONE.name()));
 
+        Options options = table.coreOptions().toConfiguration();
+        ChangelogProducer changelogProducer = table.coreOptions().changelogProducer();
         boolean waitCompaction;
         if (table.coreOptions().writeOnly()) {
             waitCompaction = false;
         } else {
-            Options options = table.coreOptions().toConfiguration();
-            ChangelogProducer changelogProducer = table.coreOptions().changelogProducer();
             waitCompaction = prepareCommitWaitCompaction(options);
             int deltaCommits = -1;
             if (options.contains(FULL_COMPACTION_DELTA_COMMITS)) {
@@ -129,6 +130,23 @@ public abstract class FlinkSink<T> implements Serializable {
                             metricGroup);
                 };
             }
+        }
+
+        if (changelogProducer == ChangelogProducer.LOOKUP
+                && !options.get(FlinkConnectorOptions.CHANGELOG_PRODUCER_LOOKUP_WAIT)) {
+            return (table, commitUser, state, ioManager, memoryPool, metricGroup) -> {
+                assertNoSinkMaterializer.run();
+                return new AsyncLookupSinkWrite(
+                        table,
+                        commitUser,
+                        state,
+                        ioManager,
+                        ignorePreviousFiles,
+                        waitCompaction,
+                        isStreaming,
+                        memoryPool,
+                        metricGroup);
+            };
         }
 
         return (table, commitUser, state, ioManager, memoryPool, metricGroup) -> {

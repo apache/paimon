@@ -340,6 +340,15 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         }
     }
 
+    public Map<BinaryRow, List<Integer>> getActiveBuckets() {
+        Map<BinaryRow, List<Integer>> result = new HashMap<>();
+        for (Map.Entry<BinaryRow, Map<Integer, WriterContainer<T>>> partitions :
+                writers.entrySet()) {
+            result.put(partitions.getKey(), new ArrayList<>(partitions.getValue().keySet()));
+        }
+        return result;
+    }
+
     private WriterContainer<T> getWriterWrapper(BinaryRow partition, int bucket) {
         Map<Integer, WriterContainer<T>> buckets = writers.get(partition);
         if (buckets == null) {
