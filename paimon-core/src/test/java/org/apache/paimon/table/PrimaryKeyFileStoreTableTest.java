@@ -1696,15 +1696,17 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         options.set(BUCKET, 1);
         options.set(BRANCH, branch);
         configure.accept(options);
+        TableSchema latestSchema =
+                new SchemaManager(LocalFileIO.create(), tablePath).latest().get();
         TableSchema tableSchema =
-                SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), tablePath),
-                        new Schema(
-                                rowType.getFields(),
-                                Collections.singletonList("pt"),
-                                Arrays.asList("pt", "a"),
-                                options.toMap(),
-                                ""));
+                new TableSchema(
+                        latestSchema.id(),
+                        latestSchema.fields(),
+                        latestSchema.highestFieldId(),
+                        latestSchema.partitionKeys(),
+                        latestSchema.primaryKeys(),
+                        options.toMap(),
+                        latestSchema.comment());
         return new PrimaryKeyFileStoreTable(FileIOFinder.find(tablePath), tablePath, tableSchema);
     }
 }

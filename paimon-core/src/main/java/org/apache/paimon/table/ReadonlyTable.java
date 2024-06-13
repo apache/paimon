@@ -183,6 +183,14 @@ public interface ReadonlyTable extends InnerTable {
     }
 
     @Override
+    default void mergeBranch(String branchName) {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support mergeBranch.",
+                        this.getClass().getSimpleName()));
+    }
+
+    @Override
     default void replaceBranch(String fromBranch) {
         throw new UnsupportedOperationException(
                 String.format(

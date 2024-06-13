@@ -634,6 +634,12 @@ public class SnapshotManager implements Serializable {
         return listVersionedFiles(fileIO, dir, prefix).reduce(reducer).orElse(null);
     }
 
+    public void deleteLatestHint() throws IOException {
+        Path snapshotDir = snapshotDirectory();
+        Path hintFile = new Path(snapshotDir, LATEST);
+        fileIO.delete(hintFile, false);
+    }
+
     public void commitLatestHint(long snapshotId) throws IOException {
         commitHint(snapshotId, LATEST, snapshotDirectory());
     }
