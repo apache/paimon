@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.options.Options;
@@ -233,13 +234,13 @@ public class MultiTablesStoreCompactOperator
             CheckpointConfig checkpointConfig,
             boolean isStreaming,
             boolean ignorePreviousFiles) {
+        Options options = fileStoreTable.coreOptions().toConfiguration();
+        CoreOptions.ChangelogProducer changelogProducer =
+                fileStoreTable.coreOptions().changelogProducer();
         boolean waitCompaction;
         if (fileStoreTable.coreOptions().writeOnly()) {
             waitCompaction = false;
         } else {
-            Options options = fileStoreTable.coreOptions().toConfiguration();
-            CoreOptions.ChangelogProducer changelogProducer =
-                    fileStoreTable.coreOptions().changelogProducer();
             waitCompaction = prepareCommitWaitCompaction(options);
             int deltaCommits = -1;
             if (options.contains(FULL_COMPACTION_DELTA_COMMITS)) {
@@ -269,6 +270,21 @@ public class MultiTablesStoreCompactOperator
                                 memoryPool,
                                 metricGroup);
             }
+        }
+
+        if (changelogProducer == CoreOptions.ChangelogProducer.LOOKUP
+                && !options.get(FlinkConnectorOptions.CHANGELOG_PRODUCER_LOOKUP_WAIT)) {
+            return (table, commitUser, state, ioManager, memoryPool, metricGroup) ->
+                    new AsyncLookupSinkWrite(
+                            table,
+                            commitUser,
+                            state,
+                            ioManager,
+                            ignorePreviousFiles,
+                            waitCompaction,
+                            isStreaming,
+                            memoryPool,
+                            metricGroup);
         }
 
         return (table, commitUser, state, ioManager, memoryPool, metricGroup) ->
