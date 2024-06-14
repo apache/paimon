@@ -554,6 +554,14 @@ public class CoreOptions implements Serializable {
                                     + " the sequence number determines which data is the most recent.");
 
     @Immutable
+    public static final ConfigOption<Boolean> PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE =
+            key("partial-update.remove-record-on-delete")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to remove the whole row in partial-update engine when -D records are received.");
+
+    @Immutable
     public static final ConfigOption<String> ROWKIND_FIELD =
             key("rowkind.field")
                     .stringType()
