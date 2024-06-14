@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
@@ -1115,12 +1116,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         "Don't panic!",
                         "Conflicts during commits are normal and this failure is intended to resolve the conflicts.",
                         "Conflicts are mainly caused by the following scenarios:",
-                        "1. Your job is suffering from back-pressuring.",
-                        "   There are too many snapshots waiting to be committed "
-                                + "and an exception occurred during the commit procedure "
-                                + "(most probably due to checkpoint timeout).",
-                        "   See https://paimon.apache.org/docs/master/maintenance/write-performance/ "
-                                + "for how to improve writing performance.",
+                        "1. Data is written into expired partitions.",
+                        "   Please check if you have set  "
+                                + CoreOptions.PARTITION_EXPIRATION_TIME.key()
+                                + " and filter out expired data.",
                         "2. Multiple jobs are writing into the same partition at the same time, "
                                 + "or you use STATEMENT SET to execute multiple INSERT statements into the same Paimon table.",
                         "   You'll probably see different base commit user and current commit user below.",
@@ -1130,7 +1129,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         "3. You're recovering from an old savepoint, or you're creating multiple jobs from a savepoint.",
                         "   The job will fail continuously in this scenario to protect metadata from corruption.",
                         "   You can either recover from the latest savepoint, "
-                                + "or you can revert the table to the snapshot corresponding to the old savepoint.");
+                                + "or you can revert the table to the snapshot corresponding to the old savepoint.",
+                        "4. The parallelism of committer, or the parallelism of compact coordinator (for append only scalable table) is not 1.");
         String commitUserString =
                 "Base commit user is: "
                         + baseCommitUser
@@ -1162,7 +1162,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         if (baseEntries.size() > maxEntry || changes.size() > maxEntry) {
             baseEntriesString =
                     "Base entries are:\n"
-                            + baseEntries.subList(0, Math.min(baseEntries.size(), maxEntry))
+                            + baseEntries
+                                    .subList(0, Math.min(baseEntries.size(), maxEntry))
                                     .stream()
                                     .map(Object::toString)
                                     .collect(Collectors.joining("\n"));
