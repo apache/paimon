@@ -74,9 +74,8 @@ public class OrcFilterConverterTest {
         test(
                 builder.in(0, Arrays.asList(1L, 2L, 3L)),
                 new OrcFilters.Or(
-                        new OrcFilters.Or(
-                                new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 1),
-                                new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 2)),
+                        new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 1),
+                        new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 2),
                         new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 3)),
                 true);
 
@@ -91,12 +90,10 @@ public class OrcFilterConverterTest {
         test(
                 builder.notIn(0, Arrays.asList(1L, 2L, 3L)),
                 new OrcFilters.And(
-                        new OrcFilters.And(
-                                new OrcFilters.Not(
-                                        new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 1)),
-                                new OrcFilters.Not(
-                                        new OrcFilters.Equals(
-                                                "long1", PredicateLeaf.Type.LONG, 2))),
+                        new OrcFilters.Not(
+                                new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 1)),
+                        new OrcFilters.Not(
+                                new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 2)),
                         new OrcFilters.Not(
                                 new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 3))),
                 true);
