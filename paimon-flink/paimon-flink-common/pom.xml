@@ -114,6 +114,12 @@ under the License.
         </dependency>
 
         <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-table-planner-loader</artifactId>
+            <version>${flink.version}</version>
+        </dependency>
+
+        <dependency>
             <groupId>org.apache.calcite</groupId>
             <artifactId>calcite-core</artifactId>
             <version>1.29.0</version>
@@ -183,6 +189,9 @@ under the License.
                                     <include>org.apache.paimon:paimon-service-runtime</include>
                                     <include>org.apache.paimon:paimon-shade-netty-4</include>
                                 </includes>
+                                <excludes>
+                                    <exclude>org.apache.flink:flink-table-planner-loader</exclude>
+                                </excludes>
                             </artifactSet>
                         </configuration>
                     </execution>

@@ -37,6 +37,10 @@ import org.apache.calcite.sql.SqlPrefixOperator;
 import org.apache.calcite.sql.parser.SqlParseException;
 import org.apache.calcite.sql.parser.SqlParser;
 
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BiFunction;
@@ -45,20 +49,73 @@ import static org.apache.calcite.avatica.util.Casing.UNCHANGED;
 
 /** convert sql to predicate. */
 public class SimpleSqlPredicateConvertor {
+    private static final String Flink_PLANNER_MODULE_CLASS =
+            "org.apache.flink.table.planner.loader.PlannerModule";
+    private static final String PLANNER_MODULE_METHOD = "getInstance";
+
+    private static final String CALCITECLASSLOADER = "submoduleClassLoader";
 
     private final PredicateBuilder builder;
     private final RowType rowType;
 
-    public SimpleSqlPredicateConvertor(RowType type) {
+    private final ClassLoader calciteClassLoader;
+
+    public SimpleSqlPredicateConvertor(RowType type) throws Exception {
         this.rowType = type;
         this.builder = new PredicateBuilder(type);
+        calciteClassLoader = initCalciteClassLoader();
+    }
+
+    private ClassLoader initCalciteClassLoader() throws Exception {
+        Class<?> plannerModuleClass = Class.forName(Flink_PLANNER_MODULE_CLASS);
+        Method getInstanceMethod = plannerModuleClass.getDeclaredMethod(PLANNER_MODULE_METHOD);
+        getInstanceMethod.setAccessible(true);
+        Object plannerModuleInstance = getInstanceMethod.invoke(null);
+
+        Field submoduleClassLoaderField = plannerModuleClass.getDeclaredField(CALCITECLASSLOADER);
+        submoduleClassLoaderField.setAccessible(true);
+        return (ClassLoader) submoduleClassLoaderField.get(plannerModuleInstance);
     }
 
     public Predicate convertSqlToPredicate(String conditionSql) throws SqlParseException {
-        SqlParser parser =
-                SqlParser.create(conditionSql, SqlParser.config().withUnquotedCasing(UNCHANGED));
-        SqlNode sqlNode = parser.parseExpression();
-        return convert((SqlBasicCall) sqlNode);
+        ClassLoader pre = Thread.currentThread().getContextClassLoader();
+        try {
+            Thread.currentThread().setContextClassLoader(calciteClassLoader);
+            return convert(conditionSql);
+        } finally {
+            Thread.currentThread().setContextClassLoader(pre);
+        }
+    }
+
+    Predicate convert(String conditionSql) throws SqlParseException {
+
+        try {
+            Class<?> calciteParserClass =
+                    Class.forName("org.apache.flink.table.planner.parse.CalciteParser");
+            System.out.println("是否能找到？");
+            // 获取它的构造函数（假设有可访问的公共构造函数）
+            Constructor<?> constructor = calciteParserClass.getConstructor(SqlParser.Config.class);
+
+            // 创建SqlParser的配置对象（这里可能需要根据实际情况修改代码以适应正确的参数类型和值）
+            SqlParser.Config config = SqlParser.config().withUnquotedCasing(UNCHANGED);
+
+            // 使用构造函数创建CalciteParser实例
+            Object calciteParserInstance = constructor.newInstance(config);
+            java.lang.reflect.Method parseExpressionMethod =
+                    calciteParserClass.getMethod("parseExpression", String.class);
+            Object sqlNode = parseExpressionMethod.invoke(calciteParserInstance, conditionSql);
+            return convert((SqlBasicCall) sqlNode);
+        } catch (ClassNotFoundException e) {
+            throw new RuntimeException(e);
+        } catch (NoSuchMethodException e) {
+            throw new RuntimeException(e);
+        } catch (InstantiationException e) {
+            throw new RuntimeException(e);
+        } catch (IllegalAccessException e) {
+            throw new RuntimeException(e);
+        } catch (InvocationTargetException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     public Predicate convert(SqlBasicCall sqlBasicCall) {
