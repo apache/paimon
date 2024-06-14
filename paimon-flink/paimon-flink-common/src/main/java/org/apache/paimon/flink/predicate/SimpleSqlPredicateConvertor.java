@@ -37,9 +37,7 @@ import org.apache.calcite.sql.SqlPrefixOperator;
 import org.apache.calcite.sql.parser.SqlParseException;
 import org.apache.calcite.sql.parser.SqlParser;
 
-import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
-import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
@@ -81,6 +79,20 @@ public class SimpleSqlPredicateConvertor {
         ClassLoader pre = Thread.currentThread().getContextClassLoader();
         try {
             Thread.currentThread().setContextClassLoader(calciteClassLoader);
+            try {
+                Class<?> aClass =
+                        Thread.currentThread()
+                                .getContextClassLoader()
+                                .loadClass("org.apache.calcite.sql.parser.SqlParser");
+                Field defaultIdentifierMaxLength = aClass.getField("DEFAULT_IDENTIFIER_MAX_LENGTH");
+                defaultIdentifierMaxLength.get(null);
+            } catch (ClassNotFoundException e) {
+                throw new RuntimeException(e);
+            } catch (NoSuchFieldException e) {
+                throw new RuntimeException(e);
+            } catch (IllegalAccessException e) {
+                throw new RuntimeException(e);
+            }
             return convert(conditionSql);
         } finally {
             Thread.currentThread().setContextClassLoader(pre);
@@ -88,34 +100,10 @@ public class SimpleSqlPredicateConvertor {
     }
 
     Predicate convert(String conditionSql) throws SqlParseException {
-
-        try {
-            Class<?> calciteParserClass =
-                    Class.forName("org.apache.flink.table.planner.parse.CalciteParser");
-            System.out.println("是否能找到？");
-            // 获取它的构造函数（假设有可访问的公共构造函数）
-            Constructor<?> constructor = calciteParserClass.getConstructor(SqlParser.Config.class);
-
-            // 创建SqlParser的配置对象（这里可能需要根据实际情况修改代码以适应正确的参数类型和值）
-            SqlParser.Config config = SqlParser.config().withUnquotedCasing(UNCHANGED);
-
-            // 使用构造函数创建CalciteParser实例
-            Object calciteParserInstance = constructor.newInstance(config);
-            java.lang.reflect.Method parseExpressionMethod =
-                    calciteParserClass.getMethod("parseExpression", String.class);
-            Object sqlNode = parseExpressionMethod.invoke(calciteParserInstance, conditionSql);
-            return convert((SqlBasicCall) sqlNode);
-        } catch (ClassNotFoundException e) {
-            throw new RuntimeException(e);
-        } catch (NoSuchMethodException e) {
-            throw new RuntimeException(e);
-        } catch (InstantiationException e) {
-            throw new RuntimeException(e);
-        } catch (IllegalAccessException e) {
-            throw new RuntimeException(e);
-        } catch (InvocationTargetException e) {
-            throw new RuntimeException(e);
-        }
+        SqlParser parser =
+                SqlParser.create(conditionSql, SqlParser.config().withUnquotedCasing(UNCHANGED));
+        SqlNode sqlNode = parser.parseExpression();
+        return convert((SqlBasicCall) sqlNode);
     }
 
     public Predicate convert(SqlBasicCall sqlBasicCall) {
