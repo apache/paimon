@@ -29,6 +29,7 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.Source;
+import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
@@ -134,7 +135,7 @@ public class SystemTableSource extends FlinkTableSource {
 
     @Override
     public LookupTableSource.LookupRuntimeProvider getLookupRuntimeProvider(
-            LookupTableSource.LookupContext context) {
+            LookupTableSource.LookupContext context, ReadableConfig config) {
         throw new UnsupportedOperationException();
     }
 

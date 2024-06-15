@@ -32,6 +32,7 @@ import org.apache.paimon.table.source.Split;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.source.LookupTableSource.LookupContext;
@@ -132,7 +133,8 @@ public abstract class FlinkTableSource {
 
     public abstract void pushWatermark(WatermarkStrategy<RowData> watermarkStrategy);
 
-    public abstract LookupRuntimeProvider getLookupRuntimeProvider(LookupContext context);
+    public abstract LookupRuntimeProvider getLookupRuntimeProvider(
+            LookupContext context, ReadableConfig config);
 
     public abstract TableStats reportStatistics();
 

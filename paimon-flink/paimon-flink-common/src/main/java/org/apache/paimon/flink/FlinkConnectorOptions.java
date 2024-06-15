@@ -293,9 +293,10 @@ public class FlinkConnectorOptions {
                     .withDescription("The thread number for lookup async.");
 
     public static final ConfigOption<LookupCacheMode> LOOKUP_CACHE_MODE =
-            ConfigOptions.key("lookup.cache")
+            ConfigOptions.key("lookup.cache-mode")
                     .enumType(LookupCacheMode.class)
                     .defaultValue(LookupCacheMode.AUTO)
+                    .withDeprecatedKeys("lookup.cache")
                     .withDescription("The cache mode of lookup join.");
 
     public static final ConfigOption<String> LOOKUP_DYNAMIC_PARTITION =

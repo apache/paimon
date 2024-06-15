@@ -57,6 +57,7 @@ import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.DynamicTableSinkFactory;
 import org.apache.flink.table.factories.DynamicTableSourceFactory;
+import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.types.logical.RowType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -126,9 +127,13 @@ public abstract class AbstractFlinkTableFactory
                             isStreamingMode,
                             context,
                             createOptionalLogStoreFactory(context).orElse(null));
+
+            final FactoryUtil.TableFactoryHelper helper =
+                    FactoryUtil.createTableFactoryHelper(this, context);
+            final ReadableConfig config = helper.getOptions();
             return new Options(table.options()).get(SCAN_PUSH_DOWN)
-                    ? new PushedRichTableSource(source)
-                    : new RichTableSource(source);
+                    ? new PushedRichTableSource(source, config)
+                    : new RichTableSource(source, config);
         }
     }
 

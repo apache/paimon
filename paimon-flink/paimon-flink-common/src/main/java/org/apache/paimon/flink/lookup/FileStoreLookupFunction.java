@@ -156,7 +156,15 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         int[] projection = projectFields.stream().mapToInt(fieldNames::indexOf).toArray();
         FileStoreTable storeTable = (FileStoreTable) table;
 
-        if (options.get(LOOKUP_CACHE_MODE) == LookupCacheMode.AUTO
+        LookupCacheMode lookupCacheMode = LookupCacheMode.AUTO;
+        try {
+            // The old option `lookup.cache` conflicts with flink, and here is the compatibility
+            // processing.
+            lookupCacheMode = options.get(LOOKUP_CACHE_MODE);
+        } catch (Exception ignored) {
+        }
+
+        if (lookupCacheMode == LookupCacheMode.AUTO
                 && new HashSet<>(table.primaryKeys()).equals(new HashSet<>(joinKeys))) {
             if (isRemoteServiceAvailable(storeTable)) {
                 this.lookupTable =
