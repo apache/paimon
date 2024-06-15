@@ -52,8 +52,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.UUID;
 import java.util.TimeZone;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.ConfigOptions.key;
