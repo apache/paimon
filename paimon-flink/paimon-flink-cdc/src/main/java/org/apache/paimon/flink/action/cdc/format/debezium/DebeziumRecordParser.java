@@ -18,12 +18,13 @@
 
 package org.apache.paimon.flink.action.cdc.format.debezium;
 
+import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.format.RecordParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
-import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Preconditions;
 
@@ -33,6 +34,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.Arra
 
 import javax.annotation.Nullable;
 
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -118,8 +120,8 @@ public class DebeziumRecordParser extends RecordParser {
     }
 
     @Override
-    protected void setRoot(String record) {
-        JsonNode node = JsonSerdeUtil.fromJson(record, JsonNode.class);
+    protected void setRoot(CdcSourceRecord record) {
+        JsonNode node = (JsonNode) record.getValue();
 
         hasSchema = false;
         if (node.has(FIELD_SCHEMA)) {
@@ -181,10 +183,9 @@ public class DebeziumRecordParser extends RecordParser {
     }
 
     @Override
-    protected Map<String, String> extractRowData(
-            JsonNode record, LinkedHashMap<String, DataType> paimonFieldTypes) {
+    protected Map<String, String> extractRowData(JsonNode record, RowType.Builder rowTypeBuilder) {
         if (!hasSchema) {
-            return super.extractRowData(record, paimonFieldTypes);
+            return super.extractRowData(record, rowTypeBuilder);
         }
 
         Map<String, Object> recordMap =
@@ -198,16 +199,21 @@ public class DebeziumRecordParser extends RecordParser {
 
             String transformed =
                     DebeziumSchemaUtils.transformRawValue(
-                            rawValue, debeziumType, className, typeMapping, record.get(fieldName));
+                            rawValue,
+                            debeziumType,
+                            className,
+                            typeMapping,
+                            record.get(fieldName),
+                            ZoneOffset.UTC);
             resultMap.put(fieldName, transformed);
 
-            paimonFieldTypes.put(
+            rowTypeBuilder.field(
                     fieldName,
                     DebeziumSchemaUtils.toDataType(
                             debeziumType, className, parameters.get(fieldName)));
         }
 
-        evalComputedColumns(resultMap, paimonFieldTypes);
+        evalComputedColumns(resultMap, rowTypeBuilder);
 
         return resultMap;
     }

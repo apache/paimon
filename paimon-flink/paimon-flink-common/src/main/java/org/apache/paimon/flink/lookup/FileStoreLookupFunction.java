@@ -19,7 +19,9 @@
 package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.flink.FlinkConnectorOptions.LookupCacheMode;
 import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.FlinkRowWrapper;
@@ -29,7 +31,9 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.OutOfRangeException;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
+import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
 
@@ -51,8 +55,12 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
@@ -63,6 +71,7 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_CACHE_MODE;
 import static org.apache.paimon.flink.query.RemoteTableQuery.isRemoteServiceAvailable;
 import static org.apache.paimon.lookup.RocksDBOptions.LOOKUP_CACHE_ROWS;
 import static org.apache.paimon.lookup.RocksDBOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL;
+import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
 
 /** A lookup {@link TableFunction} for file store. */
@@ -73,6 +82,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     private static final Logger LOG = LoggerFactory.getLogger(FileStoreLookupFunction.class);
 
     private final Table table;
+    @Nullable private final DynamicPartitionLoader partitionLoader;
     private final List<String> projectFields;
     private final List<String> joinKeys;
     @Nullable private final Predicate predicate;
@@ -89,12 +99,17 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         TableScanUtils.streamingReadingValidate(table);
 
         this.table = table;
+        this.partitionLoader = DynamicPartitionLoader.of(table);
 
         // join keys are based on projection fields
         this.joinKeys =
                 Arrays.stream(joinKeyIndex)
                         .mapToObj(i -> table.rowType().getFieldNames().get(projection[i]))
                         .collect(Collectors.toList());
+
+        if (partitionLoader != null) {
+            partitionLoader.addJoinKeys(joinKeys);
+        }
 
         this.projectFields =
                 Arrays.stream(projection)
@@ -126,6 +141,10 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     }
 
     private void open() throws Exception {
+        if (partitionLoader != null) {
+            partitionLoader.open();
+        }
+
         this.nextLoadTime = -1;
 
         Options options = Options.fromMap(table.options());
@@ -147,7 +166,11 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                 try {
                     this.lookupTable =
                             PrimaryKeyPartialLookupTable.createLocalTable(
-                                    storeTable, projection, path, joinKeys);
+                                    storeTable,
+                                    projection,
+                                    path,
+                                    joinKeys,
+                                    getRequireCachedBucketIds());
                 } catch (UnsupportedOperationException ignore2) {
                 }
             }
@@ -161,10 +184,12 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                             predicate,
                             createProjectedPredicate(projection),
                             path,
-                            joinKeys);
+                            joinKeys,
+                            getRequireCachedBucketIds());
             this.lookupTable = FullCacheLookupTable.create(context, options.get(LOOKUP_CACHE_ROWS));
         }
 
+        refreshDynamicPartition(false);
         lookupTable.open();
     }
 
@@ -187,7 +212,17 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     public Collection<RowData> lookup(RowData keyRow) {
         try {
             checkRefresh();
-            List<InternalRow> results = lookupTable.get(new FlinkRowWrapper(keyRow));
+
+            InternalRow key = new FlinkRowWrapper(keyRow);
+            if (partitionLoader != null) {
+                InternalRow partition = refreshDynamicPartition(true);
+                if (partition == null) {
+                    return Collections.emptyList();
+                }
+                key = JoinedRow.join(key, partition);
+            }
+
+            List<InternalRow> results = lookupTable.get(key);
             List<RowData> rows = new ArrayList<>(results.size());
             for (InternalRow matchedRow : results) {
                 rows.add(new FlinkRowData(matchedRow));
@@ -199,6 +234,43 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    @Nullable
+    private BinaryRow refreshDynamicPartition(boolean reopen) throws Exception {
+        if (partitionLoader == null) {
+            return null;
+        }
+
+        boolean partitionChanged = partitionLoader.checkRefresh();
+        BinaryRow partition = partitionLoader.partition();
+        if (partition == null) {
+            return null;
+        }
+
+        lookupTable.specificPartitionFilter(createSpecificPartFilter(partition));
+
+        if (partitionChanged && reopen) {
+            lookupTable.close();
+            lookupTable.open();
+        }
+
+        return partition;
+    }
+
+    private Predicate createSpecificPartFilter(BinaryRow partition) {
+        RowType rowType = table.rowType();
+        List<String> partitionKeys = table.partitionKeys();
+        Object[] partitionSpec =
+                new RowDataToObjectArrayConverter(rowType.project(partitionKeys))
+                        .convert(partition);
+        Map<String, Object> partitionMap = new HashMap<>(partitionSpec.length);
+        for (int i = 0; i < partitionSpec.length; i++) {
+            partitionMap.put(partitionKeys.get(i), partitionSpec[i]);
+        }
+
+        // create partition predicate base on rowType instead of partitionType
+        return createPartitionPredicate(rowType, partitionMap);
     }
 
     private void reopen() {
@@ -270,5 +342,18 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         Field field = runtimeContext.getClass().getDeclaredField("runtimeContext");
         field.setAccessible(true);
         return extractStreamingRuntimeContext(field.get(runtimeContext));
+    }
+
+    /**
+     * Get the set of bucket IDs that need to be cached by the current lookup join subtask.
+     *
+     * <p>The Flink Planner will distribute data to lookup join nodes based on buckets. This allows
+     * paimon to cache only the necessary buckets for each subtask, improving efficiency.
+     *
+     * @return the set of bucket IDs to be cached
+     */
+    private Set<Integer> getRequireCachedBucketIds() {
+        // TODO: Implement the method when Flink support bucket shuffle for lookup join.
+        return null;
     }
 }

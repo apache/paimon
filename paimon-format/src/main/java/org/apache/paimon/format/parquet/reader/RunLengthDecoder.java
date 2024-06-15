@@ -1,12 +1,13 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The ASF licenses this file to You under the Apache License, Version 2.0
- * (the "License"); you may not use this file except in compliance with
- * the License.  You may obtain a copy of the License at
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
  *
- *    http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,7 +21,6 @@ package org.apache.paimon.format.parquet.reader;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.data.columnar.writable.WritableIntVector;
 
-import org.apache.parquet.Preconditions;
 import org.apache.parquet.bytes.ByteBufferInputStream;
 import org.apache.parquet.bytes.BytesUtils;
 import org.apache.parquet.column.values.bitpacking.BytePacker;
@@ -30,6 +30,8 @@ import org.apache.parquet.io.ParquetDecodingException;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Run length decoder for data and dictionary ids. See <a
@@ -107,8 +109,7 @@ final class RunLengthDecoder {
 
     /** Initializes the internal state for decoding ints of `bitWidth`. */
     private void initWidthAndPacker(int bitWidth) {
-        Preconditions.checkArgument(
-                bitWidth >= 0 && bitWidth <= 32, "bitWidth must be >= 0 and <= 32");
+        checkArgument(bitWidth >= 0 && bitWidth <= 32, "bitWidth must be >= 0 and <= 32");
         this.bitWidth = bitWidth;
         this.bytesWidth = BytesUtils.paddedByteCountFromBits(bitWidth);
         this.packer = Packer.LITTLE_ENDIAN.newBytePacker(bitWidth);

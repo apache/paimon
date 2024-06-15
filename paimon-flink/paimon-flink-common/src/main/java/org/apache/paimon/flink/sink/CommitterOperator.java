@@ -1,12 +1,13 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The ASF licenses this file to You under the Apache License, Version 2.0
- * (the "License"); you may not use this file except in compliance with
- * the License.  You may obtain a copy of the License at
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
  *
- *    http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,6 +17,8 @@
  */
 
 package org.apache.paimon.flink.sink;
+
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
@@ -54,6 +57,9 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
      */
     private final boolean streamingCheckpointEnabled;
 
+    /** Whether to check the parallelism while runtime. */
+    private final boolean forceSingleParallelism;
+
     /**
      * This commitUser is valid only for new jobs. After the job starts, this commitUser will be
      * recorded into the states of write and commit operators. When the job restarts, commitUser
@@ -80,22 +86,50 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
 
     private transient String commitUser;
 
+    private final Long endInputWatermark;
+
     public CommitterOperator(
             boolean streamingCheckpointEnabled,
+            boolean forceSingleParallelism,
+            boolean chaining,
             String initialCommitUser,
             Committer.Factory<CommitT, GlobalCommitT> committerFactory,
             CommittableStateManager<GlobalCommitT> committableStateManager) {
+        this(
+                streamingCheckpointEnabled,
+                forceSingleParallelism,
+                chaining,
+                initialCommitUser,
+                committerFactory,
+                committableStateManager,
+                null);
+    }
+
+    public CommitterOperator(
+            boolean streamingCheckpointEnabled,
+            boolean forceSingleParallelism,
+            boolean chaining,
+            String initialCommitUser,
+            Committer.Factory<CommitT, GlobalCommitT> committerFactory,
+            CommittableStateManager<GlobalCommitT> committableStateManager,
+            Long endInputWatermark) {
         this.streamingCheckpointEnabled = streamingCheckpointEnabled;
+        this.forceSingleParallelism = forceSingleParallelism;
         this.initialCommitUser = initialCommitUser;
         this.committablesPerCheckpoint = new TreeMap<>();
         this.committerFactory = checkNotNull(committerFactory);
         this.committableStateManager = committableStateManager;
-        setChainingStrategy(ChainingStrategy.ALWAYS);
+        this.endInputWatermark = endInputWatermark;
+        setChainingStrategy(chaining ? ChainingStrategy.ALWAYS : ChainingStrategy.NEVER);
     }
 
     @Override
     public void initializeState(StateInitializationContext context) throws Exception {
         super.initializeState(context);
+
+        Preconditions.checkArgument(
+                !forceSingleParallelism || getRuntimeContext().getNumberOfParallelSubtasks() == 1,
+                "Committer Operator parallelism in paimon MUST be one.");
 
         this.currentWatermark = Long.MIN_VALUE;
         this.endInput = false;
@@ -106,7 +140,14 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
                 StateUtils.getSingleValueFromState(
                         context, "commit_user_state", String.class, initialCommitUser);
         // parallelism of commit operator is always 1, so commitUser will never be null
-        committer = committerFactory.create(commitUser, getMetricGroup());
+        committer =
+                committerFactory.create(
+                        Committer.createContext(
+                                commitUser,
+                                getMetricGroup(),
+                                streamingCheckpointEnabled,
+                                context.isRestored(),
+                                context.getOperatorStateStore()));
 
         committableStateManager.initializeState(context, committer);
     }
@@ -138,6 +179,10 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
     @Override
     public void endInput() throws Exception {
         endInput = true;
+        if (endInputWatermark != null) {
+            currentWatermark = endInputWatermark;
+        }
+
         if (streamingCheckpointEnabled) {
             return;
         }

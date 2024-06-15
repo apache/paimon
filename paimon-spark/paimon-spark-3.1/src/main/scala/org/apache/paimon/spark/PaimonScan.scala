@@ -15,6 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark
 
 import org.apache.paimon.predicate.Predicate
@@ -26,7 +27,7 @@ import org.apache.spark.sql.types.StructType
 case class PaimonScan(
     table: Table,
     requiredSchema: StructType,
-    filters: Array[Predicate],
-    reservedFilters: Array[Filter],
+    filters: Seq[Predicate],
+    reservedFilters: Seq[Filter],
     pushDownLimit: Option[Int])
   extends PaimonBaseScan(table, requiredSchema, filters, reservedFilters, pushDownLimit)

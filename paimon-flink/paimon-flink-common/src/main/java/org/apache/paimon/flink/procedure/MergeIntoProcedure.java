@@ -18,10 +18,8 @@
 
 package org.apache.paimon.flink.procedure;
 
-import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.MergeIntoAction;
-import org.apache.paimon.flink.action.MergeIntoActionFactory;
 
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -181,8 +179,8 @@ public class MergeIntoProcedure extends ProcedureBase {
             String notMatchedInsertCondition,
             String notMatchedInsertValues,
             String matchedDeleteCondition) {
-        String warehouse = ((AbstractCatalog) catalog).warehouse();
-        Map<String, String> catalogOptions = ((AbstractCatalog) catalog).options();
+        String warehouse = catalog.warehouse();
+        Map<String, String> catalogOptions = catalog.options();
         Identifier identifier = Identifier.fromString(targetTableId);
         MergeIntoAction action =
                 new MergeIntoAction(
@@ -222,7 +220,7 @@ public class MergeIntoProcedure extends ProcedureBase {
         }
 
         action.withStreamExecutionEnvironment(procedureContext.getExecutionEnvironment());
-        MergeIntoActionFactory.validate(action);
+        action.validate();
 
         DataStream<RowData> dataStream = action.buildDataStream();
         TableResult tableResult = action.batchSink(dataStream);

@@ -20,12 +20,10 @@ package org.apache.paimon.tests;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.DisabledIfSystemProperty;
 
 import java.util.UUID;
 
 /** Tests for reading and writing log store in stream jobs. */
-@DisabledIfSystemProperty(named = "test.flink.version", matches = "1.14.*")
 public class LogStoreE2eTest extends E2eTestBase {
 
     private String topicName;
@@ -73,10 +71,8 @@ public class LogStoreE2eTest extends E2eTestBase {
                         bucketNum, topicName);
 
         // prepare data only in file store
-        runSql(
-                "SET 'execution.runtime-mode' = 'batch';\n"
-                        + "SET 'table.dml-sync' = 'true';\n"
-                        + "INSERT INTO ts_table VALUES ('A', 1), ('B', 2), ('C', 3)",
+        runBatchSql(
+                "INSERT INTO ts_table VALUES ('A', 1), ('B', 2), ('C', 3)",
                 catalogDdl,
                 useCatalogCmd,
                 streamTableDdl);
@@ -102,7 +98,7 @@ public class LogStoreE2eTest extends E2eTestBase {
                         testTopicName);
 
         // insert data into paimon
-        runSql(
+        runStreamingSql(
                 // long checkpoint interval ensures that new data are only visible from log store
                 "SET 'execution.checkpointing.interval' = '9999s';\n"
                         + "INSERT INTO ts_table SELECT * FROM test_source;",
@@ -112,7 +108,7 @@ public class LogStoreE2eTest extends E2eTestBase {
                 testDataSourceDdl);
 
         // read all data from paimon
-        runSql(
+        runStreamingSql(
                 "INSERT INTO result1 SELECT * FROM ts_table;",
                 catalogDdl,
                 useCatalogCmd,
@@ -127,9 +123,5 @@ public class LogStoreE2eTest extends E2eTestBase {
 
         // check that we can receive data from log store quickly
         checkResult(s -> s.split(",")[0], "A, 100", "B, 2", "C, 30", "D, 400");
-    }
-
-    private void runSql(String sql, String... ddls) throws Exception {
-        runSql(String.join("\n", ddls) + "\n" + sql);
     }
 }

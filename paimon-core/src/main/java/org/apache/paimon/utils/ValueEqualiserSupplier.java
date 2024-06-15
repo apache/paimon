@@ -18,27 +18,28 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.paimon.codegen.CodeGenUtils;
-import org.apache.paimon.codegen.GeneratedClass;
 import org.apache.paimon.codegen.RecordEqualiser;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 
+import java.util.List;
 import java.util.function.Supplier;
+
+import static org.apache.paimon.codegen.CodeGenUtils.newRecordEqualiser;
 
 /** A {@link Supplier} that returns the equaliser for the file store value. */
 public class ValueEqualiserSupplier implements SerializableSupplier<RecordEqualiser> {
 
     private static final long serialVersionUID = 1L;
 
-    private final GeneratedClass<RecordEqualiser> genRecordEqualiser;
+    private final List<DataType> fieldTypes;
 
     public ValueEqualiserSupplier(RowType keyType) {
-        genRecordEqualiser =
-                CodeGenUtils.generateRecordEqualiser(keyType.getFieldTypes(), "valueEqualiser");
+        this.fieldTypes = keyType.getFieldTypes();
     }
 
     @Override
     public RecordEqualiser get() {
-        return genRecordEqualiser.newInstance(ValueEqualiserSupplier.class.getClassLoader());
+        return newRecordEqualiser(fieldTypes);
     }
 }

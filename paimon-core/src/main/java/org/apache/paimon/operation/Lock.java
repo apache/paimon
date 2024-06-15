@@ -20,6 +20,8 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.catalog.CatalogLock;
+import org.apache.paimon.catalog.CatalogLockContext;
+import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
 
 import javax.annotation.Nullable;
@@ -43,10 +45,13 @@ public interface Lock extends AutoCloseable {
         Lock create();
     }
 
-    static Factory factory(@Nullable CatalogLock.Factory lockFactory, Identifier tablePath) {
+    static Factory factory(
+            @Nullable CatalogLockFactory lockFactory,
+            @Nullable CatalogLockContext lockContext,
+            Identifier tablePath) {
         return lockFactory == null
                 ? new EmptyFactory()
-                : new CatalogLockFactory(lockFactory, tablePath);
+                : new LockFactory(lockFactory, lockContext, tablePath);
     }
 
     static Factory emptyFactory() {
@@ -54,21 +59,26 @@ public interface Lock extends AutoCloseable {
     }
 
     /** A {@link Factory} creating lock from catalog. */
-    class CatalogLockFactory implements Factory {
+    class LockFactory implements Factory {
 
         private static final long serialVersionUID = 1L;
 
-        private final CatalogLock.Factory lockFactory;
+        private final CatalogLockFactory lockFactory;
+        private final CatalogLockContext lockContext;
         private final Identifier tablePath;
 
-        public CatalogLockFactory(CatalogLock.Factory lockFactory, Identifier tablePath) {
+        public LockFactory(
+                CatalogLockFactory lockFactory,
+                CatalogLockContext lockContext,
+                Identifier tablePath) {
             this.lockFactory = lockFactory;
+            this.lockContext = lockContext;
             this.tablePath = tablePath;
         }
 
         @Override
         public Lock create() {
-            return fromCatalog(lockFactory.create(), tablePath);
+            return fromCatalog(lockFactory.createLock(lockContext), tablePath);
         }
     }
 

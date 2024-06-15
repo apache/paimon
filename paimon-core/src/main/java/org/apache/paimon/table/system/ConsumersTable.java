@@ -32,6 +32,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadOnceTableScan;
+import org.apache.paimon.table.source.SingletonSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.BigIntType;
@@ -114,27 +115,19 @@ public class ConsumersTable implements ReadonlyTable {
 
         @Override
         public Plan innerPlan() {
-            return () ->
-                    Collections.singletonList(new ConsumersTable.ConsumersSplit(fileIO, location));
+            return () -> Collections.singletonList(new ConsumersTable.ConsumersSplit(location));
         }
     }
 
     /** {@link Split} implementation for {@link ConsumersTable}. */
-    private static class ConsumersSplit implements Split {
+    private static class ConsumersSplit extends SingletonSplit {
 
         private static final long serialVersionUID = 1L;
 
-        private final FileIO fileIO;
         private final Path location;
 
-        private ConsumersSplit(FileIO fileIO, Path location) {
-            this.fileIO = fileIO;
+        private ConsumersSplit(Path location) {
             this.location = location;
-        }
-
-        @Override
-        public long rowCount() {
-            return new ConsumerManager(fileIO, location).listAllIds().size();
         }
 
         @Override

@@ -61,7 +61,7 @@ public class PaimonRecordReaderTest {
     public void testPk() throws Exception {
         Options conf = new Options();
         conf.set(CatalogOptions.WAREHOUSE, tempDir.toString());
-        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
         conf.set("bucket", "1");
         Table table =
                 FileStoreTestUtils.createFileStoreTable(
@@ -104,7 +104,7 @@ public class PaimonRecordReaderTest {
     public void testProjectionPushdown() throws Exception {
         Options conf = new Options();
         conf.set(CatalogOptions.WAREHOUSE, tempDir.toString());
-        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
         Table table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
@@ -155,7 +155,7 @@ public class PaimonRecordReaderTest {
                 List<String> originalColumns = ((FileStoreTable) table).schema().fieldNames();
                 return new PaimonRecordReader(
                         table.newReadBuilder(),
-                        new PaimonInputSplit(tempDir.toString(), dataSplit),
+                        new PaimonInputSplit(tempDir.toString(), dataSplit, (FileStoreTable) table),
                         originalColumns,
                         originalColumns,
                         selectedColumns,

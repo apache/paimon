@@ -19,17 +19,19 @@
 package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
+import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
+import org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils;
 import org.apache.paimon.flink.action.cdc.mysql.format.DebeziumEvent;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
-import org.apache.paimon.utils.DateTimeUtils;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Preconditions;
-import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.DeserializationFeature;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
@@ -37,31 +39,17 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMap
 
 import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
 import io.debezium.connector.AbstractSourceInfo;
-import io.debezium.data.Bits;
-import io.debezium.data.geometry.Geometry;
-import io.debezium.data.geometry.Point;
 import io.debezium.relational.Column;
 import io.debezium.relational.Table;
 import io.debezium.relational.history.TableChanges;
-import io.debezium.time.Date;
-import io.debezium.time.MicroTime;
-import io.debezium.time.MicroTimestamp;
-import io.debezium.time.Timestamp;
-import io.debezium.time.ZonedTimestamp;
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.util.Collector;
-import org.apache.kafka.connect.json.JsonConverterConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.math.BigDecimal;
-import java.time.Instant;
-import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -78,15 +66,13 @@ import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.listCaseCo
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.recordKeyDuplicateErrMsg;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
-import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
-import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.decimalLogicalName;
 import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
 
 /**
  * A parser for MySql Debezium JSON strings, converting them into a list of {@link
  * RichCdcMultiplexRecord}s.
  */
-public class MySqlRecordParser implements FlatMapFunction<String, RichCdcMultiplexRecord> {
+public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichCdcMultiplexRecord> {
 
     private static final Logger LOG = LoggerFactory.getLogger(MySqlRecordParser.class);
 
@@ -126,8 +112,9 @@ public class MySqlRecordParser implements FlatMapFunction<String, RichCdcMultipl
     }
 
     @Override
-    public void flatMap(String rawEvent, Collector<RichCdcMultiplexRecord> out) throws Exception {
-        root = objectMapper.readValue(rawEvent, DebeziumEvent.class);
+    public void flatMap(CdcSourceRecord rawEvent, Collector<RichCdcMultiplexRecord> out)
+            throws Exception {
+        root = objectMapper.readValue((String) rawEvent.getValue(), DebeziumEvent.class);
         currentTable = root.payload().source().get(AbstractSourceInfo.TABLE_NAME_KEY).asText();
         databaseName = root.payload().source().get(AbstractSourceInfo.DATABASE_NAME_KEY).asText();
 
@@ -174,22 +161,18 @@ public class MySqlRecordParser implements FlatMapFunction<String, RichCdcMultipl
 
         Table table = tableChange.getTable();
 
-        LinkedHashMap<String, DataType> fieldTypes = extractFieldTypes(table);
+        List<DataField> fields = extractFields(table);
         List<String> primaryKeys = listCaseConvert(table.primaryKeyColumnNames(), caseSensitive);
 
         // TODO : add table comment and column comment when we upgrade flink cdc to 2.4
         return Collections.singletonList(
                 new RichCdcMultiplexRecord(
-                        databaseName,
-                        currentTable,
-                        fieldTypes,
-                        primaryKeys,
-                        CdcRecord.emptyRecord()));
+                        databaseName, currentTable, fields, primaryKeys, CdcRecord.emptyRecord()));
     }
 
-    private LinkedHashMap<String, DataType> extractFieldTypes(Table table) {
+    private List<DataField> extractFields(Table table) {
+        RowType.Builder rowType = RowType.builder();
         List<Column> columns = table.columns();
-        LinkedHashMap<String, DataType> fieldTypes = new LinkedHashMap<>(columns.size());
         Set<String> existedFields = new HashSet<>();
         Function<String, String> columnDuplicateErrMsg =
                 columnDuplicateErrMsg(table.id().toString());
@@ -207,9 +190,9 @@ public class MySqlRecordParser implements FlatMapFunction<String, RichCdcMultipl
                             typeMapping);
             dataType = dataType.copy(typeMapping.containsMode(TO_NULLABLE) || column.isOptional());
 
-            fieldTypes.put(columnName, dataType);
+            rowType.field(columnName, dataType);
         }
-        return fieldTypes;
+        return rowType.build().getFields();
     }
 
     private List<RichCdcMultiplexRecord> extractRecords() {
@@ -258,105 +241,14 @@ public class MySqlRecordParser implements FlatMapFunction<String, RichCdcMultipl
 
             String className = field.getValue().name();
             String oldValue = objectValue.asText();
-            String newValue = oldValue;
-
-            if (Bits.LOGICAL_NAME.equals(className)) {
-                // transform little-endian form to normal order
-                // https://debezium.io/documentation/reference/stable/connectors/mysql.html#mysql-data-types
-                byte[] littleEndian = Base64.getDecoder().decode(oldValue);
-                byte[] bigEndian = new byte[littleEndian.length];
-                for (int i = 0; i < littleEndian.length; i++) {
-                    bigEndian[i] = littleEndian[littleEndian.length - 1 - i];
-                }
-                if (typeMapping.containsMode(TO_STRING)) {
-                    newValue = StringUtils.bytesToBinaryString(bigEndian);
-                } else {
-                    newValue = Base64.getEncoder().encodeToString(bigEndian);
-                }
-            } else if (("bytes".equals(mySqlType) && className == null)) {
-                // MySQL binary, varbinary, blob
-                newValue = new String(Base64.getDecoder().decode(oldValue));
-            } else if ("bytes".equals(mySqlType) && decimalLogicalName().equals(className)) {
-                // MySQL numeric, fixed, decimal
-                try {
-                    new BigDecimal(oldValue);
-                } catch (NumberFormatException e) {
-                    throw new IllegalArgumentException(
-                            "Invalid big decimal value "
-                                    + oldValue
-                                    + ". Make sure that in the `customConverterConfigs` "
-                                    + "of the JsonDebeziumDeserializationSchema you created, set '"
-                                    + JsonConverterConfig.DECIMAL_FORMAT_CONFIG
-                                    + "' to 'numeric'",
-                            e);
-                }
-            }
-            // pay attention to the temporal types
-            // https://debezium.io/documentation/reference/stable/connectors/mysql.html#mysql-temporal-types
-            else if (Date.SCHEMA_NAME.equals(className)) {
-                // MySQL date
-                newValue = DateTimeUtils.toLocalDate(Integer.parseInt(oldValue)).toString();
-            } else if (Timestamp.SCHEMA_NAME.equals(className)) {
-                // MySQL datetime (precision 0-3)
-
-                // display value of datetime is not affected by timezone, see
-                // https://dev.mysql.com/doc/refman/8.0/en/datetime.html for standard, and
-                // RowDataDebeziumDeserializeSchema#convertToTimestamp in flink-cdc-connector
-                // for implementation
-                LocalDateTime localDateTime =
-                        DateTimeUtils.toLocalDateTime(Long.parseLong(oldValue), ZoneOffset.UTC);
-                newValue = DateTimeUtils.formatLocalDateTime(localDateTime, 3);
-            } else if (MicroTimestamp.SCHEMA_NAME.equals(className)) {
-                // MySQL datetime (precision 4-6)
-                long microseconds = Long.parseLong(oldValue);
-                long microsecondsPerSecond = 1_000_000;
-                long nanosecondsPerMicros = 1_000;
-                long seconds = microseconds / microsecondsPerSecond;
-                long nanoAdjustment = (microseconds % microsecondsPerSecond) * nanosecondsPerMicros;
-
-                // display value of datetime is not affected by timezone, see
-                // https://dev.mysql.com/doc/refman/8.0/en/datetime.html for standard, and
-                // RowDataDebeziumDeserializeSchema#convertToTimestamp in flink-cdc-connector
-                // for implementation
-                LocalDateTime localDateTime =
-                        Instant.ofEpochSecond(seconds, nanoAdjustment)
-                                .atZone(ZoneOffset.UTC)
-                                .toLocalDateTime();
-                newValue = DateTimeUtils.formatLocalDateTime(localDateTime, 6);
-            } else if (ZonedTimestamp.SCHEMA_NAME.equals(className)) {
-                // MySQL timestamp
-
-                // display value of timestamp is affected by timezone, see
-                // https://dev.mysql.com/doc/refman/8.0/en/datetime.html for standard, and
-                // RowDataDebeziumDeserializeSchema#convertToTimestamp in flink-cdc-connector
-                // for implementation
-                LocalDateTime localDateTime =
-                        Instant.parse(oldValue).atZone(serverTimeZone).toLocalDateTime();
-                newValue = DateTimeUtils.formatLocalDateTime(localDateTime, 6);
-            } else if (MicroTime.SCHEMA_NAME.equals(className)) {
-                long microseconds = Long.parseLong(oldValue);
-                long microsecondsPerSecond = 1_000_000;
-                long nanosecondsPerMicros = 1_000;
-                long seconds = microseconds / microsecondsPerSecond;
-                long nanoAdjustment = (microseconds % microsecondsPerSecond) * nanosecondsPerMicros;
-
-                newValue =
-                        Instant.ofEpochSecond(seconds, nanoAdjustment)
-                                .atZone(ZoneOffset.UTC)
-                                .toLocalTime()
-                                .toString();
-            } else if (Point.LOGICAL_NAME.equals(className)
-                    || Geometry.LOGICAL_NAME.equals(className)) {
-                try {
-                    byte[] wkb = objectValue.get(Geometry.WKB_FIELD).binaryValue();
-                    newValue = MySqlTypeUtils.convertWkbArray(wkb);
-                } catch (Exception e) {
-                    throw new IllegalArgumentException(
-                            String.format("Failed to convert %s to geometry JSON.", objectValue),
-                            e);
-                }
-            }
-
+            String newValue =
+                    DebeziumSchemaUtils.transformRawValue(
+                            oldValue,
+                            mySqlType,
+                            className,
+                            typeMapping,
+                            objectValue,
+                            serverTimeZone);
             resultMap.put(fieldName, newValue);
         }
 
@@ -380,7 +272,7 @@ public class MySqlRecordParser implements FlatMapFunction<String, RichCdcMultipl
         return new RichCdcMultiplexRecord(
                 databaseName,
                 currentTable,
-                new LinkedHashMap<>(0),
+                Collections.emptyList(),
                 Collections.emptyList(),
                 new CdcRecord(rowKind, data));
     }

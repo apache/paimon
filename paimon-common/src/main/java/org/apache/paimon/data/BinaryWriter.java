@@ -1,12 +1,13 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.	See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The ASF licenses this file to You under the Apache License, Version 2.0
- * (the "License"); you may not use this file except in compliance with
- * the License.	You may obtain a copy of the License at
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
  *
- *		http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -149,6 +150,10 @@ public interface BinaryWriter {
      * @param elementType the element type
      */
     static ValueSetter createValueSetter(DataType elementType) {
+        return createValueSetter(elementType, null);
+    }
+
+    static ValueSetter createValueSetter(DataType elementType, Serializer<?> serializer) {
         // ordered by type root definition
         switch (elementType.getTypeRoot()) {
             case CHAR:
@@ -183,8 +188,8 @@ public interface BinaryWriter {
                 return (writer, pos, value) ->
                         writer.writeTimestamp(pos, (Timestamp) value, timestampPrecision);
             case ARRAY:
-                final Serializer<InternalArray> arraySerializer =
-                        InternalSerializers.create(elementType);
+                final Serializer<?> arraySerializer =
+                        serializer == null ? InternalSerializers.create(elementType) : serializer;
                 return (writer, pos, value) ->
                         writer.writeArray(
                                 pos,
@@ -192,14 +197,14 @@ public interface BinaryWriter {
                                 (InternalArraySerializer) arraySerializer);
             case MULTISET:
             case MAP:
-                final Serializer<InternalMap> mapSerializer =
-                        InternalSerializers.create(elementType);
+                final Serializer<?> mapSerializer =
+                        serializer == null ? InternalSerializers.create(elementType) : serializer;
                 return (writer, pos, value) ->
                         writer.writeMap(
                                 pos, (InternalMap) value, (InternalMapSerializer) mapSerializer);
             case ROW:
-                final Serializer<InternalRow> rowSerializer =
-                        InternalSerializers.create(elementType);
+                final Serializer<?> rowSerializer =
+                        serializer == null ? InternalSerializers.create(elementType) : serializer;
                 return (writer, pos, value) ->
                         writer.writeRow(
                                 pos, (InternalRow) value, (InternalRowSerializer) rowSerializer);

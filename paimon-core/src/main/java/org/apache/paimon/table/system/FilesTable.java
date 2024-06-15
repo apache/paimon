@@ -20,22 +20,22 @@ package org.apache.paimon.table.system;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.LazyGenericRow;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.LeafPredicateExtractor;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.stats.BinaryTableStats;
-import org.apache.paimon.stats.FieldStatsArraySerializer;
-import org.apache.paimon.stats.FieldStatsConverters;
+import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.stats.SimpleStatsConverter;
+import org.apache.paimon.stats.SimpleStatsConverters;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
@@ -43,14 +43,17 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadOnceTableScan;
+import org.apache.paimon.table.source.SingletonSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.InternalRowUtils;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
@@ -60,7 +63,6 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -132,12 +134,13 @@ public class FilesTable implements ReadonlyTable {
 
     @Override
     public InnerTableScan newScan() {
-        return new FilesScan(storeTable);
+        return new FilesScan();
     }
 
     @Override
     public InnerTableRead newRead() {
-        return new FilesRead(new SchemaManager(storeTable.fileIO(), storeTable.location()));
+        return new FilesRead(
+                new SchemaManager(storeTable.fileIO(), storeTable.location()), storeTable);
     }
 
     @Override
@@ -147,37 +150,21 @@ public class FilesTable implements ReadonlyTable {
 
     private static class FilesScan extends ReadOnceTableScan {
 
-        private final FileStoreTable storeTable;
-
         @Nullable private LeafPredicate partitionPredicate;
         @Nullable private LeafPredicate bucketPredicate;
         @Nullable private LeafPredicate levelPredicate;
 
-        private FilesScan(FileStoreTable storeTable) {
-            this.storeTable = storeTable;
-        }
-
         @Override
         public InnerTableScan withFilter(Predicate pushdown) {
-            List<Predicate> predicates = PredicateBuilder.splitAnd(pushdown);
-            for (Predicate predicate : predicates) {
-                if (predicate instanceof LeafPredicate) {
-                    LeafPredicate leaf = (LeafPredicate) predicate;
-                    switch (leaf.fieldName()) {
-                        case "partition":
-                            this.partitionPredicate = leaf;
-                            break;
-                        case "bucket":
-                            this.bucketPredicate = leaf;
-                            break;
-                        case "level":
-                            this.levelPredicate = leaf;
-                            break;
-                        default:
-                            break;
-                    }
-                }
+            if (pushdown == null) {
+                return this;
             }
+
+            Map<String, LeafPredicate> leafPredicates =
+                    pushdown.visit(LeafPredicateExtractor.INSTANCE);
+            this.partitionPredicate = leafPredicates.get("partition");
+            this.bucketPredicate = leafPredicates.get("bucket");
+            this.levelPredicate = leafPredicates.get("level");
             return this;
         }
 
@@ -185,45 +172,49 @@ public class FilesTable implements ReadonlyTable {
         public Plan innerPlan() {
             return () ->
                     Collections.singletonList(
-                            new FilesSplit(
-                                    storeTable,
-                                    partitionPredicate,
-                                    bucketPredicate,
-                                    levelPredicate));
+                            new FilesSplit(partitionPredicate, bucketPredicate, levelPredicate));
         }
     }
 
-    private static class FilesSplit implements Split {
-
-        private static final long serialVersionUID = 1L;
-
-        private final FileStoreTable storeTable;
+    private static class FilesSplit extends SingletonSplit {
 
         @Nullable private final LeafPredicate partitionPredicate;
         @Nullable private final LeafPredicate bucketPredicate;
         @Nullable private final LeafPredicate levelPredicate;
 
         private FilesSplit(
-                FileStoreTable storeTable,
                 @Nullable LeafPredicate partitionPredicate,
                 @Nullable LeafPredicate bucketPredicate,
                 @Nullable LeafPredicate levelPredicate) {
-            this.storeTable = storeTable;
             this.partitionPredicate = partitionPredicate;
             this.bucketPredicate = bucketPredicate;
             this.levelPredicate = levelPredicate;
         }
 
         @Override
-        public long rowCount() {
-            TableScan.Plan plan = plan();
-            return plan.splits().stream()
-                    .map(s -> (DataSplit) s)
-                    .mapToLong(s -> s.dataFiles().size())
-                    .sum();
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            FilesSplit that = (FilesSplit) o;
+            return Objects.equals(partitionPredicate, that.partitionPredicate)
+                    && Objects.equals(bucketPredicate, that.bucketPredicate)
+                    && Objects.equals(this.levelPredicate, that.levelPredicate);
         }
 
-        private TableScan.Plan plan() {
+        @Override
+        public int hashCode() {
+            return Objects.hash(partitionPredicate, bucketPredicate, levelPredicate);
+        }
+
+        public List<Split> splits(FileStoreTable storeTable) {
+            return tablePlan(storeTable).splits();
+        }
+
+        private TableScan.Plan tablePlan(FileStoreTable storeTable) {
             InnerTableScan scan = storeTable.newScan();
             if (partitionPredicate != null) {
                 if (partitionPredicate.function() instanceof Equal) {
@@ -261,33 +252,19 @@ public class FilesTable implements ReadonlyTable {
             }
             return scan.plan();
         }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            FilesSplit that = (FilesSplit) o;
-            return Objects.equals(storeTable, that.storeTable);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(storeTable);
-        }
     }
 
     private static class FilesRead implements InnerTableRead {
 
         private final SchemaManager schemaManager;
 
+        private final FileStoreTable storeTable;
+
         private int[][] projection;
 
-        private FilesRead(SchemaManager schemaManager) {
+        private FilesRead(SchemaManager schemaManager, FileStoreTable fileStoreTable) {
             this.schemaManager = schemaManager;
+            this.storeTable = fileStoreTable;
         }
 
         @Override
@@ -308,26 +285,25 @@ public class FilesTable implements ReadonlyTable {
         }
 
         @Override
-        public RecordReader<InternalRow> createReader(Split split) throws IOException {
+        public RecordReader<InternalRow> createReader(Split split) {
             if (!(split instanceof FilesSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
             FilesSplit filesSplit = (FilesSplit) split;
-            FileStoreTable table = filesSplit.storeTable;
-            TableScan.Plan plan = filesSplit.plan();
-            if (plan.splits().isEmpty()) {
+            List<Split> splits = filesSplit.splits(storeTable);
+            if (splits.isEmpty()) {
                 return new IteratorRecordReader<>(Collections.emptyIterator());
             }
 
             List<Iterator<InternalRow>> iteratorList = new ArrayList<>();
             // dataFilePlan.snapshotId indicates there's no files in the table, use the newest
             // schema id directly
-            FieldStatsConverters fieldStatsConverters =
-                    new FieldStatsConverters(
-                            sid -> schemaManager.schema(sid).fields(), table.schema().id());
+            SimpleStatsConverters simpleStatsConverters =
+                    new SimpleStatsConverters(
+                            sid -> schemaManager.schema(sid).fields(), storeTable.schema().id());
 
             RowDataToObjectArrayConverter partitionConverter =
-                    new RowDataToObjectArrayConverter(table.schema().logicalPartitionType());
+                    new RowDataToObjectArrayConverter(storeTable.schema().logicalPartitionType());
 
             Function<Long, RowDataToObjectArrayConverter> keyConverters =
                     new Function<Long, RowDataToObjectArrayConverter>() {
@@ -350,7 +326,7 @@ public class FilesTable implements ReadonlyTable {
                                     });
                         }
                     };
-            for (Split dataSplit : plan.splits()) {
+            for (Split dataSplit : splits) {
                 iteratorList.add(
                         Iterators.transform(
                                 ((DataSplit) dataSplit).dataFiles().iterator(),
@@ -360,8 +336,8 @@ public class FilesTable implements ReadonlyTable {
                                                 partitionConverter,
                                                 keyConverters,
                                                 file,
-                                                table.getSchemaFieldStats(file),
-                                                fieldStatsConverters)));
+                                                storeTable.getSchemaFieldStats(file),
+                                                simpleStatsConverters)));
             }
             Iterator<InternalRow> rows = Iterators.concat(iteratorList.iterator());
             if (projection != null) {
@@ -377,10 +353,10 @@ public class FilesTable implements ReadonlyTable {
                 RowDataToObjectArrayConverter partitionConverter,
                 Function<Long, RowDataToObjectArrayConverter> keyConverters,
                 DataFileMeta dataFileMeta,
-                BinaryTableStats tableStats,
-                FieldStatsConverters fieldStatsConverters) {
+                SimpleStats stats,
+                SimpleStatsConverters simpleStatsConverters) {
             StatsLazyGetter statsGetter =
-                    new StatsLazyGetter(tableStats, dataFileMeta, fieldStatsConverters);
+                    new StatsLazyGetter(stats, dataFileMeta, simpleStatsConverters);
             @SuppressWarnings("unchecked")
             Supplier<Object>[] fields =
                     new Supplier[] {
@@ -431,38 +407,38 @@ public class FilesTable implements ReadonlyTable {
 
     private static class StatsLazyGetter {
 
-        private final BinaryTableStats tableStats;
+        private final SimpleStats stats;
         private final DataFileMeta file;
-        private final FieldStatsConverters fieldStatsConverters;
+        private final SimpleStatsConverters simpleStatsConverters;
 
         private Map<String, Long> lazyNullValueCounts;
         private Map<String, Object> lazyLowerValueBounds;
         private Map<String, Object> lazyUpperValueBounds;
 
         private StatsLazyGetter(
-                BinaryTableStats tableStats,
-                DataFileMeta file,
-                FieldStatsConverters fieldStatsConverters) {
-            this.tableStats = tableStats;
+                SimpleStats stats, DataFileMeta file, SimpleStatsConverters simpleStatsConverters) {
+            this.stats = stats;
             this.file = file;
-            this.fieldStatsConverters = fieldStatsConverters;
+            this.simpleStatsConverters = simpleStatsConverters;
         }
 
         private void initialize() {
-            FieldStatsArraySerializer fieldStatsArraySerializer =
-                    fieldStatsConverters.getOrCreate(file.schemaId());
+            SimpleStatsConverter serializer = simpleStatsConverters.getOrCreate(file.schemaId());
             // Create value stats
-            FieldStats[] fieldStatsArray =
-                    fieldStatsArraySerializer.fromBinary(tableStats, file.rowCount());
+            InternalRow min = serializer.evolution(stats.minValues());
+            InternalRow max = serializer.evolution(stats.maxValues());
+            InternalArray nullCounts = serializer.evolution(stats.nullCounts(), file.rowCount());
             lazyNullValueCounts = new TreeMap<>();
             lazyLowerValueBounds = new TreeMap<>();
             lazyUpperValueBounds = new TreeMap<>();
-            for (int i = 0; i < fieldStatsArray.length; i++) {
-                String fieldName = fieldStatsConverters.tableDataFields().get(i).name();
-                FieldStats fieldStats = fieldStatsArray[i];
-                lazyNullValueCounts.put(fieldName, fieldStats.nullCount());
-                lazyLowerValueBounds.put(fieldName, fieldStats.minValue());
-                lazyUpperValueBounds.put(fieldName, fieldStats.maxValue());
+            for (int i = 0; i < min.getFieldCount(); i++) {
+                DataField field = simpleStatsConverters.tableDataFields().get(i);
+                String name = field.name();
+                DataType type = field.type();
+                lazyNullValueCounts.put(
+                        name, nullCounts.isNullAt(i) ? null : nullCounts.getLong(i));
+                lazyLowerValueBounds.put(name, InternalRowUtils.get(min, i, type));
+                lazyUpperValueBounds.put(name, InternalRowUtils.get(max, i, type));
             }
         }
 

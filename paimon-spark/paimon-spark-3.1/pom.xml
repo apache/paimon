@@ -25,7 +25,7 @@ under the License.
     <parent>
         <groupId>org.apache.paimon</groupId>
         <artifactId>paimon-spark</artifactId>
-        <version>0.8-SNAPSHOT</version>
+        <version>0.9-SNAPSHOT</version>
     </parent>
 
     <artifactId>paimon-spark-3.1</artifactId>
@@ -210,24 +210,6 @@ under the License.
                         </goals>
                     </execution>
                 </executions>
-            </plugin>
-            <plugin>
-                <groupId>com.diffplug.spotless</groupId>
-                <artifactId>spotless-maven-plugin</artifactId>
-                <version>${spotless.version}</version>
-                <configuration>
-                    <scala>
-                        <scalafmt>
-                            <version>3.4.3</version>
-                            <!-- This file is in the root of the project to make sure IntelliJ picks it up automatically -->
-                            <file>${project.basedir}/../../.scalafmt.conf</file>
-                        </scalafmt>
-                        <licenseHeader>
-                            <content>${spotless.license.header}</content>
-                            <delimiter>${spotless.delimiter}</delimiter>
-                        </licenseHeader>
-                    </scala>
-                </configuration>
             </plugin>
         </plugins>
     </build>

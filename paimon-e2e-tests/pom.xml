@@ -25,7 +25,7 @@ under the License.
     <parent>
         <artifactId>paimon-parent</artifactId>
         <groupId>org.apache.paimon</groupId>
-        <version>0.8-SNAPSHOT</version>
+        <version>0.9-SNAPSHOT</version>
     </parent>
 
     <artifactId>paimon-e2e-tests</artifactId>
@@ -33,8 +33,7 @@ under the License.
 
     <properties>
         <flink.shaded.hadoop.version>2.8.3-10.0</flink.shaded.hadoop.version>
-        <flink.cdc.version>2.3.0</flink.cdc.version>
-        <flink.sql.connector.kafka>flink-sql-connector-kafka</flink.sql.connector.kafka>
+        <flink.cdc.version>2.4.2</flink.cdc.version>
         <flink.sql.connector.hive>flink-sql-connector-hive-2.3.9_${scala.binary.version}</flink.sql.connector.hive>
     </properties>
 
@@ -210,7 +209,7 @@ under the License.
                         <!-- test paimon with kafka sql jar -->
                         <artifactItem>
                             <groupId>org.apache.flink</groupId>
-                            <artifactId>${flink.sql.connector.kafka}</artifactId>
+                            <artifactId>flink-sql-connector-kafka</artifactId>
                             <version>${test.flink.connector.kafka.version}</version>
                             <destFileName>flink-sql-connector-kafka.jar</destFileName>
                             <type>jar</type>
@@ -277,6 +276,14 @@ under the License.
     <profiles>
         <!-- Activate these profiles with -Pflink-x.xx to build and test against different Flink versions -->
         <profile>
+            <id>flink-1.18</id>
+            <properties>
+                <test.flink.main.version>1.18</test.flink.main.version>
+                <test.flink.version>1.18.1</test.flink.version>
+            </properties>
+        </profile>
+
+        <profile>
             <id>flink-1.17</id>
             <properties>
                 <test.flink.main.version>1.17</test.flink.main.version>
@@ -300,18 +307,6 @@ under the License.
                 <test.flink.main.version>1.15</test.flink.main.version>
                 <test.flink.version>1.15.3</test.flink.version>
                 <test.flink.connector.kafka.version>${test.flink.version}</test.flink.connector.kafka.version>
-                <flink.sql.connector.kafka>flink-sql-connector-kafka</flink.sql.connector.kafka>
-                <flink.sql.connector.hive>flink-sql-connector-hive-2.3.6_${scala.binary.version}</flink.sql.connector.hive>
-            </properties>
-        </profile>
-
-        <profile>
-            <id>flink-1.14</id>
-            <properties>
-                <test.flink.main.version>1.14</test.flink.main.version>
-                <test.flink.version>1.14.6</test.flink.version>
-                <test.flink.connector.kafka.version>${test.flink.version}</test.flink.connector.kafka.version>
-                <flink.sql.connector.kafka>flink-sql-connector-kafka_${scala.binary.version}</flink.sql.connector.kafka>
                 <flink.sql.connector.hive>flink-sql-connector-hive-2.3.6_${scala.binary.version}</flink.sql.connector.hive>
             </properties>
         </profile>

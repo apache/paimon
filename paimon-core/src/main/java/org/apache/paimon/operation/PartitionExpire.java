@@ -20,10 +20,15 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.partition.PartitionTimeExtractor;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -32,10 +37,11 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 /** Expire partitions. */
 public class PartitionExpire {
+
+    private static final Logger LOG = LoggerFactory.getLogger(PartitionExpire.class);
 
     private final List<String> partitionKeys;
     private final RowDataToObjectArrayConverter toObjectArrayConverter;
@@ -88,20 +94,13 @@ public class PartitionExpire {
     }
 
     private void doExpire(LocalDateTime expireDateTime, long commitIdentifier) {
-        List<BinaryRow> partitions = readPartitions();
         List<Map<String, String>> expired = new ArrayList<>();
-        for (BinaryRow partition : partitions) {
+        for (BinaryRow partition : readPartitions(expireDateTime)) {
             Object[] array = toObjectArrayConverter.convert(partition);
-
-            LocalDateTime partTime = timeExtractor.extract(partitionKeys, Arrays.asList(array));
-            if (partTime == null) {
-                continue;
-            }
-            if (expireDateTime.isAfter(partTime)) {
-                expired.add(toPartitionString(array));
-            }
+            Map<String, String> partString = toPartitionString(array);
+            expired.add(partString);
+            LOG.info("Expire Partition: " + partition);
         }
-
         if (expired.size() > 0) {
             commit.dropPartitions(expired, commitIdentifier);
         }
@@ -115,13 +114,33 @@ public class PartitionExpire {
         return map;
     }
 
-    private List<BinaryRow> readPartitions() {
-        // TODO optimize this to read partition only
-        // NOTE: avro projection push down can't reach expected cause row-oriented design, see pull
-        // request #1114
-        return scan.plan().files().stream()
-                .map(ManifestEntry::partition)
-                .distinct()
-                .collect(Collectors.toList());
+    private List<BinaryRow> readPartitions(LocalDateTime expireDateTime) {
+        return scan.withPartitionFilter(new PartitionTimePredicate(expireDateTime))
+                .listPartitions();
+    }
+
+    private class PartitionTimePredicate implements PartitionPredicate {
+
+        private final LocalDateTime expireDateTime;
+
+        private PartitionTimePredicate(LocalDateTime expireDateTime) {
+            this.expireDateTime = expireDateTime;
+        }
+
+        @Override
+        public boolean test(BinaryRow partition) {
+            Object[] array = toObjectArrayConverter.convert(partition);
+            LocalDateTime partTime = timeExtractor.extract(partitionKeys, Arrays.asList(array));
+            return partTime != null && expireDateTime.isAfter(partTime);
+        }
+
+        @Override
+        public boolean test(
+                long rowCount,
+                InternalRow minValues,
+                InternalRow maxValues,
+                InternalArray nullCounts) {
+            return true;
+        }
     }
 }

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,12 +23,15 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
-import org.apache.paimon.format.TableStatsExtractor;
+import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.format.parquet.writer.RowDataParquetBuilder;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.statistics.FieldStatsCollector;
+import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
+
+import org.apache.parquet.hadoop.ParquetOutputFormat;
 
 import java.util.List;
 import java.util.Optional;
@@ -54,7 +57,7 @@ public class ParquetFileFormat extends FileFormat {
     public FormatReaderFactory createReaderFactory(
             RowType projectedRowType, List<Predicate> filters) {
         return new ParquetReaderFactory(
-                getParquetConfiguration(formatContext.formatOptions()),
+                getParquetConfiguration(formatContext),
                 projectedRowType,
                 formatContext.readBatchSize());
     }
@@ -62,8 +65,7 @@ public class ParquetFileFormat extends FileFormat {
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
         return new ParquetWriterFactory(
-                new RowDataParquetBuilder(
-                        type, getParquetConfiguration(formatContext.formatOptions())));
+                new RowDataParquetBuilder(type, getParquetConfiguration(formatContext)));
     }
 
     @Override
@@ -72,14 +74,28 @@ public class ParquetFileFormat extends FileFormat {
     }
 
     @Override
-    public Optional<TableStatsExtractor> createStatsExtractor(
-            RowType type, FieldStatsCollector.Factory[] statsCollectors) {
-        return Optional.of(new ParquetTableStatsExtractor(type, statsCollectors));
+    public Optional<SimpleStatsExtractor> createStatsExtractor(
+            RowType type, SimpleColStatsCollector.Factory[] statsCollectors) {
+        return Optional.of(new ParquetSimpleStatsExtractor(type, statsCollectors));
     }
 
-    public static Options getParquetConfiguration(Options options) {
-        Options conf = new Options();
-        options.toMap().forEach((key, value) -> conf.setString(IDENTIFIER + "." + key, value));
-        return conf;
+    public static Options getParquetConfiguration(FormatContext context) {
+        Options parquetOptions = new Options();
+        context.formatOptions()
+                .toMap()
+                .forEach((key, value) -> parquetOptions.setString(IDENTIFIER + "." + key, value));
+
+        if (!parquetOptions.containsKey("parquet.compression.codec.zstd.level")) {
+            parquetOptions.set(
+                    "parquet.compression.codec.zstd.level", String.valueOf(context.zstdLevel()));
+        }
+
+        MemorySize blockSize = context.blockSize();
+        if (blockSize != null) {
+            parquetOptions.set(
+                    ParquetOutputFormat.BLOCK_SIZE, String.valueOf(blockSize.getBytes()));
+        }
+
+        return parquetOptions;
     }
 }

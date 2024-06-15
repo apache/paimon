@@ -27,7 +27,6 @@ import org.apache.flink.api.java.tuple.Tuple3;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.COMPUTED_COLUMN;
@@ -37,31 +36,18 @@ import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PRIMARY_KE
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TYPE_MAPPING;
 
 /** Base {@link ActionFactory} for synchronizing into one Paimon table. */
-public abstract class SyncTableActionFactoryBase implements ActionFactory {
+public abstract class SyncTableActionFactoryBase
+        extends SynchronizationActionFactoryBase<SyncTableActionBase> {
 
     protected Tuple3<String, String, String> tablePath;
-    protected Map<String, String> catalogConfig;
-    protected Map<String, String> cdcSourceConfig;
-
-    public abstract String cdcConfigIdentifier();
-
-    public abstract SyncTableActionBase createAction();
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-        checkRequiredArgument(params, cdcConfigIdentifier());
         this.tablePath = getTablePath(params);
-        this.catalogConfig = optionalConfigMap(params, CATALOG_CONF);
-        this.cdcSourceConfig = optionalConfigMap(params, cdcConfigIdentifier());
-
-        SyncTableActionBase action = createAction();
-
-        action.withTableConfig(optionalConfigMap(params, TABLE_CONF));
-        withParams(params, action);
-
-        return Optional.of(action);
+        return super.create(params);
     }
 
+    @Override
     protected void withParams(MultipleParameterToolAdapter params, SyncTableActionBase action) {
         if (params.has(PARTITION_KEYS)) {
             action.withPartitionKeys(params.get(PARTITION_KEYS).split(","));
@@ -82,8 +68,7 @@ public abstract class SyncTableActionFactoryBase implements ActionFactory {
             if (metadataColumns.size() == 1) {
                 action.withMetadataColumns(Arrays.asList(metadataColumns.get(0).split(",")));
             } else {
-                action.withMetadataColumns(
-                        new ArrayList<>(params.getMultiParameter(METADATA_COLUMN)));
+                action.withMetadataColumns(metadataColumns);
             }
         }
 

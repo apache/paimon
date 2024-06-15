@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -39,6 +39,8 @@ public class SparkTypeTest {
                                     1)) // posX and posY have field id 0 and 1, here we start from 2
                     .field("id", DataTypes.INT().notNull())
                     .field("name", DataTypes.STRING()) /* optional by default */
+                    .field("char", DataTypes.CHAR(10))
+                    .field("varchar", DataTypes.VARCHAR(10))
                     .field("salary", DataTypes.DOUBLE().notNull())
                     .field(
                             "locations",
@@ -79,6 +81,8 @@ public class SparkTypeTest {
                 "StructType("
                         + "StructField(id,IntegerType,true),"
                         + "StructField(name,StringType,true),"
+                        + "StructField(char,CharType(10),true),"
+                        + "StructField(varchar,VarcharType(10),true),"
                         + "StructField(salary,DoubleType,true),"
                         + nestedRowMapType
                         + ","

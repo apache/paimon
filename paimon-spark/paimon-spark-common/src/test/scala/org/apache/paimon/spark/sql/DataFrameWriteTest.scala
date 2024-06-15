@@ -15,6 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.spark.PaimonSparkTestBase
@@ -64,15 +65,17 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
             val _spark = spark
             import _spark.implicits._
 
-            val primaryKeysProp = if (hasPk) {
-              "'primary-key'='a',"
+            val prop = if (hasPk) {
+              s"'primary-key'='a', 'bucket' = '$bucket' "
+            } else if (bucket != -1) {
+              s"'bucket-key'='a', 'bucket' = '$bucket' "
             } else {
-              ""
+              "'write-only'='true'"
             }
 
             spark.sql(s"""
                          |CREATE TABLE T (a INT, b STRING)
-                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket')
+                         |TBLPROPERTIES ($prop)
                          |""".stripMargin)
 
             val paimonTable = loadTable("T")
@@ -110,15 +113,17 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
             val _spark = spark
             import _spark.implicits._
 
-            val primaryKeysProp = if (hasPk) {
-              "'primary-key'='a',"
+            val prop = if (hasPk) {
+              s"'primary-key'='a', 'bucket' = '$bucket' "
+            } else if (bucket != -1) {
+              s"'bucket-key'='a', 'bucket' = '$bucket' "
             } else {
-              ""
+              "'write-only'='true'"
             }
 
             spark.sql(s"""
                          |CREATE TABLE T (a INT, b STRING)
-                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket')
+                         |TBLPROPERTIES ($prop)
                          |""".stripMargin)
 
             val paimonTable = loadTable("T")
@@ -199,15 +204,17 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
             val _spark = spark
             import _spark.implicits._
 
-            val primaryKeysProp = if (hasPk) {
-              "'primary-key'='a',"
+            val prop = if (hasPk) {
+              s"'primary-key'='a', 'bucket' = '$bucket' "
+            } else if (bucket != -1) {
+              s"'bucket-key'='a', 'bucket' = '$bucket' "
             } else {
-              ""
+              "'write-only'='true'"
             }
 
             spark.sql(s"""
                          |CREATE TABLE T (a INT, b STRING)
-                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket')
+                         |TBLPROPERTIES ($prop)
                          |""".stripMargin)
 
             val paimonTable = loadTable("T")

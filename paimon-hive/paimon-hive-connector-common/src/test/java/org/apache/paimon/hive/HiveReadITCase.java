@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,16 +18,28 @@
 
 package org.apache.paimon.hive;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.hive.mapred.PaimonInputFormat;
 import org.apache.paimon.hive.mapred.PaimonRecordReader;
+import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.table.sink.StreamTableCommit;
+import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
@@ -45,7 +57,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 public class HiveReadITCase extends HiveTestBase {
 
     @Test
-    public void testReExternalTableWithIgnoreCase() throws Exception {
+    public void testReadExternalTableWithEmptyDataAndIgnoreCase() throws Exception {
         // Create hive external table with paimon table
         String tableName = "with_ignore_case";
 
@@ -72,7 +84,6 @@ public class HiveReadITCase extends HiveTestBase {
                                 "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
                                 "LOCATION '" + tablePath.toUri().toString() + "'"));
         assertThatCode(() -> hiveShell.execute(hiveSql)).doesNotThrowAnyException();
-
         List<String> result = hiveShell.executeQuery("SHOW CREATE TABLE " + tableName);
         assertThat(result)
                 .containsAnyOf(
@@ -91,12 +102,70 @@ public class HiveReadITCase extends HiveTestBase {
         assertThat(result).containsExactly("Hello", "Paimon");
         result = hiveShell.executeQuery("SELECT Col2 FROM " + tableName);
         assertThat(result).containsExactly("Hello", "Paimon");
-
         result = hiveShell.executeQuery("SELECT * FROM " + tableName + " WHERE col2 = 'Hello'");
         assertThat(result).containsExactly("1\tHello");
         result =
                 hiveShell.executeQuery(
                         "SELECT * FROM " + tableName + " WHERE Col2 in ('Hello', 'Paimon')");
         assertThat(result).containsExactly("1\tHello", "2\tPaimon");
+    }
+
+    @Test
+    public void testReadExternalTableWithDataAndIgnoreCase() throws Exception {
+        // Create hive external table with paimon table
+        String tableName = "with_data_and_ignore_case";
+
+        // Create a paimon table
+        Identifier identifier = Identifier.create(DATABASE_TEST, tableName);
+
+        Options conf = new Options();
+        conf.set(CatalogOptions.WAREHOUSE, path);
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
+        RowType.Builder rowType = RowType.builder();
+        rowType.field("col1", DataTypes.INT());
+        rowType.field("Col2", DataTypes.STRING());
+
+        Table table =
+                FileStoreTestUtils.createFileStoreTable(
+                        conf,
+                        rowType.build(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        identifier);
+
+        // insert data into paimon table, make sure has some data file use older schema file.
+        List<InternalRow> data =
+                Arrays.asList(
+                        GenericRow.of(1, BinaryString.fromString("Hello")),
+                        GenericRow.of(2, BinaryString.fromString("Paimon")));
+
+        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
+        for (InternalRow rowData : data) {
+            write.write(rowData);
+        }
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.close();
+        commit.close();
+
+        // add column, do some ddl which will generate a new version schema-n file.
+        Path tablePath = AbstractCatalog.newTableLocation(path, identifier);
+        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
+        schemaManager.commitChanges(SchemaChange.addColumn("N1", DataTypes.STRING()));
+
+        // Create hive external table
+        String hiveSql =
+                String.join(
+                        "\n",
+                        Arrays.asList(
+                                "CREATE EXTERNAL TABLE " + tableName + " ",
+                                "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
+                                "LOCATION '" + tablePath.toUri().toString() + "'"));
+        assertThatCode(() -> hiveShell.execute(hiveSql)).doesNotThrowAnyException();
+
+        List<String> result =
+                hiveShell.executeQuery("SELECT * FROM " + tableName + " WHERE col2 is not null");
+        assertThat(result).containsExactly("1\tHello\tNULL", "2\tPaimon\tNULL");
     }
 }

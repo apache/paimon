@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -36,7 +36,25 @@ import org.apache.spark.sql.catalyst.util.ArrayBasedMapData;
 import org.apache.spark.sql.catalyst.util.ArrayData;
 import org.apache.spark.sql.catalyst.util.DateTimeUtils;
 import org.apache.spark.sql.catalyst.util.MapData;
+import org.apache.spark.sql.types.BinaryType;
+import org.apache.spark.sql.types.BooleanType;
+import org.apache.spark.sql.types.ByteType;
+import org.apache.spark.sql.types.CalendarIntervalType;
+import org.apache.spark.sql.types.CharType;
+import org.apache.spark.sql.types.DateType;
 import org.apache.spark.sql.types.Decimal;
+import org.apache.spark.sql.types.DecimalType;
+import org.apache.spark.sql.types.DoubleType;
+import org.apache.spark.sql.types.FloatType;
+import org.apache.spark.sql.types.IntegerType;
+import org.apache.spark.sql.types.LongType;
+import org.apache.spark.sql.types.NullType;
+import org.apache.spark.sql.types.ShortType;
+import org.apache.spark.sql.types.StringType;
+import org.apache.spark.sql.types.StructType;
+import org.apache.spark.sql.types.TimestampType;
+import org.apache.spark.sql.types.UserDefinedType;
+import org.apache.spark.sql.types.VarcharType;
 import org.apache.spark.unsafe.types.CalendarInterval;
 import org.apache.spark.unsafe.types.UTF8String;
 
@@ -165,7 +183,65 @@ public class SparkInternalRow extends org.apache.spark.sql.catalyst.InternalRow 
 
     @Override
     public Object get(int ordinal, org.apache.spark.sql.types.DataType dataType) {
-        return SpecializedGettersReader.read(this, ordinal, dataType);
+        if (isNullAt(ordinal) || dataType instanceof NullType) {
+            return null;
+        }
+        if (dataType instanceof BooleanType) {
+            return getBoolean(ordinal);
+        }
+        if (dataType instanceof ByteType) {
+            return getByte(ordinal);
+        }
+        if (dataType instanceof ShortType) {
+            return getShort(ordinal);
+        }
+        if (dataType instanceof IntegerType) {
+            return getInt(ordinal);
+        }
+        if (dataType instanceof LongType) {
+            return getLong(ordinal);
+        }
+        if (dataType instanceof FloatType) {
+            return getFloat(ordinal);
+        }
+        if (dataType instanceof DoubleType) {
+            return getDouble(ordinal);
+        }
+        if (dataType instanceof StringType
+                || dataType instanceof CharType
+                || dataType instanceof VarcharType) {
+            return getUTF8String(ordinal);
+        }
+        if (dataType instanceof DecimalType) {
+            DecimalType dt = (DecimalType) dataType;
+            return getDecimal(ordinal, dt.precision(), dt.scale());
+        }
+        if (dataType instanceof DateType) {
+            return getInt(ordinal);
+        }
+        if (dataType instanceof TimestampType) {
+            return getLong(ordinal);
+        }
+        if (dataType instanceof CalendarIntervalType) {
+            return getInterval(ordinal);
+        }
+        if (dataType instanceof BinaryType) {
+            return getBinary(ordinal);
+        }
+        if (dataType instanceof StructType) {
+            return getStruct(ordinal, ((StructType) dataType).size());
+        }
+        if (dataType instanceof org.apache.spark.sql.types.ArrayType) {
+            return getArray(ordinal);
+        }
+        if (dataType instanceof org.apache.spark.sql.types.MapType) {
+            return getMap(ordinal);
+        }
+        if (dataType instanceof UserDefinedType) {
+            return get(ordinal, ((UserDefinedType<?>) dataType).sqlType());
+        }
+
+        throw new UnsupportedOperationException("Unsupported data type " + dataType.simpleString());
     }
 
     public static Object fromPaimon(Object o, DataType type) {

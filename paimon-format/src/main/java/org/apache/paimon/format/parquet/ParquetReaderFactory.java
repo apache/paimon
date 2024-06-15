@@ -28,7 +28,6 @@ import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.parquet.reader.ColumnReader;
 import org.apache.paimon.format.parquet.reader.ParquetDecimalVector;
 import org.apache.paimon.format.parquet.reader.ParquetTimestampVector;
-import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
@@ -87,31 +86,25 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     }
 
     @Override
-    public ParquetReader createReader(FileIO fileIO, Path filePath) throws IOException {
-        final long splitOffset = 0;
-        final long splitLength = fileIO.getFileSize(filePath);
-
+    public ParquetReader createReader(FormatReaderFactory.Context context) throws IOException {
         ParquetReadOptions.Builder builder =
-                ParquetReadOptions.builder().withRange(splitOffset, splitOffset + splitLength);
+                ParquetReadOptions.builder().withRange(0, context.fileSize());
         setReadOptions(builder);
 
         ParquetFileReader reader =
-                new ParquetFileReader(ParquetInputFile.fromPath(fileIO, filePath), builder.build());
+                new ParquetFileReader(
+                        ParquetInputFile.fromPath(context.fileIO(), context.filePath()),
+                        builder.build());
         MessageType fileSchema = reader.getFileMetaData().getSchema();
         MessageType requestedSchema = clipParquetSchema(fileSchema);
         reader.setRequestedSchema(requestedSchema);
 
         checkSchema(fileSchema, requestedSchema);
 
-        Pool<ParquetReaderBatch> poolOfBatches = createPoolOfBatches(requestedSchema);
+        Pool<ParquetReaderBatch> poolOfBatches =
+                createPoolOfBatches(context.filePath(), requestedSchema);
 
         return new ParquetReader(reader, requestedSchema, reader.getRecordCount(), poolOfBatches);
-    }
-
-    @Override
-    public RecordReader<InternalRow> createReader(FileIO fileIO, Path file, int poolSize)
-            throws IOException {
-        throw new UnsupportedOperationException();
     }
 
     private void setReadOptions(ParquetReadOptions.Builder builder) {
@@ -183,21 +176,24 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         }
     }
 
-    private Pool<ParquetReaderBatch> createPoolOfBatches(MessageType requestedSchema) {
+    private Pool<ParquetReaderBatch> createPoolOfBatches(
+            Path filePath, MessageType requestedSchema) {
         // In a VectorizedColumnBatch, the dictionary will be lazied deserialized.
         // If there are multiple batches at the same time, there may be thread safety problems,
         // because the deserialization of the dictionary depends on some internal structures.
         // We need set poolCapacity to 1.
         Pool<ParquetReaderBatch> pool = new Pool<>(1);
-        pool.add(createReaderBatch(requestedSchema, pool.recycler()));
+        pool.add(createReaderBatch(filePath, requestedSchema, pool.recycler()));
         return pool;
     }
 
     private ParquetReaderBatch createReaderBatch(
-            MessageType requestedSchema, Pool.Recycler<ParquetReaderBatch> recycler) {
+            Path filePath,
+            MessageType requestedSchema,
+            Pool.Recycler<ParquetReaderBatch> recycler) {
         WritableColumnVector[] writableVectors = createWritableVectors(requestedSchema);
         VectorizedColumnBatch columnarBatch = createVectorizedColumnBatch(writableVectors);
-        return createReaderBatch(writableVectors, columnarBatch, recycler);
+        return createReaderBatch(filePath, writableVectors, columnarBatch, recycler);
     }
 
     private WritableColumnVector[] createWritableVectors(MessageType requestedSchema) {
@@ -259,6 +255,9 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         /** The number of rows that have been reading, including the current in flight row group. */
         private long totalCountLoadedSoFar;
 
+        /** The current row's position in the file. */
+        private long currentRowPosition;
+
         /**
          * For each request column, the reader to read this column. This is NULL if this column is
          * missing from the file, in which case we populate the attribute with NULL.
@@ -277,6 +276,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             this.pool = pool;
             this.rowsReturned = 0;
             this.totalCountLoadedSoFar = 0;
+            this.currentRowPosition = 0;
         }
 
         @Nullable
@@ -284,12 +284,13 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         public RecordIterator<InternalRow> readBatch() throws IOException {
             final ParquetReaderBatch batch = getCachedEntry();
 
+            long rowNumber = currentRowPosition;
             if (!nextBatch(batch)) {
                 batch.recycle();
                 return null;
             }
 
-            return batch.convertAndGetIterator();
+            return batch.convertAndGetIterator(rowNumber);
         }
 
         /** Advances to the next batch of rows. Returns false if there are no more. */
@@ -315,6 +316,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 }
             }
             rowsReturned += num;
+            currentRowPosition += num;
             batch.columnarBatch.setNumRows(num);
             return true;
         }
@@ -364,10 +366,11 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     }
 
     private ParquetReaderBatch createReaderBatch(
+            Path filePath,
             WritableColumnVector[] writableVectors,
             VectorizedColumnBatch columnarBatch,
             Pool.Recycler<ParquetReaderBatch> recycler) {
-        return new ParquetReaderBatch(writableVectors, columnarBatch, recycler);
+        return new ParquetReaderBatch(filePath, writableVectors, columnarBatch, recycler);
     }
 
     private static class ParquetReaderBatch {
@@ -379,21 +382,24 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         private final ColumnarRowIterator result;
 
         protected ParquetReaderBatch(
+                Path filePath,
                 WritableColumnVector[] writableVectors,
                 VectorizedColumnBatch columnarBatch,
                 Pool.Recycler<ParquetReaderBatch> recycler) {
             this.writableVectors = writableVectors;
             this.columnarBatch = columnarBatch;
             this.recycler = recycler;
-            this.result = new ColumnarRowIterator(new ColumnarRow(columnarBatch), this::recycle);
+            this.result =
+                    new ColumnarRowIterator(
+                            filePath, new ColumnarRow(columnarBatch), this::recycle);
         }
 
         public void recycle() {
             recycler.recycle(this);
         }
 
-        public RecordIterator<InternalRow> convertAndGetIterator() {
-            result.set(columnarBatch.getNumRows());
+        public RecordIterator<InternalRow> convertAndGetIterator(long rowNumber) {
+            result.reset(rowNumber);
             return result;
         }
     }

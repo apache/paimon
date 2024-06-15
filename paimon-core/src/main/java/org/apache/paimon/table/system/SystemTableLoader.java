@@ -36,6 +36,7 @@ import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
 import static org.apache.paimon.table.system.AggregationFieldsTable.AGGREGATION;
 import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
 import static org.apache.paimon.table.system.AuditLogTable.AUDIT_LOG;
+import static org.apache.paimon.table.system.BranchesTable.BRANCHES;
 import static org.apache.paimon.table.system.CatalogOptionsTable.CATALOG_OPTIONS;
 import static org.apache.paimon.table.system.ConsumersTable.CONSUMERS;
 import static org.apache.paimon.table.system.FilesTable.FILES;
@@ -47,6 +48,7 @@ import static org.apache.paimon.table.system.SchemasTable.SCHEMAS;
 import static org.apache.paimon.table.system.SinkTableLineageTable.SINK_TABLE_LINEAGE;
 import static org.apache.paimon.table.system.SnapshotsTable.SNAPSHOTS;
 import static org.apache.paimon.table.system.SourceTableLineageTable.SOURCE_TABLE_LINEAGE;
+import static org.apache.paimon.table.system.StatisticTable.STATISTICS;
 import static org.apache.paimon.table.system.TagsTable.TAGS;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -58,7 +60,7 @@ public class SystemTableLoader {
         Path location = dataTable.location();
         switch (type.toLowerCase()) {
             case MANIFESTS:
-                return new ManifestsTable(fileIO, location, dataTable);
+                return new ManifestsTable(dataTable);
             case SNAPSHOTS:
                 return new SnapshotsTable(fileIO, location, dataTable);
             case OPTIONS:
@@ -73,12 +75,16 @@ public class SystemTableLoader {
                 return new FilesTable(dataTable);
             case TAGS:
                 return new TagsTable(fileIO, location);
+            case BRANCHES:
+                return new BranchesTable(fileIO, location);
             case CONSUMERS:
                 return new ConsumersTable(fileIO, location);
             case READ_OPTIMIZED:
                 return new ReadOptimizedTable(dataTable);
             case AGGREGATION:
                 return new AggregationFieldsTable(fileIO, location);
+            case STATISTICS:
+                return new StatisticTable(fileIO, location, dataTable);
             default:
                 return null;
         }

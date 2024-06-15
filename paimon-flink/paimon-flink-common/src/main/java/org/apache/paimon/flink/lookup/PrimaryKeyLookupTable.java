@@ -33,36 +33,27 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Collections;
-import java.util.Iterator;
 import java.util.List;
 
 /** A {@link LookupTable} for primary key table. */
 public class PrimaryKeyLookupTable extends FullCacheLookupTable {
 
-    protected final RocksDBValueState<InternalRow, InternalRow> tableState;
-
-    protected int[] primaryKeyMapping;
+    protected final long lruCacheSize;
 
     protected final KeyProjectedRow primaryKeyRow;
 
     @Nullable private final ProjectedRow keyRearrange;
 
-    public PrimaryKeyLookupTable(Context context, long lruCacheSize, List<String> joinKey)
-            throws IOException {
+    protected RocksDBValueState<InternalRow, InternalRow> tableState;
+
+    public PrimaryKeyLookupTable(Context context, long lruCacheSize, List<String> joinKey) {
         super(context);
+        this.lruCacheSize = lruCacheSize;
         List<String> fieldNames = projectedType.getFieldNames();
         FileStoreTable table = context.table;
-        this.primaryKeyMapping =
+        int[] primaryKeyMapping =
                 table.primaryKeys().stream().mapToInt(fieldNames::indexOf).toArray();
         this.primaryKeyRow = new KeyProjectedRow(primaryKeyMapping);
-
-        this.tableState =
-                stateFactory.valueState(
-                        "table",
-                        InternalSerializers.create(
-                                TypeUtils.project(projectedType, primaryKeyMapping)),
-                        InternalSerializers.create(projectedType),
-                        lruCacheSize);
 
         ProjectedRow keyRearrange = null;
         if (!table.primaryKeys().equals(joinKey)) {
@@ -77,6 +68,23 @@ public class PrimaryKeyLookupTable extends FullCacheLookupTable {
     }
 
     @Override
+    public void open() throws Exception {
+        openStateFactory();
+        createTableState();
+        bootstrap();
+    }
+
+    protected void createTableState() throws IOException {
+        this.tableState =
+                stateFactory.valueState(
+                        "table",
+                        InternalSerializers.create(
+                                TypeUtils.project(projectedType, primaryKeyRow.indexMapping())),
+                        InternalSerializers.create(projectedType),
+                        lruCacheSize);
+    }
+
+    @Override
     public List<InternalRow> innerGet(InternalRow key) throws IOException {
         if (keyRearrange != null) {
             key = keyRearrange.replaceRow(key);
@@ -86,31 +94,25 @@ public class PrimaryKeyLookupTable extends FullCacheLookupTable {
     }
 
     @Override
-    public void refresh(Iterator<InternalRow> incremental, boolean orderByLastField)
-            throws IOException {
-        Predicate predicate = projectedPredicate();
-        while (incremental.hasNext()) {
-            InternalRow row = incremental.next();
-            primaryKeyRow.replaceRow(row);
-            if (orderByLastField) {
-                InternalRow previous = tableState.get(primaryKeyRow);
-                int orderIndex = projectedType.getFieldCount() - 1;
-                if (previous != null && previous.getLong(orderIndex) > row.getLong(orderIndex)) {
-                    continue;
-                }
+    protected void refreshRow(InternalRow row, Predicate predicate) throws IOException {
+        primaryKeyRow.replaceRow(row);
+        if (userDefinedSeqComparator != null) {
+            InternalRow previous = tableState.get(primaryKeyRow);
+            if (previous != null && userDefinedSeqComparator.compare(previous, row) > 0) {
+                return;
             }
+        }
 
-            if (row.getRowKind() == RowKind.INSERT || row.getRowKind() == RowKind.UPDATE_AFTER) {
-                if (predicate == null || predicate.test(row)) {
-                    tableState.put(primaryKeyRow, row);
-                } else {
-                    // The new record under primary key is filtered
-                    // We need to delete this primary key as it no longer exists.
-                    tableState.delete(primaryKeyRow);
-                }
+        if (row.getRowKind() == RowKind.INSERT || row.getRowKind() == RowKind.UPDATE_AFTER) {
+            if (predicate == null || predicate.test(row)) {
+                tableState.put(primaryKeyRow, row);
             } else {
+                // The new record under primary key is filtered
+                // We need to delete this primary key as it no longer exists.
                 tableState.delete(primaryKeyRow);
             }
+        } else {
+            tableState.delete(primaryKeyRow);
         }
     }
 

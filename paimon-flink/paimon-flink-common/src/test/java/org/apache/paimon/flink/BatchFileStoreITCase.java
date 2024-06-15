@@ -25,12 +25,17 @@ import org.apache.paimon.utils.DateTimeUtils;
 
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
+import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -221,6 +226,36 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
+    @Timeout(120)
+    public void testTimeTravelReadWithWatermark() throws Exception {
+        streamSqlIter(
+                "CREATE TEMPORARY TABLE gen (a STRING, b STRING, c STRING,"
+                        + " dt AS NOW(), WATERMARK FOR dt AS dt) WITH ('connector'='datagen')");
+        sql(
+                "CREATE TABLE WT (a STRING, b STRING, c STRING, dt TIMESTAMP, PRIMARY KEY (a) NOT ENFORCED)");
+        CloseableIterator<Row> insert = streamSqlIter("INSERT INTO WT SELECT * FROM gen ");
+        List<Long> watermarks;
+        while (true) {
+            watermarks =
+                    sql("SELECT `watermark` FROM WT$snapshots").stream()
+                            .map(r -> (Long) r.getField("watermark"))
+                            .collect(Collectors.toList());
+            if (watermarks.size() > 1) {
+                insert.close();
+                break;
+            }
+            Thread.sleep(1000);
+        }
+        Long maxWatermark = watermarks.get(watermarks.size() - 1);
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT * FROM WT /*+ OPTIONS('scan.watermark'='%d') */",
+                                        maxWatermark)))
+                .isNotEmpty();
+    }
+
+    @Test
     public void testTimeTravelReadWithSnapshotExpiration() throws Exception {
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
 
@@ -372,20 +407,51 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testIgnoreDelete() throws Exception {
+    public void testIgnoreDelete() {
         sql(
                 "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING) "
-                        + "WITH ('deduplicate.ignore-delete' = 'true', 'bucket' = '1')");
-        BlockingIterator<Row, Row> iterator = streamSqlBlockIter("SELECT * FROM ignore_delete");
+                        + "WITH ('merge-engine' = 'deduplicate', 'ignore-delete' = 'true', 'bucket' = '1')");
 
-        sql("INSERT INTO ignore_delete VALUES (1, 'A'), (2, 'B')");
+        sql("INSERT INTO ignore_delete VALUES (1, 'A')");
+        assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "A"));
+
         sql("DELETE FROM ignore_delete WHERE pk = 1");
-        sql("INSERT INTO ignore_delete VALUES (1, 'B')");
+        assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "A"));
 
-        assertThat(iterator.collect(2))
-                .containsExactlyInAnyOrder(
-                        Row.ofKind(RowKind.INSERT, 1, "B"), Row.ofKind(RowKind.INSERT, 2, "B"));
-        iterator.close();
+        sql("INSERT INTO ignore_delete VALUES (1, 'B')");
+        assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "B"));
+    }
+
+    @Test
+    public void testIgnoreDeleteCompatible() {
+        sql(
+                "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING) "
+                        + "WITH ('merge-engine' = 'deduplicate', 'write-only' = 'true')");
+
+        sql("INSERT INTO ignore_delete VALUES (1, 'A')");
+        // write delete records
+        sql("DELETE FROM ignore_delete WHERE pk = 1");
+        assertThat(sql("SELECT * FROM ignore_delete")).isEmpty();
+
+        // set ignore-delete and read
+        sql("ALTER TABLE ignore_delete set ('ignore-delete' = 'true')");
+        assertThat(sql("SELECT * FROM ignore_delete")).containsExactlyInAnyOrder(Row.of(1, "A"));
+    }
+
+    @Test
+    public void testIgnoreDeleteWithRowKindField() {
+        sql(
+                "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING, kind STRING) "
+                        + "WITH ('merge-engine' = 'deduplicate', 'ignore-delete' = 'true', 'bucket' = '1', 'rowkind.field' = 'kind')");
+
+        sql("INSERT INTO ignore_delete VALUES (1, 'A', '+I')");
+        assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "A", "+I"));
+
+        sql("INSERT INTO ignore_delete VALUES (1, 'A', '-D')");
+        assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "A", "+I"));
+
+        sql("INSERT INTO ignore_delete VALUES (1, 'B', '+I')");
+        assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "B", "+I"));
     }
 
     @Test
@@ -402,6 +468,31 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         assertThat(iterator.collect(2))
                 .containsExactlyInAnyOrder(
                         Row.ofKind(RowKind.INSERT, 1, "B"), Row.ofKind(RowKind.INSERT, 2, "B"));
+        iterator.close();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"none", "lookup", "input"})
+    public void testDeletePartitionWithChangelog(String producer) throws Exception {
+        sql(
+                "CREATE TABLE delete_table (pt INT, pk INT, v STRING, PRIMARY KEY(pt, pk) NOT ENFORCED) PARTITIONED BY (pt)   "
+                        + "WITH ('changelog-producer' = '"
+                        + producer
+                        + "', 'delete.force-produce-changelog'='true', 'bucket'='1')");
+        BlockingIterator<Row, Row> iterator = streamSqlBlockIter("SELECT * FROM delete_table");
+
+        sql("INSERT INTO delete_table VALUES (1, 1, 'A'), (2, 2, 'B')");
+        assertThat(iterator.collect(2))
+                .containsExactlyInAnyOrder(
+                        Row.ofKind(RowKind.INSERT, 1, 1, "A"),
+                        Row.ofKind(RowKind.INSERT, 2, 2, "B"));
+        sql("DELETE FROM delete_table WHERE pt = 1");
+        assertThat(iterator.collect(1))
+                .containsExactlyInAnyOrder(Row.ofKind(RowKind.DELETE, 1, 1, "A"));
+        sql("INSERT INTO delete_table VALUES (1, 1, 'B')");
+
+        assertThat(iterator.collect(1))
+                .containsExactlyInAnyOrder(Row.ofKind(RowKind.INSERT, 1, 1, "B"));
         iterator.close();
     }
 

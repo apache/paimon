@@ -21,10 +21,8 @@ package org.apache.paimon.flink.action.cdc;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.Preconditions;
-import org.apache.paimon.utils.StringUtils;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -71,25 +69,10 @@ public class ComputedColumnUtils {
             String[] args = expression.substring(left + 1, right).split(",");
             checkArgument(args.length >= 1, "Computed column needs at least one argument.");
 
-            String fieldReference = args[0].trim();
-            String[] literals =
-                    Arrays.stream(args).skip(1).map(String::trim).toArray(String[]::new);
-            String fieldReferenceCheckForm =
-                    StringUtils.caseSensitiveConversion(fieldReference, caseSensitive);
-            checkArgument(
-                    typeMapping.containsKey(fieldReferenceCheckForm),
-                    String.format(
-                            "Referenced field '%s' is not in given fields: %s.",
-                            fieldReferenceCheckForm, typeMapping.keySet()));
-
             computedColumns.add(
                     new ComputedColumn(
                             columnName,
-                            Expression.create(
-                                    exprName,
-                                    fieldReference,
-                                    typeMapping.get(fieldReference),
-                                    literals)));
+                            Expression.create(typeMapping, caseSensitive, exprName, args)));
         }
 
         return computedColumns;

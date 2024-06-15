@@ -20,7 +20,6 @@ package org.apache.paimon.flink.kafka;
 
 import org.apache.paimon.flink.util.AbstractTestBase;
 
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
@@ -103,9 +102,8 @@ public abstract class KafkaTableTestBase extends AbstractTestBase {
 
     @BeforeEach
     public void setup() {
-        env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env = streamExecutionEnvironmentBuilder().streamingMode().build();
         tEnv = StreamTableEnvironment.create(env);
-        env.getConfig().setRestartStrategy(RestartStrategies.noRestart());
         tEnv.getConfig()
                 .getConfiguration()
                 .set(ExecutionCheckpointingOptions.ENABLE_UNALIGNED, false);

@@ -70,22 +70,22 @@ public abstract class TableSorter {
             StreamExecutionEnvironment batchTEnv,
             DataStream<RowData> origin,
             FileStoreTable fileStoreTable,
-            String sortStrategy,
-            List<String> orderColumns) {
-        switch (OrderType.of(sortStrategy)) {
+            TableSortInfo sortInfo) {
+        OrderType sortStrategy = sortInfo.getSortStrategy();
+        switch (sortStrategy) {
             case ORDER:
-                return new OrderSorter(batchTEnv, origin, fileStoreTable, orderColumns);
+                return new OrderSorter(batchTEnv, origin, fileStoreTable, sortInfo);
             case ZORDER:
-                return new ZorderSorter(batchTEnv, origin, fileStoreTable, orderColumns);
+                return new ZorderSorter(batchTEnv, origin, fileStoreTable, sortInfo);
             case HILBERT:
-                // todo support hilbert curve
-                throw new IllegalArgumentException("Not supported yet.");
+                return new HilbertSorter(batchTEnv, origin, fileStoreTable, sortInfo);
             default:
                 throw new IllegalArgumentException("cannot match order type: " + sortStrategy);
         }
     }
 
-    enum OrderType {
+    /** The order type of table sort. */
+    public enum OrderType {
         ORDER("order"),
         ZORDER("zorder"),
         HILBERT("hilbert");

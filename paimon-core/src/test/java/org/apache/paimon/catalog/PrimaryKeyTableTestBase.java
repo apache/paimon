@@ -18,11 +18,17 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.TraceableFileIO;
 
@@ -32,6 +38,8 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 import java.util.function.Predicate;
 
@@ -81,5 +89,44 @@ public abstract class PrimaryKeyTableTestBase {
 
     protected static long utcMills(String timestamp) {
         return Timestamp.fromLocalDateTime(LocalDateTime.parse(timestamp)).getMillisecond();
+    }
+
+    protected void writeCommit(InternalRow... rows) throws Exception {
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        for (InternalRow row : rows) {
+            write.write(row);
+        }
+        writeBuilder.newCommit().commit(write.prepareCommit());
+        write.close();
+    }
+
+    protected void compact(int partition) throws Exception {
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        write.compact(BinaryRow.singleColumn(partition), 0, true);
+        writeBuilder.newCommit().commit(write.prepareCommit());
+        write.close();
+    }
+
+    protected List<GenericRow> query() throws Exception {
+        return query(new int[] {0, 1, 2});
+    }
+
+    protected List<GenericRow> query(int[] projection) throws Exception {
+        ReadBuilder readBuilder = table.newReadBuilder().withProjection(projection);
+        List<GenericRow> rows = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .createReader(readBuilder.newScan().plan())
+                .forEachRemaining(
+                        r -> {
+                            GenericRow newR = new GenericRow(projection.length);
+                            for (int i = 0; i < projection.length; i++) {
+                                newR.setField(i, r.getInt(i));
+                            }
+                            rows.add(newR);
+                        });
+        return rows;
     }
 }

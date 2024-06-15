@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,15 +19,14 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -43,6 +42,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.TestKeyValueGenerator.DEFAULT_PART_TYPE;
+import static org.apache.paimon.stats.StatsTestUtils.convertWithoutSchemaEvolution;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link ManifestFile}. */
@@ -63,7 +63,7 @@ public class ManifestFileTest {
         checkRollingFiles(meta, actualMetas, manifestFile.suggestedFileSize());
         List<ManifestEntry> actualEntries =
                 actualMetas.stream()
-                        .flatMap(m -> manifestFile.read(m.fileName()).stream())
+                        .flatMap(m -> manifestFile.read(m.fileName(), m.fileSize()).stream())
                         .collect(Collectors.toList());
         assertThat(actualEntries).isEqualTo(entries);
     }
@@ -108,6 +108,7 @@ public class ManifestFileTest {
                         new SchemaManager(fileIO, path),
                         DEFAULT_PART_TYPE,
                         avro,
+                        "zstd",
                         pathFactory,
                         suggestedFileSize,
                         null)
@@ -130,14 +131,16 @@ public class ManifestFileTest {
                 .isEqualTo(expected.numDeletedFiles());
 
         // check stats
-        FieldStatsArraySerializer statsConverter = new FieldStatsArraySerializer(DEFAULT_PART_TYPE);
-        FieldStats[] fieldStats = statsConverter.fromBinary(expected.partitionStats());
+        SimpleColStats[] fieldStats =
+                convertWithoutSchemaEvolution(expected.partitionStats(), DEFAULT_PART_TYPE);
         for (int i = 0; i < fieldStats.length; i++) {
             int idx = i;
             StatsTestUtils.checkRollingFileStats(
                     fieldStats[i],
                     actual,
-                    meta -> statsConverter.fromBinary(meta.partitionStats())[idx]);
+                    meta ->
+                            convertWithoutSchemaEvolution(meta.partitionStats(), DEFAULT_PART_TYPE)[
+                                    idx]);
         }
     }
 }

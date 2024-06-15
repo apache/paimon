@@ -28,7 +28,7 @@ under the License.
 
 Paimon has built a metrics system to measure the behaviours of reading and writing, like how many manifest files it scanned in the last planning, how long it took in the last commit operation, how many files it deleted in the last compact operation.
 
-In Paimon's metrics system, metrics are updated and reported at different levels of granularity. Currently, the levels of **table** and **bucket** are provided, which means you can get metrics per table or bucket.
+In Paimon's metrics system, metrics are updated and reported at table granularity.
 
 There are three types of metrics provided in the Paimon metric system, `Gauge`, `Counter`, `Histogram`.
 - `Gauge`: Provides a value of any type at a point in time.
@@ -47,7 +47,6 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
     <thead>
     <tr>
       <th class="text-left" style="width: 225pt">Metrics Name</th>
-      <th class="text-left" style="width: 65pt">Level</th>
       <th class="text-left" style="width: 70pt">Type</th>
       <th class="text-left" style="width: 300pt">Description</th>
     </tr>
@@ -55,49 +54,41 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
     <tbody>
         <tr>
             <td>lastScanDuration</td>
-            <td>Table</td>
             <td>Gauge</td>
             <td>The time it took to complete the last scan.</td>
         </tr>
         <tr>
             <td>scanDuration</td>
-            <td>Table</td>
             <td>Histogram</td>
             <td>Distributions of the time taken by the last few scans.</td>
         </tr>
         <tr>
             <td>lastScannedManifests</td>
-            <td>Table</td>
             <td>Gauge</td>
             <td>Number of scanned manifest files in the last scan.</td>
         </tr>
         <tr>
             <td>lastSkippedByPartitionAndStats</td>
-            <td>Table</td>
             <td>Gauge</td>
             <td>Skipped table files by partition filter and value / key stats information in the last scan.</td>
         </tr>
         <tr>
             <td>lastSkippedByBucketAndLevelFilter</td>
-            <td>Table</td>
             <td>Gauge</td>
             <td>Skipped table files by bucket, bucket key and level filter in the last scan.</td>
         </tr>
         <tr>
             <td>lastSkippedByWholeBucketFilesFilter</td>
-            <td>Table</td>
             <td>Gauge</td>
             <td>Skipped table files by bucket level value filter (only primary key table) in the last scan.</td>
         </tr>
         <tr>
             <td>lastScanSkippedTableFiles</td>
-            <td>Table</td>
             <td>Gauge</td>
             <td>Total skipped table files in the last scan.</td>
         </tr>
         <tr>
             <td>lastScanResultedTableFiles</td>
-            <td>Table</td>
             <td>Gauge</td>
             <td>Resulted table files in the last scan.</td>
         </tr>
@@ -110,7 +101,6 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
     <thead>
     <tr>
       <th class="text-left" style="width: 225pt">Metrics Name</th>
-      <th class="text-left" style="width: 65pt">Level</th>
       <th class="text-left" style="width: 70pt">Type</th>
       <th class="text-left" style="width: 300pt">Description</th>
     </tr>
@@ -118,132 +108,83 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
     <tbody>
         <tr>
             <td>lastCommitDuration</td>
-            <td>Table</td>
             <td>Gauge</td>
             <td>The time it took to complete the last commit.</td>
         </tr>
         <tr>
             <td>commitDuration</td>
-            <td>Table</td>
             <td>Histogram</td>
             <td>Distributions of the time taken by the last few commits.</td>
         </tr>
         <tr>
             <td>lastCommitAttempts</td>
-            <td>Table</td>
             <td>Gauge</td>
             <td>The number of attempts the last commit made.</td>
         </tr>
         <tr>
             <td>lastTableFilesAdded</td>
-            <td>Table</td>
             <td>Gauge</td>
             <td>Number of added table files in the last commit, including newly created data files and compacted after.</td>
         </tr>
         <tr>
             <td>lastTableFilesDeleted</td>
-            <td>Table</td>
             <td>Gauge</td>
             <td>Number of deleted table files in the last commit, which comes from compacted before.</td>
         </tr>
         <tr>
             <td>lastTableFilesAppended</td>
-            <td>Table</td>
             <td>Gauge</td>
             <td>Number of appended table files in the last commit, which means the newly created data files.</td>
         </tr>
         <tr>
             <td>lastTableFilesCommitCompacted</td>
-            <td>Table</td>
             <td>Gauge</td>
             <td>Number of compacted table files in the last commit, including compacted before and after.</td>
         </tr>
         <tr>
             <td>lastChangelogFilesAppended</td>
-            <td>Table</td>
             <td>Gauge</td>
             <td>Number of appended changelog files in last commit.</td>
         </tr>
         <tr>
             <td>lastChangelogFileCommitCompacted</td>
-            <td>Table</td>
             <td>Gauge</td>
             <td>Number of compacted changelog files in last commit.</td>
         </tr>
         <tr>
             <td>lastGeneratedSnapshots</td>
-            <td>Table</td>
             <td>Gauge</td>
             <td>Number of snapshot files generated in the last commit, maybe 1 snapshot or 2 snapshots.</td>
         </tr>
         <tr>
             <td>lastDeltaRecordsAppended</td>
-            <td>Table</td>
             <td>Gauge</td>
             <td>Delta records count in last commit with APPEND commit kind.</td>
         </tr>
         <tr>
             <td>lastChangelogRecordsAppended</td>
-            <td>Table</td>
             <td>Gauge</td>
             <td>Changelog records count in last commit with APPEND commit kind.</td>
         </tr>
         <tr>
             <td>lastDeltaRecordsCommitCompacted</td>
-            <td>Table</td>
             <td>Gauge</td>
             <td>Delta records count in last commit with COMPACT commit kind.</td>
         </tr>
         <tr>
             <td>lastChangelogRecordsCommitCompacted</td>
-            <td>Table</td>
             <td>Gauge</td>
             <td>Changelog records count in last commit with COMPACT commit kind.</td>
         </tr>
         <tr>
             <td>lastPartitionsWritten</td>
-            <td>Table</td>
             <td>Gauge</td>
             <td>Number of partitions written in the last commit.</td>
         </tr>
         <tr>
             <td>lastBucketsWritten</td>
-            <td>Table</td>
             <td>Gauge</td>
             <td>Number of buckets written in the last commit.</td>
-        </tr>
-    </tbody>
-</table>
-
-### Write Metrics
-
-<table class="table table-bordered">
-    <thead>
-    <tr>
-      <th class="text-left" style="width: 225pt">Metrics Name</th>
-      <th class="text-left" style="width: 65pt">Level</th>
-      <th class="text-left" style="width: 70pt">Type</th>
-      <th class="text-left" style="width: 300pt">Description</th>
-    </tr>
-    </thead>
-    <tbody>
-        <tr>
-            <td>writeRecordCount</td>
-            <td>Bucket</td>
-            <td>Counter</td>
-            <td>Total number of records written into the bucket.</td>
-        </tr>
-        <tr>
-            <td>flushCostMillis</td>
-            <td>Bucket</td>
-            <td>Histogram</td>
-            <td>Distributions of the time taken by the last few write buffer flushing.</td>
-        </tr>
-        <tr>
-            <td>prepareCommitCostMillis</td>
-            <td>Bucket</td>
-            <td>Histogram</td>
-            <td>Distributions of the time taken by the last few call of `prepareCommit`.</td>
         </tr>
     </tbody>
 </table>
@@ -254,7 +195,6 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
     <thead>
     <tr>
       <th class="text-left" style="width: 225pt">Metrics Name</th>
-      <th class="text-left" style="width: 65pt">Level</th>
       <th class="text-left" style="width: 70pt">Type</th>
       <th class="text-left" style="width: 300pt">Description</th>
     </tr>
@@ -262,19 +202,16 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
     <tbody>
         <tr>
             <td>bufferPreemptCount</td>
-            <td>Table</td>
             <td>Gauge</td>
             <td>The total number of memory preempted.</td>
         </tr>
         <tr>
             <td>usedWriteBufferSizeByte</td>
-            <td>Table</td>
             <td>Gauge</td>
             <td>Current used write buffer size in byte.</td>
         </tr>
         <tr>
             <td>totalWriteBufferSizeByte</td>
-            <td>Table</td>
             <td>Gauge</td>
             <td>The total write buffer size configured in byte.</td>
         </tr>
@@ -287,65 +224,25 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
     <thead>
     <tr>
       <th class="text-left" style="width: 225pt">Metrics Name</th>
-      <th class="text-left" style="width: 65pt">Level</th>
       <th class="text-left" style="width: 70pt">Type</th>
       <th class="text-left" style="width: 300pt">Description</th>
     </tr>
     </thead>
     <tbody>
         <tr>
-            <td>level0FileCount</td>
-            <td>Bucket</td>
+            <td>maxLevel0FileCount</td>
             <td>Gauge</td>
-            <td>The level 0 file count will become larger if asynchronous compaction cannot be done in time.</td>
+            <td>The maximum number of level 0 files currently handled by this writer. This value will become larger if asynchronous compaction cannot be done in time.</td>
         </tr>
         <tr>
-            <td>lastCompactionDuration</td>
-            <td>Bucket</td>
+            <td>avgLevel0FileCount</td>
             <td>Gauge</td>
-            <td>The time it took to complete the last compaction.</td>
+            <td>The average number of level 0 files currently handled by this writer. This value will become larger if asynchronous compaction cannot be done in time.</td>
         </tr>
         <tr>
-            <td>compactionDuration</td>
-            <td>Bucket</td>
-            <td>Histogram</td>
-            <td>Distributions of the time taken by the last few compaction.</td>
-        </tr>
-        <tr>
-            <td>lastTableFilesCompactedBefore</td>
-            <td>Bucket</td>
+            <td>compactionThreadBusy</td>
             <td>Gauge</td>
-            <td>Number of deleted files in the last compaction.</td>
-        </tr>
-        <tr>
-            <td>lastTableFilesCompactedAfter</td>
-            <td>Bucket</td>
-            <td>Gauge</td>
-            <td>Number of added files in the last compaction.</td>
-        </tr>
-        <tr>
-            <td>lastChangelogFilesCompacted</td>
-            <td>Bucket</td>
-            <td>Gauge</td>
-            <td>Number of changelog files compacted in last compaction.</td>
-        </tr>
-        <tr>
-            <td>lastRewriteInputFileSize</td>
-            <td>Bucket</td>
-            <td>Gauge</td>
-            <td>Size of deleted files in the last compaction.</td>
-        </tr>
-        <tr>
-            <td>lastRewriteOutputFileSize</td>
-            <td>Bucket</td>
-            <td>Gauge</td>
-            <td>Size of added files in the last compaction.</td>
-        </tr>
-        <tr>
-            <td>lastRewriteChangelogFileSize</td>
-            <td>Bucket</td>
-            <td>Gauge</td>
-            <td>Size of changelog files compacted in last compaction.</td>
+            <td>The maximum business of compaction threads in this parallelism. Currently, there is only one compaction thread in each parallelism, so value of business ranges from 0 (idle) to 100 (compaction running all the time).</td>
         </tr>
     </tbody>
 </table>

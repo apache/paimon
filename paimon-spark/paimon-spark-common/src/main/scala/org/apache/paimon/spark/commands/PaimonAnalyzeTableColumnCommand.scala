@@ -15,6 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.schema.TableSchema
@@ -25,7 +26,7 @@ import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.BatchWriteBuilder
 
 import org.apache.parquet.Preconditions
-import org.apache.spark.sql.{Row, SparkSession, StatsUtils}
+import org.apache.spark.sql.{PaimonStatsUtils, Row, SparkSession}
 import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.plans.logical.ColumnStat
 import org.apache.spark.sql.catalyst.util.DateTimeUtils
@@ -52,16 +53,20 @@ case class PaimonAnalyzeTableColumnCommand(
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
     val relation = DataSourceV2Relation.create(v2Table, Some(catalog), Some(identifier))
+    val attributes = getColumnsToAnalyze(relation)
+
     val currentSnapshot = table.snapshotManager().latestSnapshot()
+    if (currentSnapshot == null) {
+      return Seq.empty[Row]
+    }
 
     // compute stats
-    val attributes = getColumnsToAnalyze(relation, columnNames, allColumns)
-    val totalSize = StatsUtils.calculateTotalSize(
+    val totalSize = PaimonStatsUtils.calculateTotalSize(
       sparkSession.sessionState,
       table.name(),
       Some(table.location().toUri))
     val (mergedRecordCount, colStats) =
-      StatsUtils.computeColumnStats(sparkSession, relation, attributes)
+      PaimonStatsUtils.computeColumnStats(sparkSession, relation, attributes)
 
     val totalRecordCount = currentSnapshot.totalRecordCount()
     Preconditions.checkState(
@@ -91,10 +96,7 @@ case class PaimonAnalyzeTableColumnCommand(
     Seq.empty[Row]
   }
 
-  private def getColumnsToAnalyze(
-      relation: DataSourceV2Relation,
-      columnNames: Option[Seq[String]],
-      allColumns: Boolean): Seq[Attribute] = {
+  private def getColumnsToAnalyze(relation: DataSourceV2Relation): Seq[Attribute] = {
     if (columnNames.isDefined && allColumns) {
       throw new UnsupportedOperationException(
         "Parameter `columnNames` and `allColumns` are " +
@@ -112,7 +114,7 @@ case class PaimonAnalyzeTableColumnCommand(
     }
     columnsToAnalyze.foreach {
       attr =>
-        if (!StatsUtils.analyzeSupportsType(attr.dataType)) {
+        if (!PaimonStatsUtils.analyzeSupportsType(attr.dataType)) {
           throw new UnsupportedOperationException(
             s"Analyzing on col: ${attr.name}, data type: ${attr.dataType} is not supported.")
         }
@@ -147,12 +149,12 @@ case class PaimonAnalyzeTableColumnCommand(
   }
 
   /**
-   * Convert data from spark type to paimon, only cover datatype meet [[StatsUtils.hasMinMax]]
+   * Convert data from spark type to paimon, only cover datatype meet [[PaimonStatsUtils.hasMinMax]]
    * currently.
    */
   private def toPaimonData(o: Any, dataType: DataType): Any = {
     dataType match {
-      case d if !StatsUtils.hasMinMax(d) =>
+      case d if !PaimonStatsUtils.hasMinMax(d) =>
         // should not reach here
         throw new UnsupportedOperationException(s"Unsupported data type $d, value is $o.")
       case _: DecimalType =>

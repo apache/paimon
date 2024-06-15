@@ -16,11 +16,6 @@
  * limitations under the License.
  */
 
-/* This file is based on source code from MySqlTypeUtils in the flink-cdc-connectors Project
- * (https://ververica.github.io/flink-cdc-connectors/), licensed by the Apache Software Foundation (ASF)
- * under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
- * additional information regarding copyright ownership. */
-
 package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.flink.action.cdc.JdbcToPaimonTypeVisitor;
@@ -52,6 +47,11 @@ import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.LON
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TINYINT1_NOT_BOOL;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
 
+/* This file is based on source code from MySqlTypeUtils in the flink-cdc-connectors Project
+ * (https://ververica.github.io/flink-cdc-connectors/), licensed by the Apache Software Foundation (ASF)
+ * under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership. */
+
 /** Converts from MySQL type to {@link DataType}. */
 public class MySqlTypeUtils {
 
@@ -72,6 +72,9 @@ public class MySqlTypeUtils {
     private static final String INT = "INT";
     private static final String INT_UNSIGNED = "INT UNSIGNED";
     private static final String INT_UNSIGNED_ZEROFILL = "INT UNSIGNED ZEROFILL";
+    private static final String INTEGER = "INTEGER";
+    private static final String INTEGER_UNSIGNED = "INTEGER UNSIGNED";
+    private static final String INTEGER_UNSIGNED_ZEROFILL = "INTEGER UNSIGNED ZEROFILL";
     private static final String BIGINT = "BIGINT";
     private static final String SERIAL = "SERIAL";
     private static final String BIGINT_UNSIGNED = "BIGINT UNSIGNED";
@@ -197,11 +200,14 @@ public class MySqlTypeUtils {
             case SMALLINT_UNSIGNED:
             case SMALLINT_UNSIGNED_ZEROFILL:
             case INT:
+            case INTEGER:
             case MEDIUMINT:
             case YEAR:
                 return DataTypes.INT();
             case INT_UNSIGNED:
+            case INTEGER_UNSIGNED:
             case INT_UNSIGNED_ZEROFILL:
+            case INTEGER_UNSIGNED_ZEROFILL:
             case MEDIUMINT_UNSIGNED:
             case MEDIUMINT_UNSIGNED_ZEROFILL:
             case BIGINT:

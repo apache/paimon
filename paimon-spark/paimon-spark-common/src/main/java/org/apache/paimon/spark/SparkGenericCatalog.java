@@ -16,19 +16,17 @@
  * limitations under the License.
  */
 
-/* This file is based on source code from the Iceberg Project (http://iceberg.apache.org/), licensed by the Apache
- * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
- * additional information regarding copyright ownership. */
-
 package org.apache.paimon.spark;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.hive.HiveCatalogOptions;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.spark.catalog.SparkBaseCatalog;
+import org.apache.paimon.spark.util.SQLConfUtils;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.spark.SparkConf;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.analysis.NamespaceAlreadyExistsException;
 import org.apache.spark.sql.catalyst.analysis.NoSuchFunctionException;
@@ -36,18 +34,24 @@ import org.apache.spark.sql.catalyst.analysis.NoSuchNamespaceException;
 import org.apache.spark.sql.catalyst.analysis.NoSuchTableException;
 import org.apache.spark.sql.catalyst.analysis.NonEmptyNamespaceException;
 import org.apache.spark.sql.catalyst.analysis.TableAlreadyExistsException;
+import org.apache.spark.sql.catalyst.catalog.ExternalCatalog;
 import org.apache.spark.sql.catalyst.catalog.InMemoryCatalog;
+import org.apache.spark.sql.catalyst.catalog.SessionCatalog;
 import org.apache.spark.sql.connector.catalog.CatalogExtension;
 import org.apache.spark.sql.connector.catalog.CatalogPlugin;
+import org.apache.spark.sql.connector.catalog.FunctionCatalog;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.NamespaceChange;
+import org.apache.spark.sql.connector.catalog.PaimonCatalogUtils;
 import org.apache.spark.sql.connector.catalog.SupportsNamespaces;
 import org.apache.spark.sql.connector.catalog.Table;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.connector.catalog.TableChange;
 import org.apache.spark.sql.connector.catalog.functions.UnboundFunction;
 import org.apache.spark.sql.connector.expressions.Transform;
+import org.apache.spark.sql.execution.datasources.v2.V2SessionCatalog;
 import org.apache.spark.sql.internal.SQLConf;
+import org.apache.spark.sql.internal.SessionState;
 import org.apache.spark.sql.internal.StaticSQLConf;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
@@ -60,25 +64,27 @@ import java.util.concurrent.Callable;
 
 import static org.apache.paimon.options.CatalogOptions.METASTORE;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
+import static org.apache.paimon.spark.SparkCatalogOptions.CREATE_UNDERLYING_SESSION_CATALOG;
+import static org.apache.paimon.spark.SparkCatalogOptions.DEFAULT_DATABASE;
+
+/* This file is based on source code from the Iceberg Project (http://iceberg.apache.org/), licensed by the Apache
+ * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership. */
 
 /**
  * A Spark catalog that can also load non-Paimon tables.
  *
  * <p>Most of the content of this class is referenced from Iceberg's SparkSessionCatalog.
- *
- * @param <T> CatalogPlugin class to avoid casting to TableCatalog and SupportsNamespaces.
  */
-public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
-        extends SparkBaseCatalog implements CatalogExtension {
+public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExtension {
 
     private static final Logger LOG = LoggerFactory.getLogger(SparkGenericCatalog.class);
 
-    private static final String[] DEFAULT_NAMESPACE = new String[] {"default"};
-
-    private String catalogName = null;
     private SparkCatalog sparkCatalog = null;
-    private T sessionCatalog = null;
+
+    private boolean underlyingSessionCatalogEnabled = false;
+
+    private CatalogPlugin sessionCatalog = null;
 
     @Override
     public Catalog paimonCatalog() {
@@ -87,52 +93,64 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
 
     @Override
     public String[] defaultNamespace() {
-        return DEFAULT_NAMESPACE;
+        return asNamespaceCatalog().defaultNamespace();
     }
 
     @Override
     public String[][] listNamespaces() throws NoSuchNamespaceException {
-        return getSessionCatalog().listNamespaces();
+        return asNamespaceCatalog().listNamespaces();
     }
 
     @Override
     public String[][] listNamespaces(String[] namespace) throws NoSuchNamespaceException {
-        return getSessionCatalog().listNamespaces(namespace);
+        return asNamespaceCatalog().listNamespaces(namespace);
     }
 
     @Override
     public boolean namespaceExists(String[] namespace) {
-        return getSessionCatalog().namespaceExists(namespace);
+        return asNamespaceCatalog().namespaceExists(namespace);
     }
 
     @Override
     public Map<String, String> loadNamespaceMetadata(String[] namespace)
             throws NoSuchNamespaceException {
-        return getSessionCatalog().loadNamespaceMetadata(namespace);
+        return asNamespaceCatalog().loadNamespaceMetadata(namespace);
     }
 
     @Override
     public void createNamespace(String[] namespace, Map<String, String> metadata)
             throws NamespaceAlreadyExistsException {
-        getSessionCatalog().createNamespace(namespace, metadata);
+        asNamespaceCatalog().createNamespace(namespace, metadata);
     }
 
     @Override
     public void alterNamespace(String[] namespace, NamespaceChange... changes)
             throws NoSuchNamespaceException {
-        getSessionCatalog().alterNamespace(namespace, changes);
+        asNamespaceCatalog().alterNamespace(namespace, changes);
     }
 
     @Override
     public boolean dropNamespace(String[] namespace, boolean cascade)
             throws NoSuchNamespaceException, NonEmptyNamespaceException {
-        return getSessionCatalog().dropNamespace(namespace, cascade);
+        if (namespace.length == 1 && namespaceExists(namespace) && cascade) {
+            for (Identifier table : listTables(namespace)) {
+                try {
+                    dropTable(table);
+                } catch (Exception e) {
+                    LOG.warn(
+                            "Failed to drop {}, fallback to use sessionCatalog to drop, for {}",
+                            table,
+                            e.getMessage());
+                }
+            }
+        }
+        return asNamespaceCatalog().dropNamespace(namespace, cascade);
     }
 
     @Override
     public Identifier[] listTables(String[] namespace) throws NoSuchNamespaceException {
         // delegate to the session catalog because all tables share the same namespace
-        return getSessionCatalog().listTables(namespace);
+        return asTableCatalog().listTables(namespace);
     }
 
     @Override
@@ -140,7 +158,7 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
         try {
             return sparkCatalog.loadTable(ident);
         } catch (NoSuchTableException e) {
-            return throwsOldIfExceptionHappens(() -> getSessionCatalog().loadTable(ident), e);
+            return throwsOldIfExceptionHappens(() -> asTableCatalog().loadTable(ident), e);
         }
     }
 
@@ -149,8 +167,7 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
         try {
             return sparkCatalog.loadTable(ident, version);
         } catch (NoSuchTableException e) {
-            return throwsOldIfExceptionHappens(
-                    () -> getSessionCatalog().loadTable(ident, version), e);
+            return throwsOldIfExceptionHappens(() -> asTableCatalog().loadTable(ident, version), e);
         }
     }
 
@@ -160,7 +177,7 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
             return sparkCatalog.loadTable(ident, timestamp);
         } catch (NoSuchTableException e) {
             return throwsOldIfExceptionHappens(
-                    () -> getSessionCatalog().loadTable(ident, timestamp), e);
+                    () -> asTableCatalog().loadTable(ident, timestamp), e);
         }
     }
 
@@ -169,7 +186,7 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
         // We do not need to check whether the table exists and whether
         // it is an Paimon table to reduce remote service requests.
         sparkCatalog.invalidateTable(ident);
-        getSessionCatalog().invalidateTable(ident);
+        asTableCatalog().invalidateTable(ident);
     }
 
     @Override
@@ -184,7 +201,7 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
             return sparkCatalog.createTable(ident, schema, partitions, properties);
         } else {
             // delegate to the session catalog
-            return getSessionCatalog().createTable(ident, schema, partitions, properties);
+            return asTableCatalog().createTable(ident, schema, partitions, properties);
         }
     }
 
@@ -193,18 +210,18 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
         if (sparkCatalog.tableExists(ident)) {
             return sparkCatalog.alterTable(ident, changes);
         } else {
-            return getSessionCatalog().alterTable(ident, changes);
+            return asTableCatalog().alterTable(ident, changes);
         }
     }
 
     @Override
     public boolean dropTable(Identifier ident) {
-        return sparkCatalog.dropTable(ident) || getSessionCatalog().dropTable(ident);
+        return sparkCatalog.dropTable(ident) || asTableCatalog().dropTable(ident);
     }
 
     @Override
     public boolean purgeTable(Identifier ident) {
-        return sparkCatalog.purgeTable(ident) || getSessionCatalog().purgeTable(ident);
+        return sparkCatalog.purgeTable(ident) || asTableCatalog().purgeTable(ident);
     }
 
     @Override
@@ -213,13 +230,15 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
         if (sparkCatalog.tableExists(from)) {
             sparkCatalog.renameTable(from, to);
         } else {
-            getSessionCatalog().renameTable(from, to);
+            asTableCatalog().renameTable(from, to);
         }
     }
 
     @Override
     public final void initialize(String name, CaseInsensitiveStringMap options) {
-        Configuration hadoopConf = SparkSession.active().sessionState().newHadoopConf();
+        SessionState sessionState = SparkSession.active().sessionState();
+        Configuration hadoopConf = sessionState.newHadoopConf();
+        SparkConf sparkConf = new SparkConf();
         if (options.containsKey(METASTORE.key())
                 && options.get(METASTORE.key()).equalsIgnoreCase("hive")) {
             String uri = options.get(CatalogOptions.URI.key());
@@ -242,10 +261,22 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
         this.catalogName = name;
         this.sparkCatalog = new SparkCatalog();
 
-        this.sparkCatalog.initialize(
-                name,
-                autoFillConfigurations(
-                        options, SparkSession.active().sessionState().conf(), hadoopConf));
+        CaseInsensitiveStringMap newOptions =
+                autoFillConfigurations(options, sessionState.conf(), hadoopConf);
+        sparkCatalog.initialize(name, newOptions);
+
+        if (options.getBoolean(
+                CREATE_UNDERLYING_SESSION_CATALOG.key(),
+                CREATE_UNDERLYING_SESSION_CATALOG.defaultValue())) {
+            this.underlyingSessionCatalogEnabled = true;
+            for (Map.Entry<String, String> entry : options.entrySet()) {
+                sparkConf.set("spark.hadoop." + entry.getKey(), entry.getValue());
+                hadoopConf.set(entry.getKey(), entry.getValue());
+            }
+            ExternalCatalog externalCatalog =
+                    PaimonCatalogUtils.buildExternalCatalog(sparkConf, hadoopConf);
+            this.sessionCatalog = new V2SessionCatalog(new SessionCatalog(externalCatalog));
+        }
     }
 
     private CaseInsensitiveStringMap autoFillConfigurations(
@@ -278,34 +309,38 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
                 options.put(METASTORE.key(), metastore);
             }
         }
-    }
-
-    @Override
-    @SuppressWarnings("unchecked")
-    public void setDelegateCatalog(CatalogPlugin sparkSessionCatalog) {
-        if (sparkSessionCatalog instanceof TableCatalog
-                && sparkSessionCatalog instanceof SupportsNamespaces) {
-            this.sessionCatalog = (T) sparkSessionCatalog;
+        String sessionCatalogDefaultDatabase = SQLConfUtils.defaultDatabase(sqlConf);
+        if (options.containsKey(DEFAULT_DATABASE.key())) {
+            String userDefineDefaultDatabase = options.get(DEFAULT_DATABASE.key());
+            if (!userDefineDefaultDatabase.equals(sessionCatalogDefaultDatabase)) {
+                LOG.warn(
+                        String.format(
+                                "The current spark version does not support configuring default database, switch database to %s",
+                                sessionCatalogDefaultDatabase));
+                options.put(DEFAULT_DATABASE.key(), sessionCatalogDefaultDatabase);
+            }
         } else {
-            throw new IllegalArgumentException("Invalid session catalog: " + sparkSessionCatalog);
+            options.put(DEFAULT_DATABASE.key(), sessionCatalogDefaultDatabase);
         }
     }
 
     @Override
-    public String name() {
-        return catalogName;
+    public void setDelegateCatalog(CatalogPlugin delegate) {
+        if (!underlyingSessionCatalogEnabled) {
+            this.sessionCatalog = delegate;
+        }
     }
 
-    private boolean usePaimon(String provider) {
-        return provider == null || SparkSource.NAME().equalsIgnoreCase(provider);
+    private TableCatalog asTableCatalog() {
+        return (TableCatalog) sessionCatalog;
     }
 
-    private T getSessionCatalog() {
-        checkNotNull(
-                sessionCatalog,
-                "Delegated SessionCatalog is missing. "
-                        + "Please make sure your are replacing Spark's default catalog, named 'spark_catalog'.");
-        return sessionCatalog;
+    private SupportsNamespaces asNamespaceCatalog() {
+        return (SupportsNamespaces) sessionCatalog;
+    }
+
+    private FunctionCatalog asFunctionCatalog() {
+        return (FunctionCatalog) sessionCatalog;
     }
 
     @Override
@@ -314,12 +349,12 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
             return new Identifier[0];
         }
 
-        throw new NoSuchNamespaceException(namespace);
+        return asFunctionCatalog().listFunctions(namespace);
     }
 
     @Override
     public UnboundFunction loadFunction(Identifier ident) throws NoSuchFunctionException {
-        throw new NoSuchFunctionException(ident);
+        return asFunctionCatalog().loadFunction(ident);
     }
 
     private static boolean isSystemNamespace(String[] namespace) {

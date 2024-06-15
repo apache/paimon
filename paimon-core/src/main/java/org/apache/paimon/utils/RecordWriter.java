@@ -53,6 +53,9 @@ public interface RecordWriter<T> {
     /** Get all data files maintained by this writer. */
     Collection<DataFileMeta> dataFiles();
 
+    /** Get max sequence number of records written by this writer. */
+    long maxSequenceNumber();
+
     /**
      * Prepare for a commit.
      *
@@ -60,6 +63,9 @@ public interface RecordWriter<T> {
      * @return Incremental files in this snapshot cycle
      */
     CommitIncrement prepareCommit(boolean waitCompaction) throws Exception;
+
+    /** Check if a compaction is in progress, or if a compaction result remains to be fetched. */
+    boolean isCompacting();
 
     /**
      * Sync the writer. The structure related to file reading and writing is thread unsafe, there

@@ -1,12 +1,13 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The ASF licenses this file to You under the Apache License, Version 2.0
- * (the "License"); you may not use this file except in compliance with
- * the License.  You may obtain a copy of the License at
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
  *
- *    http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,13 +18,14 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.data.serializer.VersionedSerializer;
+import org.apache.paimon.flink.VersionedSerializerWrapper;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.utils.SerializableSupplier;
 
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.typeutils.base.array.BytePrimitiveArraySerializer;
-import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.api.operators.util.SimpleVersionedListState;
@@ -47,14 +49,13 @@ public class RestoreAndFailCommittableStateManager<GlobalCommitT>
     private static final long serialVersionUID = 1L;
 
     /** The committable's serializer. */
-    private final SerializableSupplier<SimpleVersionedSerializer<GlobalCommitT>>
-            committableSerializer;
+    private final SerializableSupplier<VersionedSerializer<GlobalCommitT>> committableSerializer;
 
     /** GlobalCommitT state of this job. Used to filter out previous successful commits. */
     private ListState<GlobalCommitT> streamingCommitterState;
 
     public RestoreAndFailCommittableStateManager(
-            SerializableSupplier<SimpleVersionedSerializer<GlobalCommitT>> committableSerializer) {
+            SerializableSupplier<VersionedSerializer<GlobalCommitT>> committableSerializer) {
         this.committableSerializer = committableSerializer;
     }
 
@@ -69,7 +70,7 @@ public class RestoreAndFailCommittableStateManager<GlobalCommitT>
                                         new ListStateDescriptor<>(
                                                 "streaming_committer_raw_states",
                                                 BytePrimitiveArraySerializer.INSTANCE)),
-                        committableSerializer.get());
+                        new VersionedSerializerWrapper<>(committableSerializer.get()));
         List<GlobalCommitT> restored = new ArrayList<>();
         streamingCommitterState.get().forEach(restored::add);
         streamingCommitterState.clear();

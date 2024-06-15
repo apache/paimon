@@ -20,6 +20,7 @@ package org.apache.paimon;
 
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.HashIndexMaintainer;
@@ -27,18 +28,21 @@ import org.apache.paimon.index.IndexMaintainer;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
-import org.apache.paimon.operation.KeyValueFileStoreRead;
 import org.apache.paimon.operation.KeyValueFileStoreScan;
 import org.apache.paimon.operation.KeyValueFileStoreWrite;
+import org.apache.paimon.operation.MergeFileSplitRead;
+import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.operation.ScanBucketFilter;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.KeyComparatorSupplier;
+import org.apache.paimon.utils.UserDefinedSeqComparator;
 import org.apache.paimon.utils.ValueEqualiserSupplier;
 
 import java.util.Comparator;
@@ -52,7 +56,6 @@ import java.util.function.Supplier;
 import static org.apache.paimon.predicate.PredicateBuilder.and;
 import static org.apache.paimon.predicate.PredicateBuilder.pickTransformFieldMapping;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
-import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** {@link FileStore} for querying and updating {@link KeyValue}s. */
@@ -73,7 +76,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     public KeyValueFileStore(
             FileIO fileIO,
             SchemaManager schemaManager,
-            long schemaId,
+            TableSchema schema,
             boolean crossPartitionUpdate,
             CoreOptions options,
             RowType partitionType,
@@ -84,7 +87,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             MergeFunctionFactory<KeyValue> mfFactory,
             String tableName,
             CatalogEnvironment catalogEnvironment) {
-        super(fileIO, schemaManager, schemaId, options, partitionType, catalogEnvironment);
+        super(fileIO, schemaManager, schema, options, partitionType, catalogEnvironment);
         this.crossPartitionUpdate = crossPartitionUpdate;
         this.bucketKeyType = bucketKeyType;
         this.keyType = keyType;
@@ -99,27 +102,23 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     @Override
     public BucketMode bucketMode() {
         if (options.bucket() == -1) {
-            return crossPartitionUpdate ? BucketMode.GLOBAL_DYNAMIC : BucketMode.DYNAMIC;
+            return crossPartitionUpdate ? BucketMode.CROSS_PARTITION : BucketMode.HASH_DYNAMIC;
         } else {
             checkArgument(!crossPartitionUpdate);
-            return BucketMode.FIXED;
+            return BucketMode.HASH_FIXED;
         }
     }
 
     @Override
     public KeyValueFileStoreScan newScan() {
-        return newScan(DEFAULT_MAIN_BRANCH);
-    }
-
-    public KeyValueFileStoreScan newScan(String branchName) {
-        return newScan(false, branchName);
+        return newScan(false);
     }
 
     @Override
-    public KeyValueFileStoreRead newRead() {
-        return new KeyValueFileStoreRead(
-                schemaManager,
-                schemaId,
+    public MergeFileSplitRead newRead() {
+        return new MergeFileSplitRead(
+                options,
+                schema,
                 keyType,
                 valueType,
                 newKeyComparator(),
@@ -127,11 +126,22 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 newReaderFactoryBuilder());
     }
 
+    public RawFileSplitRead newBatchRawFileRead() {
+        return new RawFileSplitRead(
+                fileIO,
+                schemaManager,
+                schema,
+                valueType,
+                FileFormatDiscover.of(options),
+                pathFactory(),
+                options.fileIndexReadEnabled());
+    }
+
     public KeyValueFileReaderFactory.Builder newReaderFactoryBuilder() {
         return KeyValueFileReaderFactory.builder(
                 fileIO,
                 schemaManager,
-                schemaId,
+                schema,
                 keyType,
                 valueType,
                 FileFormatDiscover.of(options),
@@ -148,24 +158,31 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     @Override
     public KeyValueFileStoreWrite newWrite(String commitUser, ManifestCacheFilter manifestFilter) {
         IndexMaintainer.Factory<KeyValue> indexFactory = null;
-        if (bucketMode() == BucketMode.DYNAMIC) {
+        if (bucketMode() == BucketMode.HASH_DYNAMIC) {
             indexFactory = new HashIndexMaintainer.Factory(newIndexFileHandler());
+        }
+        DeletionVectorsMaintainer.Factory deletionVectorsMaintainerFactory = null;
+        if (options.deletionVectorsEnabled()) {
+            deletionVectorsMaintainerFactory =
+                    new DeletionVectorsMaintainer.Factory(newIndexFileHandler());
         }
         return new KeyValueFileStoreWrite(
                 fileIO,
                 schemaManager,
-                schemaId,
+                schema,
                 commitUser,
                 keyType,
                 valueType,
                 keyComparatorSupplier,
+                () -> UserDefinedSeqComparator.create(valueType, options),
                 valueEqualiserSupplier,
                 mfFactory,
                 pathFactory(),
                 format2PathFactory(),
                 snapshotManager(),
-                newScan(true, DEFAULT_MAIN_BRANCH).withManifestCacheFilter(manifestFilter),
+                newScan(true).withManifestCacheFilter(manifestFilter),
                 indexFactory,
+                deletionVectorsMaintainerFactory,
                 options,
                 keyValueFieldsExtractor,
                 tableName);
@@ -187,12 +204,12 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
         return pathFactoryMap;
     }
 
-    private KeyValueFileStoreScan newScan(boolean forWrite, String branchName) {
+    private KeyValueFileStoreScan newScan(boolean forWrite) {
         ScanBucketFilter bucketFilter =
                 new ScanBucketFilter(bucketKeyType) {
                     @Override
                     public void pushdown(Predicate keyFilter) {
-                        if (bucketMode() != BucketMode.FIXED) {
+                        if (bucketMode() != BucketMode.HASH_FIXED) {
                             return;
                         }
 
@@ -211,14 +228,15 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 bucketFilter,
                 snapshotManager(),
                 schemaManager,
-                schemaId,
+                schema,
                 keyValueFieldsExtractor,
                 manifestFileFactory(forWrite),
                 manifestListFactory(forWrite),
                 options.bucket(),
                 forWrite,
                 options.scanManifestParallelism(),
-                branchName);
+                options.deletionVectorsEnabled(),
+                options.mergeEngine());
     }
 
     @Override

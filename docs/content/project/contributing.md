@@ -26,7 +26,7 @@ under the License.
 
 # Contributing
 
-Apache Paimon (incubating) is developed by an open and friendly community. Everybody is cordially welcome to join
+Apache Paimon is developed by an open and friendly community. Everybody is cordially welcome to join
 the community and contribute to Apache Paimon. There are several ways to interact with the community and contribute
 to Paimon including asking questions, filing bug reports, proposing new features, joining discussions on the mailing
 lists, contributing code or documentation, improving website, testing release candidates and writing corresponding blog etc.
@@ -44,7 +44,7 @@ lists, contributing code or documentation, improving website, testing release ca
   <tbody>
     <tr>
       <td><span class="glyphicon glyphicon-exclamation-sign" aria-hidden="true"></span> Report Bug</td>
-      <td>To report a problem with Paimon, open <a href="https://github.com/apache/incubator-paimon/issues">Paimon’s issues</a>. <br/>
+      <td>To report a problem with Paimon, open <a href="https://github.com/apache/paimon/issues">Paimon’s issues</a>. <br/>
       Please give detailed information about the problem you encountered and, if possible, add a description that helps to reproduce the problem.</td>
     </tr>
     <tr>
@@ -61,20 +61,20 @@ lists, contributing code or documentation, improving website, testing release ca
     </tr>
     <tr>
       <td><span class="glyphicon glyphicon-user" aria-hidden="true"></span> Support Users</td>
-      <td>Reply to questions on the <a href="https://github.com/apache/incubator-paimon#mailing-lists">user mailing list</a>,
-          check the latest issues in <a href="https://github.com/apache/incubator-paimon/issues">Issues</a> for tickets which are actually user questions.
+      <td>Reply to questions on the <a href="https://github.com/apache/paimon#mailing-lists">user mailing list</a>,
+          check the latest issues in <a href="https://github.com/apache/paimon/issues">Issues</a> for tickets which are actually user questions.
       </td>
     </tr>
     <tr>
       <td><span class="glyphicon glyphicon-volume-up" aria-hidden="true"></span> Spread the Word About Paimon</td>
       <td>Organize or attend a Paimon Meetup, contribute to the Paimon blog, share your conference, meetup or blog
-          post on the <a href="https://github.com/apache/incubator-paimon#mailing-lists">dev@paimon.apache.org mailing list</a>.
+          post on the <a href="https://github.com/apache/paimon#mailing-lists">dev@paimon.apache.org mailing list</a>.
       </td>
     </tr>
     <tr>
       <td colspan="2">
         <span class="glyphicon glyphicon-question-sign" aria-hidden="true"></span> Any other question? Reach out to the
-                     <a href="https://github.com/apache/incubator-paimon#mailing-lists">dev@paimon.apache.org mailing list</a> to get help!
+                     <a href="https://github.com/apache/paimon#mailing-lists">dev@paimon.apache.org mailing list</a> to get help!
       </td>
     </tr>
   </tbody>

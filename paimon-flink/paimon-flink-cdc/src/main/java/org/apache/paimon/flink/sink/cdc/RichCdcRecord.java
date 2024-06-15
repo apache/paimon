@@ -19,14 +19,19 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
 
+import javax.annotation.Nullable;
+
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /** A change message contains schema and data. */
 @Experimental
@@ -35,11 +40,11 @@ public class RichCdcRecord implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private final CdcRecord cdcRecord;
-    private final LinkedHashMap<String, DataType> fieldTypes;
+    private final List<DataField> fields;
 
-    public RichCdcRecord(CdcRecord cdcRecord, LinkedHashMap<String, DataType> fieldTypes) {
+    public RichCdcRecord(CdcRecord cdcRecord, List<DataField> fields) {
         this.cdcRecord = cdcRecord;
-        this.fieldTypes = fieldTypes;
+        this.fields = fields;
     }
 
     public boolean hasPayload() {
@@ -50,8 +55,8 @@ public class RichCdcRecord implements Serializable {
         return cdcRecord.kind();
     }
 
-    public LinkedHashMap<String, DataType> fieldTypes() {
-        return fieldTypes;
+    public List<DataField> fields() {
+        return fields;
     }
 
     public CdcRecord toCdcRecord() {
@@ -67,42 +72,49 @@ public class RichCdcRecord implements Serializable {
             return false;
         }
         RichCdcRecord that = (RichCdcRecord) o;
-        return cdcRecord == that.cdcRecord && Objects.equals(fieldTypes, that.fieldTypes);
+        return cdcRecord == that.cdcRecord && Objects.equals(fields, that.fields);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(cdcRecord, fieldTypes);
+        return Objects.hash(cdcRecord, fields);
     }
 
     @Override
     public String toString() {
-        return "{" + "cdcRecord=" + cdcRecord + ", fieldTypes=" + fieldTypes + '}';
+        return "{" + "cdcRecord=" + cdcRecord + ", fields=" + fields + '}';
     }
 
     public static Builder builder(RowKind kind) {
-        return new Builder(kind);
+        return new Builder(kind, new AtomicInteger(-1));
     }
 
     /** Builder for {@link RichCdcRecord}. */
     public static class Builder {
 
         private final RowKind kind;
-        private final LinkedHashMap<String, DataType> fieldTypes = new LinkedHashMap<>();
+        private final AtomicInteger fieldId;
+        private final List<DataField> fields = new ArrayList<>();
         private final Map<String, String> fieldValues = new HashMap<>();
 
-        public Builder(RowKind kind) {
+        public Builder(RowKind kind, AtomicInteger fieldId) {
             this.kind = kind;
+            this.fieldId = fieldId;
         }
 
         public Builder field(String name, DataType type, String value) {
-            fieldTypes.put(name, type);
+            return field(name, type, value, null);
+        }
+
+        public Builder field(
+                String name, DataType type, String value, @Nullable String description) {
+            fields.add(new DataField(fieldId.incrementAndGet(), name, type, description));
             fieldValues.put(name, value);
             return this;
         }
 
         public RichCdcRecord build() {
-            return new RichCdcRecord(new CdcRecord(kind, fieldValues), fieldTypes);
+            return new RichCdcRecord(new CdcRecord(kind, fieldValues), fields);
         }
     }
 }

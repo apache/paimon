@@ -18,19 +18,31 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileTestDataGenerator;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
+import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.InstantiationUtil;
 
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
+import static org.apache.paimon.data.BinaryArray.fromLongArray;
+import static org.apache.paimon.data.BinaryRow.singleColumn;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link DataSplit}. */
@@ -50,6 +62,7 @@ public class SplitTest {
                         .withPartition(data.partition)
                         .withBucket(data.bucket)
                         .withDataFiles(files)
+                        .withBucketPath("my path")
                         .build();
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -57,5 +70,64 @@ public class SplitTest {
 
         DataSplit newSplit = DataSplit.deserialize(new DataInputDeserializer(out.toByteArray()));
         assertThat(newSplit).isEqualTo(split);
+    }
+
+    @Test
+    public void testSerializerCompatible() throws Exception {
+        SimpleStats keyStats =
+                new SimpleStats(
+                        singleColumn("min_key"),
+                        singleColumn("max_key"),
+                        fromLongArray(new Long[] {0L}));
+        SimpleStats valueStats =
+                new SimpleStats(
+                        singleColumn("min_value"),
+                        singleColumn("max_value"),
+                        fromLongArray(new Long[] {0L}));
+
+        DataFileMeta dataFile =
+                new DataFileMeta(
+                        "my_file",
+                        1024 * 1024,
+                        1024,
+                        singleColumn("min_key"),
+                        singleColumn("max_key"),
+                        keyStats,
+                        valueStats,
+                        15,
+                        200,
+                        5,
+                        3,
+                        Arrays.asList("extra1", "extra2"),
+                        Timestamp.fromLocalDateTime(LocalDateTime.parse("2022-03-02T20:20:12")),
+                        11L,
+                        new byte[] {1, 2, 4},
+                        null);
+        List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
+
+        BinaryRow partition = new BinaryRow(1);
+        BinaryRowWriter binaryRowWriter = new BinaryRowWriter(partition);
+        binaryRowWriter.writeString(0, BinaryString.fromString("aaaaa"));
+        binaryRowWriter.complete();
+
+        DataSplit split =
+                DataSplit.builder()
+                        .withSnapshot(18)
+                        .withPartition(partition)
+                        .withBucket(20)
+                        .withDataFiles(dataFiles)
+                        .withBucketPath("my path")
+                        .build();
+
+        byte[] v2Bytes =
+                IOUtils.readFully(
+                        SplitTest.class
+                                .getClassLoader()
+                                .getResourceAsStream("compatibility/datasplit-v1"),
+                        true);
+
+        DataSplit actual =
+                InstantiationUtil.deserializeObject(v2Bytes, DataSplit.class.getClassLoader());
+        assertThat(actual).isEqualTo(split);
     }
 }

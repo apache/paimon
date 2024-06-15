@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -24,16 +24,17 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
-import org.apache.paimon.format.TableStatsExtractor;
+import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.format.orc.filter.OrcFilters;
 import org.apache.paimon.format.orc.filter.OrcPredicateFunctionVisitor;
-import org.apache.paimon.format.orc.filter.OrcTableStatsExtractor;
+import org.apache.paimon.format.orc.filter.OrcSimpleStatsExtractor;
 import org.apache.paimon.format.orc.reader.OrcSplitReaderUtil;
 import org.apache.paimon.format.orc.writer.RowDataVectorizer;
 import org.apache.paimon.format.orc.writer.Vectorizer;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.statistics.FieldStatsCollector;
+import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -43,6 +44,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 
+import org.apache.orc.OrcConf;
 import org.apache.orc.TypeDescription;
 
 import javax.annotation.Nullable;
@@ -65,33 +67,32 @@ public class OrcFileFormat extends FileFormat {
     private final Properties orcProperties;
     private final org.apache.hadoop.conf.Configuration readerConf;
     private final org.apache.hadoop.conf.Configuration writerConf;
-
-    private final FormatContext formatContext;
+    private final int readBatchSize;
 
     public OrcFileFormat(FormatContext formatContext) {
         super(IDENTIFIER);
-        this.orcProperties = getOrcProperties(formatContext.formatOptions());
+        this.orcProperties = getOrcProperties(formatContext.formatOptions(), formatContext);
         this.readerConf = new org.apache.hadoop.conf.Configuration();
         this.orcProperties.forEach((k, v) -> readerConf.set(k.toString(), v.toString()));
         this.writerConf = new org.apache.hadoop.conf.Configuration();
         this.orcProperties.forEach((k, v) -> writerConf.set(k.toString(), v.toString()));
-        this.formatContext = formatContext;
+        this.readBatchSize = formatContext.readBatchSize();
     }
 
     @VisibleForTesting
-    Properties orcProperties() {
+    public Properties orcProperties() {
         return orcProperties;
     }
 
     @VisibleForTesting
-    public FormatContext formatContext() {
-        return formatContext;
+    public int readBatchSize() {
+        return readBatchSize;
     }
 
     @Override
-    public Optional<TableStatsExtractor> createStatsExtractor(
-            RowType type, FieldStatsCollector.Factory[] statsCollectors) {
-        return Optional.of(new OrcTableStatsExtractor(type, statsCollectors));
+    public Optional<SimpleStatsExtractor> createStatsExtractor(
+            RowType type, SimpleColStatsCollector.Factory[] statsCollectors) {
+        return Optional.of(new OrcSimpleStatsExtractor(type, statsCollectors));
     }
 
     @Override
@@ -111,7 +112,7 @@ public class OrcFileFormat extends FileFormat {
                 readerConf,
                 (RowType) refineDataType(projectedRowType),
                 orcPredicates,
-                formatContext.readBatchSize());
+                readBatchSize);
     }
 
     @Override
@@ -142,11 +143,25 @@ public class OrcFileFormat extends FileFormat {
         return new OrcWriterFactory(vectorizer, orcProperties, writerConf);
     }
 
-    private static Properties getOrcProperties(Options options) {
+    private static Properties getOrcProperties(Options options, FormatContext formatContext) {
         Properties orcProperties = new Properties();
+
         Properties properties = new Properties();
         options.addAllToProperties(properties);
         properties.forEach((k, v) -> orcProperties.put(IDENTIFIER + "." + k, v));
+
+        if (!orcProperties.containsKey(OrcConf.COMPRESSION_ZSTD_LEVEL.getAttribute())) {
+            orcProperties.setProperty(
+                    OrcConf.COMPRESSION_ZSTD_LEVEL.getAttribute(),
+                    String.valueOf(formatContext.zstdLevel()));
+        }
+
+        MemorySize blockSize = formatContext.blockSize();
+        if (blockSize != null) {
+            orcProperties.setProperty(
+                    OrcConf.STRIPE_SIZE.getAttribute(), String.valueOf(blockSize.getBytes()));
+        }
+
         return orcProperties;
     }
 

@@ -60,14 +60,14 @@ public class FixedBucketRowKeyExtractorTest {
         assertThat(bucket(extractor("", "a"), row)).isEqualTo(96);
         assertThat(bucket(extractor("", "a,b"), row)).isEqualTo(27);
         assertThat(bucket(extractor("a,b", "a,b"), row)).isEqualTo(27);
-        assertThat(bucket(extractor("", ""), row)).isEqualTo(40);
         assertThat(bucket(extractor("a,b,c", ""), row)).isEqualTo(40);
         assertThat(bucket(extractor("", "a,b,c"), row)).isEqualTo(40);
     }
 
     @Test
     public void testIllegalBucket() {
-        assertThatThrownBy(() -> extractor("", "", "a", -1))
+        GenericRow row = GenericRow.of(5, 6, 7);
+        assertThatThrownBy(() -> bucket(extractor("", "", "a", -1), row))
                 .hasMessageContaining("Num bucket is illegal");
     }
 

@@ -25,7 +25,7 @@ under the License.
     <parent>
         <artifactId>paimon-flink</artifactId>
         <groupId>org.apache.paimon</groupId>
-        <version>0.8-SNAPSHOT</version>
+        <version>0.9-SNAPSHOT</version>
     </parent>
 
     <packaging>jar</packaging>
@@ -64,12 +64,20 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-common</artifactId>
+            <artifactId>flink-table-api-java-bridge</artifactId>
             <version>${flink.version}</version>
             <scope>provided</scope>
         </dependency>
 
         <!-- test dependencies -->
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-flink-common</artifactId>
+            <version>${project.version}</version>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
 
         <dependency>
             <groupId>org.apache.flink</groupId>
@@ -86,9 +94,9 @@ under the License.
         </dependency>
 
         <dependency>
-            <groupId>org.apache.hadoop</groupId>
-            <artifactId>hadoop-hdfs-client</artifactId>
-            <version>${hadoop.version}</version>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-connector-files</artifactId>
+            <version>${flink.version}</version>
             <scope>test</scope>
         </dependency>
 

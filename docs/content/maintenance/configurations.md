@@ -50,6 +50,12 @@ Options for Hive catalog.
 
 {{< generated/hive_catalog_configuration >}}
 
+### JdbcCatalogOptions
+
+Options for Jdbc catalog.
+
+{{< generated/jdbc_catalog_configuration >}}
+
 ### FlinkCatalogOptions
 
 Flink catalog options for paimon.
@@ -62,13 +68,23 @@ Flink connector options for paimon.
 
 {{< generated/flink_connector_configuration >}}
 
+### SparkCatalogOptions
+
+Spark catalog options for paimon.
+
+{{< generated/spark_catalog_configuration >}}
+
 ### SparkConnectorOptions
 
 Spark connector options for paimon.
 
 {{< generated/spark_connector_configuration >}}
 
-## RocksDB Options
+### ORC Options
+
+{{< generated/orc_configuration >}}
+
+### RocksDB Options
 
 The following options allow users to finely adjust RocksDB for better performance. You can either specify them in table properties or in dynamic table hints.
 

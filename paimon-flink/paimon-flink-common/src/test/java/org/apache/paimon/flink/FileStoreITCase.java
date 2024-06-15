@@ -33,15 +33,17 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.utils.BlockingIterator;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.FailingFileIO;
 
-import org.apache.flink.api.common.RuntimeExecutionMode;
+import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.transformations.SourceTransformation;
+import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.Projection;
 import org.apache.flink.table.data.GenericRowData;
@@ -51,6 +53,7 @@ import org.apache.flink.table.data.conversion.DataStructureConverter;
 import org.apache.flink.table.data.conversion.DataStructureConverters;
 import org.apache.flink.table.runtime.typeutils.InternalSerializers;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
+import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
@@ -60,6 +63,8 @@ import org.apache.flink.testutils.junit.extensions.parameterized.Parameters;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.extension.ExtendWith;
 
@@ -74,7 +79,9 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static org.apache.paimon.CoreOptions.BRANCH;
 import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
@@ -122,9 +129,16 @@ public class FileStoreITCase extends AbstractTestBase {
 
     private final StreamExecutionEnvironment env;
 
+    protected static String branch;
+
     public FileStoreITCase(boolean isBatch) {
         this.isBatch = isBatch;
         this.env = isBatch ? buildBatchEnv() : buildStreamEnv();
+    }
+
+    @BeforeAll
+    public static void before() {
+        branch = BranchManager.DEFAULT_MAIN_BRANCH;
     }
 
     @Parameters(name = "isBatch-{0}")
@@ -137,16 +151,53 @@ public class FileStoreITCase extends AbstractTestBase {
     }
 
     @TestTemplate
-    public void testPartitioned() throws Exception {
+    public void testRowSourceSink() throws Exception {
         FileStoreTable table = buildFileStoreTable(new int[] {1}, new int[] {1, 2});
 
         // write
-        new FlinkSinkBuilder(table).withInput(buildTestSource(env, isBatch)).build();
+        DataStreamSource<RowData> source = buildTestSource(env, isBatch);
+        DataStream<Row> input =
+                source.map(
+                                (MapFunction<RowData, Row>)
+                                        r ->
+                                                Row.of(
+                                                        r.getInt(0),
+                                                        r.getString(1).toString(),
+                                                        r.getInt(2)))
+                        .setParallelism(source.getParallelism());
+        DataType inputType =
+                DataTypes.ROW(
+                        DataTypes.FIELD("v", DataTypes.INT()),
+                        DataTypes.FIELD("p", DataTypes.STRING()),
+                        DataTypes.FIELD("_k", DataTypes.INT()));
+        new FlinkSinkBuilder(table).forRow(input, inputType).build();
         env.execute();
 
         // read
         List<Row> results =
-                executeAndCollect(new FlinkSourceBuilder(IDENTIFIER, table).withEnv(env).build());
+                executeAndCollectRow(
+                        new FlinkSourceBuilder(table).env(env).sourceBounded(true).buildForRow());
+
+        // assert
+        Row[] expected =
+                new Row[] {
+                    Row.of(5, "p2", 1), Row.of(3, "p2", 5), Row.of(5, "p1", 1), Row.of(0, "p1", 2)
+                };
+        assertThat(results).containsExactlyInAnyOrder(expected);
+    }
+
+    @TestTemplate
+    public void testPartitioned() throws Exception {
+        FileStoreTable table = buildFileStoreTable(new int[] {1}, new int[] {1, 2});
+
+        // write
+        new FlinkSinkBuilder(table).forRowData(buildTestSource(env, isBatch)).build();
+        env.execute();
+
+        // read
+        List<Row> results =
+                executeAndCollect(
+                        new FlinkSourceBuilder(table).sourceBounded(true).env(env).build());
 
         // assert
         Row[] expected =
@@ -161,12 +212,13 @@ public class FileStoreITCase extends AbstractTestBase {
         FileStoreTable table = buildFileStoreTable(new int[0], new int[] {2});
 
         // write
-        new FlinkSinkBuilder(table).withInput(buildTestSource(env, isBatch)).build();
+        new FlinkSinkBuilder(table).forRowData(buildTestSource(env, isBatch)).build();
         env.execute();
 
         // read
         List<Row> results =
-                executeAndCollect(new FlinkSourceBuilder(IDENTIFIER, table).withEnv(env).build());
+                executeAndCollect(
+                        new FlinkSourceBuilder(table).sourceBounded(true).env(env).build());
 
         // assert
         Row[] expected = new Row[] {Row.of(5, "p2", 1), Row.of(0, "p1", 2), Row.of(3, "p2", 5)};
@@ -180,7 +232,7 @@ public class FileStoreITCase extends AbstractTestBase {
         FileStoreTable table = buildFileStoreTable(new int[] {1}, new int[] {1, 2});
 
         // write
-        new FlinkSinkBuilder(table).withInput(buildTestSource(env, isBatch)).build();
+        new FlinkSinkBuilder(table).forRowData(buildTestSource(env, isBatch)).build();
         env.execute();
 
         // overwrite p2
@@ -191,15 +243,13 @@ public class FileStoreITCase extends AbstractTestBase {
                         InternalTypeInfo.of(TABLE_TYPE));
         Map<String, String> overwrite = new HashMap<>();
         overwrite.put("p", "p2");
-        new FlinkSinkBuilder(table)
-                .withInput(partialData)
-                .withOverwritePartition(overwrite)
-                .build();
+        new FlinkSinkBuilder(table).forRowData(partialData).overwrite(overwrite).build();
         env.execute();
 
         // read
         List<Row> results =
-                executeAndCollect(new FlinkSourceBuilder(IDENTIFIER, table).withEnv(env).build());
+                executeAndCollect(
+                        new FlinkSourceBuilder(table).sourceBounded(true).env(env).build());
 
         Row[] expected = new Row[] {Row.of(9, "p2", 5), Row.of(5, "p1", 1), Row.of(0, "p1", 2)};
         assertThat(results).containsExactlyInAnyOrder(expected);
@@ -210,14 +260,13 @@ public class FileStoreITCase extends AbstractTestBase {
                         Collections.singletonList(
                                 wrap(GenericRowData.of(19, StringData.fromString("p2"), 6))),
                         InternalTypeInfo.of(TABLE_TYPE));
-        new FlinkSinkBuilder(table)
-                .withInput(partialData)
-                .withOverwritePartition(new HashMap<>())
-                .build();
+        new FlinkSinkBuilder(table).forRowData(partialData).overwrite().build();
         env.execute();
 
         // read
-        results = executeAndCollect(new FlinkSourceBuilder(IDENTIFIER, table).withEnv(env).build());
+        results =
+                executeAndCollect(
+                        new FlinkSourceBuilder(table).sourceBounded(true).env(env).build());
         expected = new Row[] {Row.of(19, "p2", 6), Row.of(5, "p1", 1), Row.of(0, "p1", 2)};
         assertThat(results).containsExactlyInAnyOrder(expected);
 
@@ -231,13 +280,15 @@ public class FileStoreITCase extends AbstractTestBase {
                         table.copy(
                                 Collections.singletonMap(
                                         CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key(), "false")))
-                .withInput(partialData)
-                .withOverwritePartition(new HashMap<>())
+                .forRowData(partialData)
+                .overwrite()
                 .build();
         env.execute();
 
         // read
-        results = executeAndCollect(new FlinkSourceBuilder(IDENTIFIER, table).withEnv(env).build());
+        results =
+                executeAndCollect(
+                        new FlinkSourceBuilder(table).sourceBounded(true).env(env).build());
         expected = new Row[] {Row.of(20, "p2", 3)};
         assertThat(results).containsExactlyInAnyOrder(expected);
     }
@@ -247,12 +298,13 @@ public class FileStoreITCase extends AbstractTestBase {
         FileStoreTable table = buildFileStoreTable(new int[] {1}, new int[0]);
 
         // write
-        new FlinkSinkBuilder(table).withInput(buildTestSource(env, isBatch)).build();
+        new FlinkSinkBuilder(table).forRowData(buildTestSource(env, isBatch)).build();
         env.execute();
 
         // read
         List<Row> results =
-                executeAndCollect(new FlinkSourceBuilder(IDENTIFIER, table).withEnv(env).build());
+                executeAndCollect(
+                        new FlinkSourceBuilder(table).sourceBounded(true).env(env).build());
 
         // assert
         // in streaming mode, expect origin data X 2 (FiniteTestSource)
@@ -276,7 +328,7 @@ public class FileStoreITCase extends AbstractTestBase {
 
     private void testProjection(FileStoreTable table) throws Exception {
         // write
-        new FlinkSinkBuilder(table).withInput(buildTestSource(env, isBatch)).build();
+        new FlinkSinkBuilder(table).forRowData(buildTestSource(env, isBatch)).build();
         env.execute();
 
         // read
@@ -289,9 +341,10 @@ public class FileStoreITCase extends AbstractTestBase {
                                         projection.project(TABLE_TYPE)));
         List<Row> results =
                 executeAndCollect(
-                        new FlinkSourceBuilder(IDENTIFIER, table)
-                                .withProjection(projection.toNestedIndexes())
-                                .withEnv(env)
+                        new FlinkSourceBuilder(table)
+                                .sourceBounded(true)
+                                .projection(projection.toNestedIndexes())
+                                .env(env)
                                 .build(),
                         converter);
 
@@ -329,14 +382,29 @@ public class FileStoreITCase extends AbstractTestBase {
                 table.copy(
                         Collections.singletonMap(CoreOptions.SCAN_BOUNDED_WATERMARK.key(), "1024"));
         DataStream<RowData> source =
-                new FlinkSourceBuilder(IDENTIFIER, table)
-                        .withContinuousMode(true)
-                        .withEnv(env)
-                        .build();
+                new FlinkSourceBuilder(table).sourceBounded(false).env(env).build();
         Transformation<RowData> transformation = source.getTransformation();
         assertThat(transformation).isInstanceOf(SourceTransformation.class);
         assertThat(((SourceTransformation<?, ?, ?>) transformation).getSource().getBoundedness())
                 .isEqualTo(Boundedness.BOUNDED);
+    }
+
+    @TestTemplate
+    public void testCommitUserWithPrefix() throws Exception {
+        String commitUserPrefix = "commitUserPrefix";
+
+        FileStoreTable table = buildFileStoreTable(new int[0], new int[] {2});
+        table =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.COMMIT_USER_PREFIX.key(), commitUserPrefix));
+        // write
+        new FlinkSinkBuilder(table).forRowData(buildTestSource(env, isBatch)).build();
+        env.execute();
+
+        Assertions.assertNotNull(table.snapshotManager().latestSnapshot());
+        Assertions.assertTrue(
+                table.snapshotManager().latestSnapshot().commitUser().startsWith(commitUserPrefix));
     }
 
     private void innerTestContinuous(FileStoreTable table) throws Exception {
@@ -344,9 +412,9 @@ public class FileStoreITCase extends AbstractTestBase {
 
         BlockingIterator<RowData, Row> iterator =
                 BlockingIterator.of(
-                        new FlinkSourceBuilder(IDENTIFIER, table)
-                                .withContinuousMode(true)
-                                .withEnv(env)
+                        new FlinkSourceBuilder(table)
+                                .sourceBounded(false)
+                                .env(env)
                                 .build()
                                 .executeAndCollect(),
                         CONVERTER::toExternal);
@@ -383,7 +451,7 @@ public class FileStoreITCase extends AbstractTestBase {
         }
         DataStreamSource<RowData> source =
                 env.addSource(new FiniteTestSource<>(src, true), InternalTypeInfo.of(TABLE_TYPE));
-        new FlinkSinkBuilder(table).withInput(source).build();
+        new FlinkSinkBuilder(table).forRowData(source).build();
         env.execute();
         assertThat(iterator.collect(expected.length)).containsExactlyInAnyOrder(expected);
     }
@@ -396,19 +464,16 @@ public class FileStoreITCase extends AbstractTestBase {
         return wrap(GenericRowData.ofKind(kind, v, StringData.fromString(p), k));
     }
 
-    public static StreamExecutionEnvironment buildStreamEnv() {
-        final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setRuntimeMode(RuntimeExecutionMode.STREAMING);
-        env.enableCheckpointing(100);
-        env.setParallelism(2);
-        return env;
+    public StreamExecutionEnvironment buildStreamEnv() {
+        return streamExecutionEnvironmentBuilder()
+                .streamingMode()
+                .checkpointIntervalMs(100)
+                .parallelism(2)
+                .build();
     }
 
-    public static StreamExecutionEnvironment buildBatchEnv() {
-        final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setRuntimeMode(RuntimeExecutionMode.BATCH);
-        env.setParallelism(2);
-        return env;
+    public StreamExecutionEnvironment buildBatchEnv() {
+        return streamExecutionEnvironmentBuilder().batchMode().parallelism(2).build();
     }
 
     public static FileStoreTable buildFileStoreTable(
@@ -416,6 +481,9 @@ public class FileStoreITCase extends AbstractTestBase {
             throws Exception {
         Options options = buildConfiguration(noFail, temporaryPath);
         Path tablePath = new CoreOptions(options.toMap()).path();
+        if (primaryKey.length == 0) {
+            options.set(BUCKET_KEY, "_k");
+        }
         Schema schema =
                 new Schema(
                         toDataType(TABLE_TYPE).getFields(),
@@ -429,7 +497,7 @@ public class FileStoreITCase extends AbstractTestBase {
                         "");
         return retryArtificialException(
                 () -> {
-                    new SchemaManager(LocalFileIO.create(), tablePath).createTable(schema);
+                    new SchemaManager(LocalFileIO.create(), tablePath, branch).createTable(schema);
                     return FileStoreTableFactory.create(LocalFileIO.create(), options);
                 });
     }
@@ -444,7 +512,8 @@ public class FileStoreITCase extends AbstractTestBase {
             FailingFileIO.reset(failingName, 3, 100);
             options.set(PATH, FailingFileIO.getFailingPath(failingName, temporaryPath));
         }
-        options.set(FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        options.set(FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
+        options.set(BRANCH, branch);
         return options;
     }
 
@@ -468,6 +537,16 @@ public class FileStoreITCase extends AbstractTestBase {
         List<Row> results = new ArrayList<>();
         while (iterator.hasNext()) {
             results.add(converter.toExternal(iterator.next()));
+        }
+        iterator.close();
+        return results;
+    }
+
+    public static List<Row> executeAndCollectRow(DataStream<Row> source) throws Exception {
+        CloseableIterator<Row> iterator = source.executeAndCollect();
+        List<Row> results = new ArrayList<>();
+        while (iterator.hasNext()) {
+            results.add(iterator.next());
         }
         iterator.close();
         return results;

@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.table.api.ValidationException;
@@ -58,6 +57,7 @@ import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.sEnv;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testBatchRead;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testStreamingRead;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.validateStreamingReadResult;
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.params.provider.Arguments.arguments;
 
@@ -124,35 +124,12 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                 expected,
                 Arrays.asList(
                         changelogRow("+I", 1, "v_1", "creation", "02-27"),
-                        changelogRow("+U", 2, "v_2_nmu", "not_matched_upsert", "02-27"),
-                        changelogRow("+U", 3, "v_3_nmu", "not_matched_upsert", "02-27"),
-                        changelogRow("+U", 7, "Seven", "matched_upsert", "02-28"),
+                        changelogRow("+I", 2, "v_2_nmu", "not_matched_upsert", "02-27"),
+                        changelogRow("+I", 3, "v_3_nmu", "not_matched_upsert", "02-27"),
+                        changelogRow("+I", 7, "Seven", "matched_upsert", "02-28"),
                         changelogRow("+I", 8, "v_8", "insert", "02-29"),
                         changelogRow("+I", 11, "v_11", "insert", "02-29"),
                         changelogRow("+I", 12, "v_12", "insert", "02-29")));
-
-        if (producer == CoreOptions.ChangelogProducer.FULL_COMPACTION) {
-            // test partial update still works after action
-            testWorkWithPartialUpdate();
-        }
-    }
-
-    private void testWorkWithPartialUpdate() throws Exception {
-        insertInto(
-                "T",
-                "(12, CAST (NULL AS STRING), '$', '02-29')",
-                "(12, 'Test', CAST (NULL AS STRING), '02-29')");
-
-        testBatchRead(
-                buildSimpleQuery("T"),
-                Arrays.asList(
-                        changelogRow("+I", 1, "v_1", "creation", "02-27"),
-                        changelogRow("+U", 2, "v_2_nmu", "not_matched_upsert", "02-27"),
-                        changelogRow("+U", 3, "v_3_nmu", "not_matched_upsert", "02-27"),
-                        changelogRow("+U", 7, "Seven", "matched_upsert", "02-28"),
-                        changelogRow("+I", 8, "v_8", "insert", "02-29"),
-                        changelogRow("+I", 11, "v_11", "insert", "02-29"),
-                        changelogRow("+I", 12, "Test", "$", "02-29")));
     }
 
     @ParameterizedTest(name = "in-default = {0}")
@@ -455,6 +432,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                 createTable(
                         Collections.singletonList("k int"),
                         Collections.emptyList(),
+                        Collections.singletonList("k"),
                         Collections.emptyList());
 
         assertThatThrownBy(
@@ -495,9 +473,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                 .withMatchedDelete("S.v IS NULL");
 
         assertThatThrownBy(() -> action.build().run())
-                .satisfies(
-                        AssertionUtils.anyCauseMatches(
-                                ValidationException.class, "Object 'S' not found"));
+                .satisfies(anyCauseMatches(ValidationException.class, "Object 'S' not found"));
     }
 
     @Test
@@ -515,9 +491,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                 .withMatchedDelete("S.v IS NULL");
 
         assertThatThrownBy(() -> action.build().run())
-                .satisfies(
-                        AssertionUtils.anyCauseMatches(
-                                ValidationException.class, "Object 'S' not found"));
+                .satisfies(anyCauseMatches(ValidationException.class, "Object 'S' not found"));
     }
 
     private void validateActionRunResult(
@@ -557,11 +531,11 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                             {
                                 put(CHANGELOG_PRODUCER.key(), producer.toString());
                                 // test works with partial update normally
-                                if (producer == CoreOptions.ChangelogProducer.FULL_COMPACTION) {
+                                if (producer == CoreOptions.ChangelogProducer.LOOKUP) {
                                     put(
                                             CoreOptions.MERGE_ENGINE.key(),
                                             CoreOptions.MergeEngine.PARTIAL_UPDATE.toString());
-                                    put(CoreOptions.PARTIAL_UPDATE_IGNORE_DELETE.key(), "true");
+                                    put(CoreOptions.IGNORE_DELETE.key(), "true");
                                 }
                             }
                         }));

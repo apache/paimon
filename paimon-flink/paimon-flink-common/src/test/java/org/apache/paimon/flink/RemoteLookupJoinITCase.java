@@ -22,6 +22,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.flink.query.RemoteTableQuery;
+import org.apache.paimon.flink.service.QueryService;
 import org.apache.paimon.service.ServiceManager;
 import org.apache.paimon.service.network.stats.DisabledServiceRequestStats;
 import org.apache.paimon.service.server.KvQueryServer;
@@ -34,6 +35,8 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.BlockingIterator;
 
+import org.apache.flink.core.execution.JobClient;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.Test;
@@ -67,7 +70,7 @@ public class RemoteLookupJoinITCase extends CatalogITCaseBase {
         sql(
                 "CREATE TABLE DIM (k INT PRIMARY KEY NOT ENFORCED, v INT) WITH ('bucket' = '2', 'continuous.discovery-interval' = '1ms')");
         CloseableIterator<Row> service = streamSqlIter("CALL sys.query_service('default.DIM', 2)");
-        RemoteTableQuery query = new RemoteTableQuery(getPaimonTable("DIM"));
+        RemoteTableQuery query = new RemoteTableQuery(paimonTable("DIM"));
 
         sql("INSERT INTO DIM VALUES (1, 11), (2, 22), (3, 33), (4, 44)");
         Thread.sleep(2000);
@@ -131,8 +134,36 @@ public class RemoteLookupJoinITCase extends CatalogITCaseBase {
         proxy.close();
     }
 
+    @Test
+    public void testServiceFileCleaned() throws Exception {
+        sql(
+                "CREATE TABLE DIM (k INT PRIMARY KEY NOT ENFORCED, v INT) WITH ('bucket' = '2', 'continuous.discovery-interval' = '1ms')");
+        JobClient client = queryService(paimonTable("DIM"));
+
+        RemoteTableQuery query = new RemoteTableQuery(paimonTable("DIM"));
+
+        sql("INSERT INTO DIM VALUES (1, 11), (2, 22), (3, 33), (4, 44)");
+        Thread.sleep(2000);
+
+        assertThat(query.lookup(row(), 0, row(1)))
+                .isNotNull()
+                .extracting(r -> r.getInt(1))
+                .isEqualTo(11);
+
+        client.cancel().get();
+        query.close();
+        ServiceManager serviceManager = paimonTable("DIM").store().newServiceManager();
+        assertThat(serviceManager.service(PRIMARY_KEY_LOOKUP).isPresent()).isFalse();
+    }
+
+    private JobClient queryService(FileStoreTable table) throws Exception {
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        QueryService.build(env, table, 2);
+        return env.executeAsync();
+    }
+
     private ServiceProxy launchQueryServer(String tableName) throws Throwable {
-        FileStoreTable table = (FileStoreTable) getPaimonTable(tableName);
+        FileStoreTable table = (FileStoreTable) paimonTable(tableName);
         LocalTableQuery query = table.newLocalTableQuery().withIOManager(IOManager.create(path));
         KvQueryServer server =
                 new KvQueryServer(

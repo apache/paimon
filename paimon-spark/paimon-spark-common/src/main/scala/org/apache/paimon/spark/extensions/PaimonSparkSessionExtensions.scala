@@ -15,10 +15,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark.extensions
 
 import org.apache.paimon.spark.catalyst.analysis.{PaimonAnalysis, PaimonDeleteTable, PaimonIncompatiblePHRRules, PaimonIncompatibleResolutionRules, PaimonMergeInto, PaimonPostHocResolutionRules, PaimonProcedureResolver, PaimonUpdateTable}
-import org.apache.paimon.spark.catalyst.optimizer.MergePaimonScalarSubqueriers
+import org.apache.paimon.spark.catalyst.optimizer.{EvalSubqueriesForDeleteTable, MergePaimonScalarSubqueriers}
 import org.apache.paimon.spark.catalyst.plans.logical.PaimonTableValuedFunctions
 import org.apache.paimon.spark.execution.PaimonStrategy
 
@@ -51,10 +52,11 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
           PaimonTableValuedFunctions.getTableValueFunctionInjection(fnName))
     }
 
+    // optimization rules
+    extensions.injectOptimizerRule(_ => EvalSubqueriesForDeleteTable)
+    extensions.injectOptimizerRule(_ => MergePaimonScalarSubqueriers)
+
     // planner extensions
     extensions.injectPlannerStrategy(spark => PaimonStrategy(spark))
-
-    // optimization rules
-    extensions.injectOptimizerRule(_ => MergePaimonScalarSubqueriers)
   }
 }

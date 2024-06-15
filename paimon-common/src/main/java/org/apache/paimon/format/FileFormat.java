@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,7 +23,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.statistics.FieldStatsCollector;
+import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
@@ -69,8 +69,8 @@ public abstract class FileFormat {
         return createReaderFactory(rowType, new ArrayList<>());
     }
 
-    public Optional<TableStatsExtractor> createStatsExtractor(
-            RowType type, FieldStatsCollector.Factory[] statsCollectors) {
+    public Optional<SimpleStatsExtractor> createStatsExtractor(
+            RowType type, SimpleColStatsCollector.Factory[] statsCollectors) {
         return Optional.empty();
     }
 
@@ -104,9 +104,12 @@ public abstract class FileFormat {
     }
 
     public static FileFormat getFileFormat(Options options, String formatIdentifier) {
-        int readBatchSize = options.get(CoreOptions.READ_BATCH_SIZE);
-        return FileFormat.fromIdentifier(
-                formatIdentifier,
-                new FormatContext(options.removePrefix(formatIdentifier + "."), readBatchSize));
+        FormatContext context =
+                new FormatContext(
+                        options.removePrefix(formatIdentifier + "."),
+                        options.get(CoreOptions.READ_BATCH_SIZE),
+                        options.get(CoreOptions.FILE_COMPRESSION_ZSTD_LEVEL),
+                        options.get(CoreOptions.FILE_BLOCK_SIZE));
+        return FileFormat.fromIdentifier(formatIdentifier, context);
     }
 }

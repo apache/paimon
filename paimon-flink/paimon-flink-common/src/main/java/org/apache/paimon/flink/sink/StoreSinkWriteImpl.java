@@ -170,11 +170,13 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     }
 
     @Override
+    @Nullable
     public SinkRecord write(InternalRow rowData) throws Exception {
         return write.writeAndReturn(rowData);
     }
 
     @Override
+    @Nullable
     public SinkRecord write(InternalRow rowData, int bucket) throws Exception {
         return write.writeAndReturn(rowData, bucket);
     }

@@ -19,7 +19,6 @@
 package org.apache.paimon.predicate;
 
 import org.apache.paimon.annotation.Public;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
@@ -28,8 +27,6 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
-import org.apache.paimon.utils.RowDataToObjectArrayConverter;
-import org.apache.paimon.utils.TypeUtils;
 
 import javax.annotation.Nullable;
 
@@ -46,10 +43,13 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import static java.util.Collections.singletonList;
+import static org.apache.paimon.utils.InternalRowPartitionComputer.convertSpecToInternal;
 
 /**
  * A utility class to create {@link Predicate} object for common filter conditions.
@@ -159,6 +159,21 @@ public class PredicateBuilder {
         return predicates.stream()
                 .reduce((a, b) -> new CompoundPredicate(And.INSTANCE, Arrays.asList(a, b)))
                 .get();
+    }
+
+    @Nullable
+    public static Predicate andNullable(Predicate... predicates) {
+        return andNullable(Arrays.asList(predicates));
+    }
+
+    @Nullable
+    public static Predicate andNullable(List<Predicate> predicates) {
+        predicates = predicates.stream().filter(Objects::nonNull).collect(Collectors.toList());
+        if (predicates.isEmpty()) {
+            return null;
+        }
+
+        return and(predicates);
     }
 
     public static Predicate or(Predicate... predicates) {
@@ -343,47 +358,31 @@ public class PredicateBuilder {
     }
 
     @Nullable
-    public static Predicate partition(Map<String, String> map, RowType rowType) {
-        // TODO: It is somewhat misleading that an empty map creates a null predicate filter
+    public static Predicate partition(
+            Map<String, String> map, RowType rowType, String defaultPartValue) {
+        Map<String, Object> internalValues = convertSpecToInternal(map, rowType, defaultPartValue);
         List<String> fieldNames = rowType.getFieldNames();
         Predicate predicate = null;
         PredicateBuilder builder = new PredicateBuilder(rowType);
-        for (Map.Entry<String, String> entry : map.entrySet()) {
+        for (Map.Entry<String, Object> entry : internalValues.entrySet()) {
             int idx = fieldNames.indexOf(entry.getKey());
-            Object literal = TypeUtils.castFromString(entry.getValue(), rowType.getTypeAt(idx));
+            Object literal = internalValues.get(entry.getKey());
+            Predicate predicateTemp =
+                    literal == null ? builder.isNull(idx) : builder.equal(idx, literal);
             if (predicate == null) {
-                predicate = builder.equal(idx, literal);
+                predicate = predicateTemp;
             } else {
-                predicate = PredicateBuilder.and(predicate, builder.equal(idx, literal));
+                predicate = PredicateBuilder.and(predicate, predicateTemp);
             }
         }
         return predicate;
     }
 
-    public static Predicate partitions(List<Map<String, String>> partitions, RowType rowType) {
+    public static Predicate partitions(
+            List<Map<String, String>> partitions, RowType rowType, String defaultPartValue) {
         return PredicateBuilder.or(
                 partitions.stream()
-                        .map(p -> PredicateBuilder.partition(p, rowType))
+                        .map(p -> PredicateBuilder.partition(p, rowType, defaultPartValue))
                         .toArray(Predicate[]::new));
-    }
-
-    public static Predicate equalPartition(BinaryRow partition, RowType partitionType) {
-        Preconditions.checkArgument(
-                partition.getFieldCount() == partitionType.getFieldCount(),
-                "Partition's field count should be equal to partitionType's field count.");
-
-        RowDataToObjectArrayConverter converter = new RowDataToObjectArrayConverter(partitionType);
-        Predicate predicate = null;
-        PredicateBuilder builder = new PredicateBuilder(partitionType);
-        Object[] literals = converter.convert(partition);
-        for (int i = 0; i < literals.length; i++) {
-            if (predicate == null) {
-                predicate = builder.equal(i, literals[i]);
-            } else {
-                predicate = PredicateBuilder.and(predicate, builder.equal(i, literals[i]));
-            }
-        }
-
-        return predicate;
     }
 }

@@ -24,7 +24,7 @@
     <parent>
         <artifactId>paimon-filesystems</artifactId>
         <groupId>org.apache.paimon</groupId>
-        <version>0.8-SNAPSHOT</version>
+        <version>0.9-SNAPSHOT</version>
     </parent>
 
     <artifactId>paimon-oss</artifactId>
@@ -56,6 +56,26 @@
 
     <build>
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>test-jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <archive>
+                        <manifestEntries>
+                            <!-- jaxb-api is packaged as an optional dependency that is only accessible on Java 11 -->
+                            <Multi-Release>true</Multi-Release>
+                        </manifestEntries>
+                    </archive>
+                </configuration>
+            </plugin>
+
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-dependency-plugin</artifactId>

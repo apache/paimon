@@ -15,6 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark
 
 import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate}
@@ -59,18 +60,16 @@ abstract class PaimonBaseScanBuilder(table: Table)
     val visitor = new PartitionPredicateVisitor(table.partitionKeys())
     filters.foreach {
       filter =>
-        try {
-          val predicate = converter.convert(filter)
+        val predicate = converter.convertIgnoreFailure(filter)
+        if (predicate == null) {
+          postScan.append(filter)
+        } else {
           pushable.append((filter, predicate))
-          if (!predicate.visit(visitor)) {
-            postScan.append(filter)
-          } else {
+          if (predicate.visit(visitor)) {
             reserved.append(filter)
-          }
-        } catch {
-          case e: UnsupportedOperationException =>
-            logWarning(e.getMessage)
+          } else {
             postScan.append(filter)
+          }
         }
     }
 

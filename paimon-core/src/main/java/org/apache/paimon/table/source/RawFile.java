@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
@@ -67,10 +66,7 @@ public class RawFile {
         return length;
     }
 
-    /**
-     * Format of the file, which is a lower-cased string. See {@link CoreOptions.FileFormatType} for
-     * all possible types.
-     */
+    /** Format of the file, which is a lower-cased string. e.g. avro, orc, parquet. */
     public String format() {
         return format;
     }

@@ -34,6 +34,7 @@ import java.util.ListIterator;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Queue;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.paimon.flink.utils.TableScanUtils.getSnapshotId;
 
@@ -48,6 +49,8 @@ public class PreAssignSplitAssigner implements SplitAssigner {
 
     private final Map<Integer, LinkedList<FileStoreSourceSplit>> pendingSplitAssignment;
 
+    private final AtomicInteger numberOfPendingSplits;
+
     public PreAssignSplitAssigner(
             int splitBatchSize,
             SplitEnumeratorContext<FileStoreSourceSplit> context,
@@ -55,6 +58,7 @@ public class PreAssignSplitAssigner implements SplitAssigner {
         this.splitBatchSize = splitBatchSize;
         this.pendingSplitAssignment =
                 createBatchFairSplitAssignment(splits, context.currentParallelism());
+        this.numberOfPendingSplits = new AtomicInteger(splits.size());
     }
 
     @Override
@@ -67,12 +71,14 @@ public class PreAssignSplitAssigner implements SplitAssigner {
         while (taskSplits != null && !taskSplits.isEmpty() && assignment.size() < splitBatchSize) {
             assignment.add(taskSplits.poll());
         }
+        numberOfPendingSplits.getAndAdd(-assignment.size());
         return assignment;
     }
 
     @Override
     public void addSplit(int suggestedTask, FileStoreSourceSplit split) {
         pendingSplitAssignment.computeIfAbsent(suggestedTask, k -> new LinkedList<>()).add(split);
+        numberOfPendingSplits.incrementAndGet();
     }
 
     @Override
@@ -83,6 +89,7 @@ public class PreAssignSplitAssigner implements SplitAssigner {
         while (iterator.hasPrevious()) {
             remainingSplits.addFirst(iterator.previous());
         }
+        numberOfPendingSplits.getAndAdd(splits.size());
     }
 
     @Override
@@ -114,5 +121,10 @@ public class PreAssignSplitAssigner implements SplitAssigner {
         return (pendingSplits == null || pendingSplits.isEmpty())
                 ? Optional.empty()
                 : getSnapshotId(pendingSplits.peekFirst());
+    }
+
+    @Override
+    public int numberOfRemainingSplits() {
+        return numberOfPendingSplits.get();
     }
 }

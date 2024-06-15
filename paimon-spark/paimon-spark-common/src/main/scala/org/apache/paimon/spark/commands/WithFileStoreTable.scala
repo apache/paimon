@@ -15,12 +15,24 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.{CoreOptions, FileStore}
 import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.types.RowType
 
 private[spark] trait WithFileStoreTable {
 
   def table: FileStoreTable
 
+  def withPrimaryKeys: Boolean = !table.primaryKeys().isEmpty
+
+  def rowType: RowType = table.rowType()
+
+  def coreOptions: CoreOptions = table.coreOptions()
+
+  def fileStore: FileStore[_] = table.store()
+
+  def deletionVectorsEnabled: Boolean = coreOptions.deletionVectorsEnabled()
 }

@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.testutils.assertj.AssertionUtils;
 
 import org.junit.jupiter.api.Test;
 
@@ -30,6 +29,7 @@ import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
 
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -168,7 +168,7 @@ public class SparkTimeTravelITCase extends SparkReadTestBase {
 
     @Test
     public void testSystemTableTimeTravel() throws Exception {
-        spark.sql("CREATE TABLE t (k INT, v STRING) TBLPROPERTIES ('bucket' = '1')");
+        spark.sql("CREATE TABLE t (k INT, v STRING)");
 
         // snapshot 1
         writeTable(
@@ -234,7 +234,7 @@ public class SparkTimeTravelITCase extends SparkReadTestBase {
         assertThatThrownBy(
                         () -> spark.sql("SELECT * FROM t VERSION AS OF 'unknown'").collectAsList())
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 RuntimeException.class,
                                 "Cannot find a time travel version for unknown"));
     }
@@ -298,5 +298,63 @@ public class SparkTimeTravelITCase extends SparkReadTestBase {
         // time travel to tag '1'
         assertThat(spark.sql("SELECT * FROM t VERSION AS OF '1'").collectAsList().toString())
                 .isEqualTo("[[1,Hello], [2,Paimon], [3,Test], [4,Case]]");
+    }
+
+    @Test
+    public void testTravelWithWatermark() throws Exception {
+        spark.sql("CREATE TABLE t (k INT, v STRING)");
+
+        // snapshot 1
+        writeTableWithWatermark(
+                "t",
+                1L,
+                GenericRow.of(1, BinaryString.fromString("Hello")),
+                GenericRow.of(2, BinaryString.fromString("Paimon")));
+
+        // snapshot 2
+        writeTableWithWatermark(
+                "t",
+                null,
+                GenericRow.of(1, BinaryString.fromString("Null")),
+                GenericRow.of(2, BinaryString.fromString("Watermark")));
+
+        // snapshot 3
+        writeTableWithWatermark(
+                "t",
+                10L,
+                GenericRow.of(3, BinaryString.fromString("Time")),
+                GenericRow.of(4, BinaryString.fromString("Travel")));
+
+        // time travel to watermark '1'
+        assertThat(
+                        spark.sql("SELECT * FROM t version as of 'watermark-1'")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[[1,Hello], [2,Paimon]]");
+
+        try {
+            spark.sql("SELECT * FROM t version as of 'watermark-11'").collectAsList();
+        } catch (Exception e) {
+            assertThat(
+                    e.getMessage()
+                            .equals(
+                                    "There is currently no snapshot later than or equal to watermark[11]"));
+        }
+
+        // time travel to watermark '9'
+        assertThat(
+                        spark.sql("SELECT * FROM t version as of 'watermark-9'")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo(
+                        "[[1,Hello], [2,Paimon], [1,Null], [2,Watermark], [3,Time], [4,Travel]]");
+
+        // time travel to watermark '10'
+        assertThat(
+                        spark.sql("SELECT * FROM t version as of 'watermark-10'")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo(
+                        "[[1,Hello], [2,Paimon], [1,Null], [2,Watermark], [3,Time], [4,Travel]]");
     }
 }

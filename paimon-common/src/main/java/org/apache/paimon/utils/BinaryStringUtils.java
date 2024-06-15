@@ -1,12 +1,13 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.	See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The ASF licenses this file to You under the Apache License, Version 2.0
- * (the "License"); you may not use this file except in compliance with
- * the License.	You may obtain a copy of the License at
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
  *
- *		http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -275,7 +276,12 @@ public class BinaryStringUtils {
     }
 
     public static int toDate(BinaryString input) throws DateTimeException {
-        Integer date = DateTimeUtils.parseDate(input.toString());
+        String str = input.toString();
+        if (StringUtils.isNumeric(str)) {
+            // for Integer.toString conversion
+            return toInt(input);
+        }
+        Integer date = DateTimeUtils.parseDate(str);
         if (date == null) {
             throw new DateTimeException("For input string: '" + input + "'.");
         }
@@ -284,7 +290,12 @@ public class BinaryStringUtils {
     }
 
     public static int toTime(BinaryString input) throws DateTimeException {
-        Integer date = DateTimeUtils.parseTime(input.toString());
+        String str = input.toString();
+        if (StringUtils.isNumeric(str)) {
+            // for Integer.toString conversion
+            return toInt(input);
+        }
+        Integer date = DateTimeUtils.parseTime(str);
         if (date == null) {
             throw new DateTimeException("For input string: '" + input + "'.");
         }

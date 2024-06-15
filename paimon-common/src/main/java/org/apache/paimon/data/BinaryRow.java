@@ -1,12 +1,13 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.	See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The ASF licenses this file to You under the Apache License, Version 2.0
- * (the "License"); you may not use this file except in compliance with
- * the License.	You may obtain a copy of the License at
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
  *
- *		http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,12 +21,9 @@ package org.apache.paimon.data;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentUtils;
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypeRoot;
-import org.apache.paimon.types.DecimalType;
-import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.RowKind;
-import org.apache.paimon.types.TimestampType;
+
+import javax.annotation.Nullable;
 
 import java.nio.ByteOrder;
 
@@ -77,38 +75,6 @@ public final class BinaryRow extends BinarySection implements InternalRow, DataS
 
     public static int calculateFixPartSizeInBytes(int arity) {
         return calculateBitSetWidthInBytes(arity) + 8 * arity;
-    }
-
-    /**
-     * If it is a fixed-length field, we can call this BinaryRow's setXX method for in-place
-     * updates. If it is variable-length field, can't use this method, because the underlying data
-     * is stored continuously.
-     */
-    public static boolean isInFixedLengthPart(DataType type) {
-        switch (type.getTypeRoot()) {
-            case BOOLEAN:
-            case TINYINT:
-            case SMALLINT:
-            case INTEGER:
-            case DATE:
-            case TIME_WITHOUT_TIME_ZONE:
-            case BIGINT:
-            case FLOAT:
-            case DOUBLE:
-                return true;
-            case DECIMAL:
-                return Decimal.isCompact(((DecimalType) type).getPrecision());
-            case TIMESTAMP_WITHOUT_TIME_ZONE:
-                return Timestamp.isCompact(((TimestampType) type).getPrecision());
-            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                return Timestamp.isCompact(((LocalZonedTimestampType) type).getPrecision());
-            default:
-                return false;
-        }
-    }
-
-    public static boolean isMutable(DataType type) {
-        return isInFixedLengthPart(type) || type.getTypeRoot() == DataTypeRoot.DECIMAL;
     }
 
     private final int arity;
@@ -444,5 +410,36 @@ public final class BinaryRow extends BinarySection implements InternalRow, DataS
     @Override
     public int hashCode() {
         return MemorySegmentUtils.hashByWords(segments, offset, sizeInBytes);
+    }
+
+    public static BinaryRow singleColumn(@Nullable Integer i) {
+        BinaryRow row = new BinaryRow(1);
+        BinaryRowWriter writer = new BinaryRowWriter(row);
+        writer.reset();
+        if (i == null) {
+            writer.setNullAt(0);
+        } else {
+            writer.writeInt(0, i);
+        }
+        writer.complete();
+        return row;
+    }
+
+    public static BinaryRow singleColumn(@Nullable String string) {
+        BinaryString binaryString = string == null ? null : BinaryString.fromString(string);
+        return singleColumn(binaryString);
+    }
+
+    public static BinaryRow singleColumn(@Nullable BinaryString string) {
+        BinaryRow row = new BinaryRow(1);
+        BinaryRowWriter writer = new BinaryRowWriter(row);
+        writer.reset();
+        if (string == null) {
+            writer.setNullAt(0);
+        } else {
+            writer.writeString(0, string);
+        }
+        writer.complete();
+        return row;
     }
 }

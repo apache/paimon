@@ -80,7 +80,6 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
         }
     }
 
-    @Nullable
     @Override
     public KeyValue getResult() {
         checkNotNull(
@@ -132,12 +131,15 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
             }
 
             FieldAggregator[] fieldAggregators = new FieldAggregator[fieldNames.size()];
+            String defaultAggFunc = options.fieldsDefaultFunc();
             for (int i = 0; i < fieldNames.size(); i++) {
                 String fieldName = fieldNames.get(i);
                 DataType fieldType = fieldTypes.get(i);
                 // aggregate by primary keys, so they do not aggregate
                 boolean isPrimaryKey = primaryKeys.contains(fieldName);
                 String strAggFunc = options.fieldAggFunc(fieldName);
+                strAggFunc = strAggFunc == null ? defaultAggFunc : strAggFunc;
+
                 boolean ignoreRetract = options.fieldAggIgnoreRetract(fieldName);
                 fieldAggregators[i] =
                         FieldAggregator.createFieldAggregator(

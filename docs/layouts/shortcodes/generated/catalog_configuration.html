@@ -27,6 +27,12 @@ under the License.
     </thead>
     <tbody>
         <tr>
+            <td><h5>client-pool-size</h5></td>
+            <td style="word-wrap: break-word;">2</td>
+            <td>Integer</td>
+            <td>Configure the size of the connection pool.</td>
+        </tr>
+        <tr>
             <td><h5>fs.allow-hadoop-fallback</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
@@ -57,10 +63,16 @@ under the License.
             <td>Enable Catalog Lock.</td>
         </tr>
         <tr>
+            <td><h5>lock.type</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The Lock Type for Catalog, such as 'hive', 'zookeeper'.</td>
+        </tr>
+        <tr>
             <td><h5>metastore</h5></td>
             <td style="word-wrap: break-word;">"filesystem"</td>
             <td>String</td>
-            <td>Metastore of paimon catalog, supports filesystem and hive.</td>
+            <td>Metastore of paimon catalog, supports filesystem, hive and jdbc.</td>
         </tr>
         <tr>
             <td><h5>table.type</h5></td>

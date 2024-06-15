@@ -107,12 +107,13 @@ public abstract class RocksDBState<K, V, CacheV> {
             IOManager ioManager, CoreOptions options) {
         return BinaryExternalSortBuffer.create(
                 ioManager,
-                RowType.of(DataTypes.BYTES()),
                 RowType.of(DataTypes.BYTES(), DataTypes.BYTES()),
+                new int[] {0},
                 options.writeBufferSize() / 2,
                 options.pageSize(),
                 options.localSortMaxNumFileHandles(),
-                options.spillCompression());
+                options.spillCompression(),
+                options.writeBufferSpillDiskSize());
     }
 
     /** A class wraps byte[] to implement equals and hashCode. */

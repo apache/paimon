@@ -15,6 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.spark.PaimonSparkTestBase
@@ -28,15 +29,18 @@ class TableValuedFunctionsTest extends PaimonSparkTestBase {
       bucketModes.foreach {
         bucket =>
           test(s"incremental query: hasPk: $hasPk, bucket: $bucket") {
-            val primaryKeysProp = if (hasPk) {
-              "'primary-key'='a,b',"
+            val prop = if (hasPk) {
+              s"'primary-key'='a,b', 'bucket' = '$bucket' "
+            } else if (bucket != -1) {
+              s"'bucket-key'='b', 'bucket' = '$bucket' "
             } else {
-              ""
+              "'write-only'='true'"
             }
+
             spark.sql(s"""
                          |CREATE TABLE T (a INT, b INT, c STRING)
                          |USING paimon
-                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket')
+                         |TBLPROPERTIES ($prop)
                          |PARTITIONED BY (a)
                          |""".stripMargin)
 

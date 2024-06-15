@@ -25,7 +25,29 @@ import java.util.List;
 /** Generate splits from {@link DataFileMeta}s. */
 public interface SplitGenerator {
 
-    List<List<DataFileMeta>> splitForBatch(List<DataFileMeta> files);
+    boolean alwaysRawConvertible();
 
-    List<List<DataFileMeta>> splitForStreaming(List<DataFileMeta> files);
+    List<SplitGroup> splitForBatch(List<DataFileMeta> files);
+
+    List<SplitGroup> splitForStreaming(List<DataFileMeta> files);
+
+    /** Split group. */
+    class SplitGroup {
+
+        public final List<DataFileMeta> files;
+        public final boolean rawConvertible;
+
+        private SplitGroup(List<DataFileMeta> files, boolean rawConvertible) {
+            this.files = files;
+            this.rawConvertible = rawConvertible;
+        }
+
+        public static SplitGroup rawConvertibleGroup(List<DataFileMeta> files) {
+            return new SplitGroup(files, true);
+        }
+
+        public static SplitGroup nonRawConvertibleGroup(List<DataFileMeta> files) {
+            return new SplitGroup(files, false);
+        }
+    }
 }

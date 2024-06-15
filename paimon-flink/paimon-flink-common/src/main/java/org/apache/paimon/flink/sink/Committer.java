@@ -14,12 +14,14 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.flink.api.common.state.OperatorStateStore;
 import org.apache.flink.metrics.groups.OperatorMetricGroup;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -58,7 +60,55 @@ public interface Committer<CommitT, GlobalCommitT> extends AutoCloseable {
     /** Factory to create {@link Committer}. */
     interface Factory<CommitT, GlobalCommitT> extends Serializable {
 
-        Committer<CommitT, GlobalCommitT> create(
-                String commitUser, OperatorMetricGroup metricGroup);
+        Committer<CommitT, GlobalCommitT> create(Context context);
+    }
+
+    /** Context to create {@link Committer}. */
+    interface Context {
+
+        String commitUser();
+
+        @Nullable
+        OperatorMetricGroup metricGroup();
+
+        boolean streamingCheckpointEnabled();
+
+        boolean isRestored();
+
+        OperatorStateStore stateStore();
+    }
+
+    static Context createContext(
+            String commitUser,
+            @Nullable OperatorMetricGroup metricGroup,
+            boolean streamingCheckpointEnabled,
+            boolean isRestored,
+            OperatorStateStore stateStore) {
+        return new Committer.Context() {
+            @Override
+            public String commitUser() {
+                return commitUser;
+            }
+
+            @Override
+            public OperatorMetricGroup metricGroup() {
+                return metricGroup;
+            }
+
+            @Override
+            public boolean streamingCheckpointEnabled() {
+                return streamingCheckpointEnabled;
+            }
+
+            @Override
+            public boolean isRestored() {
+                return isRestored;
+            }
+
+            @Override
+            public OperatorStateStore stateStore() {
+                return stateStore;
+            }
+        };
     }
 }

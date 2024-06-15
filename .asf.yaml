@@ -18,7 +18,7 @@
 # See: https://cwiki.apache.org/confluence/display/INFRA/git+-+.asf.yaml+features
 
 github:
-  description: "Apache Paimon(incubating) is a streaming data lake platform that supports high-speed data ingestion, change data tracking and efficient real-time analytics."
+  description: "Apache Paimon is a lake format that enables building a Realtime Lakehouse Architecture with Flink and Spark for both streaming and batch operations."
   homepage: https://paimon.apache.org/
   labels:
     - paimon

@@ -85,7 +85,7 @@ public abstract class ScannerTestBase {
         snapshotReader = table.newSnapshotReader();
     }
 
-    protected void createAppenOnlyTable() throws Exception {
+    protected void createAppendOnlyTable() throws Exception {
         tempDir = Files.createTempDirectory("junit");
         tablePath = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
         fileIO = FileIOFinder.find(tablePath);
@@ -135,19 +135,19 @@ public abstract class ScannerTestBase {
     }
 
     protected FileStoreTable createFileStoreTable() throws Exception {
-        return createFileStoreTable(true, new Options());
+        return createFileStoreTable(true, new Options(), tablePath);
     }
 
     protected FileStoreTable createFileStoreTable(Options conf) throws Exception {
-        return createFileStoreTable(true, conf);
+        return createFileStoreTable(true, conf, tablePath);
     }
 
     protected FileStoreTable createFileStoreTable(boolean withPrimaryKeys) throws Exception {
-        return createFileStoreTable(withPrimaryKeys, new Options());
+        return createFileStoreTable(withPrimaryKeys, new Options(), tablePath);
     }
 
-    protected FileStoreTable createFileStoreTable(boolean withPrimaryKeys, Options conf)
-            throws Exception {
+    protected FileStoreTable createFileStoreTable(
+            boolean withPrimaryKeys, Options conf, Path tablePath) throws Exception {
         SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
         List<String> primaryKeys = new ArrayList<>();
         if (withPrimaryKeys) {
@@ -155,6 +155,9 @@ public abstract class ScannerTestBase {
         }
         if (!conf.contains(CoreOptions.BUCKET)) {
             conf.set(CoreOptions.BUCKET, 1);
+            if (!withPrimaryKeys) {
+                conf.set(CoreOptions.BUCKET_KEY, "a");
+            }
         }
         TableSchema tableSchema =
                 schemaManager.createTable(

@@ -22,7 +22,7 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.manifest.IndexManifestEntry.Identifier;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.ObjectsFile;
@@ -31,10 +31,7 @@ import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 /** Index manifest file. */
 public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
@@ -43,37 +40,29 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
             FileIO fileIO,
             FormatReaderFactory readerFactory,
             FormatWriterFactory writerFactory,
+            String compression,
             PathFactory pathFactory) {
         super(
                 fileIO,
                 new IndexManifestEntrySerializer(),
                 readerFactory,
                 writerFactory,
+                compression,
                 pathFactory,
                 null);
     }
 
-    /** Merge new index files to index manifest. */
+    /** Write new index files to index manifest. */
     @Nullable
-    public String merge(
-            @Nullable String previousIndexManifest, List<IndexManifestEntry> newIndexFiles) {
-        String indexManifest = previousIndexManifest;
-        if (newIndexFiles.size() > 0) {
-            Map<Identifier, IndexManifestEntry> indexEntries = new LinkedHashMap<>();
-            List<IndexManifestEntry> entries =
-                    indexManifest == null ? new ArrayList<>() : read(indexManifest);
-            entries.addAll(newIndexFiles);
-            for (IndexManifestEntry file : entries) {
-                if (file.kind() == FileKind.ADD) {
-                    indexEntries.put(file.identifier(), file);
-                } else {
-                    indexEntries.remove(file.identifier());
-                }
-            }
-            indexManifest = writeWithoutRolling(indexEntries.values());
+    public String writeIndexFiles(
+            @Nullable String previousIndexManifest,
+            List<IndexManifestEntry> newIndexFiles,
+            BucketMode bucketMode) {
+        if (newIndexFiles.isEmpty()) {
+            return previousIndexManifest;
         }
-
-        return indexManifest;
+        IndexManifestFileHandler handler = new IndexManifestFileHandler(this, bucketMode);
+        return handler.write(previousIndexManifest, newIndexFiles);
     }
 
     /** Creator of {@link IndexManifestFile}. */
@@ -81,11 +70,17 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
 
         private final FileIO fileIO;
         private final FileFormat fileFormat;
+        private final String compression;
         private final FileStorePathFactory pathFactory;
 
-        public Factory(FileIO fileIO, FileFormat fileFormat, FileStorePathFactory pathFactory) {
+        public Factory(
+                FileIO fileIO,
+                FileFormat fileFormat,
+                String compression,
+                FileStorePathFactory pathFactory) {
             this.fileIO = fileIO;
             this.fileFormat = fileFormat;
+            this.compression = compression;
             this.pathFactory = pathFactory;
         }
 
@@ -95,6 +90,7 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
                     fileIO,
                     fileFormat.createReaderFactory(schema),
                     fileFormat.createWriterFactory(schema),
+                    compression,
                     pathFactory.indexManifestFileFactory());
         }
     }

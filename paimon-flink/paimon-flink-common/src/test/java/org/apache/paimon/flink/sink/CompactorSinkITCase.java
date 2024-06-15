@@ -20,22 +20,16 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.source.CompactorSourceBuilder;
 import org.apache.paimon.flink.util.AbstractTestBase;
-import org.apache.paimon.flink.utils.MetricUtils;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.io.DataFileMetaSerializer;
-import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -52,12 +46,9 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
-import org.apache.paimon.utils.TraceableFileIO;
 
 import org.apache.flink.api.common.ExecutionConfig;
-import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.CheckpointConfig;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -67,7 +58,6 @@ import org.apache.flink.table.data.RowData;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -126,8 +116,7 @@ public class CompactorSinkITCase extends AbstractTestBase {
         write.close();
         commit.close();
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setRuntimeMode(RuntimeExecutionMode.BATCH);
+        StreamExecutionEnvironment env = streamExecutionEnvironmentBuilder().batchMode().build();
         CompactorSourceBuilder sourceBuilder =
                 new CompactorSourceBuilder(tablePath.toString(), table);
         DataStreamSource<RowData> source =
@@ -161,7 +150,8 @@ public class CompactorSinkITCase extends AbstractTestBase {
     public void testCompactParallelism() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        StreamExecutionEnvironment env =
+                streamExecutionEnvironmentBuilder().streamingMode().build();
         CompactorSourceBuilder sourceBuilder =
                 new CompactorSourceBuilder(tablePath.toString(), table);
         DataStreamSource<RowData> source =
@@ -185,188 +175,6 @@ public class CompactorSinkITCase extends AbstractTestBase {
 
         Assertions.assertThat(env.getTransformations().get(0).getParallelism())
                 .isEqualTo(sinkParalellism);
-    }
-
-    @Test
-    public void testCompactionMetrics() throws Exception {
-        FileStoreTable table = createFileStoreTable();
-        prepareDataFile(table);
-
-        StoreCompactOperator operator = createCompactOperator(table);
-        OneInputStreamOperatorTestHarness<RowData, Committable> testHarness =
-                createTestHarness(operator);
-        testHarness.open();
-
-        MetricGroup compactionMetricGroup =
-                operator.getMetricGroup()
-                        .addGroup("paimon")
-                        .addGroup("table", table.name())
-                        .addGroup("partition", "dt=20221208_hh=15")
-                        .addGroup("bucket", "0")
-                        .addGroup("compaction");
-        DataFileMetaSerializer fileMetaSerializer = new DataFileMetaSerializer();
-        RowData record =
-                new FlinkRowData(
-                        GenericRow.of(
-                                1L,
-                                partition("20221208", 15),
-                                0,
-                                fileMetaSerializer.serializeList(Collections.emptyList())));
-
-        long timestamp = 0;
-        testHarness.processElement(record, timestamp++);
-        testHarness.endInput();
-        assertThat(
-                        MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedBefore")
-                                .getValue())
-                .isEqualTo(2L);
-        assertThat(
-                        MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedAfter")
-                                .getValue())
-                .isEqualTo(1L);
-        assertThat(
-                        MetricUtils.getGauge(compactionMetricGroup, "lastChangelogFilesCompacted")
-                                .getValue())
-                .isEqualTo(0L);
-
-        compactionMetricGroup =
-                operator.getMetricGroup()
-                        .addGroup("paimon")
-                        .addGroup("table", table.name())
-                        .addGroup("partition", "dt=20221208_hh=16")
-                        .addGroup("bucket", "0")
-                        .addGroup("compaction");
-        record =
-                new FlinkRowData(
-                        GenericRow.of(
-                                2L,
-                                partition("20221208", 16),
-                                0,
-                                fileMetaSerializer.serializeList(Collections.emptyList())));
-
-        testHarness.processElement(record, timestamp);
-        testHarness.endInput();
-        assertThat(
-                        MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedBefore")
-                                .getValue())
-                .isEqualTo(2L);
-        assertThat(
-                        MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedAfter")
-                                .getValue())
-                .isEqualTo(1L);
-        assertThat(
-                        MetricUtils.getGauge(compactionMetricGroup, "lastChangelogFilesCompacted")
-                                .getValue())
-                .isEqualTo(0L);
-
-        // operator closed, metric groups should be unregistered
-        testHarness.close();
-        assertThat(MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedBefore"))
-                .isNull();
-        assertThat(MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedAfter"))
-                .isNull();
-        assertThat(MetricUtils.getGauge(compactionMetricGroup, "lastChangelogFilesCompacted"))
-                .isNull();
-    }
-
-    @Test
-    public void testMultiTablesCompactionMetrics(@TempDir java.nio.file.Path tempDir)
-            throws Exception {
-        Path warehouse = new Path(TraceableFileIO.SCHEME + "://" + tempDir);
-        Options catalogOptions = new Options();
-        catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse.toString());
-        catalogOptions.set(CatalogOptions.URI, "");
-        Catalog.Loader catalogLoader =
-                () -> CatalogFactory.createCatalog(CatalogContext.create(catalogOptions));
-        Catalog catalog = catalogLoader.load();
-        String databaseName = "test_db";
-        catalog.createDatabase(databaseName, true);
-        Identifier firstTableId = Identifier.create(databaseName, "test_table1");
-        Identifier secondTableId = Identifier.create(databaseName, "test_table2");
-        FileStoreTable firstTable = createCatalogTable(catalog, firstTableId);
-        FileStoreTable secondTable = createCatalogTable(catalog, secondTableId);
-        prepareDataFile(firstTable);
-        prepareDataFile(secondTable);
-
-        MultiTablesStoreCompactOperator operator = createMultiTablesCompactOperator(catalogLoader);
-        OneInputStreamOperatorTestHarness<RowData, MultiTableCommittable> testHarness =
-                createMultiTablesTestHarness(operator);
-        testHarness.open();
-
-        MetricGroup compactionMetricGroup =
-                operator.getMetricGroup()
-                        .addGroup("paimon")
-                        .addGroup("table", firstTable.name())
-                        .addGroup("partition", "_")
-                        .addGroup("bucket", "0")
-                        .addGroup("compaction");
-        DataFileMetaSerializer fileMetaSerializer = new DataFileMetaSerializer();
-        RowData record =
-                new FlinkRowData(
-                        GenericRow.of(
-                                1L,
-                                serializeBinaryRow(BinaryRow.EMPTY_ROW),
-                                0,
-                                fileMetaSerializer.serializeList(Collections.emptyList()),
-                                BinaryString.fromString(databaseName),
-                                BinaryString.fromString(firstTableId.getObjectName())));
-
-        long timestamp = 0;
-        testHarness.processElement(record, timestamp++);
-        testHarness.endInput();
-        assertThat(
-                        MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedBefore")
-                                .getValue())
-                .isEqualTo(2L);
-        assertThat(
-                        MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedAfter")
-                                .getValue())
-                .isEqualTo(1L);
-        assertThat(
-                        MetricUtils.getGauge(compactionMetricGroup, "lastChangelogFilesCompacted")
-                                .getValue())
-                .isEqualTo(0L);
-
-        compactionMetricGroup =
-                operator.getMetricGroup()
-                        .addGroup("paimon")
-                        .addGroup("table", secondTable.name())
-                        .addGroup("partition", "_")
-                        .addGroup("bucket", "0")
-                        .addGroup("compaction");
-        record =
-                new FlinkRowData(
-                        GenericRow.of(
-                                2L,
-                                serializeBinaryRow(BinaryRow.EMPTY_ROW),
-                                0,
-                                fileMetaSerializer.serializeList(Collections.emptyList()),
-                                BinaryString.fromString(databaseName),
-                                BinaryString.fromString(secondTableId.getObjectName())));
-
-        testHarness.processElement(record, timestamp);
-        testHarness.endInput();
-        assertThat(
-                        MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedBefore")
-                                .getValue())
-                .isEqualTo(2L);
-        assertThat(
-                        MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedAfter")
-                                .getValue())
-                .isEqualTo(1L);
-        assertThat(
-                        MetricUtils.getGauge(compactionMetricGroup, "lastChangelogFilesCompacted")
-                                .getValue())
-                .isEqualTo(0L);
-
-        // operator closed, metric groups should be unregistered
-        testHarness.close();
-        assertThat(MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedBefore"))
-                .isNull();
-        assertThat(MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedAfter"))
-                .isNull();
-        assertThat(MetricUtils.getGauge(compactionMetricGroup, "lastChangelogFilesCompacted"))
-                .isNull();
     }
 
     private List<Map<String, String>> getSpecifiedPartitions() {

@@ -1,21 +1,19 @@
 /*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
  *
- *  Licensed to the Apache Software Foundation (ASF) under one
- *  or more contributor license agreements.  See the NOTICE file
- *  distributed with this work for additional information
- *  regarding copyright ownership.  The ASF licenses this file
- *  to you under the Apache License, Version 2.0 (the
- *  "License"); you may not use this file except in compliance
- *  with the License.  You may obtain a copy of the License at
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
- *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 package org.apache.paimon.mergetree.compact;
@@ -37,7 +35,7 @@ public class FirstRowMergeFunction implements MergeFunction<KeyValue> {
     private final InternalRowSerializer keySerializer;
     private final InternalRowSerializer valueSerializer;
     private KeyValue first;
-
+    public boolean containsHighLevel;
     private final boolean ignoreDelete;
 
     protected FirstRowMergeFunction(RowType keyType, RowType valueType, boolean ignoreDelete) {
@@ -49,11 +47,14 @@ public class FirstRowMergeFunction implements MergeFunction<KeyValue> {
     @Override
     public void reset() {
         this.first = null;
+        this.containsHighLevel = false;
     }
 
     @Override
     public void add(KeyValue kv) {
         if (kv.valueKind().isRetract()) {
+            // In 0.7- versions, the delete records might be written into data file even when
+            // ignore-delete configured, so ignoreDelete still needs to be checked
             if (ignoreDelete) {
                 return;
             } else {
@@ -62,20 +63,24 @@ public class FirstRowMergeFunction implements MergeFunction<KeyValue> {
                                 + "You can config 'first-row.ignore-delete' to ignore the DELETE/UPDATE_BEFORE records.");
             }
         }
+
         if (first == null) {
             this.first = kv.copy(keySerializer, valueSerializer);
         }
+        if (kv.level() > 0) {
+            containsHighLevel = true;
+        }
     }
 
-    @Nullable
     @Override
     public KeyValue getResult() {
         return first;
     }
 
     public static MergeFunctionFactory<KeyValue> factory(
-            RowType keyType, RowType valueType, Options options) {
-        return new FirstRowMergeFunction.Factory(keyType, valueType, options);
+            Options options, RowType keyType, RowType valueType) {
+        return new FirstRowMergeFunction.Factory(
+                keyType, valueType, options.get(CoreOptions.IGNORE_DELETE));
     }
 
     private static class Factory implements MergeFunctionFactory<KeyValue> {
@@ -83,19 +88,17 @@ public class FirstRowMergeFunction implements MergeFunction<KeyValue> {
         private static final long serialVersionUID = 1L;
         private final RowType keyType;
         private final RowType valueType;
+        private final boolean ignoreDelete;
 
-        private final Options options;
-
-        public Factory(RowType keyType, RowType valueType, Options options) {
+        public Factory(RowType keyType, RowType valueType, boolean ignoreDelete) {
             this.keyType = keyType;
             this.valueType = valueType;
-            this.options = options;
+            this.ignoreDelete = ignoreDelete;
         }
 
         @Override
         public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
-            return new FirstRowMergeFunction(
-                    keyType, valueType, options.get(CoreOptions.FIRST_ROW_IGNORE_DELETE));
+            return new FirstRowMergeFunction(keyType, valueType, ignoreDelete);
         }
     }
 }

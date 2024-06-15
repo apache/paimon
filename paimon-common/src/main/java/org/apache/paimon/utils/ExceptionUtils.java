@@ -16,14 +16,6 @@
  * limitations under the License.
  */
 
-//
-// The function "stringifyException" is based on source code from the Hadoop Project
-// (http://hadoop.apache.org/),
-// licensed by the Apache Software Foundation (ASF) under the Apache License, Version 2.0.
-// See the NOTICE file distributed with this work for additional information regarding copyright
-// ownership.
-//
-
 package org.apache.paimon.utils;
 
 import javax.annotation.Nullable;
@@ -32,6 +24,7 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.lang.reflect.Field;
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.CompletionException;
@@ -566,6 +559,20 @@ public final class ExceptionUtils {
     public static void checkInterrupted(Throwable e) {
         if (e instanceof InterruptedException) {
             Thread.currentThread().interrupt();
+        }
+    }
+
+    public static void throwMultiException(List<Exception> exceptions) throws Exception {
+        if (!exceptions.isEmpty()) {
+            if (exceptions.size() == 1) {
+                throw exceptions.get(0);
+            } else {
+                Exception compoundException = new Exception("Multi exceptions occurred");
+                for (Exception e : exceptions) {
+                    compoundException.addSuppressed(e);
+                }
+                throw compoundException;
+            }
         }
     }
 

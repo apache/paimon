@@ -45,4 +45,9 @@ public class OrcRowColumnVector extends AbstractOrcColumnVector
     public ColumnarRow getRow(int i) {
         return new ColumnarRow(batch, i);
     }
+
+    @Override
+    public VectorizedColumnBatch getBatch() {
+        return batch;
+    }
 }

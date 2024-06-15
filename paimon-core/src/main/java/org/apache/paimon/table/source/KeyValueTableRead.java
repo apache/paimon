@@ -21,63 +21,121 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.operation.KeyValueFileStoreRead;
+import org.apache.paimon.operation.MergeFileSplitRead;
+import org.apache.paimon.operation.RawFileSplitRead;
+import org.apache.paimon.operation.SplitRead;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.source.splitread.IncrementalChangelogReadProvider;
+import org.apache.paimon.table.source.splitread.IncrementalDiffReadProvider;
+import org.apache.paimon.table.source.splitread.MergeFileSplitReadProvider;
+import org.apache.paimon.table.source.splitread.RawFileSplitReadProvider;
+import org.apache.paimon.table.source.splitread.SplitReadProvider;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.function.Supplier;
 
 /**
- * An abstraction layer above {@link KeyValueFileStoreRead} to provide reading of {@link
- * InternalRow}.
+ * An abstraction layer above {@link MergeFileSplitRead} to provide reading of {@link InternalRow}.
  */
-public abstract class KeyValueTableRead extends AbstractDataTableRead<KeyValue> {
+public final class KeyValueTableRead extends AbstractDataTableRead<KeyValue> {
 
-    protected final KeyValueFileStoreRead read;
+    private final List<SplitReadProvider> readProviders;
 
-    protected KeyValueTableRead(KeyValueFileStoreRead read, TableSchema schema) {
-        super(read, schema);
-        this.read = read;
+    private int[][] projection = null;
+    private boolean forceKeepDelete = false;
+    private Predicate predicate = null;
+    private IOManager ioManager = null;
+
+    public KeyValueTableRead(
+            Supplier<MergeFileSplitRead> mergeReadSupplier,
+            Supplier<RawFileSplitRead> batchRawReadSupplier,
+            TableSchema schema) {
+        super(schema);
+        this.readProviders =
+                Arrays.asList(
+                        new RawFileSplitReadProvider(batchRawReadSupplier, this::assignValues),
+                        new MergeFileSplitReadProvider(mergeReadSupplier, this::assignValues),
+                        new IncrementalChangelogReadProvider(mergeReadSupplier, this::assignValues),
+                        new IncrementalDiffReadProvider(mergeReadSupplier, this::assignValues));
+    }
+
+    private List<SplitRead<InternalRow>> initialized() {
+        List<SplitRead<InternalRow>> readers = new ArrayList<>();
+        for (SplitReadProvider readProvider : readProviders) {
+            if (readProvider.initialized()) {
+                readers.add(readProvider.getOrCreate());
+            }
+        }
+        return readers;
+    }
+
+    private void assignValues(SplitRead<InternalRow> read) {
+        if (forceKeepDelete) {
+            read = read.forceKeepDelete();
+        }
+        read.withProjection(projection).withFilter(predicate).withIOManager(ioManager);
     }
 
     @Override
-    public TableRead withIOManager(IOManager ioManager) {
-        read.withIOManager(ioManager);
+    public void projection(int[][] projection) {
+        initialized().forEach(r -> r.withProjection(projection));
+        this.projection = projection;
+    }
+
+    @Override
+    public InnerTableRead forceKeepDelete() {
+        initialized().forEach(SplitRead::forceKeepDelete);
+        this.forceKeepDelete = true;
         return this;
     }
 
     @Override
-    public final RecordReader<InternalRow> reader(Split split) throws IOException {
-        return new RowDataRecordReader(read.createReader((DataSplit) split));
+    protected InnerTableRead innerWithFilter(Predicate predicate) {
+        initialized().forEach(r -> r.withFilter(predicate));
+        this.predicate = predicate;
+        return this;
     }
 
-    public final RecordReader<KeyValue> kvReader(Split split) throws IOException {
-        return read.createReader((DataSplit) split);
+    @Override
+    public TableRead withIOManager(IOManager ioManager) {
+        initialized().forEach(r -> r.withIOManager(ioManager));
+        this.ioManager = ioManager;
+        return this;
     }
 
-    protected abstract RecordReader.RecordIterator<InternalRow> rowDataRecordIteratorFromKv(
-            RecordReader.RecordIterator<KeyValue> kvRecordIterator);
-
-    private class RowDataRecordReader implements RecordReader<InternalRow> {
-
-        private final RecordReader<KeyValue> wrapped;
-
-        private RowDataRecordReader(RecordReader<KeyValue> wrapped) {
-            this.wrapped = wrapped;
+    @Override
+    public RecordReader<InternalRow> reader(Split split) throws IOException {
+        DataSplit dataSplit = (DataSplit) split;
+        for (SplitReadProvider readProvider : readProviders) {
+            if (readProvider.match(dataSplit, forceKeepDelete)) {
+                return readProvider.getOrCreate().createReader(dataSplit);
+            }
         }
 
-        @Nullable
-        @Override
-        public RecordIterator<InternalRow> readBatch() throws IOException {
-            RecordIterator<KeyValue> batch = wrapped.readBatch();
-            return batch == null ? null : rowDataRecordIteratorFromKv(batch);
-        }
+        throw new RuntimeException("Should not happen.");
+    }
 
-        @Override
-        public void close() throws IOException {
-            wrapped.close();
-        }
+    public static RecordReader<InternalRow> unwrap(RecordReader<KeyValue> reader) {
+        return new RecordReader<InternalRow>() {
+
+            @Nullable
+            @Override
+            public RecordIterator<InternalRow> readBatch() throws IOException {
+                RecordIterator<KeyValue> batch = reader.readBatch();
+                return batch == null ? null : new ValueContentRowDataRecordIterator(batch);
+            }
+
+            @Override
+            public void close() throws IOException {
+                reader.close();
+            }
+        };
     }
 }

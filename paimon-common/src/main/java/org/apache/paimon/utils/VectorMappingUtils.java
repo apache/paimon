@@ -39,6 +39,7 @@ import org.apache.paimon.data.columnar.MapColumnVector;
 import org.apache.paimon.data.columnar.RowColumnVector;
 import org.apache.paimon.data.columnar.ShortColumnVector;
 import org.apache.paimon.data.columnar.TimestampColumnVector;
+import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
@@ -333,6 +334,12 @@ public class VectorMappingUtils {
                 public boolean isNullAt(int i) {
                     return partition.isNullAt(index);
                 }
+
+                @Override
+                public ColumnVector getColumnVector() {
+                    throw new UnsupportedOperationException(
+                            "Doesn't support getting ColumnVector.");
+                }
             };
         }
 
@@ -347,6 +354,18 @@ public class VectorMappingUtils {
                 @Override
                 public boolean isNullAt(int i) {
                     return partition.isNullAt(index);
+                }
+
+                @Override
+                public ColumnVector getKeyColumnVector() {
+                    throw new UnsupportedOperationException(
+                            "Doesn't support getting key ColumnVector.");
+                }
+
+                @Override
+                public ColumnVector getValueColumnVector() {
+                    throw new UnsupportedOperationException(
+                            "Doesn't support getting value ColumnVector.");
                 }
             };
         }
@@ -363,6 +382,18 @@ public class VectorMappingUtils {
                 public boolean isNullAt(int i) {
                     return partition.isNullAt(index);
                 }
+
+                @Override
+                public ColumnVector getKeyColumnVector() {
+                    throw new UnsupportedOperationException(
+                            "Doesn't support getting key ColumnVector.");
+                }
+
+                @Override
+                public ColumnVector getValueColumnVector() {
+                    throw new UnsupportedOperationException(
+                            "Doesn't support getting value ColumnVector.");
+                }
             };
         }
 
@@ -377,6 +408,11 @@ public class VectorMappingUtils {
                 @Override
                 public boolean isNullAt(int i) {
                     return partition.isNullAt(index);
+                }
+
+                @Override
+                public VectorizedColumnBatch getBatch() {
+                    throw new UnsupportedOperationException("Doesn't support getting batch.");
                 }
             };
         }

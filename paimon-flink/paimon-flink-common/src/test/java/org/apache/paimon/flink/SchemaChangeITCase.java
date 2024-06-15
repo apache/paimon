@@ -19,7 +19,6 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.utils.DateTimeUtils;
 
 import org.apache.flink.table.api.TableException;
@@ -33,6 +32,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -638,14 +638,14 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         //  move self to first test
         assertThatThrownBy(() -> sql("ALTER TABLE T MODIFY b STRING FIRST"))
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 UnsupportedOperationException.class,
                                 "Cannot move itself for column b"));
 
         //  move self to after test
         assertThatThrownBy(() -> sql("ALTER TABLE T MODIFY b STRING AFTER b"))
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 UnsupportedOperationException.class,
                                 "Cannot move itself for column b"));
 
@@ -677,7 +677,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                                 sql(
                                         "INSERT INTO T VALUES('aaa', 'bbb', 'ccc', 1, CAST(NULL AS FLOAT))"))
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 TableException.class,
                                 "Column 'e' is NOT NULL, however, a null value is being written into it."));
 
@@ -709,7 +709,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                                 sql(
                                         "INSERT INTO T VALUES('aaa', 'bbb', CAST(NULL AS STRING), 1, CAST(NULL AS FLOAT))"))
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 TableException.class,
                                 "Column 'c' is NOT NULL, however, a null value is being written into it."));
 
@@ -847,7 +847,8 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     @Test
     public void testSetAndResetImmutableOptions() throws Exception {
         // bucket-key is immutable
-        sql("CREATE TABLE T1 (a STRING, b STRING, c STRING) WITH ('bucket' = '1')");
+        sql(
+                "CREATE TABLE T1 (a STRING, b STRING, c STRING) WITH ('bucket' = '1', 'bucket-key' = 'a')");
 
         assertThatThrownBy(() -> sql("ALTER TABLE T1 SET ('bucket-key' = 'c')"))
                 .getRootCause()

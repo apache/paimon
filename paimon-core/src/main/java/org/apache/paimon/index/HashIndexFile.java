@@ -24,30 +24,21 @@ import org.apache.paimon.utils.IntIterator;
 import org.apache.paimon.utils.PathFactory;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 
 import static org.apache.paimon.utils.IntFileUtils.readInts;
 import static org.apache.paimon.utils.IntFileUtils.writeInts;
 
 /** Hash index file contains ints. */
-public class HashIndexFile {
+public class HashIndexFile extends IndexFile {
 
     public static final String HASH_INDEX = "HASH";
 
-    private final FileIO fileIO;
-    private final PathFactory pathFactory;
-
     public HashIndexFile(FileIO fileIO, PathFactory pathFactory) {
-        this.fileIO = fileIO;
-        this.pathFactory = pathFactory;
+        super(fileIO, pathFactory);
     }
 
-    public long fileSize(String fileName) {
-        try {
-            return fileIO.getFileSize(pathFactory.toPath(fileName));
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+    public Path path(String fileName) {
+        return pathFactory.toPath(fileName);
     }
 
     public IntIterator read(String fileName) throws IOException {
@@ -58,17 +49,5 @@ public class HashIndexFile {
         Path path = pathFactory.newPath();
         writeInts(fileIO, path, input);
         return path.getName();
-    }
-
-    public void delete(String fileName) {
-        fileIO.deleteQuietly(pathFactory.toPath(fileName));
-    }
-
-    public boolean exists(String fileName) {
-        try {
-            return fileIO.exists(pathFactory.toPath(fileName));
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
     }
 }

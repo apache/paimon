@@ -23,7 +23,7 @@ import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.LongColumnVector;
 import org.apache.paimon.data.columnar.TimestampColumnVector;
 
-import org.apache.parquet.Preconditions;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Parquet write timestamp precision 0-3 as int64 mills, 4-6 as int64 micros, 7-9 as int96, this
@@ -44,7 +44,7 @@ public class ParquetTimestampVector implements TimestampColumnVector {
         } else if (precision <= 6 && vector instanceof LongColumnVector) {
             return Timestamp.fromMicros(((LongColumnVector) vector).getLong(i));
         } else {
-            Preconditions.checkArgument(
+            checkArgument(
                     vector instanceof TimestampColumnVector,
                     "Reading timestamp type occur unsupported vector type: %s",
                     vector.getClass());

@@ -61,15 +61,9 @@ public class TypeE2eTest extends E2eTestBase {
 
         String tableDdl =
                 String.join(
-                        "\n",
-                        Arrays.asList(
-                                "CREATE TABLE IF NOT EXISTS ts_table(",
-                                schema,
-                                ") WITH (",
-                                "  'bucket' = '1'",
-                                ");"));
+                        "\n", Arrays.asList("CREATE TABLE IF NOT EXISTS ts_table(", schema, ");"));
 
-        runSql(
+        runBatchSql(
                 "INSERT INTO ts_table VALUES ("
                         + "true, cast(1 as tinyint), cast(10 as smallint), "
                         + "100, 1000, cast(1.1 as float), 1.11, 12.456, "
@@ -89,7 +83,7 @@ public class TypeE2eTest extends E2eTestBase {
                 catalogDdl,
                 useCatalogCmd,
                 tableDdl);
-        runSql(
+        runBatchSql(
                 "INSERT INTO result1 SELECT f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, "
                         + "f10, f11, f12, f13, f14, f15, f16 FROM ts_table;",
                 catalogDdl,
@@ -97,16 +91,10 @@ public class TypeE2eTest extends E2eTestBase {
                 tableDdl,
                 createResultSink("result1", schema));
 
-        String flinkVersion = System.getProperty("test.flink.version");
         String expected =
-                flinkVersion.startsWith("1.14")
-                        ? "true, 1, 10, 100, 1000, 1.1, 1.11, 12.456, "
-                                + "123456789123456789.12345678, hi, hello, table桌子store商店, "
-                                + "[116, 97, 98, 108, 101, -26, -95, -116, -27, -83, -112, 115, 116, 111, 114, 101, -27, -107, -122, -27, -70, -105], "
-                                + "2022-04-28, 2022-04-28T15:35:45.123, [hi, hello, null, test], +I[1, 10, 测试]"
-                        : "true, 1, 10, 100, 1000, 1.1, 1.11, 12.456, "
-                                + "123456789123456789.12345678, hi, hello, table桌子store商店, [116], "
-                                + "2022-04-28, 2022-04-28T15:35:45.123, [hi, hello, null, test], +I[1, 10, 测试]";
+                "true, 1, 10, 100, 1000, 1.1, 1.11, 12.456, "
+                        + "123456789123456789.12345678, hi, hello, table桌子store商店, [116], "
+                        + "2022-04-28, 2022-04-28T15:35:45.123, [hi, hello, null, test], +I[1, 10, 测试]";
         checkResult(
                 expected,
                 "null, null, null, null, null, null, null, null, null, "
@@ -160,7 +148,7 @@ public class TypeE2eTest extends E2eTestBase {
                                 "  'bucket' = '1'",
                                 ");"));
 
-        runSql(
+        runBatchSql(
                 "INSERT INTO ts_table VALUES (1,"
                         + "true, cast(1 as tinyint), cast(10 as smallint), "
                         + "100, 1000, cast(1.1 as float), 1.11, 12.456, "
@@ -182,37 +170,21 @@ public class TypeE2eTest extends E2eTestBase {
                 catalogDdl,
                 useCatalogCmd,
                 tableDdl);
-        runSql(
+        runBatchSql(
                 "INSERT INTO result1 SELECT * FROM ts_table;",
                 catalogDdl,
                 useCatalogCmd,
                 tableDdl,
                 createResultSink("result1", schema));
 
-        String flinkVersion = System.getProperty("test.flink.version");
         String expected =
-                flinkVersion.startsWith("1.14")
-                        ? "1, true, 1, 10, 100, 1000, 1.1, 1.11, 12.456, "
-                                + "123456789123456789.12345678, hi, hello, table桌子store商店, "
-                                + "[116, 97, 98, 108, 101, -26, -95, -116, -27, -83, -112, 115, 116, 111, 114, 101, -27, -107, -122, -27, -70, -105], "
-                                + "2022-04-28, 2022-04-28T15:35:45.123, [hi, hello, null, test], +I[1, 10, 测试], "
-                                + "{hi=1, test=3, hello=null}"
-                        : "1, true, 1, 10, 100, 1000, 1.1, 1.11, 12.456, "
-                                + "123456789123456789.12345678, hi, hello, table桌子store商店, [116], "
-                                + "2022-04-28, 2022-04-28T15:35:45.123, [hi, hello, null, test], +I[1, 10, 测试], "
-                                + "{hi=1, test=3, hello=null}";
+                "1, true, 1, 10, 100, 1000, 1.1, 1.11, 12.456, "
+                        + "123456789123456789.12345678, hi, hello, table桌子store商店, [116], "
+                        + "2022-04-28, 2022-04-28T15:35:45.123, [hi, hello, null, test], +I[1, 10, 测试], "
+                        + "{hi=1, test=3, hello=null}";
         checkResult(
                 expected,
                 "2, null, null, null, null, null, null, null, null, null, "
                         + "null, null, null, null, null, null, null, null, null");
-    }
-
-    private void runSql(String sql, String... ddls) throws Exception {
-        runSql(
-                "SET 'execution.runtime-mode' = 'batch';\n"
-                        + "SET 'table.dml-sync' = 'true';\n"
-                        + String.join("\n", ddls)
-                        + "\n"
-                        + sql);
     }
 }

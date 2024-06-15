@@ -43,6 +43,8 @@ import static org.apache.paimon.options.CatalogOptions.LOCK_CHECK_MAX_SLEEP;
 /** Hive {@link CatalogLock}. */
 public class HiveCatalogLock implements CatalogLock {
 
+    static final String LOCK_IDENTIFIER = "hive";
+
     private final IMetaStoreClient client;
     private final long checkMaxSleep;
     private final long acquireTimeout;
@@ -109,33 +111,6 @@ public class HiveCatalogLock implements CatalogLock {
     @Override
     public void close() {
         this.client.close();
-    }
-
-    /** Create a hive lock factory. */
-    public static CatalogLock.Factory createFactory(HiveConf hiveConf, String clientClassName) {
-        return new HiveCatalogLockFactory(hiveConf, clientClassName);
-    }
-
-    private static class HiveCatalogLockFactory implements CatalogLock.Factory {
-
-        private static final long serialVersionUID = 1L;
-
-        private final SerializableHiveConf hiveConf;
-        private final String clientClassName;
-
-        public HiveCatalogLockFactory(HiveConf hiveConf, String clientClassName) {
-            this.hiveConf = new SerializableHiveConf(hiveConf);
-            this.clientClassName = clientClassName;
-        }
-
-        @Override
-        public CatalogLock create() {
-            HiveConf conf = hiveConf.conf();
-            return new HiveCatalogLock(
-                    HiveCatalog.createClient(conf, clientClassName),
-                    checkMaxSleep(conf),
-                    acquireTimeout(conf));
-        }
     }
 
     public static long checkMaxSleep(HiveConf conf) {

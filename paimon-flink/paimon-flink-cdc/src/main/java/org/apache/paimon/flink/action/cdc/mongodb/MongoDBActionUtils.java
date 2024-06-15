@@ -18,12 +18,14 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb;
 
+import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
+import org.apache.paimon.flink.action.cdc.serialization.CdcDebeziumDeserializationSchema;
+
 import com.ververica.cdc.connectors.base.options.SourceOptions;
 import com.ververica.cdc.connectors.base.options.StartupOptions;
 import com.ververica.cdc.connectors.mongodb.source.MongoDBSource;
 import com.ververica.cdc.connectors.mongodb.source.MongoDBSourceBuilder;
 import com.ververica.cdc.connectors.mongodb.source.config.MongoDBSourceOptions;
-import com.ververica.cdc.debezium.JsonDebeziumDeserializationSchema;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
@@ -83,9 +85,9 @@ public class MongoDBActionUtils {
                     .withDescription(
                             "Determines whether to use the default MongoDB _id generation strategy. If set to true, the default _id generation will remove the outer $oid nesting. If set to false, no additional processing will be done on the _id field.");
 
-    public static MongoDBSource<String> buildMongodbSource(
+    public static MongoDBSource<CdcSourceRecord> buildMongodbSource(
             Configuration mongodbConfig, String tableList) {
-        MongoDBSourceBuilder<String> sourceBuilder = MongoDBSource.builder();
+        MongoDBSourceBuilder<CdcSourceRecord> sourceBuilder = MongoDBSource.builder();
 
         if (mongodbConfig.contains(MongoDBSourceOptions.USERNAME)
                 && mongodbConfig.contains(MongoDBSourceOptions.PASSWORD)) {
@@ -132,8 +134,8 @@ public class MongoDBActionUtils {
 
         Map<String, Object> customConverterConfigs = new HashMap<>();
         customConverterConfigs.put(JsonConverterConfig.DECIMAL_FORMAT_CONFIG, "numeric");
-        JsonDebeziumDeserializationSchema schema =
-                new JsonDebeziumDeserializationSchema(false, customConverterConfigs);
+        CdcDebeziumDeserializationSchema schema =
+                new CdcDebeziumDeserializationSchema(false, customConverterConfigs);
 
         return sourceBuilder.deserializer(schema).build();
     }

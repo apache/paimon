@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -28,6 +28,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.utils.DateTimeUtils;
 
 import org.apache.spark.sql.catalyst.CatalystTypeConverters;
+import org.apache.spark.sql.catalyst.util.CharVarcharUtils;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -54,6 +55,8 @@ public class SparkInternalRowTest {
                 GenericRow.of(
                         1,
                         fromString("jingsong"),
+                        fromString("apache"),
+                        fromString("paimon"),
                         22.2,
                         new GenericMap(
                                 Stream.of(
@@ -79,9 +82,12 @@ public class SparkInternalRowTest {
                         Decimal.fromBigDecimal(BigDecimal.valueOf(65782123123.01), 38, 2),
                         Decimal.fromBigDecimal(BigDecimal.valueOf(62123123.5), 10, 1));
 
+        // CatalystTypeConverters does not support char and varchar, we need to replace char and
+        // varchar with string
         Function1<Object, Object> sparkConverter =
                 CatalystTypeConverters.createToScalaConverter(
-                        SparkTypeUtils.fromPaimonType(ALL_TYPES));
+                        CharVarcharUtils.replaceCharVarcharWithString(
+                                SparkTypeUtils.fromPaimonType(ALL_TYPES)));
         org.apache.spark.sql.Row sparkRow =
                 (org.apache.spark.sql.Row)
                         sparkConverter.apply(new SparkInternalRow(ALL_TYPES).replace(rowData));
@@ -90,6 +96,8 @@ public class SparkInternalRowTest {
                 "{"
                         + "\"id\":1,"
                         + "\"name\":\"jingsong\","
+                        + "\"char\":\"apache\","
+                        + "\"varchar\":\"paimon\","
                         + "\"salary\":22.2,"
                         + "\"locations\":{\"key1\":{\"posX\":1.2,\"posY\":2.3},\"key2\":{\"posX\":2.4,\"posY\":3.5}},"
                         + "\"strArray\":[\"v1\",\"v5\"],"

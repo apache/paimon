@@ -51,7 +51,6 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.utils.FailingFileIO.retryArtificialException;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -131,7 +130,7 @@ public class SchemaManagerTest {
                                                                         "f4"),
                                                                 ""))))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Nonexistent sequence field: 'f4'");
+                .hasMessageContaining("Sequence field: 'f4' can not be found in table schema.");
     }
 
     @Test
@@ -297,24 +296,5 @@ public class SchemaManagerTest {
 
         manager.deleteSchema(manager.latest().get().id());
         assertThat(manager.latest().get().toString()).isEqualTo(schemaContent);
-    }
-
-    @Test
-    public void testInvalidFormatType() {
-        Map<String, String> options = new HashMap<>();
-        options.put(FILE_FORMAT.key(), "test");
-        Schema schema =
-                new Schema(
-                        rowType.getFields(),
-                        partitionKeys,
-                        primaryKeys,
-                        options,
-                        "append-only table with primary key");
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
-        assertThatThrownBy(() -> manager.createTable(schema))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage(
-                        String.format(
-                                "Could not parse value 'test' for key '%s'.", FILE_FORMAT.key()));
     }
 }

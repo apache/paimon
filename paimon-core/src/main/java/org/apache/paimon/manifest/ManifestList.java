@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -39,17 +39,15 @@ import java.util.List;
  */
 public class ManifestList extends ObjectsFile<ManifestFileMeta> {
 
-    private final FormatWriterFactory writerFactory;
-
     private ManifestList(
             FileIO fileIO,
             ManifestFileMetaSerializer serializer,
             FormatReaderFactory readerFactory,
             FormatWriterFactory writerFactory,
+            String compression,
             PathFactory pathFactory,
             @Nullable SegmentsCache<String> cache) {
-        super(fileIO, serializer, readerFactory, writerFactory, pathFactory, cache);
-        this.writerFactory = writerFactory;
+        super(fileIO, serializer, readerFactory, writerFactory, compression, pathFactory, cache);
     }
 
     /**
@@ -66,16 +64,19 @@ public class ManifestList extends ObjectsFile<ManifestFileMeta> {
 
         private final FileIO fileIO;
         private final FileFormat fileFormat;
+        private final String compression;
         private final FileStorePathFactory pathFactory;
         @Nullable private final SegmentsCache<String> cache;
 
         public Factory(
                 FileIO fileIO,
                 FileFormat fileFormat,
+                String compression,
                 FileStorePathFactory pathFactory,
                 @Nullable SegmentsCache<String> cache) {
             this.fileIO = fileIO;
             this.fileFormat = fileFormat;
+            this.compression = compression;
             this.pathFactory = pathFactory;
             this.cache = cache;
         }
@@ -87,6 +88,7 @@ public class ManifestList extends ObjectsFile<ManifestFileMeta> {
                     new ManifestFileMetaSerializer(),
                     fileFormat.createReaderFactory(metaType),
                     fileFormat.createWriterFactory(metaType),
+                    compression,
                     pathFactory.manifestListFactory(),
                     cache);
         }

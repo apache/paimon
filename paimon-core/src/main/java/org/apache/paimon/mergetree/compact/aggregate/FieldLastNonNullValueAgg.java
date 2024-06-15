@@ -38,4 +38,9 @@ public class FieldLastNonNullValueAgg extends FieldAggregator {
     public Object agg(Object accumulator, Object inputField) {
         return (inputField == null) ? accumulator : inputField;
     }
+
+    @Override
+    public Object retract(Object accumulator, Object retractField) {
+        return retractField != null ? null : accumulator;
+    }
 }

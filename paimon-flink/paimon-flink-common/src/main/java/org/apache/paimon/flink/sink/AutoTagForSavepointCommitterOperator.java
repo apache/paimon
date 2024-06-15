@@ -46,6 +46,7 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.runtime.tasks.StreamTask;
 import org.apache.flink.streaming.runtime.watermarkstatus.WatermarkStatus;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.NavigableSet;
@@ -76,6 +77,8 @@ public class AutoTagForSavepointCommitterOperator<CommitT, GlobalCommitT>
 
     private final NavigableSet<Long> identifiersForTags;
 
+    private final Duration tagTimeRetained;
+
     private transient SnapshotManager snapshotManager;
 
     private transient TagManager tagManager;
@@ -91,13 +94,15 @@ public class AutoTagForSavepointCommitterOperator<CommitT, GlobalCommitT>
             SerializableSupplier<SnapshotManager> snapshotManagerFactory,
             SerializableSupplier<TagManager> tagManagerFactory,
             SerializableSupplier<TagDeletion> tagDeletionFactory,
-            SerializableSupplier<List<TagCallback>> callbacksSupplier) {
+            SerializableSupplier<List<TagCallback>> callbacksSupplier,
+            Duration tagTimeRetained) {
         this.commitOperator = commitOperator;
         this.tagManagerFactory = tagManagerFactory;
         this.snapshotManagerFactory = snapshotManagerFactory;
         this.tagDeletionFactory = tagDeletionFactory;
         this.callbacksSupplier = callbacksSupplier;
         this.identifiersForTags = new TreeSet<>();
+        this.tagTimeRetained = tagTimeRetained;
     }
 
     @Override
@@ -156,7 +161,7 @@ public class AutoTagForSavepointCommitterOperator<CommitT, GlobalCommitT>
         identifiersForTags.remove(checkpointId);
         String tagName = SAVEPOINT_TAG_PREFIX + checkpointId;
         if (tagManager.tagExists(tagName)) {
-            tagManager.deleteTag(tagName, tagDeletion, snapshotManager);
+            tagManager.deleteTag(tagName, tagDeletion, snapshotManager, callbacks);
         }
     }
 
@@ -167,7 +172,7 @@ public class AutoTagForSavepointCommitterOperator<CommitT, GlobalCommitT>
         for (Snapshot snapshot : snapshotForTags) {
             String tagName = SAVEPOINT_TAG_PREFIX + snapshot.commitIdentifier();
             if (!tagManager.tagExists(tagName)) {
-                tagManager.createTag(snapshot, tagName, callbacks);
+                tagManager.createTag(snapshot, tagName, tagTimeRetained, callbacks);
             }
         }
     }

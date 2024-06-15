@@ -19,11 +19,9 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.CommittableTypeInfo;
 import org.apache.paimon.flink.sink.StoreSinkWriteImpl;
-import org.apache.paimon.flink.utils.MetricUtils;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
@@ -42,7 +40,6 @@ import org.apache.paimon.utils.TraceableFileIO;
 
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.state.JavaSerializer;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.junit.jupiter.api.AfterEach;
@@ -252,78 +249,6 @@ public class CdcRecordStoreWriteOperatorTest {
         runner.stop();
         t.join();
         harness.close();
-    }
-
-    @Test
-    public void testCompactionMetrics() throws Exception {
-        RowType rowType =
-                RowType.of(
-                        new DataType[] {DataTypes.INT(), DataTypes.INT()},
-                        new String[] {"pk", "col1"});
-        FileStoreTable table =
-                createFileStoreTable(
-                        rowType, Collections.emptyList(), Collections.singletonList("pk"));
-        OneInputStreamOperatorTestHarness<CdcRecord, Committable> harness =
-                createTestHarness(table);
-        CdcRecordStoreWriteOperator operator =
-                (CdcRecordStoreWriteOperator) harness.getOneInputOperator();
-        harness.open();
-
-        MetricGroup compactionMetricGroup =
-                operator.getMetricGroup()
-                        .addGroup("paimon")
-                        .addGroup("table", table.name())
-                        .addGroup("partition", "_")
-                        .addGroup("bucket", "0")
-                        .addGroup("compaction");
-
-        long timestamp = 0;
-        long cpId = 1L;
-        Map<String, String> fields = new HashMap<>();
-        fields.put("pk", "1");
-        fields.put("col1", "2");
-        harness.processElement(new CdcRecord(RowKind.INSERT, fields), timestamp++);
-        operator.getWrite().compact(BinaryRow.EMPTY_ROW, 0, true);
-        operator.getWrite().prepareCommit(true, cpId++);
-        assertThat(
-                        MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedBefore")
-                                .getValue())
-                .isEqualTo(1L);
-        assertThat(
-                        MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedAfter")
-                                .getValue())
-                .isEqualTo(1L);
-        assertThat(
-                        MetricUtils.getGauge(compactionMetricGroup, "lastChangelogFilesCompacted")
-                                .getValue())
-                .isEqualTo(0L);
-
-        fields.put("pk", "1");
-        fields.put("col1", "3");
-        harness.processElement(new CdcRecord(RowKind.INSERT, fields), timestamp);
-        operator.getWrite().compact(BinaryRow.EMPTY_ROW, 0, true);
-        operator.getWrite().prepareCommit(true, cpId);
-        assertThat(
-                        MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedBefore")
-                                .getValue())
-                .isEqualTo(2L);
-        assertThat(
-                        MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedAfter")
-                                .getValue())
-                .isEqualTo(1L);
-        assertThat(
-                        MetricUtils.getGauge(compactionMetricGroup, "lastChangelogFilesCompacted")
-                                .getValue())
-                .isEqualTo(0L);
-
-        // operator closed, metric groups should be unregistered
-        harness.close();
-        assertThat(MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedBefore"))
-                .isNull();
-        assertThat(MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedAfter"))
-                .isNull();
-        assertThat(MetricUtils.getGauge(compactionMetricGroup, "lastChangelogFilesCompacted"))
-                .isNull();
     }
 
     private OneInputStreamOperatorTestHarness<CdcRecord, Committable> createTestHarness(

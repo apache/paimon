@@ -15,6 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark.catalyst.analysis
 
 import org.apache.paimon.spark.commands.PaimonTruncateTableCommand
@@ -33,7 +34,7 @@ case class PaimonIncompatiblePHRRules(session: SparkSession) extends Rule[Logica
           if t.resolved =>
         assert(names.length == ident.numFields, "Names and values of partition don't match")
         val resolver = session.sessionState.conf.resolver
-        val schema = table.schema()
+        val schema = table.schema
         val partitionSpec = names.zipWithIndex.map {
           case (name, index) =>
             val field = schema.find(f => resolver(f.name, name)).getOrElse {

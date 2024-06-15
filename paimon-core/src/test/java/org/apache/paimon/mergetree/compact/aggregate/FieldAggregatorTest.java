@@ -60,25 +60,15 @@ public class FieldAggregatorTest {
     @Test
     public void testFieldBoolAndAgg() {
         FieldBoolAndAgg fieldBoolAndAgg = new FieldBoolAndAgg(new BooleanType());
-        Boolean accumulator = false;
-        Boolean inputField = true;
-        assertThat(fieldBoolAndAgg.agg(accumulator, inputField)).isEqualTo(false);
-
-        accumulator = true;
-        inputField = true;
-        assertThat(fieldBoolAndAgg.agg(accumulator, inputField)).isEqualTo(true);
+        assertThat(fieldBoolAndAgg.agg(false, true)).isEqualTo(false);
+        assertThat(fieldBoolAndAgg.agg(true, true)).isEqualTo(true);
     }
 
     @Test
     public void testFieldBoolOrAgg() {
         FieldBoolOrAgg fieldBoolOrAgg = new FieldBoolOrAgg(new BooleanType());
-        Boolean accumulator = false;
-        Boolean inputField = true;
-        assertThat(fieldBoolOrAgg.agg(accumulator, inputField)).isEqualTo(true);
-
-        accumulator = false;
-        inputField = false;
-        assertThat(fieldBoolOrAgg.agg(accumulator, inputField)).isEqualTo(false);
+        assertThat(fieldBoolOrAgg.agg(false, true)).isEqualTo(true);
+        assertThat(fieldBoolOrAgg.agg(false, false)).isEqualTo(false);
     }
 
     @Test
@@ -327,6 +317,11 @@ public class FieldAggregatorTest {
         accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
         assertThat(unnest(accumulator, elementGetter))
                 .containsExactlyInAnyOrderElementsOf(Arrays.asList(row(0, 0, "A"), row(0, 1, "b")));
+
+        current = row(0, 1, "b");
+        accumulator = (InternalArray) agg.retract(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(Collections.singletonList(row(0, 0, "A")));
     }
 
     @Test
@@ -352,6 +347,11 @@ public class FieldAggregatorTest {
         accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
         assertThat(unnest(accumulator, elementGetter))
                 .containsExactlyInAnyOrderElementsOf(Arrays.asList(row(0, 1, "B"), row(0, 1, "b")));
+
+        current = row(0, 1, "b");
+        accumulator = (InternalArray) agg.retract(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(Collections.singletonList(row(0, 1, "B")));
     }
 
     private List<Object> unnest(InternalArray array, InternalArray.ElementGetter elementGetter) {

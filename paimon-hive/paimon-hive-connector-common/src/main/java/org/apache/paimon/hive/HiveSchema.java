@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -67,7 +67,7 @@ public class HiveSchema {
     private static final Logger LOG = LoggerFactory.getLogger(HiveSchema.class);
     private final RowType rowType;
 
-    private HiveSchema(RowType rowType) {
+    HiveSchema(RowType rowType) {
         this.rowType = rowType;
     }
 

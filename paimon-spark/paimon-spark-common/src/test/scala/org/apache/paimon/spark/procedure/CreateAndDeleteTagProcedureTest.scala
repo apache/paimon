@@ -15,6 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark.procedure
 
 import org.apache.paimon.spark.PaimonSparkTestBase
@@ -69,7 +70,8 @@ class CreateAndDeleteTagProcedureTest extends PaimonSparkTestBase with StreamTes
             checkAnswer(query(), Row(1, "a") :: Row(2, "b2") :: Nil)
             checkAnswer(
               spark.sql(
-                "CALL paimon.sys.create_tag(table => 'test.T', tag => 'test_tag', snapshot => 2)"),
+                "CALL paimon.sys.create_tag(" +
+                  "table => 'test.T', tag => 'test_tag', time_retained => '5 d', snapshot => 2)"),
               Row(true) :: Nil)
             checkAnswer(
               spark.sql("SELECT tag_name FROM paimon.test.`T$tags`"),

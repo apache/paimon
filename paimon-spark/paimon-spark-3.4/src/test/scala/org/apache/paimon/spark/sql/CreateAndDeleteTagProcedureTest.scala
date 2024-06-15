@@ -15,6 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.spark.PaimonSparkTestBase
@@ -31,10 +32,10 @@ class CreateAndDeleteTagProcedureTest extends PaimonSparkTestBase with StreamTes
     failAfter(streamingTimeout) {
       withTempDir {
         checkpointDir =>
-          // define a change-log table and test `forEachBatch` api
+          // define a pk table and test `forEachBatch` api
           spark.sql(s"""
                        |CREATE TABLE T (a INT, b STRING)
-                       |TBLPROPERTIES ('primary-key'='a', 'write-mode'='change-log', 'bucket'='3')
+                       |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
                        |""".stripMargin)
           val location = loadTable("T").location().toString
 
@@ -89,6 +90,34 @@ class CreateAndDeleteTagProcedureTest extends PaimonSparkTestBase with StreamTes
               spark.sql(
                 "CALL paimon.sys.delete_tag(table => 'test.T', tag => 'test_latestSnapshot_tag')"),
               Row(true) :: Nil)
+            checkAnswer(spark.sql("SELECT tag_name FROM paimon.test.`T$tags`"), Nil)
+
+            // snapshot-4
+            inputData.addData((2, "c1"))
+            stream.processAllAvailable()
+            checkAnswer(query(), Row(1, "a") :: Row(2, "c1") :: Nil)
+
+            checkAnswer(
+              spark.sql("CALL paimon.sys.create_tag(table => 'test.T', tag => 's4')"),
+              Row(true) :: Nil)
+
+            // snapshot-5
+            inputData.addData((3, "c2"))
+            stream.processAllAvailable()
+            checkAnswer(query(), Row(1, "a") :: Row(2, "c1") :: Row(3, "c2") :: Nil)
+
+            checkAnswer(
+              spark.sql("CALL paimon.sys.create_tag(table => 'test.T', tag => 's5')"),
+              Row(true) :: Nil)
+
+            checkAnswer(
+              spark.sql("SELECT tag_name FROM paimon.test.`T$tags`"),
+              Row("s4") :: Row("s5") :: Nil)
+
+            checkAnswer(
+              spark.sql("CALL paimon.sys.delete_tag(table => 'test.T', tag => 's4,s5')"),
+              Row(true) :: Nil)
+
             checkAnswer(spark.sql("SELECT tag_name FROM paimon.test.`T$tags`"), Nil)
           } finally {
             stream.stop()

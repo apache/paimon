@@ -39,8 +39,10 @@ import java.util.List;
 /** Helper class of {@link PrepareCommitOperator} for different types of paimon sinks. */
 public interface StoreSinkWrite {
 
+    @Nullable
     SinkRecord write(InternalRow rowData) throws Exception;
 
+    @Nullable
     SinkRecord write(InternalRow rowData, int bucket) throws Exception;
 
     SinkRecord toLogRecord(SinkRecord record);

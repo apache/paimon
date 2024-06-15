@@ -19,6 +19,7 @@
 package org.apache.paimon.hive.utils;
 
 import org.apache.paimon.hive.mapred.PaimonInputSplit;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FileStoreTable;
@@ -45,6 +46,7 @@ import static java.util.Collections.singletonMap;
 import static org.apache.paimon.CoreOptions.SCAN_TAG_NAME;
 import static org.apache.paimon.hive.utils.HiveUtils.createPredicate;
 import static org.apache.paimon.hive.utils.HiveUtils.extractTagName;
+import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 
 /** Generator to generate hive input splits. */
 public class HiveSplitGenerator {
@@ -85,7 +87,8 @@ public class HiveSplitGenerator {
                 createPartitionPredicate(
                                 table.schema().logicalRowType(),
                                 table.schema().partitionKeys(),
-                                location)
+                                location,
+                                table.coreOptions().partitionDefaultName())
                         .ifPresent(predicatePerPartition::add);
 
                 scan = table.newScan();
@@ -96,13 +99,19 @@ public class HiveSplitGenerator {
             scan.plan()
                     .splits()
                     .forEach(
-                            split -> splits.add(new PaimonInputSplit(location, (DataSplit) split)));
+                            split ->
+                                    splits.add(
+                                            new PaimonInputSplit(
+                                                    location, (DataSplit) split, table)));
         }
         return splits.toArray(new InputSplit[0]);
     }
 
     private static Optional<Predicate> createPartitionPredicate(
-            RowType rowType, List<String> partitionKeys, String partitionDir) {
+            RowType rowType,
+            List<String> partitionKeys,
+            String partitionDir,
+            String defaultPartName) {
         Set<String> partitionKeySet = new HashSet<>(partitionKeys);
         LinkedHashMap<String, String> partition = new LinkedHashMap<>();
         for (String s : partitionDir.split("/")) {
@@ -121,7 +130,9 @@ public class HiveSplitGenerator {
         if (partition.isEmpty() || partition.size() != partitionKeys.size()) {
             return Optional.empty();
         } else {
-            return Optional.ofNullable(PredicateBuilder.partition(partition, rowType));
+            return Optional.ofNullable(
+                    PartitionPredicate.createPartitionPredicate(
+                            partition, rowType, defaultPartName));
         }
     }
 }

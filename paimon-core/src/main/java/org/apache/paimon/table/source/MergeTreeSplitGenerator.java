@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.mergetree.SortedRun;
@@ -31,6 +32,8 @@ import java.util.List;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
+
 /** Merge tree implementation of {@link SplitGenerator}. */
 public class MergeTreeSplitGenerator implements SplitGenerator {
 
@@ -40,15 +43,43 @@ public class MergeTreeSplitGenerator implements SplitGenerator {
 
     private final long openFileCost;
 
+    private final boolean deletionVectorsEnabled;
+
+    private final MergeEngine mergeEngine;
+
     public MergeTreeSplitGenerator(
-            Comparator<InternalRow> keyComparator, long targetSplitSize, long openFileCost) {
+            Comparator<InternalRow> keyComparator,
+            long targetSplitSize,
+            long openFileCost,
+            boolean deletionVectorsEnabled,
+            MergeEngine mergeEngine) {
         this.keyComparator = keyComparator;
         this.targetSplitSize = targetSplitSize;
         this.openFileCost = openFileCost;
+        this.deletionVectorsEnabled = deletionVectorsEnabled;
+        this.mergeEngine = mergeEngine;
     }
 
     @Override
-    public List<List<DataFileMeta>> splitForBatch(List<DataFileMeta> files) {
+    public boolean alwaysRawConvertible() {
+        return deletionVectorsEnabled || mergeEngine == FIRST_ROW;
+    }
+
+    @Override
+    public List<SplitGroup> splitForBatch(List<DataFileMeta> files) {
+        boolean rawConvertible =
+                files.stream().allMatch(file -> file.level() != 0 && withoutDeleteRow(file));
+        boolean oneLevel =
+                files.stream().map(DataFileMeta::level).collect(Collectors.toSet()).size() == 1;
+
+        if (rawConvertible && (deletionVectorsEnabled || mergeEngine == FIRST_ROW || oneLevel)) {
+            Function<DataFileMeta, Long> weightFunc =
+                    file -> Math.max(file.fileSize(), openFileCost);
+            return BinPacking.packForOrdered(files, weightFunc, targetSplitSize).stream()
+                    .map(SplitGroup::rawConvertibleGroup)
+                    .collect(Collectors.toList());
+        }
+
         /*
          * The generator aims to parallel the scan execution by slicing the files of each bucket
          * into multiple splits. The generation has one constraint: files with intersected key
@@ -74,13 +105,19 @@ public class MergeTreeSplitGenerator implements SplitGenerator {
                 new IntervalPartition(files, keyComparator)
                         .partition().stream().map(this::flatRun).collect(Collectors.toList());
 
-        return packSplits(sections);
+        return packSplits(sections).stream()
+                .map(
+                        f ->
+                                f.size() == 1 && withoutDeleteRow(f.get(0))
+                                        ? SplitGroup.rawConvertibleGroup(f)
+                                        : SplitGroup.nonRawConvertibleGroup(f))
+                .collect(Collectors.toList());
     }
 
     @Override
-    public List<List<DataFileMeta>> splitForStreaming(List<DataFileMeta> files) {
+    public List<SplitGroup> splitForStreaming(List<DataFileMeta> files) {
         // We don't split streaming scan files
-        return Collections.singletonList(files);
+        return Collections.singletonList(SplitGroup.rawConvertibleGroup(files));
     }
 
     private List<List<DataFileMeta>> packSplits(List<List<DataFileMeta>> sections) {
@@ -109,5 +146,10 @@ public class MergeTreeSplitGenerator implements SplitGenerator {
         List<DataFileMeta> files = new ArrayList<>();
         section.forEach(files::addAll);
         return files;
+    }
+
+    private boolean withoutDeleteRow(DataFileMeta dataFileMeta) {
+        // null to true to be compatible with old version
+        return dataFileMeta.deleteRowCount().map(count -> count == 0L).orElse(true);
     }
 }

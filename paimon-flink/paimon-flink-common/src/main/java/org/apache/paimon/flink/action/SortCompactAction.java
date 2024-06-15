@@ -20,8 +20,10 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.flink.sink.FlinkSinkBuilder;
+import org.apache.paimon.flink.sink.SortCompactSinkBuilder;
+import org.apache.paimon.flink.sorter.TableSortInfo;
 import org.apache.paimon.flink.sorter.TableSorter;
+import org.apache.paimon.flink.sorter.TableSorter.OrderType;
 import org.apache.paimon.flink.source.FlinkSourceBuilder;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -38,10 +40,11 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+
+import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 
 /** Compact with sort action. */
 public class SortCompactAction extends CompactAction {
@@ -79,41 +82,73 @@ public class SortCompactAction extends CompactAction {
         }
         FileStoreTable fileStoreTable = (FileStoreTable) table;
 
-        if (fileStoreTable.bucketMode() != BucketMode.UNAWARE
-                && fileStoreTable.bucketMode() != BucketMode.DYNAMIC) {
+        if (fileStoreTable.bucketMode() != BucketMode.BUCKET_UNAWARE
+                && fileStoreTable.bucketMode() != BucketMode.HASH_DYNAMIC) {
             throw new IllegalArgumentException("Sort Compact only supports bucket=-1 yet.");
         }
         Map<String, String> tableConfig = fileStoreTable.options();
         FlinkSourceBuilder sourceBuilder =
-                new FlinkSourceBuilder(
-                        ObjectIdentifier.of(
-                                catalogName,
-                                identifier.getDatabaseName(),
-                                identifier.getObjectName()),
-                        fileStoreTable);
+                new FlinkSourceBuilder(fileStoreTable)
+                        .sourceName(
+                                ObjectIdentifier.of(
+                                                catalogName,
+                                                identifier.getDatabaseName(),
+                                                identifier.getObjectName())
+                                        .asSummaryString());
 
         if (getPartitions() != null) {
             Predicate partitionPredicate =
                     PredicateBuilder.or(
                             getPartitions().stream()
-                                    .map(p -> PredicateBuilder.partition(p, table.rowType()))
+                                    .map(
+                                            p ->
+                                                    createPartitionPredicate(
+                                                            p,
+                                                            table.rowType(),
+                                                            ((FileStoreTable) table)
+                                                                    .coreOptions()
+                                                                    .partitionDefaultName()))
                                     .toArray(Predicate[]::new));
-            sourceBuilder.withPredicate(partitionPredicate);
+            sourceBuilder.predicate(partitionPredicate);
         }
 
         String scanParallelism = tableConfig.get(FlinkConnectorOptions.SCAN_PARALLELISM.key());
         if (scanParallelism != null) {
-            sourceBuilder.withParallelism(Integer.parseInt(scanParallelism));
+            sourceBuilder.sourceParallelism(Integer.parseInt(scanParallelism));
         }
 
-        DataStream<RowData> source = sourceBuilder.withEnv(env).withContinuousMode(false).build();
-        TableSorter sorter =
-                TableSorter.getSorter(env, source, fileStoreTable, sortStrategy, orderColumns);
+        DataStream<RowData> source = sourceBuilder.env(env).sourceBounded(true).build();
+        int localSampleMagnification =
+                ((FileStoreTable) table).coreOptions().getLocalSampleMagnification();
+        if (localSampleMagnification < 20) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "the config '%s=%d' should not be set too small,greater than or equal to 20 is needed.",
+                            CoreOptions.SORT_COMPACTION_SAMPLE_MAGNIFICATION.key(),
+                            localSampleMagnification));
+        }
+        String sinkParallelismValue =
+                table.options().get(FlinkConnectorOptions.SINK_PARALLELISM.key());
+        final int sinkParallelism =
+                sinkParallelismValue == null
+                        ? source.getParallelism()
+                        : Integer.parseInt(sinkParallelismValue);
+        TableSortInfo sortInfo =
+                new TableSortInfo.Builder()
+                        .setSortColumns(orderColumns)
+                        .setSortStrategy(OrderType.of(sortStrategy))
+                        .setSinkParallelism(sinkParallelism)
+                        .setLocalSampleSize(sinkParallelism * localSampleMagnification)
+                        .setGlobalSampleSize(sinkParallelism * 1000)
+                        .setRangeNumber(sinkParallelism * 10)
+                        .build();
 
-        new FlinkSinkBuilder(fileStoreTable)
-                .withInput(sorter.sort())
+        TableSorter sorter = TableSorter.getSorter(env, source, fileStoreTable, sortInfo);
+
+        new SortCompactSinkBuilder(fileStoreTable)
                 .forCompact(true)
-                .withOverwritePartition(new HashMap<>())
+                .forRowData(sorter.sort())
+                .overwrite()
                 .build();
     }
 

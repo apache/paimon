@@ -89,7 +89,7 @@ public class MessageQueueSchemaUtils {
     /** Wrap the consumer for different message queues. */
     public interface ConsumerWrapper extends AutoCloseable {
 
-        List<String> getRecords(int pollTimeOutMills);
+        List<CdcSourceRecord> getRecords(int pollTimeOutMills);
 
         String topic();
     }

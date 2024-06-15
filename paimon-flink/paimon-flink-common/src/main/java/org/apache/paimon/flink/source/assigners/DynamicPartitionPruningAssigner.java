@@ -109,6 +109,11 @@ public class DynamicPartitionPruningAssigner implements SplitAssigner {
         return innerAssigner.getNextSnapshotId(subtask);
     }
 
+    @Override
+    public int numberOfRemainingSplits() {
+        return innerAssigner.numberOfRemainingSplits();
+    }
+
     private boolean filter(FileStoreSourceSplit sourceSplit) {
         DataSplit dataSplit = (DataSplit) sourceSplit.split();
         BinaryRow partition = dataSplit.partition();

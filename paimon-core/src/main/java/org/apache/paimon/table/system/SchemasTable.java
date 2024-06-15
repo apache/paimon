@@ -34,6 +34,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadOnceTableScan;
+import org.apache.paimon.table.source.SingletonSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.BigIntType;
@@ -47,7 +48,6 @@ import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
-import java.io.IOException;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -127,29 +127,21 @@ public class SchemasTable implements ReadonlyTable {
 
         @Override
         public Plan innerPlan() {
-            return () -> Collections.singletonList(new SchemasSplit(fileIO, location));
+            return () -> Collections.singletonList(new SchemasSplit(location));
         }
     }
 
     /** {@link Split} implementation for {@link SchemasTable}. */
-    private static class SchemasSplit implements Split {
+    private static class SchemasSplit extends SingletonSplit {
 
         private static final long serialVersionUID = 1L;
 
-        private final FileIO fileIO;
         private final Path location;
 
-        private SchemasSplit(FileIO fileIO, Path location) {
-            this.fileIO = fileIO;
+        private SchemasSplit(Path location) {
             this.location = location;
         }
 
-        @Override
-        public long rowCount() {
-            return new SchemaManager(fileIO, location).listAllIds().size();
-        }
-
-        @Override
         public boolean equals(Object o) {
             if (this == o) {
                 return true;
@@ -194,7 +186,7 @@ public class SchemasTable implements ReadonlyTable {
         }
 
         @Override
-        public RecordReader<InternalRow> createReader(Split split) throws IOException {
+        public RecordReader<InternalRow> createReader(Split split) {
             if (!(split instanceof SchemasSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }

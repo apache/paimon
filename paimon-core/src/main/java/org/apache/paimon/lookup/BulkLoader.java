@@ -25,6 +25,7 @@ import org.rocksdb.Options;
 import org.rocksdb.RocksDB;
 import org.rocksdb.RocksDBException;
 import org.rocksdb.SstFileWriter;
+import org.rocksdb.TtlDB;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -39,8 +40,10 @@ public class BulkLoader {
     private final ColumnFamilyHandle columnFamily;
     private final String path;
     private final RocksDB db;
+    private final boolean isTtlEnabled;
     private final Options options;
     private final List<String> files = new ArrayList<>();
+    private final int currentTimeSeconds;
 
     private SstFileWriter writer = null;
     private int sstIndex = 0;
@@ -48,9 +51,11 @@ public class BulkLoader {
 
     public BulkLoader(RocksDB db, Options options, ColumnFamilyHandle columnFamily, String path) {
         this.db = db;
+        this.isTtlEnabled = db instanceof TtlDB;
         this.options = options;
         this.columnFamily = columnFamily;
         this.path = path;
+        this.currentTimeSeconds = (int) (System.currentTimeMillis() / 1000);
     }
 
     public void write(byte[] key, byte[] value) throws WriteException {
@@ -62,6 +67,10 @@ public class BulkLoader {
                 files.add(path);
             }
 
+            if (isTtlEnabled) {
+                value = appendTimestamp(value);
+            }
+
             try {
                 writer.put(key, value);
             } catch (RocksDBException e) {
@@ -71,6 +80,7 @@ public class BulkLoader {
             recordNum++;
             if (recordNum % 1000 == 0 && writer.fileSize() >= options.targetFileSizeBase()) {
                 writer.finish();
+                writer.close();
                 writer = null;
                 recordNum = 0;
             }
@@ -79,10 +89,21 @@ public class BulkLoader {
         }
     }
 
+    private byte[] appendTimestamp(byte[] value) {
+        byte[] newValue = new byte[value.length + 4];
+        System.arraycopy(value, 0, newValue, 0, value.length);
+        newValue[value.length] = (byte) (currentTimeSeconds & 0xff);
+        newValue[value.length + 1] = (byte) ((currentTimeSeconds >> 8) & 0xff);
+        newValue[value.length + 2] = (byte) ((currentTimeSeconds >> 16) & 0xff);
+        newValue[value.length + 3] = (byte) ((currentTimeSeconds >> 24) & 0xff);
+        return newValue;
+    }
+
     public void finish() {
         try {
             if (writer != null) {
                 writer.finish();
+                writer.close();
             }
 
             if (files.size() > 0) {

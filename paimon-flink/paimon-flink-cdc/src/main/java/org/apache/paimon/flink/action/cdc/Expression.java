@@ -18,9 +18,14 @@
 
 package org.apache.paimon.flink.action.cdc;
 
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeFamily;
+import org.apache.paimon.types.DataTypeJsonParser;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.DateTimeUtils;
+import org.apache.paimon.utils.SerializableSupplier;
+import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.Nullable;
 
@@ -31,23 +36,15 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Produce a computation result for computed column. */
 public interface Expression extends Serializable {
-
-    List<String> SUPPORTED_EXPRESSION =
-            Arrays.asList(
-                    "year",
-                    "month",
-                    "day",
-                    "hour",
-                    "minute",
-                    "second",
-                    "date_format",
-                    "substring",
-                    "truncate");
 
     /** Return name of referenced field. */
     String fieldReference();
@@ -58,67 +55,179 @@ public interface Expression extends Serializable {
     /** Compute value from given input. Input and output are serialized to string. */
     String eval(String input);
 
-    static Expression create(
-            String exprName, String fieldReference, DataType fieldType, String... literals) {
-        switch (exprName.toLowerCase()) {
-            case "year":
-                return year(fieldReference);
-            case "month":
-                return month(fieldReference);
-            case "day":
-                return day(fieldReference);
-            case "hour":
-                return hour(fieldReference);
-            case "minute":
-                return minute(fieldReference);
-            case "second":
-                return second(fieldReference);
-            case "date_format":
-                return dateFormat(fieldReference, literals);
-            case "substring":
-                return substring(fieldReference, literals);
-            case "truncate":
-                return truncate(fieldReference, fieldType, literals);
-                // TODO: support more expression
-            default:
-                throw new UnsupportedOperationException(
-                        String.format(
-                                "Unsupported expression: %s. Supported expressions are: %s",
-                                exprName, String.join(",", SUPPORTED_EXPRESSION)));
+    /** Expression function. */
+    enum ExpressionFunction {
+        YEAR(
+                (typeMapping, caseSensitive, args) -> {
+                    ReferencedField referencedField =
+                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                    return TemporalToIntConverter.create(
+                            referencedField.field(),
+                            referencedField.fieldType(),
+                            () -> LocalDateTime::getYear,
+                            referencedField.literals());
+                }),
+        MONTH(
+                (typeMapping, caseSensitive, args) -> {
+                    ReferencedField referencedField =
+                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                    return TemporalToIntConverter.create(
+                            referencedField.field(),
+                            referencedField.fieldType(),
+                            () -> LocalDateTime::getMonthValue,
+                            referencedField.literals());
+                }),
+        DAY(
+                (typeMapping, caseSensitive, args) -> {
+                    ReferencedField referencedField =
+                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                    return TemporalToIntConverter.create(
+                            referencedField.field(),
+                            referencedField.fieldType(),
+                            () -> LocalDateTime::getDayOfMonth,
+                            referencedField.literals());
+                }),
+        HOUR(
+                (typeMapping, caseSensitive, args) -> {
+                    ReferencedField referencedField =
+                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                    return TemporalToIntConverter.create(
+                            referencedField.field(),
+                            referencedField.fieldType(),
+                            () -> LocalDateTime::getHour,
+                            referencedField.literals());
+                }),
+        MINUTE(
+                (typeMapping, caseSensitive, args) -> {
+                    ReferencedField referencedField =
+                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                    return TemporalToIntConverter.create(
+                            referencedField.field(),
+                            referencedField.fieldType(),
+                            () -> LocalDateTime::getMinute,
+                            referencedField.literals());
+                }),
+        SECOND(
+                (typeMapping, caseSensitive, args) -> {
+                    ReferencedField referencedField =
+                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                    return TemporalToIntConverter.create(
+                            referencedField.field(),
+                            referencedField.fieldType(),
+                            () -> LocalDateTime::getSecond,
+                            referencedField.literals());
+                }),
+        DATE_FORMAT(
+                (typeMapping, caseSensitive, args) -> {
+                    ReferencedField referencedField =
+                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                    return DateFormat.create(
+                            referencedField.field(),
+                            referencedField.fieldType(),
+                            referencedField.literals());
+                }),
+        SUBSTRING(
+                (typeMapping, caseSensitive, args) -> {
+                    ReferencedField referencedField =
+                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                    return substring(referencedField.field(), referencedField.literals());
+                }),
+        TRUNCATE(
+                (typeMapping, caseSensitive, args) -> {
+                    ReferencedField referencedField =
+                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                    return truncate(
+                            referencedField.field(),
+                            referencedField.fieldType(),
+                            referencedField.literals());
+                }),
+        CAST((typeMapping, caseSensitive, args) -> cast(args));
+
+        public final ExpressionCreator creator;
+
+        ExpressionFunction(ExpressionCreator creator) {
+            this.creator = creator;
+        }
+
+        public ExpressionCreator getCreator() {
+            return creator;
+        }
+
+        private static final Map<String, ExpressionCreator> EXPRESSION_FUNCTIONS =
+                Arrays.stream(ExpressionFunction.values())
+                        .collect(
+                                Collectors.toMap(
+                                        value -> value.name().toLowerCase(),
+                                        ExpressionFunction::getCreator));
+
+        public static ExpressionCreator creator(String exprName) {
+            return EXPRESSION_FUNCTIONS.get(exprName.toLowerCase());
         }
     }
 
-    static Expression year(String fieldReference) {
-        return new YearComputer(fieldReference);
+    /** Expression creator. */
+    @FunctionalInterface
+    interface ExpressionCreator {
+        Expression create(Map<String, DataType> typeMapping, boolean caseSensitive, String[] args);
     }
 
-    static Expression month(String fieldReference) {
-        return new MonthComputer(fieldReference);
+    /** Referenced field in expression input parameters. */
+    class ReferencedField {
+        private final String field;
+        private final DataType fieldType;
+        private final String[] literals;
+
+        private ReferencedField(String field, DataType fieldType, String[] literals) {
+            this.field = field;
+            this.fieldType = fieldType;
+            this.literals = literals;
+        }
+
+        public static ReferencedField checkArgument(
+                Map<String, DataType> typeMapping, boolean caseSensitive, String... args) {
+            String referencedField = args[0].trim();
+            String[] literals =
+                    Arrays.stream(args).skip(1).map(String::trim).toArray(String[]::new);
+            String referencedFieldCheckForm =
+                    StringUtils.caseSensitiveConversion(referencedField, caseSensitive);
+
+            DataType fieldType =
+                    checkNotNull(
+                            typeMapping.get(referencedFieldCheckForm),
+                            String.format(
+                                    "Referenced field '%s' is not in given fields: %s.",
+                                    referencedFieldCheckForm, typeMapping.keySet()));
+            return new ReferencedField(referencedField, fieldType, literals);
+        }
+
+        public String field() {
+            return field;
+        }
+
+        public DataType fieldType() {
+            return fieldType;
+        }
+
+        public String[] literals() {
+            return literals;
+        }
     }
 
-    static Expression day(String fieldReference) {
-        return new DayComputer(fieldReference);
-    }
+    static Expression create(
+            Map<String, DataType> typeMapping,
+            boolean caseSensitive,
+            String exprName,
+            String... args) {
 
-    static Expression hour(String fieldReference) {
-        return new HourComputer(fieldReference);
-    }
-
-    static Expression minute(String fieldReference) {
-        return new MinuteComputer(fieldReference);
-    }
-
-    static Expression second(String fieldReference) {
-        return new SecondComputer(fieldReference);
-    }
-
-    static Expression dateFormat(String fieldReference, String... literals) {
-        checkArgument(
-                literals.length == 1,
-                String.format(
-                        "'date_format' expression supports one argument, but found '%s'.",
-                        literals.length));
-        return new DateFormat(fieldReference, literals[0]);
+        ExpressionCreator function = ExpressionFunction.creator(exprName.toLowerCase());
+        if (function == null) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Unsupported expression: %s. Supported expressions are: %s",
+                            exprName,
+                            String.join(",", ExpressionFunction.EXPRESSION_FUNCTIONS.keySet())));
+        }
+        return function.create(typeMapping, caseSensitive, args);
     }
 
     static Expression substring(String fieldReference, String... literals) {
@@ -160,15 +269,50 @@ public interface Expression extends Serializable {
         return new TruncateComputer(fieldReference, fieldType, literals[0]);
     }
 
-    /** Compute year from a time input. */
-    final class YearComputer implements Expression {
+    static Expression cast(String... literals) {
+        checkArgument(
+                literals.length == 1 || literals.length == 2,
+                String.format(
+                        "'cast' expression supports one or two arguments, but found '%s'.",
+                        literals.length));
+        DataType dataType = DataTypes.STRING();
+        if (literals.length == 2) {
+            dataType = DataTypeJsonParser.parseAtomicTypeSQLString(literals[1]);
+        }
+        return new CastExpression(literals[0], dataType);
+    }
+
+    // ======================== Expression Implementations ========================
+
+    /** Expression to handle temporal value. */
+    abstract class TemporalExpressionBase<T> implements Expression {
 
         private static final long serialVersionUID = 1L;
 
-        private final String fieldReference;
+        private static final List<Integer> SUPPORTED_PRECISION = Arrays.asList(0, 3, 6, 9);
 
-        private YearComputer(String fieldReference) {
+        private final String fieldReference;
+        @Nullable private final Integer precision;
+
+        private transient Function<LocalDateTime, T> converter;
+
+        private TemporalExpressionBase(
+                String fieldReference, DataType fieldType, @Nullable Integer precision) {
             this.fieldReference = fieldReference;
+
+            // when the input is INTEGER_NUMERIC, the precision must be set
+            if (fieldType.getTypeRoot().getFamilies().contains(DataTypeFamily.INTEGER_NUMERIC)
+                    && precision == null) {
+                precision = 0;
+            }
+
+            checkArgument(
+                    precision == null || SUPPORTED_PRECISION.contains(precision),
+                    "Unsupported precision of temporal function: %d. Supported precisions are: "
+                            + "0 (for epoch seconds), 3 (for epoch milliseconds), 6 (for epoch microseconds) and 9 (for epoch nanoseconds).",
+                    precision);
+
+            this.precision = precision;
         }
 
         @Override
@@ -176,6 +320,7 @@ public interface Expression extends Serializable {
             return fieldReference;
         }
 
+        /** If not, this must be overridden! */
         @Override
         public DataType outputType() {
             return DataTypes.INT();
@@ -183,168 +328,99 @@ public interface Expression extends Serializable {
 
         @Override
         public String eval(String input) {
-            LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input, 0);
-            return String.valueOf(localDateTime.getYear());
+            if (converter == null) {
+                this.converter = createConverter();
+            }
+
+            T result = converter.apply(toLocalDateTime(input));
+            return String.valueOf(result);
         }
+
+        private LocalDateTime toLocalDateTime(String input) {
+            if (precision == null) {
+                return DateTimeUtils.toLocalDateTime(input, 9);
+            } else {
+                long numericValue = Long.parseLong(input);
+                long milliseconds = 0;
+                int nanosOfMillisecond = 0;
+                switch (precision) {
+                    case 0:
+                        milliseconds = numericValue * 1000L;
+                        break;
+                    case 3:
+                        milliseconds = numericValue;
+                        break;
+                    case 6:
+                        milliseconds = numericValue / 1000;
+                        nanosOfMillisecond = (int) (numericValue % 1000 * 1000);
+                        break;
+                    case 9:
+                        milliseconds = numericValue / 1_000_000;
+                        nanosOfMillisecond = (int) (numericValue % 1_000_000);
+                        break;
+                        // no error case because precision is validated
+                }
+                return Timestamp.fromEpochMillis(milliseconds, nanosOfMillisecond)
+                        .toLocalDateTime();
+            }
+        }
+
+        protected abstract Function<LocalDateTime, T> createConverter();
     }
 
-    /** Compute month from a time input. */
-    final class MonthComputer implements Expression {
+    /** Convert the temporal value to an integer. */
+    final class TemporalToIntConverter extends TemporalExpressionBase<Integer> {
 
         private static final long serialVersionUID = 1L;
 
-        private final String fieldReference;
+        private final SerializableSupplier<Function<LocalDateTime, Integer>> converterSupplier;
 
-        private MonthComputer(String fieldReference) {
-            this.fieldReference = fieldReference;
+        private TemporalToIntConverter(
+                String fieldReference,
+                DataType fieldType,
+                @Nullable Integer precision,
+                SerializableSupplier<Function<LocalDateTime, Integer>> converterSupplier) {
+            super(fieldReference, fieldType, precision);
+            this.converterSupplier = converterSupplier;
         }
 
         @Override
-        public String fieldReference() {
-            return fieldReference;
+        protected Function<LocalDateTime, Integer> createConverter() {
+            return converterSupplier.get();
         }
 
-        @Override
-        public DataType outputType() {
-            return DataTypes.INT();
-        }
+        private static TemporalToIntConverter create(
+                String fieldReference,
+                DataType fieldType,
+                SerializableSupplier<Function<LocalDateTime, Integer>> converterSupplier,
+                String... literals) {
+            checkArgument(
+                    literals.length == 0 || literals.length == 1,
+                    "TemporalToIntConverter supports 0 or 1 argument, but found '%s'.",
+                    literals.length);
 
-        @Override
-        public String eval(String input) {
-            LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input, 0);
-            return String.valueOf(localDateTime.getMonthValue());
+            return new TemporalToIntConverter(
+                    fieldReference,
+                    fieldType,
+                    literals.length == 0 ? null : Integer.valueOf(literals[0]),
+                    converterSupplier);
         }
     }
 
-    /** Compute day from a time input. */
-    final class DayComputer implements Expression {
+    /** Convert the temporal value to desired formatted string. */
+    final class DateFormat extends TemporalExpressionBase<String> {
 
-        private static final long serialVersionUID = 1L;
+        private static final long serialVersionUID = 2L;
 
-        private final String fieldReference;
-
-        private DayComputer(String fieldReference) {
-            this.fieldReference = fieldReference;
-        }
-
-        @Override
-        public String fieldReference() {
-            return fieldReference;
-        }
-
-        @Override
-        public DataType outputType() {
-            return DataTypes.INT();
-        }
-
-        @Override
-        public String eval(String input) {
-            LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input, 0);
-            return String.valueOf(localDateTime.getDayOfMonth());
-        }
-    }
-
-    /** Compute hour from a time input. */
-    final class HourComputer implements Expression {
-
-        private static final long serialVersionUID = 1L;
-
-        private final String fieldReference;
-
-        private HourComputer(String fieldReference) {
-            this.fieldReference = fieldReference;
-        }
-
-        @Override
-        public String fieldReference() {
-            return fieldReference;
-        }
-
-        @Override
-        public DataType outputType() {
-            return DataTypes.INT();
-        }
-
-        @Override
-        public String eval(String input) {
-            LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input, 0);
-            return String.valueOf(localDateTime.getHour());
-        }
-    }
-
-    /** Compute minute from a time input. */
-    final class MinuteComputer implements Expression {
-
-        private static final long serialVersionUID = 1L;
-
-        private final String fieldReference;
-
-        private MinuteComputer(String fieldReference) {
-            this.fieldReference = fieldReference;
-        }
-
-        @Override
-        public String fieldReference() {
-            return fieldReference;
-        }
-
-        @Override
-        public DataType outputType() {
-            return DataTypes.INT();
-        }
-
-        @Override
-        public String eval(String input) {
-            LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input, 0);
-            return String.valueOf(localDateTime.getMinute());
-        }
-    }
-
-    /** Compute second from a time input. */
-    final class SecondComputer implements Expression {
-
-        private static final long serialVersionUID = 1L;
-
-        private final String fieldReference;
-
-        private SecondComputer(String fieldReference) {
-            this.fieldReference = fieldReference;
-        }
-
-        @Override
-        public String fieldReference() {
-            return fieldReference;
-        }
-
-        @Override
-        public DataType outputType() {
-            return DataTypes.INT();
-        }
-
-        @Override
-        public String eval(String input) {
-            LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input, 0);
-            return String.valueOf(localDateTime.getSecond());
-        }
-    }
-
-    /** date format from a time input. */
-    final class DateFormat implements Expression {
-
-        private static final long serialVersionUID = 1L;
-
-        private final String fieldReference;
         private final String pattern;
-        private transient DateTimeFormatter formatter;
 
-        private DateFormat(String fieldReference, String pattern) {
-            this.fieldReference = fieldReference;
+        private DateFormat(
+                String fieldReference,
+                DataType fieldType,
+                String pattern,
+                @Nullable Integer precision) {
+            super(fieldReference, fieldType, precision);
             this.pattern = pattern;
-        }
-
-        @Override
-        public String fieldReference() {
-            return fieldReference;
         }
 
         @Override
@@ -353,12 +429,23 @@ public interface Expression extends Serializable {
         }
 
         @Override
-        public String eval(String input) {
-            if (formatter == null) {
-                formatter = DateTimeFormatter.ofPattern(pattern);
-            }
-            LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input, 0);
-            return localDateTime.format(formatter);
+        protected Function<LocalDateTime, String> createConverter() {
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern(pattern);
+            return localDateTime -> localDateTime.format(formatter);
+        }
+
+        private static DateFormat create(
+                String fieldReference, DataType fieldType, String... literals) {
+            checkArgument(
+                    literals.length == 1 || literals.length == 2,
+                    "'date_format' supports 1 or 2 arguments, but found '%s'.",
+                    literals.length);
+
+            return new DateFormat(
+                    fieldReference,
+                    fieldType,
+                    literals[0],
+                    literals.length == 1 ? null : Integer.valueOf(literals[1]));
         }
     }
 
@@ -489,6 +576,36 @@ public interface Expression extends Serializable {
                             value.scale());
 
             return value.subtract(remainder);
+        }
+    }
+
+    /** Get constant value. */
+    final class CastExpression implements Expression {
+
+        private static final long serialVersionUID = 1L;
+
+        private final String value;
+
+        private final DataType dataType;
+
+        private CastExpression(String value, DataType dataType) {
+            this.value = value;
+            this.dataType = dataType;
+        }
+
+        @Override
+        public String fieldReference() {
+            return null;
+        }
+
+        @Override
+        public DataType outputType() {
+            return dataType;
+        }
+
+        @Override
+        public String eval(String input) {
+            return value;
         }
     }
 }

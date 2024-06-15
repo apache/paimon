@@ -26,9 +26,7 @@ under the License.
 
 # Overview
 
-Apache Paimon(incubating) is a streaming data lake platform that supports high-speed data ingestion, change data tracking and efficient real-time analytics.
-
-## Architecture
+Apache Paimon's Architecture:
 
 {{< img src="/img/architecture.png">}}
 
@@ -39,14 +37,17 @@ As shown in the architecture above:
   - from historical snapshots (in batch mode),
   - from the latest offset (in streaming mode), or 
   - reading incremental snapshots in a hybrid way.
-- For writes, it supports streaming synchronization from the changelog of databases (CDC) or batch
-  insert/overwrite from offline data.
+- For writes, it supports
+  - streaming synchronization from the changelog of databases (CDC)
+  - batch insert/overwrite from offline data.
 
 **Ecosystem:** In addition to Apache Flink, Paimon also supports read by other computation
 engines like Apache Hive, Apache Spark and Trino.
 
-**Internal:** Under the hood, Paimon stores the columnar files on the filesystem/object-store and uses
-the LSM tree structure to support a large volume of data updates and high-performance queries.
+**Internal:**
+- Under the hood, Paimon stores the columnar files on the filesystem/object-store
+- The metadata of the file is saved in the manifest file, providing large-scale storage and data skipping.
+- For primary key table, uses the LSM tree structure to support a large volume of data updates and high-performance queries.
 
 ## Unified Storage
 

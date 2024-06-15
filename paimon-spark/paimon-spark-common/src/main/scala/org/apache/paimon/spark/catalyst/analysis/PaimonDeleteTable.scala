@@ -15,12 +15,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark.catalyst.analysis
 
 import org.apache.paimon.spark.commands.DeleteFromPaimonTableCommand
+import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.catalyst.plans.logical.{DeleteFromTable, LogicalPlan}
 import org.apache.spark.sql.catalyst.rules.Rule
+
+import scala.collection.JavaConverters._
 
 object PaimonDeleteTable extends Rule[LogicalPlan] with RowLevelHelper {
 
@@ -29,9 +33,16 @@ object PaimonDeleteTable extends Rule[LogicalPlan] with RowLevelHelper {
   override def apply(plan: LogicalPlan): LogicalPlan = {
     plan.resolveOperators {
       case d @ DeleteFromTable(PaimonRelation(table), condition) if d.resolved =>
-        checkPaimonTable(table)
+        checkPaimonTable(table.getTable)
 
-        DeleteFromPaimonTableCommand(table, d)
+        table.getTable match {
+          case paimonTable: FileStoreTable =>
+            val relation = PaimonRelation.getPaimonRelation(d.table)
+            DeleteFromPaimonTableCommand(relation, paimonTable, condition)
+
+          case _ =>
+            throw new RuntimeException("Delete Operation is only supported for FileStoreTable.")
+        }
     }
   }
 }

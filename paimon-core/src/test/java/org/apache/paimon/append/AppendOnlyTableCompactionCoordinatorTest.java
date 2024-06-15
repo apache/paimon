@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -41,7 +42,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
-import static org.apache.paimon.stats.StatsTestUtils.newTableStats;
+import static org.apache.paimon.stats.StatsTestUtils.newSimpleStats;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link AppendOnlyTableCompactionCoordinator}. */
@@ -180,11 +181,14 @@ public class AppendOnlyTableCompactionCoordinatorTest {
                 1,
                 row(0),
                 row(0),
-                newTableStats(0, 1),
-                newTableStats(0, 1),
+                newSimpleStats(0, 1),
+                newSimpleStats(0, 1),
                 0,
                 0,
                 0,
-                0);
+                0,
+                0L,
+                null,
+                FileSource.APPEND);
     }
 }

@@ -25,7 +25,7 @@ under the License.
     <parent>
         <groupId>org.apache.paimon</groupId>
         <artifactId>paimon-flink</artifactId>
-        <version>0.8-SNAPSHOT</version>
+        <version>0.9-SNAPSHOT</version>
     </parent>
 
     <packaging>jar</packaging>
@@ -39,7 +39,7 @@ under the License.
         <flink.mongodb.cdc.version>2.4.1</flink.mongodb.cdc.version>
         <avro.version>1.11.1</avro.version>
         <geometry.version>2.2.0</geometry.version>
-        <json-path.version>2.8.0</json-path.version>
+        <json-path.version>2.9.0</json-path.version>
         <mongodb.testcontainers.version>1.19.1</mongodb.testcontainers.version>
         <flink.connector.pulsar.version>4.0.0-1.17</flink.connector.pulsar.version>
     </properties>
@@ -62,20 +62,6 @@ under the License.
         <dependency>
             <groupId>org.apache.flink</groupId>
             <artifactId>flink-core</artifactId>
-            <version>${flink.version}</version>
-            <scope>provided</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-common</artifactId>
-            <version>${flink.version}</version>
-            <scope>provided</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-streaming-java</artifactId>
             <version>${flink.version}</version>
             <scope>provided</scope>
         </dependency>
@@ -177,20 +163,6 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-api-java</artifactId>
-            <version>${flink.version}</version>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-api-java-bridge</artifactId>
-            <version>${flink.version}</version>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
             <artifactId>flink-table-planner_${scala.binary.version}</artifactId>
             <version>${flink.version}</version>
             <scope>test</scope>
@@ -252,42 +224,6 @@ under the License.
         </dependency>
 
         <dependency>
-            <groupId>org.apache.hadoop</groupId>
-            <artifactId>hadoop-common</artifactId>
-            <version>${hadoop.version}</version>
-            <scope>test</scope>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.apache.avro</groupId>
-                    <artifactId>avro</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>log4j</groupId>
-                    <artifactId>log4j</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.slf4j</groupId>
-                    <artifactId>slf4j-log4j12</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>jdk.tools</groupId>
-                    <artifactId>jdk.tools</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>com.google.protobuf</groupId>
-                    <artifactId>protobuf-java</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.hadoop</groupId>
-            <artifactId>hadoop-hdfs-client</artifactId>
-            <version>${hadoop.version}</version>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>mysql</artifactId>
             <version>${testcontainers.version}</version>
@@ -314,6 +250,19 @@ under the License.
             <version>${testcontainers.version}</version>
             <scope>test</scope>
         </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>kafka</artifactId>
+            <version>${testcontainers.version}</version>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>junit</groupId>
+                    <artifactId>junit</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
     </dependencies>
 
     <build>
@@ -331,6 +280,10 @@ under the License.
                         <configuration>
                             <relocations>
                                 <!-- Same as flink-sql-connector-kafka. -->
+                                <relocation>
+                                    <pattern>org.apache.kafka.connect</pattern>
+                                    <shadedPattern>com.ververica.cdc.connectors.shaded.org.apache.kafka.connect</shadedPattern>
+                                </relocation>
                                 <relocation>
                                     <pattern>org.apache.kafka</pattern>
                                     <shadedPattern>org.apache.flink.kafka.shaded.org.apache.kafka</shadedPattern>

@@ -20,8 +20,8 @@ package org.apache.paimon.format;
 
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.statistics.FieldStatsCollector;
-import org.apache.paimon.stats.TestTableStatsExtractor;
+import org.apache.paimon.statistics.SimpleColStatsCollector;
+import org.apache.paimon.stats.TestSimpleStatsExtractor;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
@@ -29,7 +29,7 @@ import javax.annotation.Nullable;
 import java.util.List;
 import java.util.Optional;
 
-/** An avro {@link FileFormat} for test. It provides a {@link TableStatsExtractor}. */
+/** An avro {@link FileFormat} for test. It provides a {@link SimpleStatsExtractor}. */
 public class FileStatsExtractingAvroFormat extends FileFormat {
 
     private final FileFormat avro;
@@ -56,8 +56,8 @@ public class FileStatsExtractingAvroFormat extends FileFormat {
     }
 
     @Override
-    public Optional<TableStatsExtractor> createStatsExtractor(
-            RowType type, FieldStatsCollector.Factory[] stats) {
-        return Optional.of(new TestTableStatsExtractor(this, type, stats));
+    public Optional<SimpleStatsExtractor> createStatsExtractor(
+            RowType type, SimpleColStatsCollector.Factory[] stats) {
+        return Optional.of(new TestSimpleStatsExtractor(this, type, stats));
     }
 }
