@@ -335,7 +335,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                                         "SELECT * FROM T1 /*+ OPTIONS('log.scan'='from-timestamp') */"))
                 .hasCauseInstanceOf(IllegalArgumentException.class)
                 .hasRootCauseMessage(
-                        "must set only one key in [scan.timestamp-millis,scan.timestamp] when you use from-timestamp for scan.mode");
+                        "scan.timestamp-millis can not be null when you use from-timestamp for scan.mode");
     }
 
     @Test
