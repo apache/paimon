@@ -22,6 +22,8 @@ import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 import java.util.Optional;
 
@@ -45,60 +47,95 @@ public interface CompactDeletionFile {
             throw new IllegalStateException(
                     "Should only generate one compact deletion file, this is a bug.");
         }
-        Optional<IndexFileMeta> deletionFile =
-                files.isEmpty() ? Optional.empty() : Optional.of(files.get(0));
-        IndexFileHandler indexFileHandler = maintainer.indexFileHandler();
-        return new CompactDeletionFile() {
-            @Override
-            public Optional<IndexFileMeta> getOrCompute() {
-                return deletionFile;
-            }
 
-            @Override
-            public CompactDeletionFile mergeOldFile(CompactDeletionFile old) {
-                if (deletionFile.isPresent()) {
-                    old.getOrCompute().ifPresent(indexFileHandler::deleteIndexFile);
-                    return this;
-                }
-
-                // no update, just use old file
-                return old;
-            }
-
-            @Override
-            public void clean() {
-                deletionFile.ifPresent(indexFileHandler::deleteIndexFile);
-            }
-
-            @Override
-            public String toString() {
-                return "GeneratedFiles-" + deletionFile;
-            }
-        };
+        return new GeneratedDeletionFile(
+                files.isEmpty() ? null : files.get(0), maintainer.indexFileHandler());
     }
 
     /** For sync compaction, only create deletion files when prepareCommit. */
     static CompactDeletionFile lazyGeneration(DeletionVectorsMaintainer maintainer) {
-        return new CompactDeletionFile() {
-            @Override
-            public Optional<IndexFileMeta> getOrCompute() {
-                return generateFiles(maintainer).getOrCompute();
+        return new LazyCompactDeletionFile(maintainer);
+    }
+
+    /** A generated files implementation of {@link CompactDeletionFile}. */
+    class GeneratedDeletionFile implements CompactDeletionFile {
+
+        @Nullable private final IndexFileMeta deletionFile;
+        private final IndexFileHandler fileHandler;
+
+        private boolean getInvoked = false;
+
+        public GeneratedDeletionFile(
+                @Nullable IndexFileMeta deletionFile, IndexFileHandler fileHandler) {
+            this.deletionFile = deletionFile;
+            this.fileHandler = fileHandler;
+        }
+
+        @Override
+        public Optional<IndexFileMeta> getOrCompute() {
+            this.getInvoked = true;
+            return Optional.ofNullable(deletionFile);
+        }
+
+        @Override
+        public CompactDeletionFile mergeOldFile(CompactDeletionFile old) {
+            if (!(old instanceof GeneratedDeletionFile)) {
+                throw new IllegalStateException(
+                        "old should be a GeneratedDeletionFile, but it is: " + old.getClass());
             }
 
-            @Override
-            public CompactDeletionFile mergeOldFile(CompactDeletionFile old) {
-                return this;
+            if (((GeneratedDeletionFile) old).getInvoked) {
+                throw new IllegalStateException("old should not be get, this is a bug.");
             }
 
-            @Override
-            public void clean() {
-                // do nothing
+            if (deletionFile == null) {
+                return old;
             }
 
-            @Override
-            public String toString() {
-                return "LazyGeneration";
+            old.clean();
+            return this;
+        }
+
+        @Override
+        public void clean() {
+            if (deletionFile != null) {
+                fileHandler.deleteIndexFile(deletionFile);
             }
-        };
+        }
+    }
+
+    /** A lazy generation implementation of {@link CompactDeletionFile}. */
+    class LazyCompactDeletionFile implements CompactDeletionFile {
+
+        private final DeletionVectorsMaintainer maintainer;
+
+        private boolean generated = false;
+
+        public LazyCompactDeletionFile(DeletionVectorsMaintainer maintainer) {
+            this.maintainer = maintainer;
+        }
+
+        @Override
+        public Optional<IndexFileMeta> getOrCompute() {
+            generated = true;
+            return generateFiles(maintainer).getOrCompute();
+        }
+
+        @Override
+        public CompactDeletionFile mergeOldFile(CompactDeletionFile old) {
+            if (!(old instanceof LazyCompactDeletionFile)) {
+                throw new IllegalStateException(
+                        "old should be a LazyCompactDeletionFile, but it is: " + old.getClass());
+            }
+
+            if (((LazyCompactDeletionFile) old).generated) {
+                throw new IllegalStateException("old should not be generated, this is a bug.");
+            }
+
+            return this;
+        }
+
+        @Override
+        public void clean() {}
     }
 }

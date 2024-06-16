@@ -131,7 +131,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                     .forEach(f -> compactBefore.put(f.fileName(), f));
             compactAfter.addAll(increment.compactIncrement().compactAfter());
             compactChangelog.addAll(increment.compactIncrement().changelogFiles());
-            mergeNewDeletionFile(increment.compactDeletionFile());
+            updateCompactDeletionFile(increment.compactDeletionFile());
         }
     }
 
@@ -300,6 +300,11 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         return new CommitIncrement(dataIncrement, compactIncrement, drainDeletionFile);
     }
 
+    private void trySyncLatestCompaction(boolean blocking) throws Exception {
+        Optional<CompactResult> result = compactManager.getCompactionResult(blocking);
+        result.ifPresent(this::updateCompactResult);
+    }
+
     private void updateCompactResult(CompactResult result) {
         Set<String> afterFiles =
                 result.after().stream().map(DataFileMeta::fileName).collect(Collectors.toSet());
@@ -321,15 +326,10 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         compactAfter.addAll(result.after());
         compactChangelog.addAll(result.changelog());
 
-        mergeNewDeletionFile(result.deletionFile());
+        updateCompactDeletionFile(result.deletionFile());
     }
 
-    private void trySyncLatestCompaction(boolean blocking) throws Exception {
-        Optional<CompactResult> result = compactManager.getCompactionResult(blocking);
-        result.ifPresent(this::updateCompactResult);
-    }
-
-    private void mergeNewDeletionFile(@Nullable CompactDeletionFile newDeletionFile) {
+    private void updateCompactDeletionFile(@Nullable CompactDeletionFile newDeletionFile) {
         if (newDeletionFile != null) {
             compactDeletionFile =
                     compactDeletionFile == null
