@@ -66,7 +66,7 @@ public class CompactResult {
         return changelog;
     }
 
-    public void setDeletionFile(CompactDeletionFile deletionFile) {
+    public void setDeletionFile(@Nullable CompactDeletionFile deletionFile) {
         this.deletionFile = deletionFile;
     }
 
@@ -81,7 +81,8 @@ public class CompactResult {
         changelog.addAll(that.changelog);
 
         if (deletionFile != null || that.deletionFile != null) {
-            throw new UnsupportedOperationException();
+            throw new UnsupportedOperationException(
+                    "There is a bug, deletionFile can't be set before merge.");
         }
     }
 }

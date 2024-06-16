@@ -20,11 +20,9 @@ package org.apache.paimon.deletionvectors;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
-import org.apache.paimon.utils.PathFactory;
 
 import javax.annotation.Nullable;
 
@@ -115,12 +113,8 @@ public class DeletionVectorsMaintainer {
         return Optional.ofNullable(deletionVectors.get(fileName));
     }
 
-    public FileIO fileIO() {
-        return indexFileHandler.fileIO();
-    }
-
-    public PathFactory pathFactory() {
-        return indexFileHandler.pathFactory();
+    public IndexFileHandler indexFileHandler() {
+        return indexFileHandler;
     }
 
     @VisibleForTesting
