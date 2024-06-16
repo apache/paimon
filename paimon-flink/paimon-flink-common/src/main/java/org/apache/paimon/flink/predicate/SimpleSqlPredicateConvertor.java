@@ -37,8 +37,6 @@ import org.apache.calcite.sql.SqlPrefixOperator;
 import org.apache.calcite.sql.parser.SqlParseException;
 import org.apache.calcite.sql.parser.SqlParser;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BiFunction;
@@ -47,63 +45,46 @@ import static org.apache.calcite.avatica.util.Casing.UNCHANGED;
 
 /** convert sql to predicate. */
 public class SimpleSqlPredicateConvertor {
-    private static final String Flink_PLANNER_MODULE_CLASS =
-            "org.apache.flink.table.planner.loader.PlannerModule";
-    private static final String PLANNER_MODULE_METHOD = "getInstance";
-
-    private static final String CALCITECLASSLOADER = "submoduleClassLoader";
 
     private final PredicateBuilder builder;
     private final RowType rowType;
 
-    private final ClassLoader calciteClassLoader;
+    //    private final ClassLoader calciteClassLoader;
 
     public SimpleSqlPredicateConvertor(RowType type) throws Exception {
         this.rowType = type;
         this.builder = new PredicateBuilder(type);
-        calciteClassLoader = initCalciteClassLoader();
-    }
-
-    private ClassLoader initCalciteClassLoader() throws Exception {
-        Class<?> plannerModuleClass = Class.forName(Flink_PLANNER_MODULE_CLASS);
-        Method getInstanceMethod = plannerModuleClass.getDeclaredMethod(PLANNER_MODULE_METHOD);
-        getInstanceMethod.setAccessible(true);
-        Object plannerModuleInstance = getInstanceMethod.invoke(null);
-
-        Field submoduleClassLoaderField = plannerModuleClass.getDeclaredField(CALCITECLASSLOADER);
-        submoduleClassLoaderField.setAccessible(true);
-        return (ClassLoader) submoduleClassLoaderField.get(plannerModuleInstance);
+        //        calciteClassLoader = initCalciteClassLoader();
     }
 
     public Predicate convertSqlToPredicate(String conditionSql) throws SqlParseException {
         ClassLoader pre = Thread.currentThread().getContextClassLoader();
         try {
-            Thread.currentThread().setContextClassLoader(calciteClassLoader);
-            try {
-                Class<?> aClass =
-                        Thread.currentThread()
-                                .getContextClassLoader()
-                                .loadClass("org.apache.calcite.sql.parser.SqlParser");
-                Field defaultIdentifierMaxLength = aClass.getField("DEFAULT_IDENTIFIER_MAX_LENGTH");
-                defaultIdentifierMaxLength.get(null);
-            } catch (ClassNotFoundException e) {
-                throw new RuntimeException(e);
-            } catch (NoSuchFieldException e) {
-                throw new RuntimeException(e);
-            } catch (IllegalAccessException e) {
-                throw new RuntimeException(e);
-            }
-            return convert(conditionSql);
+            //            Thread.currentThread().setContextClassLoader(calciteClassLoader);
+            //            try {
+            //                Class<?> aClass =
+            //                        Thread.currentThread()
+            //                                .getContextClassLoader()
+            //                                .loadClass("org.apache.calcite.sql.parser.SqlParser");
+            //                Field defaultIdentifierMaxLength =
+            // aClass.getField("DEFAULT_IDENTIFIER_MAX_LENGTH");
+            //                Object o = defaultIdentifierMaxLength.get(null);
+
+            SqlParser parser =
+                    SqlParser.create(
+                            conditionSql, SqlParser.config().withUnquotedCasing(UNCHANGED));
+            SqlNode sqlNode = parser.parseExpression();
+            return convert((SqlBasicCall) sqlNode);
+            //            } catch (ClassNotFoundException e) {
+            //                throw new RuntimeException(e);
+            //            } catch (NoSuchFieldException e) {
+            //                throw new RuntimeException(e);
+            //            } catch (IllegalAccessException e) {
+            //                throw new RuntimeException(e);
+            //            }
         } finally {
             Thread.currentThread().setContextClassLoader(pre);
         }
-    }
-
-    Predicate convert(String conditionSql) throws SqlParseException {
-        SqlParser parser =
-                SqlParser.create(conditionSql, SqlParser.config().withUnquotedCasing(UNCHANGED));
-        SqlNode sqlNode = parser.parseExpression();
-        return convert((SqlBasicCall) sqlNode);
     }
 
     public Predicate convert(SqlBasicCall sqlBasicCall) {
