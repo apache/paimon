@@ -28,32 +28,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 
-/** Ensure that the legacy multiply overloaded CALL with positional arguments can be invoked. */
-public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
-
-    @Test
-    public void testCallCompact() {
-        sql(
-                "CREATE TABLE T ("
-                        + " k INT,"
-                        + " v INT,"
-                        + " pt INT,"
-                        + " PRIMARY KEY (k, pt) NOT ENFORCED"
-                        + ") PARTITIONED BY (pt) WITH ("
-                        + " 'write-only' = 'true',"
-                        + " 'bucket' = '1'"
-                        + ")");
-
-        assertThatCode(() -> sql("CALL sys.compact('default.T')")).doesNotThrowAnyException();
-        assertThatCode(() -> sql("CALL sys.compact('default.T', 'pt=1')"))
-                .doesNotThrowAnyException();
-        assertThatCode(() -> sql("CALL sys.compact('default.T', 'pt=1', '', '')"))
-                .doesNotThrowAnyException();
-        assertThatCode(() -> sql("CALL sys.compact('default.T', '', '', '', 'sink.parallelism=1')"))
-                .doesNotThrowAnyException();
-    }
+/** IT Case for {@link ExpirePartitionsProcedure}. */
+public class ExpirePartitionsProcedureITCase extends CatalogITCaseBase {
 
     @Test
     public void testExpirePartitionsProcedure() throws Exception {
@@ -69,7 +46,8 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
         sql("INSERT INTO T VALUES ('1', '2024-06-01')");
         sql("INSERT INTO T VALUES ('2', '9024-06-01')");
         assertThat(read(table)).containsExactlyInAnyOrder("1:2024-06-01", "2:9024-06-01");
-        sql("CALL sys.expire_partitions('default.T', '1 d', 'yyyy-MM-dd')");
+        sql(
+                "CALL sys.expire_partitions(`table` => 'default.T', expiration_time => '1 d', timestamp_formatter => 'yyyy-MM-dd')");
         assertThat(read(table)).containsExactlyInAnyOrder("2:9024-06-01");
     }
 
