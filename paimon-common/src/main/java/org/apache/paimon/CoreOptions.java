@@ -1904,8 +1904,9 @@ public class CoreOptions implements Serializable {
         return options.get(RECORD_LEVEL_TIME_FIELD);
     }
 
-    public boolean changelogProducerLookupWait() {
-        return options.get(CHANGELOG_PRODUCER_LOOKUP_WAIT);
+    public boolean waitCompaction() {
+        return changelogProducer() == ChangelogProducer.LOOKUP
+                && options.get(CHANGELOG_PRODUCER_LOOKUP_WAIT);
     }
 
     /** Specifies the merge engine for table with primary key. */

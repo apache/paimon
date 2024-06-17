@@ -102,7 +102,7 @@ public abstract class FlinkSink<T> implements Serializable {
         if (coreOptions.writeOnly()) {
             waitCompaction = false;
         } else {
-            waitCompaction = coreOptions.changelogProducerLookupWait();
+            waitCompaction = coreOptions.waitCompaction();
             int deltaCommits = -1;
             if (options.contains(FULL_COMPACTION_DELTA_COMMITS)) {
                 deltaCommits = options.get(FULL_COMPACTION_DELTA_COMMITS);
@@ -134,8 +134,7 @@ public abstract class FlinkSink<T> implements Serializable {
             }
         }
 
-        if (changelogProducer == ChangelogProducer.LOOKUP
-                && !coreOptions.changelogProducerLookupWait()) {
+        if (changelogProducer == ChangelogProducer.LOOKUP && !coreOptions.waitCompaction()) {
             return (table, commitUser, state, ioManager, memoryPool, metricGroup) -> {
                 assertNoSinkMaterializer.run();
                 return new AsyncLookupSinkWrite(
