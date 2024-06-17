@@ -32,7 +32,6 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import javax.annotation.concurrent.GuardedBy;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -251,15 +250,25 @@ public class TraceableFileIO implements FileIO {
     }
 
     public static List<SeekableInputStream> openInputStreams(Predicate<Path> filter) {
-        // copy out to avoid ConcurrentModificationException
-        return new ArrayList<>(OPEN_INPUT_STREAMS)
-                .stream().filter(s -> filter.test(s.file)).collect(Collectors.toList());
+        LOCK.lock();
+        try {
+            return OPEN_INPUT_STREAMS.stream()
+                    .filter(s -> filter.test(s.file))
+                    .collect(Collectors.toList());
+        } finally {
+            LOCK.unlock();
+        }
     }
 
     public static List<PositionOutputStream> openOutputStreams(Predicate<Path> filter) {
-        // copy out to avoid ConcurrentModificationException
-        return new ArrayList<>(OPEN_OUTPUT_STREAMS)
-                .stream().filter(s -> filter.test(s.file)).collect(Collectors.toList());
+        LOCK.lock();
+        try {
+            return OPEN_OUTPUT_STREAMS.stream()
+                    .filter(s -> filter.test(s.file))
+                    .collect(Collectors.toList());
+        } finally {
+            LOCK.unlock();
+        }
     }
 
     /** Loader for {@link TraceableFileIO}. */
