@@ -51,6 +51,10 @@ SELECT * FROM t /*+ OPTIONS('scan.snapshot-id' = '1') */;
 -- read the snapshot from specified timestamp in unix milliseconds
 SELECT * FROM t /*+ OPTIONS('scan.timestamp-millis' = '1678883047356') */;
 
+-- read the snapshot from specified timestamp string ,it will be automatically converted to timestamp in unix milliseconds
+-- Supported formats include：yyyy-MM-dd, yyyy-MM-dd HH:mm:ss, yyyy-MM-dd HH:mm:ss.SSS, use default local time zone
+SELECT * FROM t /*+ OPTIONS('scan.timestamp' = '2023-12-09 23:09:12') */;
+
 -- read tag 'my-tag'
 SELECT * FROM t /*+ OPTIONS('scan.tag-name' = 'my-tag') */;
 

@@ -35,6 +35,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -125,6 +127,38 @@ public class StartupModeTest extends ScannerTestBase {
         Map<String, String> properties = new HashMap<>();
         properties.put(CoreOptions.SCAN_MODE.key(), StartupMode.FROM_TIMESTAMP.toString());
         properties.put(CoreOptions.SCAN_TIMESTAMP_MILLIS.key(), String.valueOf(timestamp));
+        FileStoreTable readTable = table.copy(properties);
+
+        // streaming Mode
+        StreamTableScan dataTableScan = readTable.newStreamScan();
+        TableScan.Plan firstPlan = dataTableScan.plan();
+        TableScan.Plan secondPlan = dataTableScan.plan();
+
+        assertThat(firstPlan.splits()).isEmpty();
+        assertThat(secondPlan.splits())
+                .isEqualTo(snapshotReader.withSnapshot(4).withMode(ScanMode.DELTA).read().splits());
+
+        // batch mode
+        TableScan batchScan = readTable.newScan();
+        TableScan.Plan plan = batchScan.plan();
+        assertThat(plan.splits())
+                .isEqualTo(snapshotReader.withSnapshot(3).withMode(ScanMode.ALL).read().splits());
+    }
+
+    @Test
+    public void testStartFromTimestampString() throws Exception {
+        initializeTable(StartupMode.LATEST);
+        initializeTestData(); // initialize 3 commits
+        String timestampString =
+                LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"));
+        Thread.sleep(10L);
+
+        // write next data
+        writeAndCommit(4, rowData(1, 10, 103L));
+
+        Map<String, String> properties = new HashMap<>();
+        properties.put(CoreOptions.SCAN_MODE.key(), StartupMode.FROM_TIMESTAMP.toString());
+        properties.put(CoreOptions.SCAN_TIMESTAMP.key(), timestampString);
         FileStoreTable readTable = table.copy(properties);
 
         // streaming Mode
