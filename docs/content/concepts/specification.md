@@ -57,7 +57,7 @@ CREATE TABLE my_table (
     f1 STRING
 );
 
-INSERT INTO t VALUES (1, 11, '111');
+INSERT INTO my_table VALUES (1, 11, '111');
 ```
 
 Take a look to the disk:
