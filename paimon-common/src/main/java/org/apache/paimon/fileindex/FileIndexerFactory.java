@@ -21,20 +21,10 @@ package org.apache.paimon.fileindex;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+/** File index factory to construct {@link FileIndexer}. */
+public interface FileIndexerFactory {
 
-/** File index interface. To build a file index. */
-public interface FileIndexer {
+    String identifier();
 
-    Logger LOG = LoggerFactory.getLogger(FileIndexer.class);
-
-    FileIndexWriter createWriter();
-
-    FileIndexReader createReader(byte[] serializedBytes);
-
-    static FileIndexer create(String type, DataType dataType, Options options) {
-        FileIndexerFactory fileIndexerFactory = FileIndexerFactoryUtils.load(type);
-        return fileIndexerFactory.create(dataType, options);
-    }
+    FileIndexer create(DataType type, Options options);
 }

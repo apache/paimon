@@ -16,25 +16,25 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.fileindex;
+package org.apache.paimon.fileindex.bloomfilter;
 
+import org.apache.paimon.fileindex.FileIndexer;
+import org.apache.paimon.fileindex.FileIndexerFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+/** Index factory to construct {@link BloomFilterFileIndex}. */
+public class BloomFilterFileIndexFactory implements FileIndexerFactory {
 
-/** File index interface. To build a file index. */
-public interface FileIndexer {
+    public static final String BLOOM_FILTER = "bloom-filter";
 
-    Logger LOG = LoggerFactory.getLogger(FileIndexer.class);
+    @Override
+    public String identifier() {
+        return BLOOM_FILTER;
+    }
 
-    FileIndexWriter createWriter();
-
-    FileIndexReader createReader(byte[] serializedBytes);
-
-    static FileIndexer create(String type, DataType dataType, Options options) {
-        FileIndexerFactory fileIndexerFactory = FileIndexerFactoryUtils.load(type);
-        return fileIndexerFactory.create(dataType, options);
+    @Override
+    public FileIndexer create(DataType type, Options options) {
+        return new BloomFilterFileIndex(type, options);
     }
 }

@@ -39,8 +39,6 @@ import org.apache.hadoop.util.bloom.HashFunction;
  */
 public class BloomFilterFileIndex implements FileIndexer {
 
-    public static final String BLOOM_FILTER = "bloom-filter";
-
     private static final int DEFAULT_ITEMS = 1_000_000;
     private static final double DEFAULT_FPP = 0.1;
 
@@ -55,10 +53,6 @@ public class BloomFilterFileIndex implements FileIndexer {
         this.dataType = dataType;
         this.items = options.getInteger(ITEMS, DEFAULT_ITEMS);
         this.fpp = options.getDouble(FPP, DEFAULT_FPP);
-    }
-
-    public String name() {
-        return BLOOM_FILTER;
     }
 
     @Override
