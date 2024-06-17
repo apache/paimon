@@ -44,7 +44,6 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.apache.paimon.fileindex.FileIndexResult.REMAIN;
-import static org.apache.paimon.fileindex.FileIndexResult.SKIP;
 
 /** Utils to check secondary index (e.g. bloom filter) predicate. */
 public class FileIndexPredicate implements Closeable {
@@ -147,21 +146,28 @@ public class FileIndexPredicate implements Closeable {
         @Override
         public FileIndexResult visit(CompoundPredicate predicate) {
             if (predicate.function() instanceof Or) {
-                FileIndexResult compoundResult = SKIP;
+                FileIndexResult compoundResult = null;
                 for (Predicate predicate1 : predicate.children()) {
-                    compoundResult = compoundResult.or(predicate1.visit(this));
+                    compoundResult =
+                            compoundResult == null
+                                    ? predicate1.visit(this)
+                                    : compoundResult.or(predicate1.visit(this));
                 }
-                return compoundResult;
+                return compoundResult == null ? REMAIN : compoundResult;
 
             } else {
-                FileIndexResult compundResult = REMAIN;
+                FileIndexResult compoundResult = null;
                 for (Predicate predicate1 : predicate.children()) {
-                    compundResult = compundResult.and(predicate1.visit(this));
-                    if (!compundResult.remain()) {
-                        return compundResult;
+                    compoundResult =
+                            compoundResult == null
+                                    ? predicate1.visit(this)
+                                    : compoundResult.and(predicate1.visit(this));
+                    // if not remain, no need to test anymore
+                    if (!compoundResult.remain()) {
+                        return compoundResult;
                     }
                 }
-                return compundResult;
+                return compoundResult == null ? REMAIN : compoundResult;
             }
         }
     }
