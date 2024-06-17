@@ -63,7 +63,6 @@ public abstract class FullCacheLookupTable implements LookupTable {
     private Predicate specificPartition;
 
     public FullCacheLookupTable(Context context) {
-        this.context = context;
         FileStoreTable table = context.table;
         List<String> sequenceFields = new ArrayList<>();
         if (table.primaryKeys().size() > 0) {
@@ -84,6 +83,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
                                 builder.field(f.name(), f.type());
                             });
             projectedType = builder.build();
+            context = context.copy(table.rowType().getFieldIndices(projectedType.getFieldNames()));
             this.userDefinedSeqComparator =
                     UserDefinedSeqComparator.create(projectedType, sequenceFields);
             this.appendUdsFieldNumber = appendUdsFieldNumber.get();
@@ -91,6 +91,8 @@ public abstract class FullCacheLookupTable implements LookupTable {
             this.userDefinedSeqComparator = null;
             this.appendUdsFieldNumber = 0;
         }
+
+        this.context = context;
         this.projectedType = projectedType;
     }
 
@@ -236,6 +238,11 @@ public abstract class FullCacheLookupTable implements LookupTable {
             this.projectedPredicate = projectedPredicate;
             this.tempPath = tempPath;
             this.joinKey = joinKey;
+        }
+
+        public Context copy(int[] newProjection) {
+            return new Context(
+                    table, newProjection, tablePredicate, projectedPredicate, tempPath, joinKey);
         }
     }
 }
