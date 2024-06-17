@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.partition.PartitionTimeExtractor;
 import org.apache.paimon.types.RowType;
@@ -30,6 +31,7 @@ import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -50,6 +52,7 @@ public class PartitionExpire {
     private final PartitionTimeExtractor timeExtractor;
     private final FileStoreScan scan;
     private final FileStoreCommit commit;
+    private final MetastoreClient metastoreClient;
 
     private LocalDateTime lastCheck;
 
@@ -60,7 +63,8 @@ public class PartitionExpire {
             String timePattern,
             String timeFormatter,
             FileStoreScan scan,
-            FileStoreCommit commit) {
+            FileStoreCommit commit,
+            @Nullable MetastoreClient metastoreClient) {
         this.partitionKeys = partitionType.getFieldNames();
         this.toObjectArrayConverter = new RowDataToObjectArrayConverter(partitionType);
         this.expirationTime = expirationTime;
@@ -68,6 +72,7 @@ public class PartitionExpire {
         this.timeExtractor = new PartitionTimeExtractor(timePattern, timeFormatter);
         this.scan = scan;
         this.commit = commit;
+        this.metastoreClient = metastoreClient;
         this.lastCheck = LocalDateTime.now();
     }
 
@@ -103,6 +108,21 @@ public class PartitionExpire {
         }
         if (expired.size() > 0) {
             commit.dropPartitions(expired, commitIdentifier);
+            if (metastoreClient != null) {
+                deleteMetaStorePartition(expired);
+            }
+        }
+    }
+
+    private void deleteMetaStorePartition(List<Map<String, String>> partitions) {
+        if (metastoreClient != null) {
+            partitions.forEach(partition -> {
+                try {
+                    metastoreClient.deletePartition(new LinkedHashMap<>(partition));
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            });
         }
     }
 

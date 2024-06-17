@@ -255,6 +255,13 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
             return null;
         }
 
+        MetastoreClient.Factory metastoreClientFactory = catalogEnvironment.metastoreClientFactory();
+        MetastoreClient metastoreClient = null;
+        if (options.partitionedTableInMetastore()
+                && metastoreClientFactory != null){
+            metastoreClient = metastoreClientFactory.create();
+        }
+
         return new PartitionExpire(
                 partitionType(),
                 partitionExpireTime,
@@ -262,7 +269,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.partitionTimestampPattern(),
                 options.partitionTimestampFormatter(),
                 newScan(),
-                newCommit(commitUser));
+                newCommit(commitUser),
+                metastoreClient);
     }
 
     @Override
