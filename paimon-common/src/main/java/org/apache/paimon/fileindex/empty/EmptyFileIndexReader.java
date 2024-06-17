@@ -19,9 +19,12 @@
 package org.apache.paimon.fileindex.empty;
 
 import org.apache.paimon.fileindex.FileIndexReader;
+import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.predicate.FieldRef;
 
 import java.util.List;
+
+import static org.apache.paimon.fileindex.FileIndexResult.SKIP;
 
 /** Empty file index which has no writer and no serialized bytes. */
 public class EmptyFileIndexReader extends FileIndexReader {
@@ -30,42 +33,42 @@ public class EmptyFileIndexReader extends FileIndexReader {
     public static final EmptyFileIndexReader INSTANCE = new EmptyFileIndexReader();
 
     @Override
-    public Boolean visitEqual(FieldRef fieldRef, Object literal) {
-        return false;
+    public FileIndexResult visitEqual(FieldRef fieldRef, Object literal) {
+        return SKIP;
     }
 
     @Override
-    public Boolean visitIsNotNull(FieldRef fieldRef) {
-        return false;
+    public FileIndexResult visitIsNotNull(FieldRef fieldRef) {
+        return SKIP;
     }
 
     @Override
-    public Boolean visitStartsWith(FieldRef fieldRef, Object literal) {
-        return false;
+    public FileIndexResult visitStartsWith(FieldRef fieldRef, Object literal) {
+        return SKIP;
     }
 
     @Override
-    public Boolean visitLessThan(FieldRef fieldRef, Object literal) {
-        return false;
+    public FileIndexResult visitLessThan(FieldRef fieldRef, Object literal) {
+        return SKIP;
     }
 
     @Override
-    public Boolean visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
-        return false;
+    public FileIndexResult visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
+        return SKIP;
     }
 
     @Override
-    public Boolean visitLessOrEqual(FieldRef fieldRef, Object literal) {
-        return false;
+    public FileIndexResult visitLessOrEqual(FieldRef fieldRef, Object literal) {
+        return SKIP;
     }
 
     @Override
-    public Boolean visitGreaterThan(FieldRef fieldRef, Object literal) {
-        return false;
+    public FileIndexResult visitGreaterThan(FieldRef fieldRef, Object literal) {
+        return SKIP;
     }
 
     @Override
-    public Boolean visitIn(FieldRef fieldRef, List<Object> literals) {
-        return false;
+    public FileIndexResult visitIn(FieldRef fieldRef, List<Object> literals) {
+        return SKIP;
     }
 }
