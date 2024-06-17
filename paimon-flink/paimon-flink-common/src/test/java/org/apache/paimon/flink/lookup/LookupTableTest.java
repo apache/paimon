@@ -223,6 +223,46 @@ public class LookupTableTest extends TableTestBase {
     }
 
     @Test
+    public void testPkTableWithSequenceFieldProjection() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.SEQUENCE_FIELD, "f2");
+        options.set(CoreOptions.BUCKET, 1);
+        FileStoreTable storeTable = createTable(singletonList("f0"), options);
+        FullCacheLookupTable.Context context =
+                new FullCacheLookupTable.Context(
+                        storeTable,
+                        new int[] {0, 1},
+                        null,
+                        null,
+                        tempDir.toFile(),
+                        singletonList("f0"),
+                        null);
+        table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+        table.open();
+
+        // first write
+        write(storeTable, GenericRow.of(1, 11, 111));
+        table.refresh();
+        List<InternalRow> result = table.get(row(1));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 1, 11);
+
+        // second write
+        write(storeTable, GenericRow.of(1, 22, 222));
+        table.refresh();
+        result = table.get(row(1));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 1, 22);
+
+        // not update
+        write(storeTable, GenericRow.of(1, 33, 111));
+        table.refresh();
+        result = table.get(row(1));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 1, 22);
+    }
+
+    @Test
     public void testPkTablePkFilter() throws Exception {
         FileStoreTable storeTable = createTable(singletonList("f0"), new Options());
         FullCacheLookupTable.Context context =

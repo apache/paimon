@@ -99,6 +99,15 @@ public final class RowType extends DataType {
         return -1;
     }
 
+    public int[] getFieldIndices(List<String> projectFields) {
+        List<String> fieldNames = getFieldNames();
+        int[] projection = new int[projectFields.size()];
+        for (int i = 0; i < projection.length; i++) {
+            projection[i] = fieldNames.indexOf(projectFields.get(i));
+        }
+        return projection;
+    }
+
     public boolean containsField(String fieldName) {
         for (DataField field : fields) {
             if (field.name().equals(fieldName)) {
