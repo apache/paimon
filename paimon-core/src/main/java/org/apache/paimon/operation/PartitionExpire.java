@@ -109,12 +109,12 @@ public class PartitionExpire {
         if (expired.size() > 0) {
             commit.dropPartitions(expired, commitIdentifier);
             if (metastoreClient != null) {
-                deleteMetaStorePartition(expired);
+                deleteMetaStorePartitions(expired);
             }
         }
     }
 
-    private void deleteMetaStorePartition(List<Map<String, String>> partitions) {
+    private void deleteMetaStorePartitions(List<Map<String, String>> partitions) {
         if (metastoreClient != null) {
             partitions.forEach(partition -> {
                 try {
