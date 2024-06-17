@@ -1904,7 +1904,7 @@ public class CoreOptions implements Serializable {
         return options.get(RECORD_LEVEL_TIME_FIELD);
     }
 
-    public boolean waitCompaction() {
+    public boolean prepareCommitWaitCompaction() {
         return changelogProducer() == ChangelogProducer.LOOKUP
                 && options.get(CHANGELOG_PRODUCER_LOOKUP_WAIT);
     }

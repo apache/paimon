@@ -240,7 +240,7 @@ public class MultiTablesStoreCompactOperator
         if (coreOptions.writeOnly()) {
             waitCompaction = false;
         } else {
-            waitCompaction = coreOptions.waitCompaction();
+            waitCompaction = coreOptions.prepareCommitWaitCompaction();
             int deltaCommits = -1;
             if (options.contains(FULL_COMPACTION_DELTA_COMMITS)) {
                 deltaCommits = options.get(FULL_COMPACTION_DELTA_COMMITS);
@@ -272,7 +272,7 @@ public class MultiTablesStoreCompactOperator
         }
 
         if (changelogProducer == CoreOptions.ChangelogProducer.LOOKUP
-                && !coreOptions.waitCompaction()) {
+                && !coreOptions.prepareCommitWaitCompaction()) {
             return (table, commitUser, state, ioManager, memoryPool, metricGroup) ->
                     new AsyncLookupSinkWrite(
                             table,

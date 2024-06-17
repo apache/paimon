@@ -87,7 +87,7 @@ public class FlinkCdcMultiTableSink implements Serializable {
                         state,
                         ioManager,
                         isOverwrite,
-                        table.coreOptions().waitCompaction(),
+                        table.coreOptions().prepareCommitWaitCompaction(),
                         true,
                         memoryPoolFactory,
                         metricGroup);
