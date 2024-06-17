@@ -21,7 +21,6 @@ package org.apache.paimon.fileindex;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fileindex.empty.EmptyFileIndexReader;
 import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.fs.SeekablePositionedMappingInputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
@@ -310,17 +309,7 @@ public final class FileIndexFormat {
                             indexType,
                             FileIndexCommon.getFieldType(fields, columnName),
                             new Options())
-                    .createReader(getInputStreamByStartAndLength(startAndLength));
-        }
-
-        private SeekablePositionedMappingInputStream getInputStreamByStartAndLength(
-                Pair<Integer, Integer> startAndLength) {
-            try {
-                return new SeekablePositionedMappingInputStream(
-                        seekableInputStream, startAndLength.getLeft(), startAndLength.getRight());
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
+                    .createReader(seekableInputStream, startAndLength);
         }
 
         private byte[] getBytesWithStartAndLength(Pair<Integer, Integer> startAndLength) {

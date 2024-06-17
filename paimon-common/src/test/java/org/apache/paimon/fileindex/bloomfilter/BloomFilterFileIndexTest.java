@@ -20,9 +20,10 @@ package org.apache.paimon.fileindex.bloomfilter;
 
 import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexWriter;
-import org.apache.paimon.fs.SeekablePositionedMappingInputStream;
+import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.Pair;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -61,9 +62,11 @@ public class BloomFilterFileIndexTest {
 
         testData.forEach(writer::write);
 
+        byte[] serializedBytes = writer.serializedBytes();
         FileIndexReader reader =
                 filter.createReader(
-                        new SeekablePositionedMappingInputStream(writer.serializedBytes()));
+                        new ByteArraySeekableStream(serializedBytes),
+                        Pair.of(0, serializedBytes.length));
 
         for (byte[] bytes : testData) {
             Assertions.assertThat(reader.visitEqual(null, bytes).remain()).isTrue();
@@ -103,9 +106,11 @@ public class BloomFilterFileIndexTest {
 
         testData.forEach(writer::write);
 
+        byte[] serializedBytes = writer.serializedBytes();
         FileIndexReader reader =
                 filter.createReader(
-                        new SeekablePositionedMappingInputStream(writer.serializedBytes()));
+                        new ByteArraySeekableStream(serializedBytes),
+                        Pair.of(0, serializedBytes.length));
 
         for (Long value : testData) {
             Assertions.assertThat(reader.visitEqual(null, value).remain()).isTrue();

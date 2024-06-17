@@ -18,9 +18,10 @@
 
 package org.apache.paimon.fileindex;
 
-import org.apache.paimon.fs.SeekablePositionedMappingInputStream;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.utils.Pair;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,7 +33,8 @@ public interface FileIndexer {
 
     FileIndexWriter createWriter();
 
-    FileIndexReader createReader(SeekablePositionedMappingInputStream inputStream);
+    FileIndexReader createReader(
+            SeekableInputStream inputStream, Pair<Integer, Integer> startAndLength);
 
     static FileIndexer create(String type, DataType dataType, Options options) {
         FileIndexerFactory fileIndexerFactory = FileIndexerFactoryUtils.load(type);

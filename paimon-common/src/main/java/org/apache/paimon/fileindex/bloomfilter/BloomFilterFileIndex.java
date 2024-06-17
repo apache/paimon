@@ -22,14 +22,18 @@ import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.fileindex.FileIndexWriter;
 import org.apache.paimon.fileindex.FileIndexer;
-import org.apache.paimon.fs.SeekablePositionedMappingInputStream;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.BloomFilter64;
 import org.apache.paimon.utils.BloomFilter64.BitSet;
+import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.Pair;
 
 import org.apache.hadoop.util.bloom.HashFunction;
+
+import java.io.IOException;
 
 import static org.apache.paimon.fileindex.FileIndexResult.REMAIN;
 import static org.apache.paimon.fileindex.FileIndexResult.SKIP;
@@ -66,8 +70,16 @@ public class BloomFilterFileIndex implements FileIndexer {
     }
 
     @Override
-    public FileIndexReader createReader(SeekablePositionedMappingInputStream inputStream) {
-        return new Reader(dataType, inputStream.readAllBytes());
+    public FileIndexReader createReader(
+            SeekableInputStream inputStream, Pair<Integer, Integer> startAndLength) {
+        try {
+            inputStream.seek(startAndLength.getLeft());
+            byte[] serializedBytes = new byte[startAndLength.getRight()];
+            IOUtils.readFully(inputStream, serializedBytes);
+            return new Reader(dataType, serializedBytes);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private static class Writer extends FileIndexWriter {
