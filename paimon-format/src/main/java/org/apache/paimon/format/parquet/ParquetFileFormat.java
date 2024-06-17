@@ -31,6 +31,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 
+import org.apache.parquet.filter2.predicate.ParquetFilters;
 import org.apache.parquet.hadoop.ParquetOutputFormat;
 
 import java.util.List;
@@ -59,7 +60,8 @@ public class ParquetFileFormat extends FileFormat {
         return new ParquetReaderFactory(
                 getParquetConfiguration(formatContext),
                 projectedRowType,
-                formatContext.readBatchSize());
+                formatContext.readBatchSize(),
+                ParquetFilters.convert(filters));
     }
 
     @Override

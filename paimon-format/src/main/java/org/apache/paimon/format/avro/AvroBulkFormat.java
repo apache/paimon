@@ -40,8 +40,6 @@ import java.util.Iterator;
 /** Provides a {@link FormatReaderFactory} for Avro records. */
 public class AvroBulkFormat implements FormatReaderFactory {
 
-    private static final long serialVersionUID = 1L;
-
     protected final RowType projectedRowType;
 
     public AvroBulkFormat(RowType projectedRowType) {
