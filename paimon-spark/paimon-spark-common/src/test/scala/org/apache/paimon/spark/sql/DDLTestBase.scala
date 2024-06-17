@@ -27,6 +27,36 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
 
   import testImplicits._
 
+  test("Paimon DDL: create table with not null") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT NOT NULL, name STRING)
+            |""".stripMargin)
+
+      val exception = intercept[RuntimeException] {
+        sql("""
+              |INSERT INTO T VALUES (1, "a"), (2, "b"), (null, "c")
+              |""".stripMargin)
+      }
+      Assertions.assertTrue(
+        exception.getMessage().contains("Cannot write nullable values to non-null column"))
+
+      sql("""
+            |INSERT INTO T VALUES (1, "a"), (2, "b"), (3, null)
+            |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT * FROM T ORDER BY id"),
+        Seq((1, "a"), (2, "b"), (3, null)).toDF()
+      )
+
+      val schema = spark.table("T").schema
+      Assertions.assertEquals(schema.size, 2)
+      Assertions.assertFalse(schema("id").nullable)
+      Assertions.assertTrue(schema("name").nullable)
+    }
+  }
+
   test("Paimon DDL: Create Table As Select") {
     withTable("source", "t1", "t2") {
       Seq((1L, "x1", "2023"), (2L, "x2", "2023"))
@@ -86,9 +116,9 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
     }
   }
 
-  test("Paimon DDL: create table with char/varchar/string") {
-    Seq("orc", "avro").foreach(
-      format => {
+  fileFormats.foreach {
+    format =>
+      test(s"Paimon DDL: create table with char/varchar/string, file.format: $format") {
         withTable("paimon_tbl") {
           spark.sql(
             s"""
@@ -116,7 +146,7 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
           )
 
           // check select
-          if (format == "orc" && !gteqSpark3_4) {
+          if (!gteqSpark3_4) {
             // Orc reader will right trim the char type, e.g. "Friday   " => "Friday" (see orc's `CharTreeReader`)
             // and Spark has a conf `spark.sql.readSideCharPadding` to auto padding char only since 3.4 (default true)
             // So when using orc with Spark3.4-, here will return "Friday"
@@ -149,6 +179,6 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
             Row("Friday") :: Nil
           )
         }
-      })
+      }
   }
 }
