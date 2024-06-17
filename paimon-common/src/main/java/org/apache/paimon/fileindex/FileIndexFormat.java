@@ -309,7 +309,10 @@ public final class FileIndexFormat {
                             indexType,
                             FileIndexCommon.getFieldType(fields, columnName),
                             new Options())
-                    .createReader(getBytesWithStartAndLength(startAndLength));
+                    .createReader(
+                            seekableInputStream,
+                            startAndLength.getLeft(),
+                            startAndLength.getRight());
         }
 
         private byte[] getBytesWithStartAndLength(Pair<Integer, Integer> startAndLength) {
