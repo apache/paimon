@@ -29,7 +29,6 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.BloomFilter64;
 import org.apache.paimon.utils.BloomFilter64.BitSet;
 import org.apache.paimon.utils.IOUtils;
-import org.apache.paimon.utils.Pair;
 
 import org.apache.hadoop.util.bloom.HashFunction;
 
@@ -70,11 +69,10 @@ public class BloomFilterFileIndex implements FileIndexer {
     }
 
     @Override
-    public FileIndexReader createReader(
-            SeekableInputStream inputStream, Pair<Integer, Integer> startAndLength) {
+    public FileIndexReader createReader(SeekableInputStream inputStream, int start, int length) {
         try {
-            inputStream.seek(startAndLength.getLeft());
-            byte[] serializedBytes = new byte[startAndLength.getRight()];
+            inputStream.seek(start);
+            byte[] serializedBytes = new byte[length];
             IOUtils.readFully(inputStream, serializedBytes);
             return new Reader(dataType, serializedBytes);
         } catch (IOException e) {
