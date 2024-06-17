@@ -25,7 +25,6 @@ import org.apache.paimon.annotation.Documentation.ExcludeFromDocumentation;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.MemorySize;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.Description;
 import org.apache.paimon.options.description.InlineElement;
@@ -36,7 +35,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.STREAMING_READ_MODE;
 import static org.apache.paimon.options.ConfigOptions.key;
 import static org.apache.paimon.options.description.TextElement.text;
@@ -147,17 +145,6 @@ public class FlinkConnectorOptions {
                                     + " is set to "
                                     + ChangelogProducer.FULL_COMPACTION.name()
                                     + ", full compaction will be constantly triggered after this interval.");
-
-    public static final ConfigOption<Boolean> CHANGELOG_PRODUCER_LOOKUP_WAIT =
-            key("changelog-producer.lookup-wait")
-                    .booleanType()
-                    .defaultValue(true)
-                    .withDescription(
-                            "When "
-                                    + CoreOptions.CHANGELOG_PRODUCER.key()
-                                    + " is set to "
-                                    + ChangelogProducer.LOOKUP.name()
-                                    + ", commit will wait for changelog generation by lookup.");
 
     public static final ConfigOption<WatermarkEmitStrategy> SCAN_WATERMARK_EMIT_STRATEGY =
             key("scan.watermark.emit.strategy")
@@ -444,20 +431,6 @@ public class FlinkConnectorOptions {
             }
         }
         return list;
-    }
-
-    public static boolean prepareCommitWaitCompaction(Options options) {
-        if (options.get(DELETION_VECTORS_ENABLED)) {
-            // DeletionVector (DV) is maintained in the compaction thread, but it needs to be
-            // read into a file during prepareCommit (write thread) to commit it.
-            // We must set waitCompaction to true so that there are no multiple threads
-            // operating DV simultaneously.
-            return true;
-        }
-
-        ChangelogProducer changelogProducer = options.get(CoreOptions.CHANGELOG_PRODUCER);
-        return changelogProducer == ChangelogProducer.LOOKUP
-                && options.get(CHANGELOG_PRODUCER_LOOKUP_WAIT);
     }
 
     /** The mode of lookup cache. */

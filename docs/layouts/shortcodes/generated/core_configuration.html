@@ -63,6 +63,12 @@ under the License.
             <td>Whether to double write to a changelog file. This changelog file keeps the details of data changes, it can be read directly during stream reads. This can be applied to tables with primary keys. <br /><br />Possible values:<ul><li>"none": No changelog file.</li><li>"input": Double write to a changelog file when flushing memory table, the changelog is from input.</li><li>"full-compaction": Generate changelog files with each full compaction.</li><li>"lookup": Generate changelog files through 'lookup' before committing the data writing.</li></ul></td>
         </tr>
         <tr>
+            <td><h5>changelog-producer.lookup-wait</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>When changelog-producer is set to LOOKUP, commit will wait for changelog generation by lookup.</td>
+        </tr>
+        <tr>
             <td><h5>changelog-producer.row-deduplicate</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>

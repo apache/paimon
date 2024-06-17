@@ -20,6 +20,7 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.disk.IOManager;
@@ -200,8 +201,9 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 if (writerContainer.indexMaintainer != null) {
                     newIndexFiles.addAll(writerContainer.indexMaintainer.prepareCommit());
                 }
-                if (writerContainer.deletionVectorsMaintainer != null) {
-                    newIndexFiles.addAll(writerContainer.deletionVectorsMaintainer.prepareCommit());
+                CompactDeletionFile compactDeletionFile = increment.compactDeletionFile();
+                if (compactDeletionFile != null) {
+                    compactDeletionFile.getOrCompute().ifPresent(newIndexFiles::add);
                 }
                 CommitMessageImpl committable =
                         new CommitMessageImpl(

@@ -173,12 +173,27 @@ public class IndexFileHandler {
         return indexManifestFile.readWithIOException(indexManifest);
     }
 
+    private IndexFile indexFile(IndexFileMeta file) {
+        switch (file.indexType()) {
+            case HASH_INDEX:
+                return hashIndex;
+            case DELETION_VECTORS_INDEX:
+                return deletionVectorsIndex;
+            default:
+                throw new IllegalArgumentException("Unknown index type: " + file.indexType());
+        }
+    }
+
     public boolean existsIndexFile(IndexManifestEntry file) {
-        return hashIndex.exists(file.indexFile().fileName());
+        return indexFile(file.indexFile()).exists(file.indexFile().fileName());
     }
 
     public void deleteIndexFile(IndexManifestEntry file) {
-        hashIndex.delete(file.indexFile().fileName());
+        deleteIndexFile(file.indexFile());
+    }
+
+    public void deleteIndexFile(IndexFileMeta file) {
+        indexFile(file).delete(file.fileName());
     }
 
     public void deleteManifest(String indexManifest) {

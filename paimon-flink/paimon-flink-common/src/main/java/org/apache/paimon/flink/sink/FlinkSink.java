@@ -18,9 +18,9 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.TagCreationMode;
-import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -62,7 +62,6 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_MEMOR
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_OPERATOR_CHAINING;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_MANAGED_WRITER_BUFFER_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
-import static org.apache.paimon.flink.FlinkConnectorOptions.prepareCommitWaitCompaction;
 import static org.apache.paimon.flink.utils.ManagedMemoryUtils.declareManagedMemory;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -99,10 +98,11 @@ public abstract class FlinkSink<T> implements Serializable {
         Options options = table.coreOptions().toConfiguration();
         ChangelogProducer changelogProducer = table.coreOptions().changelogProducer();
         boolean waitCompaction;
-        if (table.coreOptions().writeOnly()) {
+        CoreOptions coreOptions = table.coreOptions();
+        if (coreOptions.writeOnly()) {
             waitCompaction = false;
         } else {
-            waitCompaction = prepareCommitWaitCompaction(options);
+            waitCompaction = coreOptions.prepareCommitWaitCompaction();
             int deltaCommits = -1;
             if (options.contains(FULL_COMPACTION_DELTA_COMMITS)) {
                 deltaCommits = options.get(FULL_COMPACTION_DELTA_COMMITS);
@@ -135,7 +135,7 @@ public abstract class FlinkSink<T> implements Serializable {
         }
 
         if (changelogProducer == ChangelogProducer.LOOKUP
-                && !options.get(FlinkConnectorOptions.CHANGELOG_PRODUCER_LOOKUP_WAIT)) {
+                && !coreOptions.prepareCommitWaitCompaction()) {
             return (table, commitUser, state, ioManager, memoryPool, metricGroup) -> {
                 assertNoSinkMaterializer.run();
                 return new AsyncLookupSinkWrite(
