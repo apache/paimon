@@ -162,6 +162,15 @@ public class FieldAggregatorTest {
     }
 
     @Test
+    public void testFieldCountNonNullIntAgg() {
+        FieldNonNullCountAgg fieldCountAgg = new FieldNonNullCountAgg(new IntType());
+        assertThat(fieldCountAgg.agg(null, null)).isEqualTo(0);
+        assertThat(fieldCountAgg.agg(1, null)).isEqualTo(1);
+        assertThat(fieldCountAgg.agg(null, 15)).isEqualTo(1);
+        assertThat(fieldCountAgg.agg(3, 25)).isEqualTo(4);
+    }
+
+    @Test
     public void testFieldProductIntAgg() {
         FieldProductAgg fieldProductAgg = new FieldProductAgg(new IntType());
         assertThat(fieldProductAgg.agg(null, 10)).isEqualTo(10);
