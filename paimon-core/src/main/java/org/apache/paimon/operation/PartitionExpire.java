@@ -87,7 +87,7 @@ public class PartitionExpire {
 
     @VisibleForTesting
     void expire(LocalDateTime now, long commitIdentifier) {
-        if (now.isAfter(lastCheck.plus(checkInterval))) {
+        if (checkInterval.isZero() || now.isAfter(lastCheck.plus(checkInterval))) {
             doExpire(now.minus(expirationTime), commitIdentifier);
             lastCheck = now;
         }
