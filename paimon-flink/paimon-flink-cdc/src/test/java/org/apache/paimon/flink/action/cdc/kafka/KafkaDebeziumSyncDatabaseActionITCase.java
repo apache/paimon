@@ -18,67 +18,65 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
-import org.apache.paimon.flink.action.cdc.format.DataFormat;
-
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 /** IT cases for {@link KafkaSyncDatabaseAction}. */
 public class KafkaDebeziumSyncDatabaseActionITCase extends KafkaSyncDatabaseActionITCase {
-    private static final String FORMAT = DataFormat.DEBEZIUM_JSON.asConfigString();
+    private static final String DEBEZIUM = "debezium";
 
     @Disabled // TODO How to append table in combined mode?
     @Test
     @Timeout(60)
     public void testSchemaEvolutionMultiTopic() throws Exception {
-        testSchemaEvolutionMultiTopic(FORMAT);
+        testSchemaEvolutionMultiTopic(DEBEZIUM);
     }
 
     @Disabled // TODO How to append table in combined mode?
     @Test
     @Timeout(60)
     public void testSchemaEvolutionOneTopic() throws Exception {
-        testSchemaEvolutionOneTopic(FORMAT);
+        testSchemaEvolutionOneTopic(DEBEZIUM);
     }
 
     @Test
     public void testTopicIsEmpty() {
-        testTopicIsEmpty(FORMAT);
+        testTopicIsEmpty(DEBEZIUM);
     }
 
     @Disabled // TODO How to append table in combined mode?
     @Test
     @Timeout(60)
     public void testTableAffixMultiTopic() throws Exception {
-        testTableAffixMultiTopic(FORMAT);
+        testTableAffixMultiTopic(DEBEZIUM);
     }
 
     @Disabled // TODO How to append table in combined mode?
     @Test
     @Timeout(60)
     public void testTableAffixOneTopic() throws Exception {
-        testTableAffixOneTopic(FORMAT);
+        testTableAffixOneTopic(DEBEZIUM);
     }
 
     @Disabled // TODO How to append table in combined mode?
     @Test
     @Timeout(60)
     public void testIncludingTables() throws Exception {
-        testIncludingTables(FORMAT);
+        testIncludingTables(DEBEZIUM);
     }
 
     @Disabled // TODO How to append table in combined mode?
     @Test
     @Timeout(60)
     public void testExcludingTables() throws Exception {
-        testExcludingTables(FORMAT);
+        testExcludingTables(DEBEZIUM);
     }
 
     @Disabled // TODO How to append table in combined mode?
     @Test
     @Timeout(60)
     public void testIncludingAndExcludingTables() throws Exception {
-        testIncludingAndExcludingTables(FORMAT);
+        testIncludingAndExcludingTables(DEBEZIUM);
     }
 }

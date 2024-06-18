@@ -18,65 +18,63 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
-import org.apache.paimon.flink.action.cdc.format.DataFormat;
-
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 /** IT cases for {@link KafkaSyncDatabaseAction}. */
 public class KafkaOggSyncDatabaseActionITCase extends KafkaSyncDatabaseActionITCase {
-    private static final String FORMAT = DataFormat.OGG_JSON.asConfigString();
+    private static final String OGG = "ogg";
 
     @Test
     @Timeout(60)
     public void testSchemaEvolutionMultiTopic() throws Exception {
-        testSchemaEvolutionMultiTopic(FORMAT);
+        testSchemaEvolutionMultiTopic(OGG);
     }
 
     @Test
     @Timeout(60)
     public void testSchemaEvolutionOneTopic() throws Exception {
-        testSchemaEvolutionOneTopic(FORMAT);
+        testSchemaEvolutionOneTopic(OGG);
     }
 
     @Test
     public void testTopicIsEmpty() {
-        testTopicIsEmpty(FORMAT);
+        testTopicIsEmpty(OGG);
     }
 
     @Test
     @Timeout(60)
     public void testTableAffixMultiTopic() throws Exception {
-        testTableAffixMultiTopic(FORMAT);
+        testTableAffixMultiTopic(OGG);
     }
 
     @Test
     @Timeout(60)
     public void testTableAffixOneTopic() throws Exception {
-        testTableAffixOneTopic(FORMAT);
+        testTableAffixOneTopic(OGG);
     }
 
     @Test
     @Timeout(60)
     public void testIncludingTables() throws Exception {
-        testIncludingTables(FORMAT);
+        testIncludingTables(OGG);
     }
 
     @Test
     @Timeout(60)
     public void testExcludingTables() throws Exception {
-        testExcludingTables(FORMAT);
+        testExcludingTables(OGG);
     }
 
     @Test
     @Timeout(60)
     public void testIncludingAndExcludingTables() throws Exception {
-        testIncludingAndExcludingTables(FORMAT);
+        testIncludingAndExcludingTables(OGG);
     }
 
     @Test
     @Timeout(60)
     public void testCaseInsensitive() throws Exception {
-        testCaseInsensitive(FORMAT);
+        testCaseInsensitive(OGG);
     }
 }

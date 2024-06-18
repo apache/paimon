@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
-import org.apache.paimon.flink.action.cdc.format.DataFormat;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -37,84 +36,84 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOp
 /** IT cases for {@link KafkaSyncTableAction}. */
 public class KafkaDebeziumSyncTableActionITCase extends KafkaSyncTableActionITCase {
 
-    private static final String FORMAT = DataFormat.DEBEZIUM_JSON.asConfigString();
+    private static final String DEBEZIUM = "debezium";
 
     @Test
     @Timeout(60)
     public void testSchemaEvolution() throws Exception {
-        runSingleTableSchemaEvolution("schemaevolution", FORMAT);
+        runSingleTableSchemaEvolution("schemaevolution", DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
     public void testNotSupportFormat() throws Exception {
-        testNotSupportFormat(FORMAT);
+        testNotSupportFormat(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
     public void testAssertSchemaCompatible() throws Exception {
-        testAssertSchemaCompatible(FORMAT);
+        testAssertSchemaCompatible(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
     public void testStarUpOptionSpecific() throws Exception {
-        testStarUpOptionSpecific(FORMAT);
+        testStarUpOptionSpecific(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
     public void testStarUpOptionLatest() throws Exception {
-        testStarUpOptionLatest(FORMAT);
+        testStarUpOptionLatest(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
     public void testStarUpOptionTimestamp() throws Exception {
-        testStarUpOptionTimestamp(FORMAT);
+        testStarUpOptionTimestamp(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
     public void testStarUpOptionEarliest() throws Exception {
-        testStarUpOptionEarliest(FORMAT);
+        testStarUpOptionEarliest(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
     public void testStarUpOptionGroup() throws Exception {
-        testStarUpOptionGroup(FORMAT);
+        testStarUpOptionGroup(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
     public void testComputedColumn() throws Exception {
-        testComputedColumn(FORMAT);
+        testComputedColumn(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
     public void testWaterMarkSyncTable() throws Exception {
-        testWaterMarkSyncTable(FORMAT);
+        testWaterMarkSyncTable(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
     public void testKafkaBuildSchemaWithDelete() throws Exception {
-        testKafkaBuildSchemaWithDelete(FORMAT);
+        testKafkaBuildSchemaWithDelete(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
     public void testSchemaIncludeRecord1() throws Exception {
-        testSchemaIncludeRecord(FORMAT);
+        testSchemaIncludeRecord(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
     public void testAllTypesWithSchema() throws Exception {
-        testAllTypesWithSchemaImpl(FORMAT);
+        testAllTypesWithSchemaImpl(DEBEZIUM);
     }
 
     @Test
@@ -123,13 +122,13 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaSyncTableActionITCa
         final String topic = "test_null_value";
         createTestTopic(topic, 1, 1);
 
-        writeRecordsToKafka(topic, "kafka/%s/table/nullvalue/%s-data-1.txt", FORMAT, FORMAT);
+        writeRecordsToKafka(topic, "kafka/debezium/table/nullvalue/debezium-data-1.txt");
         // write null value
         kafkaProducer.send(new ProducerRecord<>(topic, null));
-        writeRecordsToKafka(topic, "kafka/%s/table/nullvalue/%s-data-2.txt", FORMAT, FORMAT);
+        writeRecordsToKafka(topic, "kafka/debezium/table/nullvalue/debezium-data-2.txt");
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), FORMAT);
+        kafkaConfig.put(VALUE_FORMAT.key(), "debezium-json");
         kafkaConfig.put(TOPIC.key(), topic);
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)

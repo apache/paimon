@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action.cdc.kafka;
 
 import org.apache.paimon.catalog.FileSystemCatalogOptions;
-import org.apache.paimon.flink.action.cdc.format.DataFormat;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -60,7 +59,7 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         }
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), format);
+        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
         kafkaConfig.put(TOPIC.key(), String.join(";", topics));
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(kafkaConfig)
@@ -88,7 +87,7 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         }
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), format);
+        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
         kafkaConfig.put(TOPIC.key(), String.join(";", topics));
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(kafkaConfig)
@@ -176,7 +175,7 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                         },
                         new String[] {"id", "name", "description", "weight", "address"});
 
-        if (format.equals(DataFormat.DEBEZIUM_JSON.asConfigString())) {
+        if (format.equals("debezium")) {
             expected =
                     Arrays.asList(
                             "+I[103, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3, 0.8, NULL]",
@@ -195,7 +194,7 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
     protected void testTopicIsEmpty(String format) {
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), format);
+        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
 
         KafkaSyncDatabaseAction action = syncDatabaseActionBuilder(kafkaConfig).build();
 
@@ -241,7 +240,7 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
         // try synchronization
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), format);
+        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
         kafkaConfig.put(TOPIC.key(), String.join(";", topics));
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(kafkaConfig)
@@ -289,7 +288,7 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
         // try synchronization
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), format);
+        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
         kafkaConfig.put(TOPIC.key(), String.join(";", topics));
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(kafkaConfig)
@@ -361,7 +360,7 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                             DataTypes.STRING()
                         },
                         new String[] {"id", "name", "description", "weight", "address"});
-        if (format.equals(DataFormat.DEBEZIUM_JSON.asConfigString())) {
+        if (format.equals("debezium")) {
             expected =
                     Arrays.asList(
                             "+I[101, scooter, Small 2-wheel scooter, 3.14, Beijing]",
@@ -386,7 +385,7 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                             DataTypes.STRING()
                         },
                         new String[] {"id", "name", "description", "weight", "age"});
-        if (format.equals(DataFormat.DEBEZIUM_JSON.asConfigString())) {
+        if (format.equals("debezium")) {
             expected =
                     Arrays.asList(
                             "+I[103, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3, 0.8, 19]",
@@ -445,7 +444,7 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
         // try synchronization
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), format);
+        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
         kafkaConfig.put(TOPIC.key(), String.join(";", topics));
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(kafkaConfig)
@@ -468,7 +467,7 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                 topic, "kafka/%s/database/case-insensitive/%s-data-1.txt", format, format);
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), format);
+        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
         kafkaConfig.put(TOPIC.key(), topic);
 
         KafkaSyncDatabaseAction action =
@@ -500,19 +499,17 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     }
 
     private DataType getDataType(String format) {
-        return format.equals(DataFormat.DEBEZIUM_JSON.asConfigString())
-                ? DataTypes.STRING()
-                : DataTypes.STRING().notNull();
+        return format.equals("debezium") ? DataTypes.STRING() : DataTypes.STRING().notNull();
     }
 
     private List<String> getPrimaryKey(String format) {
-        return format.equals(DataFormat.DEBEZIUM_JSON.asConfigString())
+        return format.equals("debezium")
                 ? Collections.emptyList()
                 : Collections.singletonList("id");
     }
 
     private List<String> getBucketKey(String format) {
-        return format.equals(DataFormat.DEBEZIUM_JSON.asConfigString())
+        return format.equals("debezium")
                 ? Collections.singletonList("id")
                 : Collections.emptyList();
     }

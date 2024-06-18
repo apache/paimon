@@ -203,12 +203,8 @@ public class PulsarActionITCaseBase extends CdcActionITCaseBase {
         }
     }
 
-    protected List<String> getMessages(String resourceDirFormat, Object... args)
-            throws IOException {
-        URL url =
-                PulsarActionITCaseBase.class
-                        .getClassLoader()
-                        .getResource(String.format(resourceDirFormat, args));
+    protected List<String> getMessages(String resource) throws IOException {
+        URL url = PulsarActionITCaseBase.class.getClassLoader().getResource(resource);
         assertThat(url).isNotNull();
         java.nio.file.Path path = new File(url.getFile()).toPath();
         List<String> lines = Files.readAllLines(path);

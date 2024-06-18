@@ -18,60 +18,58 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
-import org.apache.paimon.flink.action.cdc.format.DataFormat;
-
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 /** IT cases for {@link KafkaSyncDatabaseAction}. */
 public class KafkaMaxwellSyncDatabaseActionITCase extends KafkaSyncDatabaseActionITCase {
 
-    private static final String FORMAT = DataFormat.MAXWELL_JSON.asConfigString();
+    private static final String MAXWELL = "maxwell";
 
     @Test
     @Timeout(60)
     public void testSchemaEvolutionMultiTopic() throws Exception {
-        testSchemaEvolutionMultiTopic(FORMAT);
+        testSchemaEvolutionMultiTopic(MAXWELL);
     }
 
     @Test
     @Timeout(60)
     public void testSchemaEvolutionOneTopic() throws Exception {
-        testSchemaEvolutionOneTopic(FORMAT);
+        testSchemaEvolutionOneTopic(MAXWELL);
     }
 
     @Test
     public void testTopicIsEmpty() {
-        testTopicIsEmpty(FORMAT);
+        testTopicIsEmpty(MAXWELL);
     }
 
     @Test
     @Timeout(60)
     public void testTableAffixMultiTopic() throws Exception {
-        testTableAffixMultiTopic(FORMAT);
+        testTableAffixMultiTopic(MAXWELL);
     }
 
     @Test
     @Timeout(60)
     public void testTableAffixOneTopic() throws Exception {
-        testTableAffixOneTopic(FORMAT);
+        testTableAffixOneTopic(MAXWELL);
     }
 
     @Test
     @Timeout(60)
     public void testIncludingTables() throws Exception {
-        testIncludingTables(FORMAT);
+        testIncludingTables(MAXWELL);
     }
 
     @Test
     @Timeout(60)
     public void testExcludingTables() throws Exception {
-        testExcludingTables(FORMAT);
+        testExcludingTables(MAXWELL);
     }
 
     @Test
     @Timeout(60)
     public void testIncludingAndExcludingTables() throws Exception {
-        testIncludingAndExcludingTables(FORMAT);
+        testIncludingAndExcludingTables(MAXWELL);
     }
 }

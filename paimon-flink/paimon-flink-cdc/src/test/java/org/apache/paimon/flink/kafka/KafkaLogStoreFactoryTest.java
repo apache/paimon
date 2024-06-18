@@ -43,13 +43,17 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 import static org.apache.paimon.CoreOptions.SCAN_MODE;
 import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
+import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP;
 import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP_MILLIS;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -58,7 +62,25 @@ public class KafkaLogStoreFactoryTest {
 
     @ParameterizedTest
     @EnumSource(CoreOptions.StartupMode.class)
-    public void testCreateKafkaLogStoreFactory(CoreOptions.StartupMode startupMode) {
+    public void testCreateKafkaLogStoreFactoryTimestamp(CoreOptions.StartupMode startupMode) {
+        String now = String.valueOf(System.currentTimeMillis());
+        Consumer<Map<String, String>> setter =
+                (options) -> options.put(SCAN_TIMESTAMP_MILLIS.key(), now);
+        testCreateKafkaLogStoreFactory(startupMode, setter);
+    }
+
+    @ParameterizedTest
+    @EnumSource(CoreOptions.StartupMode.class)
+    public void testCreateKafkaLogStoreFactoryTimestampStr(CoreOptions.StartupMode startupMode) {
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+        String timestampString = LocalDateTime.now().format(formatter);
+        Consumer<Map<String, String>> setter =
+                (options) -> options.put(SCAN_TIMESTAMP.key(), timestampString);
+        testCreateKafkaLogStoreFactory(startupMode, setter);
+    }
+
+    private static void testCreateKafkaLogStoreFactory(
+            CoreOptions.StartupMode startupMode, Consumer<Map<String, String>> optionsSetter) {
         Map<String, String> dynamicOptions = new HashMap<>();
         dynamicOptions.put(FlinkConnectorOptions.LOG_SYSTEM.key(), "kafka");
         dynamicOptions.put(SCAN_MODE.key(), startupMode.toString());
@@ -66,8 +88,7 @@ public class KafkaLogStoreFactoryTest {
                 || startupMode == CoreOptions.StartupMode.FROM_SNAPSHOT_FULL) {
             dynamicOptions.put(SCAN_SNAPSHOT_ID.key(), "1");
         } else if (startupMode == CoreOptions.StartupMode.FROM_TIMESTAMP) {
-            dynamicOptions.put(
-                    SCAN_TIMESTAMP_MILLIS.key(), String.valueOf(System.currentTimeMillis()));
+            optionsSetter.accept(dynamicOptions);
         }
         dynamicOptions.put(SCAN_MODE.key(), startupMode.toString());
         DynamicTableFactory.Context context =
