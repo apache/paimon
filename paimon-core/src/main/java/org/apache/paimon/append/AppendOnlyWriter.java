@@ -289,7 +289,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         compactBefore.clear();
         compactAfter.clear();
 
-        return new CommitIncrement(dataIncrement, compactIncrement);
+        return new CommitIncrement(dataIncrement, compactIncrement, null);
     }
 
     @Override

@@ -311,8 +311,10 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
     public void testFileIndex() {
         batchSql(
                 "INSERT INTO index_table VALUES (1, 'a', 'AAA'), (1, 'a', 'AAA'), (2, 'c', 'BBB'), (3, 'c', 'BBB')");
+        batchSql(
+                "INSERT INTO index_table VALUES (1, 'a', 'AAA'), (1, 'a', 'AAA'), (2, 'd', 'BBB'), (3, 'd', 'BBB')");
 
-        assertThat(batchSql("SELECT * FROM index_table WHERE indexc = 'c'"))
+        assertThat(batchSql("SELECT * FROM index_table WHERE indexc = 'c' and (id = 2 or id = 3)"))
                 .containsExactlyInAnyOrder(Row.of(2, "c", "BBB"), Row.of(3, "c", "BBB"));
     }
 

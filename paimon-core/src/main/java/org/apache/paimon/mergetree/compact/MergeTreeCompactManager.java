@@ -20,10 +20,12 @@ package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.compact.CompactFutureManager;
 import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.mergetree.LevelSortedRun;
 import org.apache.paimon.mergetree.Levels;
@@ -42,6 +44,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /** Compact manager for {@link KeyValueFileStore}. */
@@ -58,7 +61,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     private final CompactRewriter rewriter;
 
     @Nullable private final CompactionMetrics.Reporter metricsReporter;
-    private final boolean deletionVectorsEnabled;
+    @Nullable private final DeletionVectorsMaintainer dvMaintainer;
+    private final boolean lazyGenDeletionFile;
 
     public MergeTreeCompactManager(
             ExecutorService executor,
@@ -69,7 +73,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
             int numSortedRunStopTrigger,
             CompactRewriter rewriter,
             @Nullable CompactionMetrics.Reporter metricsReporter,
-            boolean deletionVectorsEnabled) {
+            @Nullable DeletionVectorsMaintainer dvMaintainer,
+            boolean lazyGenDeletionFile) {
         this.executor = executor;
         this.levels = levels;
         this.strategy = strategy;
@@ -78,7 +83,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
         this.keyComparator = keyComparator;
         this.rewriter = rewriter;
         this.metricsReporter = metricsReporter;
-        this.deletionVectorsEnabled = deletionVectorsEnabled;
+        this.dvMaintainer = dvMaintainer;
+        this.lazyGenDeletionFile = lazyGenDeletionFile;
 
         MetricUtils.safeCall(this::reportLevel0FileCount, LOG);
     }
@@ -149,7 +155,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                     boolean dropDelete =
                             unit.outputLevel() != 0
                                     && (unit.outputLevel() >= levels.nonEmptyHighestLevel()
-                                            || deletionVectorsEnabled);
+                                            || dvMaintainer != null);
 
                     if (LOG.isDebugEnabled()) {
                         LOG.debug(
@@ -175,6 +181,14 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     }
 
     private void submitCompaction(CompactUnit unit, boolean dropDelete) {
+        Supplier<CompactDeletionFile> compactDfSupplier = () -> null;
+        if (dvMaintainer != null) {
+            compactDfSupplier =
+                    lazyGenDeletionFile
+                            ? () -> CompactDeletionFile.lazyGeneration(dvMaintainer)
+                            : () -> CompactDeletionFile.generateFiles(dvMaintainer);
+        }
+
         MergeTreeCompactTask task =
                 new MergeTreeCompactTask(
                         keyComparator,
@@ -183,7 +197,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                         unit,
                         dropDelete,
                         levels.maxLevel(),
-                        metricsReporter);
+                        metricsReporter,
+                        compactDfSupplier);
         if (LOG.isDebugEnabled()) {
             LOG.debug(
                     "Pick these files (name, level, size) for compaction: {}",

@@ -18,12 +18,11 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.CoreOptions
 import org.apache.paimon.operation.FileStoreCommit
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.BatchWriteBuilder
 import org.apache.paimon.types.RowType
-import org.apache.paimon.utils.InternalRowPartitionComputer
+import org.apache.paimon.utils.{InternalRowPartitionComputer, TypeUtils}
 
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.{CatalystTypeConverters, InternalRow}
@@ -31,46 +30,39 @@ import org.apache.spark.sql.catalyst.util.CharVarcharUtils
 import org.apache.spark.sql.connector.catalog.SupportsPartitionManagement
 import org.apache.spark.sql.types.StructType
 
-import java.util.{Collections, Map => JMap, UUID}
+import java.util.{Collections, Map => JMap, Objects, UUID}
 
 import scala.collection.JavaConverters._
 
 trait PaimonPartitionManagement extends SupportsPartitionManagement {
   self: SparkTable =>
 
-  def partitionKeys() = getTable.partitionKeys
+  private lazy val partitionRowType: RowType = TypeUtils.project(table.rowType, table.partitionKeys)
 
-  def tableRowType() = new RowType(
-    getTable.rowType.getFields.asScala
-      .filter(dataFiled => partitionKeys.contains(dataFiled.name()))
-      .asJava)
-
-  override def partitionSchema(): StructType = {
-    SparkTypeUtils.fromPaimonRowType(tableRowType)
-  }
+  override lazy val partitionSchema: StructType = SparkTypeUtils.fromPaimonRowType(partitionRowType)
 
   override def dropPartition(internalRow: InternalRow): Boolean = {
-    // convert internalRow to row
-    val row: Row = CatalystTypeConverters
-      .createToScalaConverter(CharVarcharUtils.replaceCharVarcharWithString(partitionSchema()))
-      .apply(internalRow)
-      .asInstanceOf[Row]
-    val rowDataPartitionComputer = new InternalRowPartitionComputer(
-      CoreOptions.PARTITION_DEFAULT_NAME.defaultValue,
-      tableRowType,
-      partitionKeys.asScala.toArray)
-    val partitionMap = rowDataPartitionComputer.generatePartValues(new SparkRow(tableRowType, row))
-    getTable match {
-      case table: FileStoreTable =>
-        val commit: FileStoreCommit = table.store.newCommit(UUID.randomUUID.toString)
+    table match {
+      case fileStoreTable: FileStoreTable =>
+        // convert internalRow to row
+        val row: Row = CatalystTypeConverters
+          .createToScalaConverter(CharVarcharUtils.replaceCharVarcharWithString(partitionSchema))
+          .apply(internalRow)
+          .asInstanceOf[Row]
+        val rowDataPartitionComputer = new InternalRowPartitionComputer(
+          fileStoreTable.coreOptions().partitionDefaultName(),
+          partitionRowType,
+          table.partitionKeys().asScala.toArray)
+        val partitionMap =
+          rowDataPartitionComputer.generatePartValues(new SparkRow(partitionRowType, row))
+        val commit: FileStoreCommit = fileStoreTable.store.newCommit(UUID.randomUUID.toString)
         commit.dropPartitions(
           Collections.singletonList(partitionMap),
           BatchWriteBuilder.COMMIT_IDENTIFIER)
+        true
       case _ =>
-        throw new UnsupportedOperationException(
-          "Only AbstractFileStoreTable supports drop partitions.")
+        throw new UnsupportedOperationException("Only FileStoreTable supports drop partitions.")
     }
-    true
   }
 
   override def replacePartitionMetadata(
@@ -91,32 +83,23 @@ trait PaimonPartitionManagement extends SupportsPartitionManagement {
       s"Number of partition names (${partitionCols.length}) must be equal to " +
         s"the number of partition values (${internalRow.numFields})."
     )
-    val schema: StructType = partitionSchema()
     assert(
-      partitionCols.forall(fieldName => schema.fieldNames.contains(fieldName)),
+      partitionCols.forall(fieldName => partitionSchema.fieldNames.contains(fieldName)),
       s"Some partition names ${partitionCols.mkString("[", ", ", "]")} don't belong to " +
-        s"the partition schema '${schema.sql}'."
+        s"the partition schema '${partitionSchema.sql}'."
     )
-
-    val tableScan = getTable.newReadBuilder.newScan
-    val binaryRows = tableScan.listPartitions.asScala.toList
-    binaryRows
-      .map(
-        binaryRow => {
-          val sparkInternalRow: SparkInternalRow =
-            new SparkInternalRow(SparkTypeUtils.toPaimonType(schema).asInstanceOf[RowType])
-          sparkInternalRow.replace(binaryRow)
-        })
+    table.newReadBuilder.newScan.listPartitions.asScala
+      .map(binaryRow => SparkInternalRow.fromPaimon(binaryRow, partitionRowType))
       .filter(
         sparkInternalRow => {
           partitionCols.zipWithIndex
             .map {
               case (partitionName, index) =>
-                val internalRowIndex = schema.fieldIndex(partitionName)
-                val structField = schema.fields(internalRowIndex)
-                sparkInternalRow
-                  .get(internalRowIndex, structField.dataType)
-                  .equals(internalRow.get(index, structField.dataType))
+                val internalRowIndex = partitionSchema.fieldIndex(partitionName)
+                val structField = partitionSchema.fields(internalRowIndex)
+                Objects.equals(
+                  sparkInternalRow.get(internalRowIndex, structField.dataType),
+                  internalRow.get(index, structField.dataType))
             }
             .forall(identity)
         })

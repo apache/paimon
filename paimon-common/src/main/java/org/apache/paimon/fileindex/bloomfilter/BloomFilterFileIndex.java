@@ -19,15 +19,23 @@
 package org.apache.paimon.fileindex.bloomfilter;
 
 import org.apache.paimon.fileindex.FileIndexReader;
+import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.fileindex.FileIndexWriter;
 import org.apache.paimon.fileindex.FileIndexer;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.BloomFilter64;
 import org.apache.paimon.utils.BloomFilter64.BitSet;
+import org.apache.paimon.utils.IOUtils;
 
 import org.apache.hadoop.util.bloom.HashFunction;
+
+import java.io.IOException;
+
+import static org.apache.paimon.fileindex.FileIndexResult.REMAIN;
+import static org.apache.paimon.fileindex.FileIndexResult.SKIP;
 
 /**
  * Bloom filter for file index.
@@ -38,8 +46,6 @@ import org.apache.hadoop.util.bloom.HashFunction;
  * http://web.archive.org/web/20071223173210/http://www.concentric.net/~Ttwang/tech/inthash.htm).
  */
 public class BloomFilterFileIndex implements FileIndexer {
-
-    public static final String BLOOM_FILTER = "bloom-filter";
 
     private static final int DEFAULT_ITEMS = 1_000_000;
     private static final double DEFAULT_FPP = 0.1;
@@ -57,18 +63,21 @@ public class BloomFilterFileIndex implements FileIndexer {
         this.fpp = options.getDouble(FPP, DEFAULT_FPP);
     }
 
-    public String name() {
-        return BLOOM_FILTER;
-    }
-
     @Override
     public FileIndexWriter createWriter() {
         return new Writer(dataType, items, fpp);
     }
 
     @Override
-    public FileIndexReader createReader(byte[] serializedBytes) {
-        return new Reader(dataType, serializedBytes);
+    public FileIndexReader createReader(SeekableInputStream inputStream, int start, int length) {
+        try {
+            inputStream.seek(start);
+            byte[] serializedBytes = new byte[length];
+            IOUtils.readFully(inputStream, serializedBytes);
+            return new Reader(dataType, serializedBytes);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private static class Writer extends FileIndexWriter {
@@ -118,8 +127,8 @@ public class BloomFilterFileIndex implements FileIndexer {
         }
 
         @Override
-        public Boolean visitEqual(FieldRef fieldRef, Object key) {
-            return key == null || filter.testHash(hashFunction.hash(key));
+        public FileIndexResult visitEqual(FieldRef fieldRef, Object key) {
+            return key == null || filter.testHash(hashFunction.hash(key)) ? REMAIN : SKIP;
         }
     }
 }

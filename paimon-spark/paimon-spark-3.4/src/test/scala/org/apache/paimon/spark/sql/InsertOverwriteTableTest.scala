@@ -16,18 +16,6 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink;
+package org.apache.paimon.spark.sql
 
-import org.apache.paimon.options.Options;
-
-/** test class for {@link TableWriteOperator} with primarykey writer. */
-public class PrimaryKeyWriterOperatorTest extends WriterOperatorTestBase {
-    @Override
-    protected void setTableConfig(Options options) {
-        options.set("primary-key", "a");
-        options.set("bucket", "1");
-        options.set("bucket-key", "a");
-        options.set("write-buffer-size", "256 b");
-        options.set("page-size", "32 b");
-    }
-}
+class InsertOverwriteTableTest extends InsertOverwriteTableTestBase {}

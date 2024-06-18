@@ -24,6 +24,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -67,9 +68,15 @@ public abstract class SparkReadTestBase {
     @BeforeAll
     public static void startMetastoreAndSpark(@TempDir java.nio.file.Path tempDir) {
         warehousePath = new Path("file:" + tempDir.toString());
-        spark = SparkSession.builder().master("local[2]").getOrCreate();
-        spark.conf().set("spark.sql.catalog.paimon", SparkCatalog.class.getName());
-        spark.conf().set("spark.sql.catalog.paimon.warehouse", warehousePath.toString());
+        spark =
+                SparkSession.builder()
+                        .master("local[2]")
+                        .config("spark.sql.catalog.paimon", SparkCatalog.class.getName())
+                        .config("spark.sql.catalog.paimon.warehouse", warehousePath.toString())
+                        .config(
+                                "spark.sql.extensions",
+                                PaimonSparkSessionExtensions.class.getName())
+                        .getOrCreate();
         spark.sql("USE paimon");
     }
 
@@ -230,6 +237,6 @@ public abstract class SparkReadTestBase {
 
     // default schema
     protected String defaultShowCreateString(String table) {
-        return showCreateString(table, "a INT", "b BIGINT", "c STRING");
+        return showCreateString(table, "a INT NOT NULL", "b BIGINT", "c STRING");
     }
 }

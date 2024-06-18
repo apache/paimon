@@ -40,6 +40,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
 
@@ -76,6 +77,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     // database to sync, currently only support single database
     private String database;
     private MultiTablesSinkMode mode;
+    private String commitUser;
 
     public FlinkCdcSyncDatabaseSinkBuilder<T> withInput(DataStream<T> input) {
         this.input = input;
@@ -102,6 +104,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         this.committerCpu = options.get(FlinkConnectorOptions.SINK_COMMITTER_CPU);
         this.committerMemory = options.get(FlinkConnectorOptions.SINK_COMMITTER_MEMORY);
         this.commitChaining = options.get(FlinkConnectorOptions.SINK_COMMITTER_OPERATOR_CHAINING);
+        this.commitUser = createCommitUser(options);
         return this;
     }
 
@@ -163,7 +166,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
 
         FlinkCdcMultiTableSink sink =
                 new FlinkCdcMultiTableSink(
-                        catalogLoader, committerCpu, committerMemory, commitChaining);
+                        catalogLoader, committerCpu, committerMemory, commitChaining, commitUser);
         sink.sinkFrom(partitioned);
     }
 

@@ -428,12 +428,24 @@ public class FlinkCatalogTest {
     }
 
     @Test
-    public void testCreateDb_DatabaseWithPropertiesException() {
+    public void testCreateDb_DatabaseWithProperties() throws Exception {
         CatalogDatabaseImpl database =
                 new CatalogDatabaseImpl(Collections.singletonMap("haa", "ccc"), null);
-        assertThatThrownBy(() -> catalog.createDatabase(path1.getDatabaseName(), database, false))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage("Create database with properties is unsupported.");
+        catalog.createDatabase(path1.getDatabaseName(), database, false);
+        assertThat(catalog.databaseExists(path1.getDatabaseName())).isTrue();
+        // TODO filesystem catalog will ignore all properties
+        assertThat(catalog.getDatabase(path1.getDatabaseName()).getProperties().isEmpty()).isTrue();
+
+        // File system catalog doesn't support path for database.
+        CatalogDatabaseImpl databaseWithPath =
+                new CatalogDatabaseImpl(Collections.singletonMap("location", "/tmp"), null);
+        assertThatThrownBy(
+                        () ->
+                                catalog.createDatabase(
+                                        "test-database-with-location", databaseWithPath, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Cannot specify location for a database when using fileSystem catalog.");
     }
 
     @Test

@@ -144,7 +144,7 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
                 bucket,
                 DataIncrement.emptyIncrement(),
                 CompactIncrement.emptyIncrement(),
-                new IndexIncrement(dvMaintainer.prepareCommit()));
+                new IndexIncrement(dvMaintainer.writeDeletionVectorsIndex()));
     }
 
     public static TestAppendFileStore createAppendStore(

@@ -33,6 +33,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.Description;
 import org.apache.paimon.options.description.InlineElement;
+import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.MathUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.StringUtils;
@@ -51,6 +52,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TimeZone;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.ConfigOptions.key;
@@ -63,6 +66,8 @@ public class CoreOptions implements Serializable {
     public static final String DEFAULT_VALUE_SUFFIX = "default-value";
 
     public static final String FIELDS_PREFIX = "fields";
+
+    public static final String FIELDS_SEPARATOR = ",";
 
     public static final String AGG_FUNCTION = "aggregate-function";
     public static final String DEFAULT_AGG_FUNCTION = "default-aggregate-function";
@@ -150,10 +155,23 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<String> FILE_COMPRESSION =
             key("file.compression")
                     .stringType()
+                    .defaultValue("zstd")
+                    .withDescription(
+                            "Default file compression. For faster read and write, it is recommended to use LZ4.");
+
+    public static final ConfigOption<Integer> FILE_COMPRESSION_ZSTD_LEVEL =
+            key("file.compression.zstd-level")
+                    .intType()
+                    .defaultValue(1)
+                    .withDescription(
+                            "Default file compression zstd level. For higher compression rates, it can be configured to 9, but the read and write speed will significantly decrease.");
+
+    public static final ConfigOption<MemorySize> FILE_BLOCK_SIZE =
+            key("file.block-size")
+                    .memoryType()
                     .noDefaultValue()
                     .withDescription(
-                            "Default file compression format, orc is lz4 and parquet is snappy. It can be overridden by "
-                                    + FILE_COMPRESSION_PER_LEVEL.key());
+                            "File block size of format, default value of orc stripe is 64 MB, and parquet row group is 128 MB.");
 
     public static final ConfigOption<MemorySize> FILE_INDEX_IN_MANIFEST_THRESHOLD =
             key("file-index.in-manifest-threshold")
@@ -172,6 +190,12 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .defaultValue(CoreOptions.FILE_FORMAT_AVRO)
                     .withDescription("Specify the message format of manifest files.");
+
+    public static final ConfigOption<String> MANIFEST_COMPRESSION =
+            key("manifest.compression")
+                    .stringType()
+                    .defaultValue("zstd")
+                    .withDescription("Default file compression for manifest.");
 
     public static final ConfigOption<MemorySize> MANIFEST_TARGET_FILE_SIZE =
             key("manifest.target-file-size")
@@ -530,6 +554,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue(StartupMode.DEFAULT)
                     .withDeprecatedKeys("log.scan")
                     .withDescription("Specify the scanning behavior of the source.");
+
+    public static final ConfigOption<String> SCAN_TIMESTAMP =
+            key("scan.timestamp")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Optional timestamp used in case of \"from-timestamp\" scan mode, it will be automatically converted to timestamp in unix milliseconds, use local time zone");
 
     public static final ConfigOption<Long> SCAN_TIMESTAMP_MILLIS =
             key("scan.timestamp-millis")
@@ -1164,7 +1195,24 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Default aggregate function of all fields for partial-update and aggregate merge function");
+                            "Default aggregate function of all fields for partial-update and aggregate merge function.");
+
+    public static final ConfigOption<String> COMMIT_USER_PREFIX =
+            key("commit.user-prefix")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("Specifies the commit user prefix.");
+
+    public static final ConfigOption<Boolean> CHANGELOG_PRODUCER_LOOKUP_WAIT =
+            key("changelog-producer.lookup-wait")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "When "
+                                    + CoreOptions.CHANGELOG_PRODUCER.key()
+                                    + " is set to "
+                                    + ChangelogProducer.LOOKUP.name()
+                                    + ", commit will wait for changelog generation by lookup.");
 
     private final Options options;
 
@@ -1227,6 +1275,10 @@ public class CoreOptions implements Serializable {
         return createFileFormat(options, MANIFEST_FORMAT);
     }
 
+    public String manifestCompression() {
+        return options.get(MANIFEST_COMPRESSION);
+    }
+
     public MemorySize manifestTargetSize() {
         return options.get(MANIFEST_TARGET_FILE_SIZE);
     }
@@ -1279,6 +1331,13 @@ public class CoreOptions implements Serializable {
         return options.get(FIELDS_DEFAULT_AGG_FUNC);
     }
 
+    public static String createCommitUser(Options options) {
+        String commitUserPrefix = options.get(COMMIT_USER_PREFIX);
+        return commitUserPrefix == null
+                ? UUID.randomUUID().toString()
+                : commitUserPrefix + "_" + UUID.randomUUID();
+    }
+
     public boolean definedAggFunc() {
         if (options.contains(FIELDS_DEFAULT_AGG_FUNC)) {
             return true;
@@ -1325,6 +1384,7 @@ public class CoreOptions implements Serializable {
                         .defaultValue(false));
     }
 
+    @Nullable
     public String fileCompression() {
         return options.get(FILE_COMPRESSION);
     }
@@ -1569,7 +1629,8 @@ public class CoreOptions implements Serializable {
     public static StartupMode startupMode(Options options) {
         StartupMode mode = options.get(SCAN_MODE);
         if (mode == StartupMode.DEFAULT) {
-            if (options.getOptional(SCAN_TIMESTAMP_MILLIS).isPresent()) {
+            if (options.getOptional(SCAN_TIMESTAMP_MILLIS).isPresent()
+                    || options.getOptional(SCAN_TIMESTAMP).isPresent()) {
                 return StartupMode.FROM_TIMESTAMP;
             } else if (options.getOptional(SCAN_SNAPSHOT_ID).isPresent()
                     || options.getOptional(SCAN_TAG_NAME).isPresent()
@@ -1592,7 +1653,17 @@ public class CoreOptions implements Serializable {
     }
 
     public Long scanTimestampMills() {
-        return options.get(SCAN_TIMESTAMP_MILLIS);
+        String timestampStr = scanTimestamp();
+        Long timestampMillis = options.get(SCAN_TIMESTAMP_MILLIS);
+        if (timestampMillis == null && timestampStr != null) {
+            return DateTimeUtils.parseTimestampData(timestampStr, 3, TimeZone.getDefault())
+                    .getMillisecond();
+        }
+        return timestampMillis;
+    }
+
+    public String scanTimestamp() {
+        return options.get(SCAN_TIMESTAMP);
     }
 
     public Long scanWatermark() {
@@ -1851,6 +1922,11 @@ public class CoreOptions implements Serializable {
     @Nullable
     public String recordLevelTimeField() {
         return options.get(RECORD_LEVEL_TIME_FIELD);
+    }
+
+    public boolean prepareCommitWaitCompaction() {
+        return changelogProducer() == ChangelogProducer.LOOKUP
+                && options.get(CHANGELOG_PRODUCER_LOOKUP_WAIT);
     }
 
     /** Specifies the merge engine for table with primary key. */
@@ -2184,6 +2260,10 @@ public class CoreOptions implements Serializable {
      */
     public static void setDefaultValues(Options options) {
         if (options.contains(SCAN_TIMESTAMP_MILLIS) && !options.contains(SCAN_MODE)) {
+            options.set(SCAN_MODE, StartupMode.FROM_TIMESTAMP);
+        }
+
+        if (options.contains(SCAN_TIMESTAMP) && !options.contains(SCAN_MODE)) {
             options.set(SCAN_MODE, StartupMode.FROM_TIMESTAMP);
         }
 

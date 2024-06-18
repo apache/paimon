@@ -74,10 +74,11 @@ public class FilesTableTest extends TableTestBase {
         Schema schema =
                 Schema.newBuilder()
                         .column("pk", DataTypes.INT())
-                        .column("pt", DataTypes.INT())
+                        .column("pt1", DataTypes.INT())
+                        .column("pt2", DataTypes.INT())
                         .column("col1", DataTypes.INT())
-                        .partitionKeys("pt")
-                        .primaryKey("pk", "pt")
+                        .partitionKeys("pt1", "pt2")
+                        .primaryKey("pk", "pt1", "pt2")
                         .option(CoreOptions.CHANGELOG_PRODUCER.key(), "input")
                         .option(CoreOptions.BUCKET.key(), "2")
                         .option(CoreOptions.SEQUENCE_FIELD.key(), "col1")
@@ -93,24 +94,27 @@ public class FilesTableTest extends TableTestBase {
         snapshotManager = new SnapshotManager(fileIO, tablePath);
 
         // snapshot 1: append
-        write(table, GenericRow.of(1, 1, 1), GenericRow.of(1, 2, 5));
+        write(table, GenericRow.of(1, 1, 10, 1), GenericRow.of(1, 2, 20, 5));
 
         // snapshot 2: append
-        write(table, GenericRow.of(2, 1, 3), GenericRow.of(2, 2, 4));
+        write(table, GenericRow.of(2, 1, 10, 3), GenericRow.of(2, 2, 20, 4));
     }
 
     @Test
     public void testReadWithFilter() throws Exception {
-        compact(table, row(2), 0);
-        write(table, GenericRow.of(3, 1, 1));
+        compact(table, row(2, 20), 0);
+        write(table, GenericRow.of(3, 1, 10, 1));
         assertThat(readPartBucketLevel(null))
-                .containsExactlyInAnyOrder("[1]-0-0", "[1]-0-0", "[1]-1-0", "[2]-0-5");
+                .containsExactlyInAnyOrder(
+                        "[1, 10]-0-0", "[1, 10]-0-0", "[1, 10]-1-0", "[2, 20]-0-5");
 
         PredicateBuilder builder = new PredicateBuilder(FilesTable.TABLE_TYPE);
-        assertThat(readPartBucketLevel(builder.equal(0, "[2]")))
-                .containsExactlyInAnyOrder("[2]-0-5");
-        assertThat(readPartBucketLevel(builder.equal(1, 1))).containsExactlyInAnyOrder("[1]-1-0");
-        assertThat(readPartBucketLevel(builder.equal(5, 5))).containsExactlyInAnyOrder("[2]-0-5");
+        assertThat(readPartBucketLevel(builder.equal(0, "[2, 20]")))
+                .containsExactlyInAnyOrder("[2, 20]-0-5");
+        assertThat(readPartBucketLevel(builder.equal(1, 1)))
+                .containsExactlyInAnyOrder("[1, 10]-1-0");
+        assertThat(readPartBucketLevel(builder.equal(5, 5)))
+                .containsExactlyInAnyOrder("[2, 20]-0-5");
     }
 
     private List<String> readPartBucketLevel(Predicate predicate) throws IOException {
@@ -135,6 +139,12 @@ public class FilesTableTest extends TableTestBase {
         List<InternalRow> expectedRow = getExceptedResult(2L);
         List<InternalRow> result = read(filesTable);
         assertThat(result).containsExactlyInAnyOrderElementsOf(expectedRow);
+    }
+
+    @Test
+    public void testReadWithNotFullPartitionKey() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(FilesTable.TABLE_TYPE);
+        assertThat(readPartBucketLevel(builder.equal(0, "[2]"))).isEmpty();
     }
 
     @Test
@@ -169,15 +179,17 @@ public class FilesTableTest extends TableTestBase {
 
         List<InternalRow> expectedRow = new ArrayList<>();
         for (ManifestEntry fileEntry : files) {
-            String partition = String.valueOf(fileEntry.partition().getInt(0));
+            String partition1 = String.valueOf(fileEntry.partition().getInt(0));
+            String partition2 = String.valueOf(fileEntry.partition().getInt(1));
             DataFileMeta file = fileEntry.file();
             String minKey = String.valueOf(file.minKey().getInt(0));
             String maxKey = String.valueOf(file.maxKey().getInt(0));
-            String minCol1 = String.valueOf(file.valueStats().minValues().getInt(2));
-            String maxCol1 = String.valueOf(file.valueStats().maxValues().getInt(2));
+            String minCol1 = String.valueOf(file.valueStats().minValues().getInt(3));
+            String maxCol1 = String.valueOf(file.valueStats().maxValues().getInt(3));
             expectedRow.add(
                     GenericRow.of(
-                            BinaryString.fromString(Arrays.toString(new String[] {partition})),
+                            BinaryString.fromString(
+                                    Arrays.toString(new String[] {partition1, partition2})),
                             fileEntry.bucket(),
                             BinaryString.fromString(file.fileName()),
                             BinaryString.fromString("orc"),
@@ -188,13 +200,15 @@ public class FilesTableTest extends TableTestBase {
                             BinaryString.fromString(Arrays.toString(new String[] {minKey})),
                             BinaryString.fromString(Arrays.toString(new String[] {maxKey})),
                             BinaryString.fromString(
-                                    String.format("{col1=%s, pk=%s, pt=%s}", 0, 0, 0)),
+                                    String.format("{col1=%s, pk=%s, pt1=%s, pt2=%s}", 0, 0, 0, 0)),
                             BinaryString.fromString(
                                     String.format(
-                                            "{col1=%s, pk=%s, pt=%s}", minCol1, minKey, partition)),
+                                            "{col1=%s, pk=%s, pt1=%s, pt2=%s}",
+                                            minCol1, minKey, partition1, partition2)),
                             BinaryString.fromString(
                                     String.format(
-                                            "{col1=%s, pk=%s, pt=%s}", maxCol1, maxKey, partition)),
+                                            "{col1=%s, pk=%s, pt1=%s, pt2=%s}",
+                                            maxCol1, maxKey, partition1, partition2)),
                             file.minSequenceNumber(),
                             file.maxSequenceNumber(),
                             file.creationTime()));

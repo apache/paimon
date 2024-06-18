@@ -23,9 +23,9 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.types._
 
-import java.sql.Date
+import java.sql.{Date, Timestamp}
 
-class InsertOverwriteTest extends PaimonSparkTestBase {
+abstract class InsertOverwriteTableTestBase extends PaimonSparkTestBase {
 
   withPk.foreach {
     hasPk =>
@@ -354,5 +354,62 @@ class InsertOverwriteTest extends PaimonSparkTestBase {
 
     spark.sql("INSERT OVERWRITE T partition (dt='2024-04-18') values(1)")
     checkAnswer(spark.sql("SELECT * FROM T"), Row("1", Date.valueOf("2024-04-18")))
+  }
+
+  test("Paimon Insert: all data types") {
+    spark.sql("""
+                |CREATE TABLE T (
+                |id bigint, name string, birth date, age int, marital boolean,
+                |height float, weight double,
+                |interests array<string>, scores map<string, double>, avg_score decimal(5, 2),
+                |address struct<province:string, city:string, district:string>,
+                |create_time timestamp
+                |)
+                |""".stripMargin)
+
+    spark.sql(
+      """
+        |INSERT INTO T
+        |SELECT 1L, "yann", TO_DATE('1990-01-01', 'yyyy-MM-dd'), 32, true, 123.4F, 56.7D,
+        |array("abc", "def"), map("math", 90D, "history", 60D), 75.000, struct("Zhejiang", "Hangzhou", "Xihu"),
+        |TO_TIMESTAMP('2024-07-01 16:00:00', 'yyyy-MM-dd kk:mm:ss')
+        |UNION ALL
+        |SELECT 2L, "mai", TO_DATE('2021-06-01', 'yyyy-MM-dd'), 3, false, 98.7F, 12.3D,
+        |array("def", "xyz"), null, null, struct("Zhejiang", "Hangzhou", "Xihu"),
+        |TO_TIMESTAMP('2024-07-01 16:00:00', 'yyyy-MM-dd kk:mm:ss')
+        |;
+        |""".stripMargin)
+
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Row(
+        1L,
+        "yann",
+        Date.valueOf("1990-01-01"),
+        32,
+        true,
+        123.4f,
+        56.7d,
+        Array("abc", "def"),
+        Map("math" -> 90d, "history" -> 60d),
+        BigDecimal.apply(75.00),
+        Row("Zhejiang", "Hangzhou", "Xihu"),
+        Timestamp.valueOf("2024-07-01 16:00:00")
+      ) ::
+        Row(
+          2L,
+          "mai",
+          Date.valueOf("2021-06-01"),
+          3,
+          false,
+          98.7f,
+          12.3d,
+          Array("def", "xyz"),
+          null,
+          null,
+          Row("Zhejiang", "Hangzhou", "Xihu"),
+          Timestamp.valueOf("2024-07-01 16:00:00")
+        ) :: Nil
+    )
   }
 }

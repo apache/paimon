@@ -20,6 +20,7 @@ package org.apache.paimon.format.avro;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
@@ -56,11 +57,11 @@ public class AvroFileFormat extends FileFormat {
                     .defaultValue(SNAPPY_CODEC)
                     .withDescription("The compression codec for avro");
 
-    private final Options formatOptions;
+    private final FormatContext context;
 
-    public AvroFileFormat(Options formatOptions) {
+    public AvroFileFormat(FormatContext context) {
         super(IDENTIFIER);
-        this.formatOptions = formatOptions;
+        this.context = context;
     }
 
     @Override
@@ -71,7 +72,7 @@ public class AvroFileFormat extends FileFormat {
 
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
-        return new RowAvroWriterFactory(type, formatOptions.get(AVRO_OUTPUT_CODEC));
+        return new RowAvroWriterFactory(type);
     }
 
     @Override
@@ -88,23 +89,32 @@ public class AvroFileFormat extends FileFormat {
         }
     }
 
+    private CodecFactory createCodecFactory(String compression) {
+        Options options = context.formatOptions();
+        if (options.contains(AVRO_OUTPUT_CODEC)) {
+            return CodecFactory.fromString(options.get(AVRO_OUTPUT_CODEC));
+        }
+
+        if (compression.equalsIgnoreCase("zstd")) {
+            return CodecFactory.zstandardCodec(context.zstdLevel());
+        }
+        return CodecFactory.fromString(options.get(AVRO_OUTPUT_CODEC));
+    }
+
     /** A {@link FormatWriterFactory} to write {@link InternalRow}. */
-    private static class RowAvroWriterFactory implements FormatWriterFactory {
+    private class RowAvroWriterFactory implements FormatWriterFactory {
 
         private final AvroWriterFactory<InternalRow> factory;
 
-        private RowAvroWriterFactory(RowType rowType, String codec) {
+        private RowAvroWriterFactory(RowType rowType) {
             this.factory =
                     new AvroWriterFactory<>(
-                            out -> {
+                            (out, compression) -> {
                                 Schema schema = AvroSchemaConverter.convertToSchema(rowType);
                                 AvroRowDatumWriter datumWriter = new AvroRowDatumWriter(rowType);
                                 DataFileWriter<InternalRow> dataFileWriter =
                                         new DataFileWriter<>(datumWriter);
-
-                                if (codec != null) {
-                                    dataFileWriter.setCodec(CodecFactory.fromString(codec));
-                                }
+                                dataFileWriter.setCodec(createCodecFactory(compression));
                                 dataFileWriter.create(schema, out);
                                 return dataFileWriter;
                             });
@@ -113,7 +123,7 @@ public class AvroFileFormat extends FileFormat {
         @Override
         public FormatWriter create(PositionOutputStream out, String compression)
                 throws IOException {
-            AvroBulkWriter<InternalRow> writer = factory.create(out);
+            AvroBulkWriter<InternalRow> writer = factory.create(out, compression);
             return new FormatWriter() {
 
                 @Override

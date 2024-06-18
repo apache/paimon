@@ -24,8 +24,8 @@ import org.apache.paimon.flink.sorter.TableSorter.OrderType;
 import java.util.Collections;
 import java.util.List;
 
-import static org.apache.flink.shaded.guava31.com.google.common.base.Preconditions.checkArgument;
-import static org.apache.flink.shaded.guava31.com.google.common.base.Preconditions.checkNotNull;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
  * {@link TableSortInfo} is used to indicate the configuration details for table data sorting. This

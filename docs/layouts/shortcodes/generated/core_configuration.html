@@ -63,6 +63,12 @@ under the License.
             <td>Whether to double write to a changelog file. This changelog file keeps the details of data changes, it can be read directly during stream reads. This can be applied to tables with primary keys. <br /><br />Possible values:<ul><li>"none": No changelog file.</li><li>"input": Double write to a changelog file when flushing memory table, the changelog is from input.</li><li>"full-compaction": Generate changelog files with each full compaction.</li><li>"lookup": Generate changelog files through 'lookup' before committing the data writing.</li></ul></td>
         </tr>
         <tr>
+            <td><h5>changelog-producer.lookup-wait</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>When changelog-producer is set to LOOKUP, commit will wait for changelog generation by lookup.</td>
+        </tr>
+        <tr>
             <td><h5>changelog-producer.row-deduplicate</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -109,6 +115,12 @@ under the License.
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether to force create snapshot on commit.</td>
+        </tr>
+        <tr>
+            <td><h5>commit.user-prefix</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specifies the commit user prefix.</td>
         </tr>
         <tr>
             <td><h5>compaction.max-size-amplification-percent</h5></td>
@@ -189,16 +201,16 @@ under the License.
             <td>Force produce changelog in delete sql, or you can use 'streaming-read-overwrite' to read changelog from overwrite commit.</td>
         </tr>
         <tr>
-            <td><h5>deletion-vectors.enabled</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>Whether to enable deletion vectors mode. In this mode, index files containing deletion vectors are generated when data is written, which marks the data for deletion. During read operations, by applying these index files, merging can be avoided.</td>
-        </tr>
-        <tr>
             <td><h5>deletion-vector.index-file.target-size</h5></td>
             <td style="word-wrap: break-word;">2 mb</td>
             <td>MemorySize</td>
             <td>The target size of deletion vector index file.</td>
+        </tr>
+        <tr>
+            <td><h5>deletion-vectors.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to enable deletion vectors mode. In this mode, index files containing deletion vectors are generated when data is written, which marks the data for deletion. During read operations, by applying these index files, merging can be avoided.</td>
         </tr>
         <tr>
             <td><h5>dynamic-bucket.assigner-parallelism</h5></td>
@@ -228,7 +240,7 @@ under the License.
             <td><h5>fields.default-aggregate-function</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>Default aggregate function of all fields for partial-update and aggregate merge function</td>
+            <td>Default aggregate function of all fields for partial-update and aggregate merge function.</td>
         </tr>
         <tr>
             <td><h5>file-index.in-manifest-threshold</h5></td>
@@ -249,16 +261,28 @@ under the License.
             <td>The threshold for read file async.</td>
         </tr>
         <tr>
-            <td><h5>file.compression</h5></td>
+            <td><h5>file.block-size</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>File block size of format, default value of orc stripe is 64 MB, and parquet row group is 128 MB.</td>
+        </tr>
+        <tr>
+            <td><h5>file.compression</h5></td>
+            <td style="word-wrap: break-word;">"zstd"</td>
             <td>String</td>
-            <td>Default file compression format, orc is lz4 and parquet is snappy. It can be overridden by file.compression.per.level</td>
+            <td>Default file compression. For faster read and write, it is recommended to use LZ4.</td>
         </tr>
         <tr>
             <td><h5>file.compression.per.level</h5></td>
             <td style="word-wrap: break-word;"></td>
             <td>Map</td>
             <td>Define different compression policies for different level, you can add the conf like this: 'file.compression.per.level' = '0:lz4,1:zstd'.</td>
+        </tr>
+        <tr>
+            <td><h5>file.compression.zstd-level</h5></td>
+            <td style="word-wrap: break-word;">1</td>
+            <td>Integer</td>
+            <td>Default file compression zstd level. For higher compression rates, it can be configured to 9, but the read and write speed will significantly decrease.</td>
         </tr>
         <tr>
             <td><h5>file.format</h5></td>
@@ -356,6 +380,12 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td style="word-wrap: break-word;">0.75</td>
             <td>Float</td>
             <td>The index load factor for lookup.</td>
+        </tr>
+        <tr>
+            <td><h5>manifest.compression</h5></td>
+            <td style="word-wrap: break-word;">"zstd"</td>
+            <td>String</td>
+            <td>Default file compression for manifest.</td>
         </tr>
         <tr>
             <td><h5>manifest.format</h5></td>
@@ -556,6 +586,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>Optional tag name used in case of "from-snapshot" scan mode.</td>
+        </tr>
+        <tr>
+            <td><h5>scan.timestamp</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Optional timestamp used in case of "from-timestamp" scan mode, it will be automatically converted to timestamp in unix milliseconds, use local time zone</td>
         </tr>
         <tr>
             <td><h5>scan.timestamp-millis</h5></td>

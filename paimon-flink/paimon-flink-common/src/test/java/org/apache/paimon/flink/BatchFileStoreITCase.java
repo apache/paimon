@@ -200,7 +200,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                                                 time3)))
                 .hasRootCauseInstanceOf(IllegalArgumentException.class)
                 .hasRootCauseMessage(
-                        "[scan.snapshot-id] must be null when you set [scan.timestamp-millis]");
+                        "[scan.snapshot-id] must be null when you set [scan.timestamp-millis,scan.timestamp]");
 
         assertThatThrownBy(
                         () ->
@@ -420,6 +420,22 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
 
         sql("INSERT INTO ignore_delete VALUES (1, 'B')");
         assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "B"));
+    }
+
+    @Test
+    public void testIgnoreDeleteCompatible() {
+        sql(
+                "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING) "
+                        + "WITH ('merge-engine' = 'deduplicate', 'write-only' = 'true')");
+
+        sql("INSERT INTO ignore_delete VALUES (1, 'A')");
+        // write delete records
+        sql("DELETE FROM ignore_delete WHERE pk = 1");
+        assertThat(sql("SELECT * FROM ignore_delete")).isEmpty();
+
+        // set ignore-delete and read
+        sql("ALTER TABLE ignore_delete set ('ignore-delete' = 'true')");
+        assertThat(sql("SELECT * FROM ignore_delete")).containsExactlyInAnyOrder(Row.of(1, "A"));
     }
 
     @Test

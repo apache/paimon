@@ -216,6 +216,43 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testMultiFieldsSequenceGroup() {
+        sql(
+                "CREATE TABLE SG ("
+                        + "k INT, a INT, b INT, g_1 INT, c INT, d INT, g_2 INT, g_3 INT, PRIMARY KEY (k) NOT ENFORCED)"
+                        + " WITH ("
+                        + "'merge-engine'='partial-update', "
+                        + "'fields.g_1.sequence-group'='a,b', "
+                        + "'fields.g_2,g_3.sequence-group'='c,d');");
+
+        sql("INSERT INTO SG VALUES (1, 1, 1, 1, 1, 1, 1, 1)");
+
+        // g_2, g_3 should not be updated
+        sql("INSERT INTO SG VALUES (1, 2, 2, 2, 2, 2, 1, CAST(NULL AS INT))");
+
+        // select *
+        assertThat(sql("SELECT * FROM SG"))
+                .containsExactlyInAnyOrder(Row.of(1, 2, 2, 2, 1, 1, 1, 1));
+
+        // projection
+        assertThat(sql("SELECT c, d FROM SG")).containsExactlyInAnyOrder(Row.of(1, 1));
+
+        // g_1 should not be updated
+        sql("INSERT INTO SG VALUES (1, 3, 3, 1, 3, 3, 3, 1)");
+
+        assertThat(sql("SELECT * FROM SG"))
+                .containsExactlyInAnyOrder(Row.of(1, 2, 2, 2, 3, 3, 3, 1));
+
+        // d should be updated by null
+        sql("INSERT INTO SG VALUES (1, 3, 3, 3, 2, 2, CAST(NULL AS INT), 1)");
+        sql("INSERT INTO SG VALUES (1, 4, 4, 4, 2, 2, CAST(NULL AS INT), 1)");
+        sql("INSERT INTO SG VALUES (1, 5, 5, 3, 5, CAST(NULL AS INT), 4, 1)");
+
+        assertThat(sql("SELECT a, b FROM SG")).containsExactlyInAnyOrder(Row.of(4, 4));
+        assertThat(sql("SELECT c, d FROM SG")).containsExactlyInAnyOrder(Row.of(5, null));
+    }
+
+    @Test
     public void testSequenceGroupWithDefaultAggFunc() {
         sql(
                 "CREATE TABLE SG ("
@@ -285,7 +322,19 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
                                                 + "'fields.g_1.sequence-group'='a,b', "
                                                 + "'fields.g_2.sequence-group'='a,d');"))
                 .hasRootCauseMessage(
-                        "Field a is defined repeatedly by multiple groups: [g_1, g_2].");
+                        "Field a is defined repeatedly by multiple groups: [[g_1], [g_2]].");
+
+        Assertions.assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "CREATE TABLE SG ("
+                                                + "k INT, a INT, b INT, g_1 INT, c INT, d INT, g_2 INT, g_3 INT, PRIMARY KEY (k) NOT ENFORCED)"
+                                                + " WITH ("
+                                                + "'merge-engine'='partial-update', "
+                                                + "'fields.g_1.sequence-group'='a,b', "
+                                                + "'fields.g_2,g_3.sequence-group'='a,d');"))
+                .hasRootCauseMessage(
+                        "Field a is defined repeatedly by multiple groups: [[g_1], [g_2, g_3]].");
     }
 
     @Test
@@ -348,6 +397,47 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
 
         sql(
                 "INSERT INTO AGG VALUES (1, CAST(NULL AS INT), CAST(NULL AS INT), 2, CAST(NULL AS VARCHAR), 4)");
+
+        // a keep the last accumulator
+        // b is not updated to null
+        // c updated to null
+        assertThat(sql("SELECT a, b, c FROM AGG")).containsExactlyInAnyOrder(Row.of(6, 3, null));
+    }
+
+    @Test
+    public void testMultiFieldsSequencePartialUpdateWithAggregation() {
+        sql(
+                "CREATE TABLE AGG ("
+                        + "k INT, a INT, b INT, g_1 INT, c VARCHAR, g_2 INT, g_3 INT, PRIMARY KEY (k) NOT ENFORCED)"
+                        + " WITH ("
+                        + "'merge-engine'='partial-update', "
+                        + "'fields.a.aggregate-function'='sum', "
+                        + "'fields.g_1,g_3.sequence-group'='a', "
+                        + "'fields.g_2.sequence-group'='c');");
+        // a in group g_1, g_3 with sum agg
+        // b not in group
+        // c in group g_2 without agg
+
+        sql("INSERT INTO AGG VALUES (1, 1, 1, 1, '1', 1, 1)");
+
+        // g_2 should not be updated
+        sql("INSERT INTO AGG VALUES (1, 2, 2, 2, '2', CAST(NULL AS INT), 2)");
+
+        // select *
+        assertThat(sql("SELECT * FROM AGG"))
+                .containsExactlyInAnyOrder(Row.of(1, 3, 2, 2, "1", 1, 2));
+
+        // projection
+        assertThat(sql("SELECT a, c FROM AGG")).containsExactlyInAnyOrder(Row.of(3, "1"));
+
+        // g_1 should not be updated
+        sql("INSERT INTO AGG VALUES (1, 3, 3, 2, '3', 3, 1)");
+
+        assertThat(sql("SELECT * FROM AGG"))
+                .containsExactlyInAnyOrder(Row.of(1, 6, 3, 2, "3", 3, 2));
+
+        sql(
+                "INSERT INTO AGG VALUES (1, CAST(NULL AS INT), CAST(NULL AS INT), 2, CAST(NULL AS VARCHAR), 4, 2)");
 
         // a keep the last accumulator
         // b is not updated to null
@@ -500,18 +590,18 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
         sql(
                 "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, a STRING, b STRING) WITH ("
                         + " 'merge-engine' = 'partial-update',"
-                        + " 'ignore-delete' = 'true'"
+                        + " 'ignore-delete' = 'true',"
+                        + " 'changelog-producer' = 'lookup'"
                         + ")");
         if (localMerge) {
             sql("ALTER TABLE ignore_delete SET ('local-merge-buffer-size' = '256 kb')");
         }
 
+        sql("INSERT INTO ignore_delete VALUES (1, CAST (NULL AS STRING), 'apple')");
+
         String id =
                 TestValuesTableFactory.registerData(
-                        Arrays.asList(
-                                Row.ofKind(RowKind.INSERT, 1, null, "apple"),
-                                Row.ofKind(RowKind.DELETE, 1, null, "apple"),
-                                Row.ofKind(RowKind.INSERT, 1, "A", null)));
+                        Collections.singletonList(Row.ofKind(RowKind.DELETE, 1, null, "apple")));
         streamSqlIter(
                         "CREATE TEMPORARY TABLE input (pk INT PRIMARY KEY NOT ENFORCED, a STRING, b STRING) "
                                 + "WITH ('connector'='values', 'bounded'='true', 'data-id'='%s', "
@@ -520,17 +610,30 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
                 .close();
         sEnv.executeSql("INSERT INTO ignore_delete SELECT * FROM input").await();
 
+        sql("INSERT INTO ignore_delete VALUES (1, 'A', CAST (NULL AS STRING))");
+
+        // batch read
         assertThat(sql("SELECT * FROM ignore_delete"))
                 .containsExactlyInAnyOrder(Row.of(1, "A", "apple"));
+
+        // streaming read results has -U
+        BlockingIterator<Row, Row> iterator =
+                streamSqlBlockIter(
+                        "SELECT * FROM ignore_delete /*+ OPTIONS('scan.timestamp-millis' = '0') */");
+        assertThat(iterator.collect(3))
+                .containsExactly(
+                        Row.ofKind(RowKind.INSERT, 1, null, "apple"),
+                        Row.ofKind(RowKind.UPDATE_BEFORE, 1, null, "apple"),
+                        Row.ofKind(RowKind.UPDATE_AFTER, 1, "A", "apple"));
+        iterator.close();
     }
 
     @Test
-    public void testIgnoreDeleteInReader() throws Exception {
+    public void testIgnoreDeleteCompatible() throws Exception {
         sql(
                 "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, a STRING, b STRING) WITH ("
                         + " 'merge-engine' = 'deduplicate',"
-                        + " 'write-only' = 'true',"
-                        + " 'bucket' = '1')");
+                        + " 'write-only' = 'true')");
         sql("INSERT INTO ignore_delete VALUES (1, CAST (NULL AS STRING), 'apple')");
         // write delete records
         sql("DELETE FROM ignore_delete WHERE pk = 1");
@@ -542,7 +645,6 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
         Map<String, String> newOptions = new HashMap<>();
         newOptions.put(
                 CoreOptions.MERGE_ENGINE.key(), CoreOptions.MergeEngine.PARTIAL_UPDATE.toString());
-        newOptions.put(CoreOptions.BUCKET.key(), "1");
         newOptions.put(CoreOptions.IGNORE_DELETE.key(), "true");
         SchemaUtils.forceCommit(
                 new SchemaManager(LocalFileIO.create(), new Path(path, "default.db/ignore_delete")),

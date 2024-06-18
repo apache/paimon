@@ -76,14 +76,13 @@ case class DeleteFromPaimonTableCommand(
 
       if (
         otherCondition.isEmpty && partitionPredicate.nonEmpty && !table
-          .store()
-          .options()
+          .coreOptions()
           .deleteForceProduceChangelog()
       ) {
         val matchedPartitions =
           table.newSnapshotReader().withPartitionFilter(partitionPredicate.get).partitions().asScala
         val rowDataPartitionComputer = new InternalRowPartitionComputer(
-          CoreOptions.PARTITION_DEFAULT_NAME.defaultValue,
+          table.coreOptions().partitionDefaultName(),
           table.schema().logicalPartitionType(),
           table.partitionKeys.asScala.toArray
         )

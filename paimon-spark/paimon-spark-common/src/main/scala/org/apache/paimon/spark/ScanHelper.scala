@@ -48,7 +48,7 @@ trait ScanHelper extends Logging {
     if (splits.length < leafNodeDefaultParallelism) {
       val beforeLength = splits.length
       val (toReshuffle, reserved) = splits.partition {
-        case split: DataSplit => split.beforeFiles().isEmpty && split.convertToRawFiles.isPresent
+        case split: DataSplit => split.beforeFiles().isEmpty && split.rawConvertible()
         case _ => false
       }
       val reshuffled = reshuffleSplits0(toReshuffle.collect { case ds: DataSplit => ds })

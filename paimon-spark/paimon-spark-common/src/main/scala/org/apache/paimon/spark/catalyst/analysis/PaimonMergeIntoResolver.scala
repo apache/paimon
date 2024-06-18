@@ -20,7 +20,7 @@ package org.apache.paimon.spark.catalyst.analysis
 
 import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
 import org.apache.spark.sql.catalyst.expressions.Expression
-import org.apache.spark.sql.catalyst.plans.logical.{Assignment, DeleteAction, LogicalPlan, MergeAction, MergeIntoTable, UpdateAction, UpdateStarAction}
+import org.apache.spark.sql.catalyst.plans.logical.{Assignment, DeleteAction, LogicalPlan, MergeAction, MergeIntoTable, Project, UpdateAction, UpdateStarAction}
 
 /** Resolve all the expressions for MergeInto. */
 object PaimonMergeIntoResolver extends PaimonMergeIntoResolverBase {
@@ -30,6 +30,8 @@ object PaimonMergeIntoResolver extends PaimonMergeIntoResolverBase {
       target: LogicalPlan,
       source: LogicalPlan,
       resolve: (Expression, LogicalPlan) => Expression): Seq[MergeAction] = {
+    val fakeSource = Project(source.output, source)
+
     def resolveMergeAction(action: MergeAction): MergeAction = {
       action match {
         case DeleteAction(condition) =>
@@ -47,7 +49,8 @@ object PaimonMergeIntoResolver extends PaimonMergeIntoResolverBase {
         case UpdateStarAction(condition) =>
           val resolvedCond = condition.map(resolve(_, target))
           val resolvedAssignments = target.output.map {
-            attr => Assignment(attr, resolve(UnresolvedAttribute.quotedString(attr.name), source))
+            attr =>
+              Assignment(attr, resolve(UnresolvedAttribute.quotedString(attr.name), fakeSource))
           }
           UpdateAction(resolvedCond, resolvedAssignments)
       }

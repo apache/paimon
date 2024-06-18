@@ -45,7 +45,6 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL;
-import static org.apache.paimon.flink.FlinkConnectorOptions.prepareCommitWaitCompaction;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 
 /**
@@ -233,14 +232,15 @@ public class MultiTablesStoreCompactOperator
             CheckpointConfig checkpointConfig,
             boolean isStreaming,
             boolean ignorePreviousFiles) {
+        Options options = fileStoreTable.coreOptions().toConfiguration();
+        CoreOptions.ChangelogProducer changelogProducer =
+                fileStoreTable.coreOptions().changelogProducer();
         boolean waitCompaction;
-        if (fileStoreTable.coreOptions().writeOnly()) {
+        CoreOptions coreOptions = fileStoreTable.coreOptions();
+        if (coreOptions.writeOnly()) {
             waitCompaction = false;
         } else {
-            Options options = fileStoreTable.coreOptions().toConfiguration();
-            CoreOptions.ChangelogProducer changelogProducer =
-                    fileStoreTable.coreOptions().changelogProducer();
-            waitCompaction = prepareCommitWaitCompaction(options);
+            waitCompaction = coreOptions.prepareCommitWaitCompaction();
             int deltaCommits = -1;
             if (options.contains(FULL_COMPACTION_DELTA_COMMITS)) {
                 deltaCommits = options.get(FULL_COMPACTION_DELTA_COMMITS);
@@ -269,6 +269,21 @@ public class MultiTablesStoreCompactOperator
                                 memoryPool,
                                 metricGroup);
             }
+        }
+
+        if (changelogProducer == CoreOptions.ChangelogProducer.LOOKUP
+                && !coreOptions.prepareCommitWaitCompaction()) {
+            return (table, commitUser, state, ioManager, memoryPool, metricGroup) ->
+                    new AsyncLookupSinkWrite(
+                            table,
+                            commitUser,
+                            state,
+                            ioManager,
+                            ignorePreviousFiles,
+                            waitCompaction,
+                            isStreaming,
+                            memoryPool,
+                            metricGroup);
         }
 
         return (table, commitUser, state, ioManager, memoryPool, metricGroup) ->

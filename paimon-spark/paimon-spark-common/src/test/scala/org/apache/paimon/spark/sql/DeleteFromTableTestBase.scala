@@ -21,7 +21,6 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.CoreOptions.MergeEngine
 import org.apache.paimon.spark.PaimonSparkTestBase
-import org.apache.paimon.spark.catalyst.analysis.Delete
 
 import org.apache.spark.sql.Row
 import org.assertj.core.api.Assertions.{assertThat, assertThatThrownBy}
@@ -355,6 +354,24 @@ abstract class DeleteFromTableTestBase extends PaimonSparkTestBase {
     assertThat(spark.sql("SELECT * FROM `T$audit_log` WHERE rowkind='-D'").collectAsList().size())
       .isEqualTo(3)
   }
-}
 
-class DeleteFromTableTest extends DeleteFromTableTestBase {}
+  test("Paimon Delete: delete null partition with specified default partition name") {
+    spark.sql(s"""
+                 |CREATE TABLE T (a INT, dt STRING)
+                 |PARTITIONED BY (dt)
+                 |TBLPROPERTIES ('partition.default-name'='__TEST_DEFAULT_PARTITION__')
+                 |""".stripMargin)
+
+    spark.sql("INSERT INTO T VALUES (1, '20240601'), (2, null)")
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY a"),
+      Row(1, "20240601") :: Row(2, null) :: Nil
+    )
+
+    spark.sql("DELETE FROM T WHERE dt IS null")
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY a"),
+      Row(1, "20240601") :: Nil
+    )
+  }
+}

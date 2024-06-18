@@ -18,9 +18,11 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.Snapshot.CommitKind
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.spark.catalyst.optimizer.MergePaimonScalarSubqueriers
 
+import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.expressions.{Attribute, CreateNamedStruct, Literal, NamedExpression}
 import org.apache.spark.sql.catalyst.plans.logical.{CTERelationDef, LogicalPlan, OneRowRelation, WithCTE}
 import org.apache.spark.sql.catalyst.rules.RuleExecutor
@@ -110,6 +112,94 @@ abstract class PaimonOptimizationTestBase extends PaimonSparkTestBase {
       }
       Assertions.assertEquals(getPaimonScan(sqlText), getPaimonScan(sqlText))
     }
+  }
+
+  test(s"Paimon Optimization: eval subqueries for delete table with ScalarSubquery") {
+    withPk.foreach(
+      hasPk => {
+        val tblProps = if (hasPk) {
+          s"TBLPROPERTIES ('primary-key'='id, pt')"
+        } else {
+          ""
+        }
+        withTable("t1", "t2") {
+          spark.sql(s"""
+                       |CREATE TABLE t1 (id INT, name STRING, pt INT)
+                       |$tblProps
+                       |PARTITIONED BY (pt)
+                       |""".stripMargin)
+          spark.sql(
+            "INSERT INTO t1 VALUES (1, 'a', 1), (2, 'b', 2), (3, 'c', 2), (4, 'd', 3), (5, 'e', 4)")
+
+          spark.sql(s"CREATE TABLE t2 (id INT, n INT)")
+          spark.sql("INSERT INTO t2 VALUES (1, 1), (2, 2), (3, 3), (4, 4)")
+
+          spark.sql(s"""DELETE FROM t1 WHERE
+                       |pt >= (SELECT min(id) FROM t2 WHERE n BETWEEN 2 AND 3)
+                       |AND
+                       |pt <= (SELECT max(id) FROM t2 WHERE n BETWEEN 2 AND 3)""".stripMargin)
+          // For partition-only predicates, drop partition is called internally.
+          Assertions.assertEquals(
+            CommitKind.OVERWRITE,
+            loadTable("t1").store().snapshotManager().latestSnapshot().commitKind())
+
+          checkAnswer(
+            spark.sql("SELECT * FROM t1 ORDER BY id"),
+            Row(1, "a", 1) :: Row(5, "e", 4) :: Nil)
+
+          // subquery eval nothing
+          spark.sql(s"""DELETE FROM t1 WHERE
+                       |pt >= (SELECT min(id) FROM t2 WHERE n > 10)""".stripMargin)
+
+          checkAnswer(
+            spark.sql("SELECT * FROM t1 ORDER BY id"),
+            Row(1, "a", 1) :: Row(5, "e", 4) :: Nil)
+        }
+      })
+  }
+
+  test(s"Paimon Optimization: eval subqueries for delete table with InSubquery") {
+    withPk.foreach(
+      hasPk => {
+        val tblProps = if (hasPk) {
+          s"TBLPROPERTIES ('primary-key'='id, pt')"
+        } else {
+          ""
+        }
+        withTable("t1", "t2") {
+          spark.sql(s"""
+                       |CREATE TABLE t1 (id INT, name STRING, pt INT)
+                       |$tblProps
+                       |PARTITIONED BY (pt)
+                       |""".stripMargin)
+          spark.sql(
+            "INSERT INTO t1 VALUES (1, 'a', 1), (2, 'b', 2), (3, 'c', 2), (4, 'd', 3), (5, 'e', 4)")
+
+          spark.sql(s"CREATE TABLE t2 (id INT, n INT)")
+          spark.sql("INSERT INTO t2 VALUES (1, 1), (2, 2), (3, 3), (4, 4)")
+
+          spark.sql(s"""DELETE FROM t1 WHERE
+                       |pt in (SELECT id FROM t2 WHERE n BETWEEN 2 AND 3)
+                       |OR
+                       |pt in (SELECT max(id) FROM t2 WHERE n BETWEEN 2 AND 3)""".stripMargin)
+          // For partition-only predicates, drop partition is called internally.
+          Assertions.assertEquals(
+            CommitKind.OVERWRITE,
+            loadTable("t1").store().snapshotManager().latestSnapshot().commitKind())
+
+          checkAnswer(
+            spark.sql("SELECT * FROM t1 ORDER BY id"),
+            Row(1, "a", 1) :: Row(5, "e", 4) :: Nil)
+
+          // subquery eval nothing
+          spark.sql(s"""DELETE FROM t1 WHERE
+                       |pt in (SELECT id FROM t2 WHERE n > 10)""".stripMargin)
+
+          checkAnswer(
+            spark.sql("SELECT * FROM t1 ORDER BY id"),
+            Row(1, "a", 1) :: Row(5, "e", 4) :: Nil)
+        }
+      })
   }
 
   private def definitionNode(plan: LogicalPlan, cteIndex: Int) = {

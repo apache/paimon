@@ -155,7 +155,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public DataTableBatchScan newScan() {
         return new DataTableBatchScan(
-                bucketMode(),
                 tableSchema.primaryKeys().size() > 0,
                 coreOptions(),
                 newSnapshotReader(),
@@ -165,7 +164,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public StreamDataTableScan newStreamScan() {
         return new DataTableStreamScan(
-                bucketMode(),
                 coreOptions(),
                 newSnapshotReader(),
                 snapshotManager(),
@@ -527,6 +525,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public void mergeBranch(String branchName) {
+        branchManager().mergeBranch(branchName);
+    }
+
+    @Override
     public void replaceBranch(String fromBranch) {
         branchManager().replaceBranch(fromBranch);
     }
@@ -572,6 +575,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 tagManager(),
                 fileIO,
                 store().newSnapshotDeletion(),
+                store().newChangelogDeletion(),
                 store().newTagDeletion());
     }
 

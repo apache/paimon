@@ -18,7 +18,6 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
@@ -46,6 +45,7 @@ public class ObjectsFile<T> {
     protected final ObjectSerializer<T> serializer;
     protected final FormatReaderFactory readerFactory;
     protected final FormatWriterFactory writerFactory;
+    protected final String compression;
     protected final PathFactory pathFactory;
 
     @Nullable private final ObjectsCache<String, T> cache;
@@ -55,15 +55,21 @@ public class ObjectsFile<T> {
             ObjectSerializer<T> serializer,
             FormatReaderFactory readerFactory,
             FormatWriterFactory writerFactory,
+            String compression,
             PathFactory pathFactory,
             @Nullable SegmentsCache<String> cache) {
         this.fileIO = fileIO;
         this.serializer = serializer;
         this.readerFactory = readerFactory;
         this.writerFactory = writerFactory;
+        this.compression = compression;
         this.pathFactory = pathFactory;
         this.cache =
                 cache == null ? null : new ObjectsCache<>(cache, serializer, this::createIterator);
+    }
+
+    public FileIO fileIO() {
+        return fileIO;
     }
 
     public long fileSize(String fileName) {
@@ -139,8 +145,7 @@ public class ObjectsFile<T> {
         Path path = pathFactory.newPath();
         try {
             try (PositionOutputStream out = fileIO.newOutputStream(path, false)) {
-                FormatWriter writer =
-                        writerFactory.create(out, CoreOptions.FILE_COMPRESSION.defaultValue());
+                FormatWriter writer = writerFactory.create(out, compression);
                 try {
                     while (records.hasNext()) {
                         writer.addElement(serializer.toRow(records.next()));

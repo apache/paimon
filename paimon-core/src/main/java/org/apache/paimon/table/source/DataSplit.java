@@ -20,11 +20,13 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFileMeta08Serializer;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
+import org.apache.paimon.utils.FunctionWithIOException;
 import org.apache.paimon.utils.SerializationUtils;
 
 import javax.annotation.Nullable;
@@ -46,6 +48,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class DataSplit implements Split {
 
     private static final long serialVersionUID = 7L;
+    private static final long MAGIC = -2394839472490812314L;
+    private static final int VERSION = 2;
 
     private long snapshotId = 0;
     private BinaryRow partition;
@@ -224,6 +228,8 @@ public class DataSplit implements Split {
     }
 
     public void serialize(DataOutputView out) throws IOException {
+        out.writeLong(MAGIC);
+        out.writeInt(VERSION);
         out.writeLong(snapshotId);
         SerializationUtils.serializeBinaryRow(partition, out);
         out.writeInt(bucket);
@@ -250,16 +256,20 @@ public class DataSplit implements Split {
     }
 
     public static DataSplit deserialize(DataInputView in) throws IOException {
-        long snapshotId = in.readLong();
+        long magic = in.readLong();
+        int version = magic == MAGIC ? in.readInt() : 1;
+        // version 1 does not write magic number in, so the first long is snapshot id.
+        long snapshotId = version == 1 ? magic : in.readLong();
         BinaryRow partition = SerializationUtils.deserializeBinaryRow(in);
         int bucket = in.readInt();
         String bucketPath = in.readUTF();
 
-        DataFileMetaSerializer dataFileSer = new DataFileMetaSerializer();
+        FunctionWithIOException<DataInputView, DataFileMeta> dataFileSer =
+                getFileMetaSerde(version);
         int beforeNumber = in.readInt();
         List<DataFileMeta> beforeFiles = new ArrayList<>(beforeNumber);
         for (int i = 0; i < beforeNumber; i++) {
-            beforeFiles.add(dataFileSer.deserialize(in));
+            beforeFiles.add(dataFileSer.apply(in));
         }
 
         List<DeletionFile> beforeDeletionFiles = DeletionFile.deserializeList(in);
@@ -267,7 +277,7 @@ public class DataSplit implements Split {
         int fileNumber = in.readInt();
         List<DataFileMeta> dataFiles = new ArrayList<>(fileNumber);
         for (int i = 0; i < fileNumber; i++) {
-            dataFiles.add(dataFileSer.deserialize(in));
+            dataFiles.add(dataFileSer.apply(in));
         }
 
         List<DeletionFile> dataDeletionFiles = DeletionFile.deserializeList(in);
@@ -293,6 +303,24 @@ public class DataSplit implements Split {
             builder.withDataDeletionFiles(dataDeletionFiles);
         }
         return builder.build();
+    }
+
+    private static FunctionWithIOException<DataInputView, DataFileMeta> getFileMetaSerde(
+            int version) {
+        if (version == 1) {
+            DataFileMeta08Serializer serializer = new DataFileMeta08Serializer();
+            return serializer::deserialize;
+        } else if (version == 2) {
+            DataFileMetaSerializer serializer = new DataFileMetaSerializer();
+            return serializer::deserialize;
+        } else {
+            throw new UnsupportedOperationException(
+                    "Expecting DataSplit version to be smaller or equal than "
+                            + VERSION
+                            + ", but found "
+                            + version
+                            + ".");
+        }
     }
 
     public static Builder builder() {

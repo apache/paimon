@@ -37,13 +37,10 @@ public class ContinuousFromTimestampStartingScanner extends AbstractStartingScan
     private final boolean startFromChangelog;
 
     public ContinuousFromTimestampStartingScanner(
-            SnapshotManager snapshotManager,
-            long startupMillis,
-            boolean changelogAsFollowup,
-            boolean changelogDecoupled) {
+            SnapshotManager snapshotManager, long startupMillis, boolean changelogDecoupled) {
         super(snapshotManager);
         this.startupMillis = startupMillis;
-        this.startFromChangelog = changelogAsFollowup && changelogDecoupled;
+        this.startFromChangelog = changelogDecoupled;
         this.startingSnapshotId =
                 this.snapshotManager.earlierThanTimeMills(startupMillis, startFromChangelog);
     }

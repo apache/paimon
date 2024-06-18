@@ -263,6 +263,40 @@ public class TableWriteTest {
         assertThat(streamingRead(scan, read, latestSnapshotId)).hasSize(2);
     }
 
+    @Test
+    public void testWaitAllSnapshotsOfSpecificIdentifier() throws Exception {
+        Options conf = new Options();
+        conf.set(CoreOptions.BUCKET, 1);
+
+        FileStoreTable table = createFileStoreTable(conf);
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 1, 10L));
+        write.write(GenericRow.of(1, 2, 20L));
+        commit.commit(0, write.prepareCommit(false, 0));
+
+        write.write(GenericRow.of(1, 2, 21L));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        // we use the same commitIdentifier to mimic a long pause between committing the APPEND
+        // snapshot and the COMPACT snapshot
+        write.compact(partition(1), 0, true);
+        List<CommitMessage> message1 = write.prepareCommit(true, 1);
+        // nothing is written, however message1 is not committed, so writer should be kept
+        List<CommitMessage> message2 = write.prepareCommit(false, 2);
+
+        write.write(GenericRow.of(1, 3, 30L));
+        write.compact(partition(1), 0, true);
+        commit.commit(1, message1);
+        commit.commit(2, message2);
+        commit.commit(3, write.prepareCommit(true, 3));
+
+        write.close();
+        commit.close();
+    }
+
     private BinaryRow partition(int x) {
         BinaryRow partition = new BinaryRow(1);
         BinaryRowWriter writer = new BinaryRowWriter(partition);

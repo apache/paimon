@@ -150,6 +150,10 @@ public interface BinaryWriter {
      * @param elementType the element type
      */
     static ValueSetter createValueSetter(DataType elementType) {
+        return createValueSetter(elementType, null);
+    }
+
+    static ValueSetter createValueSetter(DataType elementType, Serializer<?> serializer) {
         // ordered by type root definition
         switch (elementType.getTypeRoot()) {
             case CHAR:
@@ -184,8 +188,8 @@ public interface BinaryWriter {
                 return (writer, pos, value) ->
                         writer.writeTimestamp(pos, (Timestamp) value, timestampPrecision);
             case ARRAY:
-                final Serializer<InternalArray> arraySerializer =
-                        InternalSerializers.create(elementType);
+                final Serializer<?> arraySerializer =
+                        serializer == null ? InternalSerializers.create(elementType) : serializer;
                 return (writer, pos, value) ->
                         writer.writeArray(
                                 pos,
@@ -193,14 +197,14 @@ public interface BinaryWriter {
                                 (InternalArraySerializer) arraySerializer);
             case MULTISET:
             case MAP:
-                final Serializer<InternalMap> mapSerializer =
-                        InternalSerializers.create(elementType);
+                final Serializer<?> mapSerializer =
+                        serializer == null ? InternalSerializers.create(elementType) : serializer;
                 return (writer, pos, value) ->
                         writer.writeMap(
                                 pos, (InternalMap) value, (InternalMapSerializer) mapSerializer);
             case ROW:
-                final Serializer<InternalRow> rowSerializer =
-                        InternalSerializers.create(elementType);
+                final Serializer<?> rowSerializer =
+                        serializer == null ? InternalSerializers.create(elementType) : serializer;
                 return (writer, pos, value) ->
                         writer.writeRow(
                                 pos, (InternalRow) value, (InternalRowSerializer) rowSerializer);

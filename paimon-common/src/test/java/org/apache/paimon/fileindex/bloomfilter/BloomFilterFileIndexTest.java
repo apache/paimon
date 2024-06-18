@@ -20,6 +20,7 @@ package org.apache.paimon.fileindex.bloomfilter;
 
 import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexWriter;
+import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataTypes;
 
@@ -60,17 +61,20 @@ public class BloomFilterFileIndexTest {
 
         testData.forEach(writer::write);
 
-        FileIndexReader reader = filter.createReader(writer.serializedBytes());
+        byte[] serializedBytes = writer.serializedBytes();
+        FileIndexReader reader =
+                filter.createReader(
+                        new ByteArraySeekableStream(serializedBytes), 0, serializedBytes.length);
 
         for (byte[] bytes : testData) {
-            Assertions.assertThat(reader.visitEqual(null, bytes)).isTrue();
+            Assertions.assertThat(reader.visitEqual(null, bytes).remain()).isTrue();
         }
 
         int errorCount = 0;
         int num = 1000000;
         for (int i = 0; i < num; i++) {
             byte[] ra = random();
-            if (reader.visitEqual(null, ra)) {
+            if (reader.visitEqual(null, ra).remain()) {
                 errorCount++;
             }
         }
@@ -100,17 +104,20 @@ public class BloomFilterFileIndexTest {
 
         testData.forEach(writer::write);
 
-        FileIndexReader reader = filter.createReader(writer.serializedBytes());
+        byte[] serializedBytes = writer.serializedBytes();
+        FileIndexReader reader =
+                filter.createReader(
+                        new ByteArraySeekableStream(serializedBytes), 0, serializedBytes.length);
 
         for (Long value : testData) {
-            Assertions.assertThat(reader.visitEqual(null, value)).isTrue();
+            Assertions.assertThat(reader.visitEqual(null, value).remain()).isTrue();
         }
 
         int errorCount = 0;
         int num = 1000000;
         for (int i = 0; i < num; i++) {
             Long ra = RANDOM.nextLong();
-            if (reader.visitEqual(null, ra)) {
+            if (reader.visitEqual(null, ra).remain()) {
                 errorCount++;
             }
         }

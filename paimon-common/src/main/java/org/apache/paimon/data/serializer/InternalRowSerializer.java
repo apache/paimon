@@ -73,7 +73,8 @@ public class InternalRowSerializer extends AbstractRowDataSerializer<InternalRow
         for (int i = 0; i < types.length; i++) {
             DataType type = types[i];
             fieldGetters[i] = InternalRow.createFieldGetter(type, i);
-            valueSetters[i] = BinaryWriter.createValueSetter(type);
+            // pass serializer to avoid infinite loop
+            valueSetters[i] = BinaryWriter.createValueSetter(type, fieldSerializers[i]);
         }
     }
 

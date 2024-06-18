@@ -44,6 +44,7 @@ import java.util.function.BinaryOperator;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import java.util.stream.LongStream;
 
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.BranchManager.getBranchPath;
@@ -355,6 +356,32 @@ public class SnapshotManager implements Serializable {
                 .iterator();
     }
 
+    public Iterator<Snapshot> snapshotsWithinRange(
+            Optional<Long> optionalMaxSnapshotId, Optional<Long> optionalMinSnapshotId)
+            throws IOException {
+        Long lowerBoundSnapshotId = earliestSnapshotId();
+        Long upperBoundSnapshotId = latestSnapshotId();
+
+        // null check on lowerBoundSnapshotId & upperBoundSnapshotId
+        if (lowerBoundSnapshotId == null || upperBoundSnapshotId == null) {
+            return Collections.emptyIterator();
+        }
+
+        if (optionalMaxSnapshotId.isPresent()) {
+            upperBoundSnapshotId = optionalMaxSnapshotId.get();
+        }
+
+        if (optionalMinSnapshotId.isPresent()) {
+            lowerBoundSnapshotId = optionalMinSnapshotId.get();
+        }
+
+        // +1 here to include the upperBoundSnapshotId
+        return LongStream.range(lowerBoundSnapshotId, upperBoundSnapshotId + 1)
+                .mapToObj(this::snapshot)
+                .sorted(Comparator.comparingLong(Snapshot::id))
+                .iterator();
+    }
+
     public Iterator<Changelog> changelogs() throws IOException {
         return listVersionedFiles(fileIO, changelogDirectory(), CHANGELOG_PREFIX)
                 .map(snapshotId -> changelog(snapshotId))
@@ -605,6 +632,12 @@ public class SnapshotManager implements Serializable {
     private Long findByListFiles(BinaryOperator<Long> reducer, Path dir, String prefix)
             throws IOException {
         return listVersionedFiles(fileIO, dir, prefix).reduce(reducer).orElse(null);
+    }
+
+    public void deleteLatestHint() throws IOException {
+        Path snapshotDir = snapshotDirectory();
+        Path hintFile = new Path(snapshotDir, LATEST);
+        fileIO.delete(hintFile, false);
     }
 
     public void commitLatestHint(long snapshotId) throws IOException {

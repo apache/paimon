@@ -27,6 +27,7 @@ import org.apache.paimon.spark.{PaimonSplitScan, SparkFilterConverter}
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.commands.SparkDataFileMeta.convertToSparkDataFileMeta
+import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.schema.PaimonMetadataColumn._
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
@@ -37,7 +38,7 @@ import org.apache.spark.sql.{Dataset, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
-import org.apache.spark.sql.catalyst.plans.logical.{Filter => FilterLogicalNode, Project}
+import org.apache.spark.sql.catalyst.plans.logical.{Filter => FilterLogicalNode, LogicalPlan, Project}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.sources.{AlwaysTrue, And, EqualNullSafe, Filter}
 
@@ -125,14 +126,7 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
     }
 
     val metadataCols = Seq(FILE_PATH)
-    val metadataProj = metadataCols.map(_.toAttribute)
-    val newRelation = relation.copy(output = relation.output ++ metadataProj)
-    val scan = PaimonSplitScan(table, candidateDataSplits.toArray, metadataCols)
-    val filteredRelation = Project(
-      metadataProj,
-      FilterLogicalNode(
-        condition,
-        Compatibility.createDataSourceV2ScanRelation(newRelation, scan, newRelation.output)))
+    val filteredRelation = createNewScanPlan(candidateDataSplits, condition, relation, metadataCols)
     createDataset(sparkSession, filteredRelation)
       .select(FILE_PATH_COLUMN)
       .distinct()
@@ -198,18 +192,7 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
 
     val dataFileAndDeletionFile = dataFilePathToMeta.mapValues(_.toSparkDeletionFile).toArray
     val metadataCols = Seq(FILE_PATH, ROW_INDEX)
-    val metadataProj = metadataCols.map(_.toAttribute)
-    val scan = PaimonSplitScan(table, candidateDataSplits.toArray, metadataCols)
-    val filteredRelation = {
-      Project(
-        metadataProj,
-        FilterLogicalNode(
-          condition,
-          Compatibility.createDataSourceV2ScanRelation(
-            relation,
-            scan,
-            relation.output ++ metadataProj)))
-    }
+    val filteredRelation = createNewScanPlan(candidateDataSplits, condition, relation, metadataCols)
 
     val store = table.store()
     val fileIO = table.fileIO()
@@ -246,6 +229,22 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
             Seq((new Path(filePath).getName, dv.serializeToBytes()))
           )
       }
+  }
+
+  private def createNewScanPlan(
+      candidateDataSplits: Seq[DataSplit],
+      condition: Expression,
+      relation: DataSourceV2Relation,
+      metadataCols: Seq[PaimonMetadataColumn]): LogicalPlan = {
+    val metadataProj = metadataCols.map(_.toAttribute)
+    val newRelation = relation.copy(output = relation.output ++ metadataProj)
+    val scan = PaimonSplitScan(table, candidateDataSplits.toArray, metadataCols)
+    Project(
+      metadataProj,
+      FilterLogicalNode(
+        condition,
+        Compatibility.createDataSourceV2ScanRelation(newRelation, scan, newRelation.output)))
+
   }
 
   protected def buildDeletedCommitMessage(

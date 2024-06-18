@@ -20,6 +20,7 @@ package org.apache.paimon.spark.catalyst.analysis.expressions
 
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
 import org.apache.paimon.spark.SparkFilterConverter
+import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.PaimonUtils.{normalizeExprs, translateFilter}
@@ -43,6 +44,12 @@ trait ExpressionHelper extends PredicateHelper {
       val newPlan = FakeLogicalPlan(Seq(expr), plan.children)
       spark.sessionState.analyzer.execute(newPlan) match {
         case FakeLogicalPlan(resolvedExpr, _) =>
+          resolvedExpr.foreach {
+            expr =>
+              if (!expr.resolved) {
+                throw new RuntimeException(s"cannot resolve ${expr.sql} from $plan")
+              }
+          }
           resolvedExpr.head
         case _ =>
           throw new RuntimeException(s"Could not resolve expression $expr in plan: $plan")
@@ -85,7 +92,7 @@ trait ExpressionHelper extends PredicateHelper {
         if (DataType.equalsIgnoreCaseAndNullability(fromDataType, toDataType)) {
           fromExpression
         } else {
-          Cast(fromExpression, toDataType, Option(SQLConf.get.sessionLocalTimeZone))
+          Compatibility.cast(fromExpression, toDataType, Option(SQLConf.get.sessionLocalTimeZone))
         }
     }
   }
@@ -128,6 +135,7 @@ trait ExpressionHelper extends PredicateHelper {
       partitionColumns: Seq[String],
       resolver: Resolver
   ): Boolean = {
+    condition.references.nonEmpty &&
     condition.references.forall(r => partitionColumns.exists(resolver(r.name, _)))
   }
 

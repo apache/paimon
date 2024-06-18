@@ -21,6 +21,7 @@ package org.apache.paimon.format.avro;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.fs.Path;
@@ -51,7 +52,7 @@ public class AvroFileFormatTest {
 
     @BeforeAll
     public static void before() {
-        fileFormat = new AvroFileFormat(new Options());
+        fileFormat = new AvroFileFormat(new FormatContext(new Options(), 1024));
     }
 
     @Test
@@ -105,13 +106,13 @@ public class AvroFileFormatTest {
     @Test
     void testReadRowPosition() throws IOException {
         RowType rowType = DataTypes.ROW(DataTypes.INT().notNull());
-        FileFormat format = new AvroFileFormat(new Options());
+        FileFormat format = new AvroFileFormat(new FormatContext(new Options(), 1024));
 
         LocalFileIO fileIO = LocalFileIO.create();
         Path file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
 
         try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
-            FormatWriter writer = format.createWriterFactory(rowType).create(out, null);
+            FormatWriter writer = format.createWriterFactory(rowType).create(out, "zstd");
             for (int i = 0; i < 1000000; i++) {
                 writer.addElement(GenericRow.of(i));
             }

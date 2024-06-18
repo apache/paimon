@@ -53,8 +53,8 @@ abstract class PaimonBaseScan(
   private lazy val tableSchema = SparkTypeUtils.fromPaimonRowType(tableRowType)
 
   private val (tableFields, metadataFields) = {
-    val requiredFieldNames = requiredSchema.fieldNames
-    val _tableFields = tableSchema.filter(field => requiredFieldNames.contains(field.name))
+    val nameToField = tableSchema.map(field => (field.name, field)).toMap
+    val _tableFields = requiredSchema.flatMap(field => nameToField.get(field.name))
     val _metadataFields =
       requiredSchema
         .filterNot(field => tableSchema.fieldNames.contains(field.name))

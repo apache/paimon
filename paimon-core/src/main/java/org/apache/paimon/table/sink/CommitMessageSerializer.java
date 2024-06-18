@@ -21,7 +21,6 @@ package org.apache.paimon.table.sink;
 import org.apache.paimon.data.serializer.VersionedSerializer;
 import org.apache.paimon.index.IndexFileMetaSerializer;
 import org.apache.paimon.io.CompactIncrement;
-import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMeta08Serializer;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.io.DataIncrement;
@@ -30,7 +29,6 @@ import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.io.IndexIncrement;
-import org.apache.paimon.utils.ObjectSerializer;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -106,14 +104,23 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
     }
 
     private CommitMessage deserialize(int version, DataInputView view) throws IOException {
-        ObjectSerializer<DataFileMeta> dataFileSerializer;
         if (version == CURRENT_VERSION) {
-            dataFileSerializer = this.dataFileSerializer;
+            return new CommitMessageImpl(
+                    deserializeBinaryRow(view),
+                    view.readInt(),
+                    new DataIncrement(
+                            dataFileSerializer.deserializeList(view),
+                            dataFileSerializer.deserializeList(view),
+                            dataFileSerializer.deserializeList(view)),
+                    new CompactIncrement(
+                            dataFileSerializer.deserializeList(view),
+                            dataFileSerializer.deserializeList(view),
+                            dataFileSerializer.deserializeList(view)),
+                    new IndexIncrement(
+                            indexEntrySerializer.deserializeList(view),
+                            indexEntrySerializer.deserializeList(view)));
         } else if (version <= 2) {
-            if (dataFile08Serializer == null) {
-                dataFile08Serializer = new DataFileMeta08Serializer();
-            }
-            dataFileSerializer = dataFile08Serializer;
+            return deserialize08(version, view);
         } else {
             throw new UnsupportedOperationException(
                     "Expecting CommitMessageSerializer version to be smaller or equal than "
@@ -122,17 +129,24 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
                             + version
                             + ".");
         }
+    }
+
+    private CommitMessage deserialize08(int version, DataInputView view) throws IOException {
+        if (dataFile08Serializer == null) {
+            dataFile08Serializer = new DataFileMeta08Serializer();
+        }
+
         return new CommitMessageImpl(
                 deserializeBinaryRow(view),
                 view.readInt(),
                 new DataIncrement(
-                        dataFileSerializer.deserializeList(view),
-                        dataFileSerializer.deserializeList(view),
-                        dataFileSerializer.deserializeList(view)),
+                        dataFile08Serializer.deserializeList(view),
+                        dataFile08Serializer.deserializeList(view),
+                        dataFile08Serializer.deserializeList(view)),
                 new CompactIncrement(
-                        dataFileSerializer.deserializeList(view),
-                        dataFileSerializer.deserializeList(view),
-                        dataFileSerializer.deserializeList(view)),
+                        dataFile08Serializer.deserializeList(view),
+                        dataFile08Serializer.deserializeList(view),
+                        dataFile08Serializer.deserializeList(view)),
                 new IndexIncrement(
                         indexEntrySerializer.deserializeList(view),
                         version <= 2

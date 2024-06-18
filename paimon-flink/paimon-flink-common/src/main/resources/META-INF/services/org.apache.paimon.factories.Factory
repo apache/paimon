@@ -14,6 +14,7 @@
 # limitations under the License.
 
 ### action factories
+org.apache.paimon.flink.action.CloneActionFactory
 org.apache.paimon.flink.action.CompactActionFactory
 org.apache.paimon.flink.action.CompactDatabaseActionFactory
 org.apache.paimon.flink.action.DropPartitionActionFactory
@@ -52,3 +53,4 @@ org.apache.paimon.flink.procedure.privilege.GrantPrivilegeToUserProcedure
 org.apache.paimon.flink.procedure.privilege.RevokePrivilegeFromUserProcedure
 org.apache.paimon.flink.procedure.RepairProcedure
 org.apache.paimon.flink.procedure.ReplaceBranchProcedure
+org.apache.paimon.flink.procedure.MergeBranchProcedure

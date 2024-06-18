@@ -175,6 +175,12 @@ public interface FileIO extends Serializable {
         }
     }
 
+    default void deleteFilesQuietly(List<Path> files) {
+        for (Path file : files) {
+            deleteQuietly(file);
+        }
+    }
+
     default void deleteDirectoryQuietly(Path directory) {
         if (LOG.isDebugEnabled()) {
             LOG.debug("Ready to delete " + directory.toString());
@@ -270,6 +276,20 @@ public interface FileIO extends Serializable {
     default boolean copyFileUtf8(Path sourcePath, Path targetPath) throws IOException {
         String content = readFileUtf8(sourcePath);
         return writeFileUtf8(targetPath, content);
+    }
+
+    /** Copy all files in sourceDirectory to directory targetDirectory. */
+    default void copyFilesUtf8(Path sourceDirectory, Path targetDirectory) throws IOException {
+        FileStatus[] fileStatuses = listStatus(sourceDirectory);
+        List<Path> copyFiles =
+                Arrays.stream(fileStatuses)
+                        .map(fileStatus -> fileStatus.getPath())
+                        .collect(Collectors.toList());
+        for (Path file : copyFiles) {
+            String fileName = file.getName();
+            Path targetPath = new Path(targetDirectory.toString() + "/" + fileName);
+            copyFileUtf8(file, targetPath);
+        }
     }
 
     /** Read file from {@link #overwriteFileUtf8} file. */

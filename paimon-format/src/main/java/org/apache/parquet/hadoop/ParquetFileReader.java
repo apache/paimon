@@ -25,7 +25,6 @@ import org.apache.paimon.fs.VectoredReadable;
 
 import org.apache.hadoop.fs.Path;
 import org.apache.parquet.ParquetReadOptions;
-import org.apache.parquet.Preconditions;
 import org.apache.parquet.bytes.ByteBufferInputStream;
 import org.apache.parquet.bytes.BytesInput;
 import org.apache.parquet.column.ColumnDescriptor;
@@ -95,6 +94,7 @@ import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.zip.CRC32;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.parquet.bytes.BytesUtils.readIntLittleEndian;
 import static org.apache.parquet.filter2.compat.RowGroupFilter.FilterLevel.BLOOMFILTER;
 import static org.apache.parquet.filter2.compat.RowGroupFilter.FilterLevel.DICTIONARY;
@@ -565,7 +565,7 @@ public class ParquetFileReader implements Closeable {
         long totalSize = 0;
         for (ConsecutivePartList consecutiveChunks : allParts) {
             final long len = consecutiveChunks.length;
-            Preconditions.checkArgument(
+            checkArgument(
                     len < Integer.MAX_VALUE,
                     "Invalid length %s for vectored read operation. It must be less than max integer value.",
                     len);

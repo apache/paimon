@@ -23,84 +23,90 @@ import org.apache.paimon.predicate.FunctionVisitor;
 
 import java.util.List;
 
+import static org.apache.paimon.fileindex.FileIndexResult.REMAIN;
+
 /**
  * Read file index from serialized bytes. Return true, means we need to search this file, else means
  * needn't.
  */
-public abstract class FileIndexReader implements FunctionVisitor<Boolean> {
+public abstract class FileIndexReader implements FunctionVisitor<FileIndexResult> {
 
     @Override
-    public Boolean visitIsNotNull(FieldRef fieldRef) {
-        return true;
+    public FileIndexResult visitIsNotNull(FieldRef fieldRef) {
+        return REMAIN;
     }
 
     @Override
-    public Boolean visitIsNull(FieldRef fieldRef) {
-        return true;
+    public FileIndexResult visitIsNull(FieldRef fieldRef) {
+        return REMAIN;
     }
 
     @Override
-    public Boolean visitStartsWith(FieldRef fieldRef, Object literal) {
-        return true;
+    public FileIndexResult visitStartsWith(FieldRef fieldRef, Object literal) {
+        return REMAIN;
     }
 
     @Override
-    public Boolean visitLessThan(FieldRef fieldRef, Object literal) {
-        return true;
+    public FileIndexResult visitLessThan(FieldRef fieldRef, Object literal) {
+        return REMAIN;
     }
 
     @Override
-    public Boolean visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
-        return true;
+    public FileIndexResult visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
+        return REMAIN;
     }
 
     @Override
-    public Boolean visitNotEqual(FieldRef fieldRef, Object literal) {
-        return true;
+    public FileIndexResult visitNotEqual(FieldRef fieldRef, Object literal) {
+        return REMAIN;
     }
 
     @Override
-    public Boolean visitLessOrEqual(FieldRef fieldRef, Object literal) {
-        return true;
+    public FileIndexResult visitLessOrEqual(FieldRef fieldRef, Object literal) {
+        return REMAIN;
     }
 
     @Override
-    public Boolean visitEqual(FieldRef fieldRef, Object literal) {
-        return true;
+    public FileIndexResult visitEqual(FieldRef fieldRef, Object literal) {
+        return REMAIN;
     }
 
     @Override
-    public Boolean visitGreaterThan(FieldRef fieldRef, Object literal) {
-        return true;
+    public FileIndexResult visitGreaterThan(FieldRef fieldRef, Object literal) {
+        return REMAIN;
     }
 
     @Override
-    public Boolean visitIn(FieldRef fieldRef, List<Object> literals) {
+    public FileIndexResult visitIn(FieldRef fieldRef, List<Object> literals) {
+        FileIndexResult fileIndexResult = null;
         for (Object key : literals) {
-            if (visitEqual(fieldRef, key)) {
-                return true;
-            }
+            fileIndexResult =
+                    fileIndexResult == null
+                            ? visitEqual(fieldRef, key)
+                            : fileIndexResult.or(visitEqual(fieldRef, key));
         }
-        return false;
+        return fileIndexResult;
     }
 
     @Override
-    public Boolean visitNotIn(FieldRef fieldRef, List<Object> literals) {
+    public FileIndexResult visitNotIn(FieldRef fieldRef, List<Object> literals) {
+        FileIndexResult fileIndexResult = null;
         for (Object key : literals) {
-            if (visitNotEqual(fieldRef, key)) {
-                return true;
-            }
+            fileIndexResult =
+                    fileIndexResult == null
+                            ? visitNotEqual(fieldRef, key)
+                            : fileIndexResult.or(visitNotEqual(fieldRef, key));
         }
-        return false;
+        return fileIndexResult;
     }
 
     @Override
-    public Boolean visitAnd(List<Boolean> children) {
+    public FileIndexResult visitAnd(List<FileIndexResult> children) {
         throw new UnsupportedOperationException("Should not invoke this");
     }
 
     @Override
-    public Boolean visitOr(List<Boolean> children) {
+    public FileIndexResult visitOr(List<FileIndexResult> children) {
         throw new UnsupportedOperationException("Should not invoke this");
     }
 }

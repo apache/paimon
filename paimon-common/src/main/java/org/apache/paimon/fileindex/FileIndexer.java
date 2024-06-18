@@ -18,25 +18,24 @@
 
 package org.apache.paimon.fileindex;
 
-import org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndex;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 
-import static org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndex.BLOOM_FILTER;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** File index interface. To build a file index. */
 public interface FileIndexer {
 
+    Logger LOG = LoggerFactory.getLogger(FileIndexer.class);
+
     FileIndexWriter createWriter();
 
-    FileIndexReader createReader(byte[] serializedBytes);
+    FileIndexReader createReader(SeekableInputStream inputStream, int start, int length);
 
     static FileIndexer create(String type, DataType dataType, Options options) {
-        switch (type) {
-            case BLOOM_FILTER:
-                return new BloomFilterFileIndex(dataType, options);
-            default:
-                throw new RuntimeException("Doesn't support filter type: " + type);
-        }
+        FileIndexerFactory fileIndexerFactory = FileIndexerFactoryUtils.load(type);
+        return fileIndexerFactory.create(dataType, options);
     }
 }

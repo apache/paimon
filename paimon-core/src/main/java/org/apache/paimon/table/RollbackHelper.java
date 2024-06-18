@@ -22,6 +22,7 @@ import org.apache.paimon.Changelog;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.utils.SnapshotManager;
@@ -51,6 +52,7 @@ public class RollbackHelper {
     private final TagManager tagManager;
     private final FileIO fileIO;
     private final SnapshotDeletion snapshotDeletion;
+    private final ChangelogDeletion changelogDeletion;
     private final TagDeletion tagDeletion;
 
     public RollbackHelper(
@@ -58,11 +60,13 @@ public class RollbackHelper {
             TagManager tagManager,
             FileIO fileIO,
             SnapshotDeletion snapshotDeletion,
+            ChangelogDeletion changelogDeletion,
             TagDeletion tagDeletion) {
         this.snapshotManager = snapshotManager;
         this.tagManager = tagManager;
         this.fileIO = fileIO;
         this.snapshotDeletion = snapshotDeletion;
+        this.changelogDeletion = changelogDeletion;
         this.tagDeletion = tagDeletion;
     }
 
@@ -72,6 +76,7 @@ public class RollbackHelper {
         List<Snapshot> cleanedSnapshots = cleanSnapshotsDataFiles(retainedSnapshot);
         List<Changelog> cleanedChangelogs = cleanLongLivedChangelogDataFiles(retainedSnapshot);
         List<Snapshot> cleanedTags = cleanTagsDataFiles(retainedSnapshot);
+        Set<Long> cleanedIds = new HashSet<>();
 
         // clean manifests
         // this can be used for snapshots and tags manifests cleaning both
@@ -79,17 +84,18 @@ public class RollbackHelper {
 
         for (Snapshot snapshot : cleanedSnapshots) {
             snapshotDeletion.cleanUnusedManifests(snapshot, manifestsSkippingSet);
+            cleanedIds.add(snapshot.id());
         }
 
         for (Changelog changelog : cleanedChangelogs) {
-            if (changelog.changelogManifestList() != null) {
-                snapshotDeletion.cleanUnusedManifestList(
-                        changelog.changelogManifestList(), new HashSet<>());
-            }
+            changelogDeletion.cleanUnusedManifests(changelog, manifestsSkippingSet);
+            cleanedIds.add(changelog.id());
         }
 
-        cleanedTags.removeAll(cleanedSnapshots);
         for (Snapshot snapshot : cleanedTags) {
+            if (cleanedIds.contains(snapshot.id())) {
+                continue;
+            }
             tagDeletion.cleanUnusedManifests(snapshot, manifestsSkippingSet);
         }
 
@@ -122,7 +128,9 @@ public class RollbackHelper {
         // when deleting non-existing data files
         for (Snapshot snapshot : toBeCleaned) {
             snapshotDeletion.deleteAddedDataFiles(snapshot.deltaManifestList());
-            snapshotDeletion.deleteAddedDataFiles(snapshot.changelogManifestList());
+            if (snapshot.changelogManifestList() != null) {
+                snapshotDeletion.deleteAddedDataFiles(snapshot.changelogManifestList());
+            }
         }
 
         // delete directories
@@ -149,9 +157,8 @@ public class RollbackHelper {
 
         // delete data files of changelog
         for (Changelog changelog : toBeCleaned) {
-            if (changelog.changelogManifestList() != null) {
-                snapshotDeletion.deleteAddedDataFiles(changelog.changelogManifestList());
-            }
+            // clean the deleted file
+            changelogDeletion.cleanUnusedDataFiles(changelog, manifestEntry -> false);
         }
 
         // delete directories

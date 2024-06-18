@@ -23,6 +23,7 @@ import org.apache.paimon.data.Timestamp;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -43,6 +44,28 @@ public class DateTimeUtilsTest {
             assertThat(DateTimeUtils.formatLocalDateTime(time, precision))
                     .isEqualTo(expectations[precision]);
         }
+    }
+
+    @Test
+    public void testParseTimestampData() {
+        String dt = "2024-01-14 19:35:00.012";
+        Timestamp ts = DateTimeUtils.parseTimestampData(dt, 3);
+        assertThat(dt)
+                .isEqualTo(
+                        ts.toLocalDateTime()
+                                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")));
+
+        dt = "2024-01-14 19:35:20";
+        ts = DateTimeUtils.parseTimestampData(dt, 3);
+        assertThat(dt)
+                .isEqualTo(
+                        ts.toLocalDateTime()
+                                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+
+        dt = "2024-01-14";
+        ts = DateTimeUtils.parseTimestampData(dt, 3);
+        assertThat(dt)
+                .isEqualTo(ts.toLocalDateTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd")));
     }
 
     @Test

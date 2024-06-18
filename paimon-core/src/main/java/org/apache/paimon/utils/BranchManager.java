@@ -21,6 +21,7 @@ package org.apache.paimon.utils;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.branch.TableBranch;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -41,8 +42,10 @@ import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.SortedMap;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.apache.paimon.utils.FileUtils.listVersionedDirectories;
+import static org.apache.paimon.utils.FileUtils.listVersionedFileStatus;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Manager for {@code Branch}. */
@@ -350,6 +353,78 @@ public class BranchManager {
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format("Failed to determine if path '%s' exists.", path), e);
+        }
+    }
+
+    public void mergeBranch(String branchName) {
+        checkArgument(
+                !branchName.equals(DEFAULT_MAIN_BRANCH),
+                "Branch name '%s' do not use in merge branch.",
+                branchName);
+        checkArgument(!StringUtils.isBlank(branchName), "Branch name '%s' is blank.", branchName);
+        checkArgument(branchExists(branchName), "Branch name '%s' doesn't exist.", branchName);
+
+        Long earliestSnapshotId = snapshotManager.copyWithBranch(branchName).earliestSnapshotId();
+        Snapshot earliestSnapshot =
+                snapshotManager.copyWithBranch(branchName).snapshot(earliestSnapshotId);
+        long earliestSchemaId = earliestSnapshot.schemaId();
+
+        try {
+            // Delete snapshot, schema, and tag from the main branch which occurs after
+            // earliestSnapshotId
+            List<Path> deleteSnapshotPaths =
+                    listVersionedFileStatus(
+                                    fileIO, snapshotManager.snapshotDirectory(), "snapshot-")
+                            .map(FileStatus::getPath)
+                            .filter(
+                                    path ->
+                                            Snapshot.fromPath(fileIO, path).id()
+                                                    >= earliestSnapshotId)
+                            .collect(Collectors.toList());
+            List<Path> deleteSchemaPaths =
+                    listVersionedFileStatus(fileIO, schemaManager.schemaDirectory(), "schema-")
+                            .map(FileStatus::getPath)
+                            .filter(
+                                    path ->
+                                            TableSchema.fromPath(fileIO, path).id()
+                                                    >= earliestSchemaId)
+                            .collect(Collectors.toList());
+            List<Path> deleteTagPaths =
+                    listVersionedFileStatus(fileIO, tagManager.tagDirectory(), "tag-")
+                            .map(FileStatus::getPath)
+                            .filter(
+                                    path ->
+                                            Snapshot.fromPath(fileIO, path).id()
+                                                    >= earliestSnapshotId)
+                            .collect(Collectors.toList());
+
+            List<Path> deletePaths =
+                    Stream.concat(
+                                    Stream.concat(
+                                            deleteSnapshotPaths.stream(),
+                                            deleteSchemaPaths.stream()),
+                                    deleteTagPaths.stream())
+                            .collect(Collectors.toList());
+
+            // Delete latest snapshot hint
+            snapshotManager.deleteLatestHint();
+
+            fileIO.deleteFilesQuietly(deletePaths);
+            fileIO.copyFilesUtf8(
+                    snapshotManager.copyWithBranch(branchName).snapshotDirectory(),
+                    snapshotManager.snapshotDirectory());
+            fileIO.copyFilesUtf8(
+                    schemaManager.copyWithBranch(branchName).schemaDirectory(),
+                    schemaManager.schemaDirectory());
+            fileIO.copyFilesUtf8(
+                    tagManager.copyWithBranch(branchName).tagDirectory(),
+                    tagManager.tagDirectory());
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Exception occurs when merge branch '%s' (directory in %s).",
+                            branchName, getBranchPath(fileIO, tablePath, branchName)),
+                    e);
         }
     }
 
