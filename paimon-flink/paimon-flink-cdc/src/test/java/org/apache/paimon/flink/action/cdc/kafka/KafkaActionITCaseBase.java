@@ -43,12 +43,14 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.extension.AfterAllCallback;
 import org.junit.jupiter.api.extension.BeforeAllCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
@@ -78,6 +80,7 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
     private static final Logger LOG = LoggerFactory.getLogger(KafkaActionITCaseBase.class);
 
     private static final String INTER_CONTAINER_KAFKA_ALIAS = "kafka";
+    private static final String INTER_CONTAINER_SCHEMA_REGISTRY_ALIAS = "schemaregistry";
     private static final Network NETWORK = Network.newNetwork();
     private static final int ZK_TIMEOUT_MILLIS = 30000;
 
@@ -89,6 +92,7 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
     private final Timer loggingTimer = new Timer("Debug Logging Timer");
 
     @RegisterExtension
+    @Order(1)
     public static final KafkaContainerExtension KAFKA_CONTAINER =
             (KafkaContainerExtension)
                     new KafkaContainerExtension(DockerImageName.parse(DockerImageVersions.KAFKA)) {
@@ -108,6 +112,21 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
                             // Disable log deletion to prevent records from being deleted during
                             // test run
                             .withEnv("KAFKA_LOG_RETENTION_MS", "-1");
+
+    @RegisterExtension
+    @Order(2)
+    public static final SchemaRegistryContainerExtension SCHEMA_REGISTRY_CONTAINER =
+            new SchemaRegistryContainerExtension(
+                            DockerImageName.parse(DockerImageVersions.SCHEMA_REGISTRY))
+                    .dependsOn(KAFKA_CONTAINER)
+                    .withNetwork(NETWORK)
+                    .withEnv("SCHEMA_REGISTRY_HOST_NAME", "schema_registry")
+                    .withEnv(
+                            "SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS",
+                            "PLAINTEXT://" + KAFKA_CONTAINER.getNetworkAliases().get(0) + ":9092")
+                    .withNetworkAliases(INTER_CONTAINER_SCHEMA_REGISTRY_ALIAS)
+                    .withLogConsumer(new Slf4jLogConsumer(LOG))
+                    .withStartupTimeout(Duration.ofSeconds(60));
 
     @BeforeAll
     public static void beforeAll() {
@@ -257,6 +276,10 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
         return config;
     }
 
+    protected String getSchemaRegistryUrl() {
+        return SCHEMA_REGISTRY_CONTAINER.getSchemaRegistryUrl();
+    }
+
     protected KafkaSyncTableActionBuilder syncTableActionBuilder(Map<String, String> kafkaConfig) {
         return new KafkaSyncTableActionBuilder(kafkaConfig);
     }
@@ -354,6 +377,34 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
         @Override
         public void afterAll(ExtensionContext extensionContext) {
             this.close();
+        }
+    }
+
+    /** Schema registry container extension for junit5. */
+    private static class SchemaRegistryContainerExtension
+            extends GenericContainer<SchemaRegistryContainerExtension>
+            implements BeforeAllCallback, AfterAllCallback {
+
+        private static final Integer SCHEMA_REGISTRY_EXPOSED_PORT = 8081;
+
+        private SchemaRegistryContainerExtension(DockerImageName dockerImageName) {
+            super(dockerImageName);
+            addExposedPorts(SCHEMA_REGISTRY_EXPOSED_PORT);
+        }
+
+        @Override
+        public void beforeAll(ExtensionContext extensionContext) {
+            this.doStart();
+        }
+
+        @Override
+        public void afterAll(ExtensionContext extensionContext) {
+            this.close();
+        }
+
+        public String getSchemaRegistryUrl() {
+            return String.format(
+                    "http://%s:%s", getHost(), getMappedPort(SCHEMA_REGISTRY_EXPOSED_PORT));
         }
     }
 }
