@@ -167,7 +167,8 @@ public class FieldAggregatorTest {
         assertThat(fieldCountAgg.agg(null, null)).isEqualTo(0);
         assertThat(fieldCountAgg.agg(1, null)).isEqualTo(1);
         assertThat(fieldCountAgg.agg(null, 15)).isEqualTo(1);
-        assertThat(fieldCountAgg.agg(3, 25)).isEqualTo(4);
+        assertThat(fieldCountAgg.agg(1, 0)).isEqualTo(2);
+        assertThat(fieldCountAgg.agg(3, 6)).isEqualTo(4);
     }
 
     @Test
