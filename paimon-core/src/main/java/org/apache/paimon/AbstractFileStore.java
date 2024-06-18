@@ -255,10 +255,10 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
             return null;
         }
 
-        MetastoreClient.Factory metastoreClientFactory = catalogEnvironment.metastoreClientFactory();
+        MetastoreClient.Factory metastoreClientFactory =
+                catalogEnvironment.metastoreClientFactory();
         MetastoreClient metastoreClient = null;
-        if (options.partitionedTableInMetastore()
-                && metastoreClientFactory != null) {
+        if (options.partitionedTableInMetastore() && metastoreClientFactory != null) {
             metastoreClient = metastoreClientFactory.create();
         }
 

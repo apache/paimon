@@ -117,13 +117,14 @@ public class PartitionExpire {
 
     private void deleteMetastorePartitions(List<Map<String, String>> partitions) {
         if (metastoreClient != null) {
-            partitions.forEach(partition -> {
-                try {
-                    metastoreClient.deletePartition(new LinkedHashMap<>(partition));
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
-            });
+            partitions.forEach(
+                    partition -> {
+                        try {
+                            metastoreClient.deletePartition(new LinkedHashMap<>(partition));
+                        } catch (Exception e) {
+                            throw new RuntimeException(e);
+                        }
+                    });
         }
     }
 
