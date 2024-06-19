@@ -38,7 +38,7 @@ public class FieldCountAgg extends FieldAggregator {
     public Object agg(Object accumulator, Object inputField) {
         Object count;
         if (accumulator == null || inputField == null) {
-            count = (accumulator == null ? 1 : accumulator);
+            count = (accumulator == null ? (inputField == null ? 0 : 1) : accumulator);
         } else {
             // ordered by type root definition
             switch (fieldType.getTypeRoot()) {
@@ -59,7 +59,7 @@ public class FieldCountAgg extends FieldAggregator {
     public Object retract(Object accumulator, Object inputField) {
         Object count;
         if (accumulator == null || inputField == null) {
-            count = (accumulator == null ? 1 : accumulator);
+            count = (accumulator == null ? (inputField == null ? 0 : -1) : accumulator);
         } else {
             // ordered by type root definition
             switch (fieldType.getTypeRoot()) {
