@@ -45,7 +45,7 @@ import static org.apache.paimon.utils.Preconditions.checkState;
  *
  * @param <T> type of record to write into {@link FileStore}.
  */
-public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State<T>>> {
+public class TableWriteImpl<T> implements TableWriteApi<T> {
 
     private final FileStoreWrite<T> write;
     private final KeyAndBucketExtractor<InternalRow> keyAndBucketExtractor;
@@ -88,7 +88,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     }
 
     @Override
-    public TableWriteImpl<T> withMemoryPool(MemorySegmentPool memoryPool) {
+    public TableWriteApi<T> withMemoryPool(MemorySegmentPool memoryPool) {
         write.withMemoryPool(memoryPool);
         return this;
     }

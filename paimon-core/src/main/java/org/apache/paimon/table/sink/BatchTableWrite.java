@@ -36,4 +36,12 @@ public interface BatchTableWrite extends TableWrite {
      * @see BatchTableCommit#commit
      */
     List<CommitMessage> prepareCommit() throws Exception;
+
+    default boolean isBatchTableWrite() {
+        return true;
+    }
+
+    default BatchTableWrite asBatchTableWrite(){
+        return this;
+    }
 }

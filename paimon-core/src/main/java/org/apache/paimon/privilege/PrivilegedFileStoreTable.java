@@ -31,9 +31,7 @@ import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.ExpireSnapshots;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.query.LocalTableQuery;
-import org.apache.paimon.table.sink.RowKeyExtractor;
-import org.apache.paimon.table.sink.TableCommitImpl;
-import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.table.sink.*;
 import org.apache.paimon.table.source.InnerStreamTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
@@ -253,25 +251,25 @@ public class PrivilegedFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public TableWriteImpl<?> newWrite(String commitUser) {
+    public TableWriteApi<?> newWrite(String commitUser) {
         privilegeChecker.assertCanInsert(identifier);
         return wrapped.newWrite(commitUser);
     }
 
     @Override
-    public TableWriteImpl<?> newWrite(String commitUser, ManifestCacheFilter manifestFilter) {
+    public TableWriteApi<?> newWrite(String commitUser, ManifestCacheFilter manifestFilter) {
         privilegeChecker.assertCanInsert(identifier);
         return wrapped.newWrite(commitUser, manifestFilter);
     }
 
     @Override
-    public TableCommitImpl newCommit(String commitUser) {
+    public TableCommitApi newCommit(String commitUser) {
         privilegeChecker.assertCanInsert(identifier);
         return wrapped.newCommit(commitUser);
     }
 
     @Override
-    public TableCommitImpl newCommit(String commitUser, String branchName) {
+    public TableCommitApi newCommit(String commitUser, String branchName) {
         privilegeChecker.assertCanInsert(identifier);
         return wrapped.newCommit(commitUser, branchName);
     }

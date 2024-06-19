@@ -40,7 +40,9 @@ import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.sink.TableCommitApi;
 import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableWriteApi;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.InnerStreamTableScan;
 import org.apache.paimon.table.source.Split;
@@ -92,8 +94,8 @@ public class OrphanFilesCleanTest {
     private FileIO fileIO;
     private RowType rowType;
     private FileStoreTable table;
-    private TableWriteImpl<?> write;
-    private TableCommitImpl commit;
+    private TableWriteApi<?> write;
+    private TableCommitApi commit;
     private Path manifestDir;
 
     private long incrementalIdentifier;

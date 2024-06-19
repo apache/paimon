@@ -41,4 +41,12 @@ public interface StreamTableWrite extends TableWrite {
      */
     List<CommitMessage> prepareCommit(boolean waitCompaction, long commitIdentifier)
             throws Exception;
+
+    default boolean isStreamTableWrite() {
+        return true;
+    }
+
+    default StreamTableWrite asStreamTableWrite(){
+        return this;
+    }
 }

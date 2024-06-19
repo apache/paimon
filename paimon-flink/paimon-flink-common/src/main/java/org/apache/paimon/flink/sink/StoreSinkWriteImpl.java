@@ -31,6 +31,7 @@ import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.SinkRecord;
+import org.apache.paimon.table.sink.TableWriteApi;
 import org.apache.paimon.table.sink.TableWriteImpl;
 
 import org.apache.flink.metrics.MetricGroup;
@@ -61,7 +62,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     @Nullable private final MemorySegmentPool memoryPool;
     @Nullable private final MemoryPoolFactory memoryPoolFactory;
 
-    protected TableWriteImpl<?> write;
+    protected TableWriteApi<?> write;
 
     @Nullable private final MetricGroup metricGroup;
 
@@ -134,7 +135,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
         this.write = newTableWrite(table);
     }
 
-    private TableWriteImpl<?> newTableWrite(FileStoreTable table) {
+    private TableWriteApi<?> newTableWrite(FileStoreTable table) {
         checkArgument(
                 !(memoryPool != null && memoryPoolFactory != null),
                 "memoryPool and memoryPoolFactory cannot be set at the same time.");
@@ -144,9 +145,9 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                                 commitUser,
                                 (part, bucket) ->
                                         state.stateValueFilter().filter(table.name(), part, bucket))
-                        .withIOManager(paimonIOManager)
+                        .withIOManager(paimonIOManager).asTableWriteApi()
                         .withIgnorePreviousFiles(ignorePreviousFiles)
-                        .withExecutionMode(isStreamingMode)
+                        .withExecutionMode(isStreamingMode).asTableWriteApi()
                         .withBucketMode(table.bucketMode());
 
         if (metricGroup != null) {
@@ -255,7 +256,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     }
 
     @VisibleForTesting
-    public TableWriteImpl<?> getWrite() {
+    public TableWriteApi<?> getWrite() {
         return write;
     }
 }

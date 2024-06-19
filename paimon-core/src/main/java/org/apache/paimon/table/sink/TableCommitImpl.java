@@ -69,7 +69,7 @@ import static org.apache.paimon.table.sink.BatchWriteBuilder.COMMIT_IDENTIFIER;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** An abstraction layer above {@link FileStoreCommit} to provide snapshot commit and expiration. */
-public class TableCommitImpl implements InnerTableCommit {
+public class TableCommitImpl implements TableCommitApi {
     private static final Logger LOG = LoggerFactory.getLogger(TableCommitImpl.class);
 
     private final FileStoreCommit commit;

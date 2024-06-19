@@ -33,13 +33,7 @@ import org.apache.paimon.spark.commands.WriteIntoPaimonTable;
 import org.apache.paimon.spark.sort.TableSorter;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.sink.BatchTableCommit;
-import org.apache.paimon.table.sink.BatchTableWrite;
-import org.apache.paimon.table.sink.BatchWriteBuilder;
-import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.CommitMessageSerializer;
-import org.apache.paimon.table.sink.CompactionTaskSerializer;
-import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.*;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.utils.Pair;
@@ -341,7 +335,7 @@ public class CompactProcedure extends BaseProcedure {
                                             }
                                         });
 
-        try (TableCommitImpl commit = table.newCommit(commitUser)) {
+        try (TableCommitApi commit = table.newCommit(commitUser)) {
             CommitMessageSerializer messageSerializerser = new CommitMessageSerializer();
             List<byte[]> serializedMessages = commitMessageJavaRDD.collect();
             List<CommitMessage> messages = new ArrayList<>(serializedMessages.size());

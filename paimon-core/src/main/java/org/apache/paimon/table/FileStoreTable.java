@@ -25,9 +25,7 @@ import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.BinaryTableStats;
 import org.apache.paimon.table.query.LocalTableQuery;
-import org.apache.paimon.table.sink.RowKeyExtractor;
-import org.apache.paimon.table.sink.TableCommitImpl;
-import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.table.sink.*;
 import org.apache.paimon.types.RowType;
 
 import java.util.List;
@@ -90,14 +88,14 @@ public interface FileStoreTable extends DataTable {
     FileStoreTable copyWithLatestSchema();
 
     @Override
-    TableWriteImpl<?> newWrite(String commitUser);
+    TableWriteApi<?> newWrite(String commitUser);
 
-    TableWriteImpl<?> newWrite(String commitUser, ManifestCacheFilter manifestFilter);
+    TableWriteApi<?> newWrite(String commitUser, ManifestCacheFilter manifestFilter);
 
     @Override
-    TableCommitImpl newCommit(String commitUser);
+    TableCommitApi newCommit(String commitUser);
 
-    TableCommitImpl newCommit(String commitUser, String branchName);
+    TableCommitApi newCommit(String commitUser, String branchName);
 
     LocalTableQuery newLocalTableQuery();
 

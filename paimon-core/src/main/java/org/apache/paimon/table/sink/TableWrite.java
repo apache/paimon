@@ -34,6 +34,38 @@ import org.apache.paimon.table.Table;
 @Public
 public interface TableWrite extends AutoCloseable {
 
+    default boolean isTableWriteApi() {
+        return false;
+    }
+
+    default TableWriteApi<?> asTableWriteApi(){
+        throw new RuntimeException("not impl for asTableWriteApi");
+    }
+
+    default boolean isBatchTableWrite() {
+        return false;
+    }
+
+    default BatchTableWrite asBatchTableWrite(){
+        throw new RuntimeException("not impl for asBatchTableWrite");
+    }
+
+    default boolean isStreamTableWrite() {
+        return false;
+    }
+
+    default StreamTableWrite asStreamTableWrite(){
+        throw new RuntimeException("not impl for asStreamTableWrite");
+    }
+
+    default boolean isInnerTableWrite() {
+        return false;
+    }
+
+    default InnerTableWrite asInnerTableWrite(){
+        throw new RuntimeException("not impl for asInnerTableWrite");
+    }
+
     /** With {@link IOManager}, this is needed if 'write-buffer-spillable' is set to true. */
     TableWrite withIOManager(IOManager ioManager);
 
