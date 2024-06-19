@@ -1251,7 +1251,7 @@ public abstract class HiveCatalogITCaseBase {
         // Use flink to create a partitioned table and write data, hive read.
         tEnv.executeSql(
                         "create table students\n"
-                                + "(id decimal(20,0)\n"
+                                + "(id string\n"
                                 + ",dt string\n"
                                 + ",PRIMARY KEY(id,dt) NOT ENFORCED\n"
                                 + ") PARTITIONED BY (dt)\n"
