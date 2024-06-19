@@ -34,10 +34,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.fieldNameCaseConvert;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.recordKeyDuplicateErrMsg;
-
 /**
  * Implementation class for extracting records from MongoDB versions greater than 4.x and less than
  * 6.x.
@@ -53,19 +49,16 @@ public class Mongo4VersionStrategy implements MongoVersionStrategy {
     private static final String OP_DELETE = "delete";
     private final String databaseName;
     private final String collection;
-    private final boolean caseSensitive;
     private final Configuration mongodbConfig;
     private final List<ComputedColumn> computedColumns;
 
     public Mongo4VersionStrategy(
             String databaseName,
             String collection,
-            boolean caseSensitive,
             List<ComputedColumn> computedColumns,
             Configuration mongodbConfig) {
         this.databaseName = databaseName;
         this.collection = collection;
-        this.caseSensitive = caseSensitive;
         this.mongodbConfig = mongodbConfig;
         this.computedColumns = computedColumns;
     }
@@ -133,11 +126,7 @@ public class Mongo4VersionStrategy implements MongoVersionStrategy {
         RowType.Builder rowTypeBuilder = RowType.builder();
         Map<String, String> record =
                 getExtractRow(fullDocument, rowTypeBuilder, computedColumns, mongodbConfig);
-
-        record = mapKeyCaseConvert(record, caseSensitive, recordKeyDuplicateErrMsg(record));
-
         List<DataField> fields = rowTypeBuilder.build().getFields();
-        fields = fieldNameCaseConvert(fields, caseSensitive, collection);
 
         return new RichCdcMultiplexRecord(
                 databaseName,

@@ -112,7 +112,7 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
     @Override
     protected FlatMapFunction<CdcSourceRecord, RichCdcMultiplexRecord> recordParse() {
         return syncJobHandler.provideRecordParser(
-                caseSensitive, Collections.emptyList(), typeMapping, metadataConverters);
+                Collections.emptyList(), typeMapping, metadataConverters);
     }
 
     @Override

@@ -31,20 +31,19 @@ import org.apache.flink.configuration.Configuration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Function;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
 import static org.apache.paimon.flink.action.MultiTablesSinkMode.DIVIDED;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkState;
+import static org.apache.paimon.utils.StringUtils.caseSensitiveConversion;
 
 /** Common utils for CDC Action. */
 public class CdcActionCommonUtils {
@@ -100,93 +99,10 @@ public class CdcActionCommonUtils {
         return true;
     }
 
-    public static List<DataField> fieldNameCaseConvert(
-            List<DataField> origin, boolean caseSensitive, String tableName) {
-        Set<String> existedFields = new HashSet<>();
-        Function<String, String> columnDuplicateErrMsg =
-                columnDuplicateErrMsg(tableName == null ? "UNKNOWN" : tableName);
-        return origin.stream()
-                .map(
-                        field -> {
-                            if (caseSensitive) {
-                                return field;
-                            }
-                            String columnLowerCase = field.name().toLowerCase();
-                            if (!existedFields.add(columnLowerCase)) {
-                                throw new IllegalArgumentException(
-                                        columnDuplicateErrMsg.apply(field.name()));
-                            }
-                            return field.newName(columnLowerCase);
-                        })
-                .collect(Collectors.toList());
-    }
-
-    public static <T> LinkedHashMap<String, T> mapKeyCaseConvert(
-            LinkedHashMap<String, T> origin,
-            boolean caseSensitive,
-            Function<String, String> duplicateErrMsg) {
-        return mapKeyCaseConvert(origin, caseSensitive, duplicateErrMsg, LinkedHashMap::new);
-    }
-
-    public static <T> Map<String, T> mapKeyCaseConvert(
-            Map<String, T> origin,
-            boolean caseSensitive,
-            Function<String, String> duplicateErrMsg) {
-        return mapKeyCaseConvert(origin, caseSensitive, duplicateErrMsg, HashMap::new);
-    }
-
-    private static <T, M extends Map<String, T>> M mapKeyCaseConvert(
-            M origin,
-            boolean caseSensitive,
-            Function<String, String> duplicateErrMsg,
-            Supplier<M> mapSupplier) {
-        if (caseSensitive) {
-            return origin;
-        } else {
-            M newMap = mapSupplier.get();
-            for (Map.Entry<String, T> entry : origin.entrySet()) {
-                String key = entry.getKey();
-                if (newMap.containsKey(key.toLowerCase())) {
-                    throw new IllegalArgumentException(duplicateErrMsg.apply(key));
-                }
-                newMap.put(key.toLowerCase(), entry.getValue());
-            }
-            return newMap;
-        }
-    }
-
-    public static Function<String, String> columnDuplicateErrMsg(String tableName) {
-        return column ->
-                String.format(
-                        "Failed to convert columns of table '%s' to case-insensitive form because duplicate column found: '%s'.",
-                        tableName, column);
-    }
-
-    public static Function<String, String> recordKeyDuplicateErrMsg(Map<String, String> record) {
-        return column ->
-                "Failed to convert record map to case-insensitive form because duplicate column found. Original record map is:\n"
-                        + record;
-    }
-
     public static List<String> listCaseConvert(List<String> origin, boolean caseSensitive) {
         return caseSensitive
                 ? origin
                 : origin.stream().map(String::toLowerCase).collect(Collectors.toList());
-    }
-
-    public static String columnCaseConvertAndDuplicateCheck(
-            String column,
-            Set<String> existedFields,
-            boolean caseSensitive,
-            Function<String, String> columnDuplicateErrMsg) {
-        if (caseSensitive) {
-            return column;
-        }
-        String columnLowerCase = column.toLowerCase();
-        if (!existedFields.add(columnLowerCase)) {
-            throw new IllegalArgumentException(columnDuplicateErrMsg.apply(column));
-        }
-        return columnLowerCase;
     }
 
     public static Schema buildPaimonSchema(
@@ -206,35 +122,29 @@ public class CdcActionCommonUtils {
         builder.options(sourceSchema.options());
 
         // fields
-        Set<String> existedFields = new HashSet<>();
-        Function<String, String> columnDuplicateErrMsg = columnDuplicateErrMsg(tableName);
+        List<String> allFieldNames = new ArrayList<>();
 
         for (DataField field : sourceSchema.fields()) {
-            String fieldName =
-                    columnCaseConvertAndDuplicateCheck(
-                            field.name(), existedFields, caseSensitive, columnDuplicateErrMsg);
+            String fieldName = caseSensitiveConversion(field.name(), caseSensitive);
+            allFieldNames.add(fieldName);
             builder.column(fieldName, field.type(), field.description());
         }
 
         for (ComputedColumn computedColumn : computedColumns) {
             String computedColumnName =
-                    columnCaseConvertAndDuplicateCheck(
-                            computedColumn.columnName(),
-                            existedFields,
-                            caseSensitive,
-                            columnDuplicateErrMsg);
+                    caseSensitiveConversion(computedColumn.columnName(), caseSensitive);
+            allFieldNames.add(computedColumnName);
             builder.column(computedColumnName, computedColumn.columnType());
         }
 
         for (CdcMetadataConverter metadataConverter : metadataConverters) {
             String metadataColumnName =
-                    columnCaseConvertAndDuplicateCheck(
-                            metadataConverter.columnName(),
-                            existedFields,
-                            caseSensitive,
-                            columnDuplicateErrMsg);
+                    caseSensitiveConversion(metadataConverter.columnName(), caseSensitive);
+            allFieldNames.add(metadataColumnName);
             builder.column(metadataColumnName, metadataConverter.dataType());
         }
+
+        checkDuplicateFields(tableName, allFieldNames);
 
         // primary keys
         if (!specifiedPrimaryKeys.isEmpty()) {
@@ -270,6 +180,21 @@ public class CdcActionCommonUtils {
         builder.comment(sourceSchema.comment());
 
         return builder.build();
+    }
+
+    public static void checkDuplicateFields(String tableName, List<String> fieldNames) {
+        List<String> duplicates =
+                fieldNames.stream()
+                        .filter(name -> Collections.frequency(fieldNames, name) > 1)
+                        .collect(Collectors.toList());
+        checkState(
+                duplicates.isEmpty(),
+                "Table %s contains duplicate columns: %s.\n"
+                        + "Possible causes is: "
+                        + "1. computed columns or metadata columns contain duplicate field; "
+                        + "2. the catalog is case-insensitive and the table columns duplicate after they are all converted to lower-case.",
+                tableName,
+                duplicates);
     }
 
     public static String tableList(

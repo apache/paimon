@@ -53,13 +53,12 @@ public enum DataFormat {
      * Creates a new instance of {@link RecordParser} for this data format with the specified
      * configurations.
      *
-     * @param caseSensitive Indicates whether the parser should be case-sensitive.
      * @param computedColumns List of computed columns to be considered by the parser.
      * @return A new instance of {@link RecordParser}.
      */
     public RecordParser createParser(
-            boolean caseSensitive, TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        return parser.createParser(caseSensitive, typeMapping, computedColumns);
+            TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
+        return parser.createParser(typeMapping, computedColumns);
     }
 
     public static DataFormat fromConfigString(String format) {

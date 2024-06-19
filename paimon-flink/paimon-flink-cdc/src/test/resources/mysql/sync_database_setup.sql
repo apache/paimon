@@ -191,11 +191,24 @@ CREATE TABLE test (
 );
 
 -- ################################################################################
---  MySqlSyncDatabaseActionITCase#testIgnoreCase
+--  MySqlSyncDatabaseActionITCase#testIgnoreCaseDivided
 -- ################################################################################
 
-CREATE DATABASE paimon_ignore_CASE;
-USE paimon_ignore_CASE;
+CREATE DATABASE paimon_ignore_CASE_divided;
+USE paimon_ignore_CASE_divided;
+
+CREATE TABLE T (
+    k INT,
+    UPPERCASE_V0 VARCHAR(20),
+    PRIMARY KEY (k)
+);
+
+-- ################################################################################
+--  MySqlSyncDatabaseActionITCase#testIgnoreCaseCombined
+-- ################################################################################
+
+CREATE DATABASE paimon_ignore_CASE_combined;
+USE paimon_ignore_CASE_combined;
 
 CREATE TABLE T (
     k INT,

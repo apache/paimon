@@ -49,8 +49,7 @@ public class MessageQueueSchemaUtils {
         int retry = 0;
         int retryInterval = 1000;
 
-        RecordParser recordParser =
-                dataFormat.createParser(true, typeMapping, Collections.emptyList());
+        RecordParser recordParser = dataFormat.createParser(typeMapping, Collections.emptyList());
 
         while (true) {
             Optional<Schema> schema =

@@ -27,7 +27,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.core.execution.JobClient;
@@ -468,9 +467,9 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testIgnoreCase() throws Exception {
+    public void testIgnoreCaseDivided() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
-        mySqlConfig.put("database-name", "paimon_ignore_CASE");
+        mySqlConfig.put("database-name", "paimon_ignore_CASE_divided");
 
         MySqlSyncDatabaseAction action =
                 syncDatabaseActionBuilder(mySqlConfig)
@@ -481,53 +480,81 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         .build();
         runActionWithDefaultEnv(action);
 
-        // check table schema
-        FileStoreTable table = getFileStoreTable("t");
-        assertThat(JsonSerdeUtil.toFlatJson(table.schema().fields()))
-                .isEqualTo(
-                        "[{\"id\":0,\"name\":\"k\",\"type\":\"INT NOT NULL\",\"description\":\"\"},"
-                                + "{\"id\":1,\"name\":\"uppercase_v0\",\"type\":\"VARCHAR(20)\",\"description\":\"\"}]");
+        try (Statement statement = getStatement()) {
+            statement.executeUpdate("USE paimon_ignore_CASE_divided");
+            ignoreCaseTableCheck(statement, "T");
+        }
+    }
+
+    @Test
+    @Timeout(60)
+    public void testIgnoreCaseCombined() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "paimon_ignore_CASE_combined");
+
+        MySqlSyncDatabaseAction action =
+                syncDatabaseActionBuilder(mySqlConfig)
+                        .withCatalogConfig(
+                                Collections.singletonMap(
+                                        FileSystemCatalogOptions.CASE_SENSITIVE.key(), "false"))
+                        .withMode(COMBINED.configString())
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        try (Statement statement = getStatement()) {
+            statement.executeUpdate("USE paimon_ignore_CASE_combined");
+            ignoreCaseTableCheck(statement, "T");
+
+            // check new table
+            statement.executeUpdate(
+                    "CREATE TABLE T1 (k INT, UPPERCASE_V0 VARCHAR(20), PRIMARY KEY (k))");
+            waitingTables("t1");
+            ignoreCaseTableCheck(statement, "T1");
+        }
+    }
+
+    private void ignoreCaseTableCheck(Statement statement, String tableName) throws Exception {
+        FileStoreTable table = getFileStoreTable(tableName.toLowerCase());
 
         // check sync schema changes and records
-        try (Statement statement = getStatement()) {
-            statement.executeUpdate("USE paimon_ignore_CASE");
-            statement.executeUpdate("INSERT INTO T VALUES (1, 'Hi')");
-            RowType rowType1 =
-                    RowType.of(
-                            new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(20)},
-                            new String[] {"k", "uppercase_v0"});
-            waitForResult(
-                    Collections.singletonList("+I[1, Hi]"),
-                    table,
-                    rowType1,
-                    Collections.singletonList("k"));
+        statement.executeUpdate("INSERT INTO " + tableName + " VALUES (1, 'Hi')");
+        RowType rowType1 =
+                RowType.of(
+                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(20)},
+                        new String[] {"k", "uppercase_v0"});
+        waitForResult(
+                Collections.singletonList("+I[1, Hi]"),
+                table,
+                rowType1,
+                Collections.singletonList("k"));
 
-            statement.executeUpdate("ALTER TABLE T MODIFY COLUMN UPPERCASE_V0 VARCHAR(30)");
-            statement.executeUpdate("INSERT INTO T VALUES (2, 'Paimon')");
-            RowType rowType2 =
-                    RowType.of(
-                            new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(30)},
-                            new String[] {"k", "uppercase_v0"});
-            waitForResult(
-                    Arrays.asList("+I[1, Hi]", "+I[2, Paimon]"),
-                    table,
-                    rowType2,
-                    Collections.singletonList("k"));
+        statement.executeUpdate(
+                "ALTER TABLE " + tableName + " MODIFY COLUMN UPPERCASE_V0 VARCHAR(30)");
+        statement.executeUpdate("INSERT INTO " + tableName + " VALUES (2, 'Paimon')");
+        RowType rowType2 =
+                RowType.of(
+                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(30)},
+                        new String[] {"k", "uppercase_v0"});
+        waitForResult(
+                Arrays.asList("+I[1, Hi]", "+I[2, Paimon]"),
+                table,
+                rowType2,
+                Collections.singletonList("k"));
 
-            statement.executeUpdate("ALTER TABLE T ADD COLUMN UPPERCASE_V1 DOUBLE");
-            statement.executeUpdate("INSERT INTO T VALUES (3, 'Test', 0.5)");
-            RowType rowType3 =
-                    RowType.of(
-                            new DataType[] {
-                                DataTypes.INT().notNull(), DataTypes.VARCHAR(30), DataTypes.DOUBLE()
-                            },
-                            new String[] {"k", "uppercase_v0", "uppercase_v1"});
-            waitForResult(
-                    Arrays.asList("+I[1, Hi, NULL]", "+I[2, Paimon, NULL]", "+I[3, Test, 0.5]"),
-                    table,
-                    rowType3,
-                    Collections.singletonList("k"));
-        }
+        statement.executeUpdate("ALTER TABLE " + tableName + " ADD COLUMN UPPERCASE_V1 DOUBLE");
+        statement.executeUpdate("INSERT INTO " + tableName + " VALUES (3, 'Test', 0.5)");
+        RowType rowType3 =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(), DataTypes.VARCHAR(30), DataTypes.DOUBLE()
+                        },
+                        new String[] {"k", "uppercase_v0", "uppercase_v1"});
+        waitForResult(
+                Arrays.asList("+I[1, Hi, NULL]", "+I[2, Paimon, NULL]", "+I[3, Test, 0.5]"),
+                table,
+                rowType3,
+                Collections.singletonList("k"));
     }
 
     @Test

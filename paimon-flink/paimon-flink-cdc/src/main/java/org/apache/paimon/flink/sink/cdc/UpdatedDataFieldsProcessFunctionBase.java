@@ -29,6 +29,7 @@ import org.apache.paimon.types.DataTypeChecks;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
@@ -46,8 +47,10 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
     private static final Logger LOG =
             LoggerFactory.getLogger(UpdatedDataFieldsProcessFunctionBase.class);
 
-    protected Catalog catalog;
     protected final Catalog.Loader catalogLoader;
+    protected Catalog catalog;
+    private boolean caseSensitive;
+
     private static final List<DataTypeRoot> STRING_TYPES =
             Arrays.asList(DataTypeRoot.CHAR, DataTypeRoot.VARCHAR);
     private static final List<DataTypeRoot> BINARY_TYPES =
@@ -73,6 +76,7 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
     @Override
     public void open(Configuration parameters) {
         this.catalog = catalogLoader.load();
+        this.caseSensitive = this.catalog.caseSensitive();
     }
 
     protected void applySchemaChange(
@@ -198,8 +202,10 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
 
         List<SchemaChange> result = new ArrayList<>();
         for (DataField newField : updatedDataFields) {
-            if (oldFields.containsKey(newField.name())) {
-                DataField oldField = oldFields.get(newField.name());
+            String newFieldName =
+                    StringUtils.caseSensitiveConversion(newField.name(), caseSensitive);
+            if (oldFields.containsKey(newFieldName)) {
+                DataField oldField = oldFields.get(newFieldName);
                 // we compare by ignoring nullable, because partition keys and primary keys might be
                 // nullable in source database, but they can't be null in Paimon
                 if (oldField.type().equalsIgnoreNullable(newField.type())) {
@@ -208,23 +214,23 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
                             && !newField.description().equals(oldField.description())) {
                         result.add(
                                 SchemaChange.updateColumnComment(
-                                        new String[] {newField.name()}, newField.description()));
+                                        new String[] {newFieldName}, newField.description()));
                     }
                 } else {
                     // update column type
-                    result.add(SchemaChange.updateColumnType(newField.name(), newField.type()));
+                    result.add(SchemaChange.updateColumnType(newFieldName, newField.type()));
                     // update column comment
                     if (newField.description() != null) {
                         result.add(
                                 SchemaChange.updateColumnComment(
-                                        new String[] {newField.name()}, newField.description()));
+                                        new String[] {newFieldName}, newField.description()));
                     }
                 }
             } else {
                 // add column
                 result.add(
                         SchemaChange.addColumn(
-                                newField.name(), newField.type(), newField.description(), null));
+                                newFieldName, newField.type(), newField.description(), null));
             }
         }
         return result;

@@ -23,15 +23,14 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataField;
 
 import java.io.Serializable;
-import java.util.HashSet;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
-import java.util.function.Function;
 
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnCaseConvertAndDuplicateCheck;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.checkDuplicateFields;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.listCaseConvert;
+import static org.apache.paimon.utils.StringUtils.caseSensitiveConversion;
 
 /** Build schema for new table found in database synchronization. */
 public class NewTableSchemaBuilder implements Serializable {
@@ -53,29 +52,23 @@ public class NewTableSchemaBuilder implements Serializable {
         Schema.Builder builder = Schema.newBuilder();
         builder.options(tableConfig);
 
-        String tableName = record.tableName();
-        tableName = tableName == null ? "UNKNOWN" : tableName;
-
         // fields
-        Set<String> existedFields = new HashSet<>();
-        Function<String, String> columnDuplicateErrMsg = columnDuplicateErrMsg(tableName);
+        List<String> allFieldNames = new ArrayList<>();
 
         for (DataField dataField : record.fields()) {
-            String fieldName =
-                    columnCaseConvertAndDuplicateCheck(
-                            dataField.name(), existedFields, caseSensitive, columnDuplicateErrMsg);
+            String fieldName = caseSensitiveConversion(dataField.name(), caseSensitive);
+            allFieldNames.add(fieldName);
             builder.column(fieldName, dataField.type(), dataField.description());
         }
 
         for (CdcMetadataConverter metadataConverter : metadataConverters) {
             String metadataColumnName =
-                    columnCaseConvertAndDuplicateCheck(
-                            metadataConverter.columnName(),
-                            existedFields,
-                            caseSensitive,
-                            columnDuplicateErrMsg);
+                    caseSensitiveConversion(metadataConverter.columnName(), caseSensitive);
+            allFieldNames.add(metadataColumnName);
             builder.column(metadataColumnName, metadataConverter.dataType());
         }
+
+        checkDuplicateFields(record.tableName(), allFieldNames);
 
         builder.primaryKey(listCaseConvert(record.primaryKeys(), caseSensitive));
 
