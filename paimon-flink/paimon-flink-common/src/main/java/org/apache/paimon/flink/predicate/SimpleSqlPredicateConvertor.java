@@ -46,9 +46,9 @@ public class SimpleSqlPredicateConvertor {
         Object config =
                 calciteModule3
                         .configDelegate()
-                        .withUnquotedCasing(
+                        .withLex(
                                 calciteModule3.sqlParserDelegate().config(),
-                                calciteModule3.casingDelegate().unchanged());
+                                calciteModule3.lexDelegate().java());
         Object sqlParser = calciteModule3.sqlParserDelegate().create(whereSql, config);
         Object sqlBasicCall = calciteModule3.sqlParserDelegate().parseExpression(sqlParser);
         return convert(sqlBasicCall);
@@ -124,13 +124,13 @@ public class SimpleSqlPredicateConvertor {
             BiFunction<Integer, Object, Predicate> visitLeft,
             BiFunction<Integer, Object, Predicate> visitRight)
             throws Exception {
-        if (calciteModule3.sqlIndentifierDelegate().isInstanceOfSqlIdentifier(left)
+        if (calciteModule3.sqlIndentifierDelegate().instanceOfSqlIdentifier(left)
                 && calciteModule3.sqlLiteralDelegate().instanceOfSqlLiteral(right)) {
             int index = getfieldIndex(String.valueOf(left));
             String value = calciteModule3.sqlLiteralDelegate().toValue(right);
             DataType type = rowType.getFieldTypes().get(index);
             return visitLeft.apply(index, TypeUtils.castFromString(value, type));
-        } else if (calciteModule3.sqlIndentifierDelegate().isInstanceOfSqlIdentifier(right)
+        } else if (calciteModule3.sqlIndentifierDelegate().instanceOfSqlIdentifier(right)
                 && calciteModule3.sqlLiteralDelegate().instanceOfSqlLiteral(left)) {
             int index = getfieldIndex(right.toString());
             return visitRight.apply(

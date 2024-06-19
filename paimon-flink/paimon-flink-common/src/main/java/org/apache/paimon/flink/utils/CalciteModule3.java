@@ -25,7 +25,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.List;
 
-/** */
+/** Util Class for load calcite dependency through reflection. */
 public class CalciteModule3 {
     private static final Logger LOGGER = LoggerFactory.getLogger(CalciteModule3.class);
     private static final String Flink_PLANNER_MODULE_CLASS =
@@ -41,7 +41,7 @@ public class CalciteModule3 {
     private final SqlOperatorDelegate sqlOperatorDelegate;
     private final SqlKindDelegate sqlKindDelegate;
     private final SqlParserDelegate sqlParserDelegate;
-    private final CasingDelegate casingDelegate;
+    private final LexDelegate lexDelegate;
     private final ConfigDelegate configDelegate;
     private final SqlIndentifierDelegate sqlIndentifierDelegate;
 
@@ -61,7 +61,7 @@ public class CalciteModule3 {
         sqlOperatorDelegate = new SqlOperatorDelegate();
         sqlKindDelegate = new SqlKindDelegate();
         sqlParserDelegate = new SqlParserDelegate();
-        casingDelegate = new CasingDelegate();
+        lexDelegate = new LexDelegate();
         configDelegate = new ConfigDelegate();
         sqlIndentifierDelegate = new SqlIndentifierDelegate();
     }
@@ -90,6 +90,7 @@ public class CalciteModule3 {
         return Class.forName(className, true, submoduleClassLoader);
     }
 
+    /** Accessing org.apache.calcite.sql.parser.SqlParser by Reflection. */
     public static class SqlParserDelegate {
         private static final String CLASS_NAME = "org.apache.calcite.sql.parser.SqlParser";
         private final Class<?> clazz;
@@ -116,19 +117,21 @@ public class CalciteModule3 {
         }
     }
 
-    public static class CasingDelegate {
-        private static final String CLASS_NAME = "org.apache.calcite.avatica.util.Casing";
+    /** Accessing org.apache.calcite.config.Lex by Reflection. */
+    public static class LexDelegate {
+        private static final String CLASS_NAME = "org.apache.calcite.config.Lex";
         private final Class<?> clazz;
 
-        public CasingDelegate() throws ClassNotFoundException {
+        public LexDelegate() throws ClassNotFoundException {
             this.clazz = loadCalciteClass(CLASS_NAME);
         }
 
-        public Object unchanged() throws NoSuchFieldException, IllegalAccessException {
-            return clazz.getField("UNCHANGED").get(null);
+        public Object java() throws NoSuchFieldException, IllegalAccessException {
+            return clazz.getField("JAVA").get(null);
         }
     }
 
+    /** Accessing org.apache.calcite.sql.SqlKind by Reflection. */
     public static class SqlKindDelegate {
         private static final String CLASS_NAME = "org.apache.calcite.sql.SqlKind";
         private final Class<?> clazz;
@@ -186,6 +189,7 @@ public class CalciteModule3 {
         }
     }
 
+    /** Accessing org.apache.calcite.sql.parser.SqlParser$Config by Reflection. */
     public static class ConfigDelegate {
         static final String CLASS_NAME = "org.apache.calcite.sql.parser.SqlParser$Config";
         private final Class<?> clazz;
@@ -198,17 +202,17 @@ public class CalciteModule3 {
             return clazz;
         }
 
-        public Object withUnquotedCasing(Object config, Object unChangedCasingEnum)
-                throws Exception {
+        public Object withLex(Object config, Object lex) throws Exception {
             return invokeMethod(
                     config.getClass(),
                     config,
-                    "withUnquotedCasing",
-                    new Class[] {loadCalciteClass(CasingDelegate.CLASS_NAME)},
-                    new Object[] {unChangedCasingEnum});
+                    "withLex",
+                    new Class[] {loadCalciteClass(LexDelegate.CLASS_NAME)},
+                    new Object[] {lex});
         }
     }
 
+    /** Accessing org.apache.calcite.sql.SqlBasicCall by Reflection. */
     public static class SqlBasicCallDelegate {
         static final String CLASS_NAME = "org.apache.calcite.sql.SqlBasicCall";
         private final Class<?> clazz;
@@ -227,6 +231,7 @@ public class CalciteModule3 {
         }
     }
 
+    /** Accessing org.apache.calcite.sql.SqlOperator by Reflection. */
     public static class SqlOperatorDelegate {
         static final String SQL_OPERATOR = "org.apache.calcite.sql.SqlOperator";
         private final Class<?> sqlOperatorClazz;
@@ -252,18 +257,19 @@ public class CalciteModule3 {
         }
 
         public boolean instanceOfSqlBinaryOperator(Object operator) throws Exception {
-            return operator.getClass().isAssignableFrom(sqlBinaryOperatorClazz);
+            return sqlBinaryOperatorClazz.isAssignableFrom(operator.getClass());
         }
 
         public boolean instanceOfSqlPostfixOperator(Object operator) throws Exception {
-            return operator.getClass().isAssignableFrom(sqlPostfixOperatorClazz);
+            return sqlPostfixOperatorClazz.isAssignableFrom(operator.getClass());
         }
 
         public boolean instanceOfSqlPrefixOperator(Object operator) throws Exception {
-            return operator.getClass().isAssignableFrom(sqlPrefixOperatorClazz);
+            return sqlPrefixOperatorClazz.isAssignableFrom(operator.getClass());
         }
     }
 
+    /** Accessing org.apache.calcite.sql.SqlIdentifier by Reflection. */
     public static class SqlIndentifierDelegate {
         private static final String SQL_IDENTIFIER = "org.apache.calcite.sql.SqlIdentifier";
         private final Class<?> identifierClazz;
@@ -272,11 +278,12 @@ public class CalciteModule3 {
             this.identifierClazz = loadCalciteClass(SQL_IDENTIFIER);
         }
 
-        public boolean isInstanceOfSqlIdentifier(Object sqlNode) throws Exception {
-            return sqlNode.getClass().isAssignableFrom(identifierClazz);
+        public boolean instanceOfSqlIdentifier(Object sqlNode) throws Exception {
+            return identifierClazz.isAssignableFrom(sqlNode.getClass());
         }
     }
 
+    /** Accessing org.apache.calcite.sql.SqlNodeList by Reflection. */
     public static class SqlNodeListDelegate {
         private static final String SQL_NODE_LIST = "org.apache.calcite.sql.SqlNodeList";
         private final Class<?> clazz;
@@ -291,6 +298,7 @@ public class CalciteModule3 {
         }
     }
 
+    /** Accessing org.apache.calcite.sql.SqlLiteral by Reflection. */
     public static class SqlLiteralDelegate {
         private static final String CLASS_NAME = "org.apache.calcite.sql.SqlLiteral";
         private final Class<?> clazz;
@@ -300,7 +308,7 @@ public class CalciteModule3 {
         }
 
         public boolean instanceOfSqlLiteral(Object sqlNode) throws Exception {
-            return sqlNode.getClass().isAssignableFrom(clazz);
+            return clazz.isAssignableFrom(sqlNode.getClass());
         }
 
         public String toValue(Object sqlNode) throws Exception {
@@ -333,8 +341,8 @@ public class CalciteModule3 {
         return sqlParserDelegate;
     }
 
-    public CasingDelegate casingDelegate() {
-        return casingDelegate;
+    public LexDelegate lexDelegate() {
+        return lexDelegate;
     }
 
     public ConfigDelegate configDelegate() {

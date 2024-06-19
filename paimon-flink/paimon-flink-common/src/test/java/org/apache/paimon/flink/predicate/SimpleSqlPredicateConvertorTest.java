@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.predicate;
 
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.DataTypes;
@@ -45,6 +46,7 @@ class SimpleSqlPredicateConvertorTest {
                         .field("a", DataTypes.INT())
                         .field("b", DataTypes.STRING())
                         .field("c", DataTypes.DATE())
+                        .field("hour", DataTypes.STRING())
                         .build();
         predicateBuilder = new PredicateBuilder(rowType);
         simpleSqlPredicateConvertor = new SimpleSqlPredicateConvertor(rowType);
@@ -55,9 +57,12 @@ class SimpleSqlPredicateConvertorTest {
         {
             //
             // org.apache.calcite.sql.parser.ImmutableSqlParser$Config.withUnquotedCasing(org.apache.calcite.avatica.util.Casing)
-            Predicate predicate = simpleSqlPredicateConvertor.convertSqlToPredicate("a ='1'");
+            Predicate predicate = simpleSqlPredicateConvertor.convertSqlToPredicate("`hour` ='1'");
             Assertions.assertThat(predicate)
-                    .isEqualTo(predicateBuilder.equal(predicateBuilder.indexOf("a"), 1));
+                    .isEqualTo(
+                            predicateBuilder.equal(
+                                    predicateBuilder.indexOf("hour"),
+                                    BinaryString.fromString("1")));
         }
 
         {
