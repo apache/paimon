@@ -110,7 +110,7 @@ public class CdcSinkBuilder<T> {
                                         new SchemaManager(dataTable.fileIO(), dataTable.location()),
                                         identifier,
                                         catalogLoader))
-                        .name("Schema Change");
+                        .name("Schema Evolution");
         schemaChangeProcessFunction.getTransformation().setParallelism(1);
         schemaChangeProcessFunction.getTransformation().setMaxParallelism(1);
 
