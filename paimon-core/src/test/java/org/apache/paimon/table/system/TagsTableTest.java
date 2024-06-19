@@ -27,7 +27,7 @@ import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
-import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableCommitApi;
 import org.apache.paimon.tag.Tag;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.DateTimeUtils;
@@ -65,7 +65,8 @@ class TagsTableTest extends TableTestBase {
                         .build();
         catalog.createTable(identifier, schema, true);
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
-        TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        TableCommitApi commit =
+                table.newCommit(commitUser).ignoreEmptyCommit(false).asTableCommitApi();
         commit.commit(
                 new ManifestCommittable(
                         0,

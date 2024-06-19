@@ -46,7 +46,7 @@ public interface StreamTableWrite extends TableWrite {
         return true;
     }
 
-    default StreamTableWrite asStreamTableWrite(){
+    default StreamTableWrite asStreamTableWrite() {
         return this;
     }
 }

@@ -30,7 +30,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
-import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableCommitApi;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 
@@ -196,7 +196,7 @@ public abstract class SparkReadTestBase {
         FileStoreTable fileStoreTable = getTable(tableName);
         StreamWriteBuilder streamWriteBuilder = fileStoreTable.newStreamWriteBuilder();
         StreamTableWrite writer = streamWriteBuilder.newWrite();
-        TableCommitImpl commit = (TableCommitImpl) streamWriteBuilder.newCommit();
+        TableCommitApi commit = (TableCommitApi) streamWriteBuilder.newCommit();
 
         for (GenericRow row : rows) {
             writer.write(row);

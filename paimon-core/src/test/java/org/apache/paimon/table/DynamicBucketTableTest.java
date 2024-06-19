@@ -29,7 +29,7 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.BatchWriteBuilderImpl;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
-import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.table.sink.TableWriteApi;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.Pair;
 
@@ -49,7 +49,7 @@ public class DynamicBucketTableTest extends TableTestBase {
 
         Table table = getTableDefault();
         BatchWriteBuilderImpl builder = (BatchWriteBuilderImpl) table.newBatchWriteBuilder();
-        TableWriteImpl batchTableWrite = (TableWriteImpl) builder.withOverwrite().newWrite();
+        TableWriteApi batchTableWrite = (TableWriteApi) builder.withOverwrite().newWrite();
         HashIndexMaintainer indexMaintainer =
                 (HashIndexMaintainer)
                         ((AbstractFileStoreWrite<?>) (batchTableWrite.getWrite()))

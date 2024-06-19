@@ -52,7 +52,7 @@ import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
-import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableCommitApi;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.OutOfRangeException;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -371,7 +371,7 @@ public abstract class FileStoreTableTestBase {
         write.write(rowData(1, 5, 6L));
         write.write(rowData(1, 7, 8L));
         write.write(rowData(1, 9, 10L));
-        TableCommitImpl commit = table.newCommit(commitUser);
+        TableCommitApi commit = table.newCommit(commitUser);
         commit.commit(0, write.prepareCommit(true, 0));
         write.close();
         commit.close();
@@ -392,7 +392,7 @@ public abstract class FileStoreTableTestBase {
         StreamTableWrite write = table.newWrite(commitUser);
         write.write(rowData(1, 2, 3L));
         List<CommitMessage> messages = write.prepareCommit(true, 0);
-        TableCommitImpl commit = table.newCommit(commitUser);
+        TableCommitApi commit = table.newCommit(commitUser);
         commit.abort(messages);
 
         FileStatus[] files =
@@ -1156,7 +1156,7 @@ public abstract class FileStoreTableTestBase {
         options.put(CHANGELOG_NUM_RETAINED_MAX.key(), "1");
         options.put(SNAPSHOT_EXPIRE_LIMIT.key(), "2");
 
-        TableCommitImpl commit = table.copy(options).newCommit(commitUser);
+        TableCommitApi commit = table.copy(options).newCommit(commitUser);
         ExecutorService executor = commit.getExpireMainExecutor();
         CountDownLatch before = new CountDownLatch(1);
         CountDownLatch after = new CountDownLatch(1);
@@ -1240,10 +1240,10 @@ public abstract class FileStoreTableTestBase {
         options.put(SNAPSHOT_EXPIRE_LIMIT.key(), "2");
 
         table = table.copy(options);
-        TableCommitImpl commit =
+        TableCommitApi commit =
                 table.copy(Collections.singletonMap(WRITE_ONLY.key(), "true"))
                         .newCommit(commitUser);
-        TableCommitImpl expire = table.newCommit(commitUser);
+        TableCommitApi expire = table.newCommit(commitUser);
 
         try (StreamTableWrite write = table.newWrite(commitUser)) {
             for (int i = 0; i < 10; i++) {

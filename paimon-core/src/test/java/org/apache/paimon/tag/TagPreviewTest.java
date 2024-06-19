@@ -23,7 +23,7 @@ import org.apache.paimon.CoreOptions.TagCreationMode;
 import org.apache.paimon.catalog.PrimaryKeyTableTestBase;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableCommitApi;
 
 import org.junit.jupiter.api.Test;
 
@@ -55,8 +55,11 @@ public class TagPreviewTest extends PrimaryKeyTableTestBase {
         Map<String, String> dynamicOptions = new HashMap<>();
         dynamicOptions.put(SNAPSHOT_NUM_RETAINED_MIN.key(), "3");
         dynamicOptions.put(SNAPSHOT_NUM_RETAINED_MAX.key(), "3");
-        TableCommitImpl commit =
-                table.copy(dynamicOptions).newCommit(commitUser).ignoreEmptyCommit(false);
+        TableCommitApi commit =
+                table.copy(dynamicOptions)
+                        .newCommit(commitUser)
+                        .ignoreEmptyCommit(false)
+                        .asTableCommitApi();
 
         commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T12:12:00")));
         assertThat(preview.timeTravel(table, "2023-07-18"))

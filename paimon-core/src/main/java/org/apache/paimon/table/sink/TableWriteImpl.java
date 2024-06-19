@@ -31,7 +31,6 @@ import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite.State;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowKind;
-import org.apache.paimon.utils.Restorable;
 
 import javax.annotation.Nullable;
 
@@ -88,7 +87,7 @@ public class TableWriteImpl<T> implements TableWriteApi<T> {
     }
 
     @Override
-    public TableWriteApi<T> withMemoryPool(MemorySegmentPool memoryPool) {
+    public TableWriteImpl<T> withMemoryPool(MemorySegmentPool memoryPool) {
         write.withMemoryPool(memoryPool);
         return this;
     }

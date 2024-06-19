@@ -23,7 +23,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableCommitApi;
 import org.apache.paimon.table.source.snapshot.ScannerTestBase;
 
 import org.junit.jupiter.api.Test;
@@ -47,7 +47,7 @@ public class TableScanListPartitionsTest extends ScannerTestBase {
             write.write(row);
         }
         List<CommitMessage> result = write.prepareCommit();
-        TableCommitImpl commit = table.newCommit(commitUser);
+        TableCommitApi commit = table.newCommit(commitUser);
         commit.commit(result);
 
         AtomicInteger ai = new AtomicInteger(0);

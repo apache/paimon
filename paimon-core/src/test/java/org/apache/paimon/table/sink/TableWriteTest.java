@@ -118,7 +118,7 @@ public class TableWriteTest {
         conf.set(CoreOptions.PAGE_SIZE, new MemorySize(4096));
         FileStoreTable table = createFileStoreTable(conf);
 
-        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableWriteApi<?> write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
 
         Map<String, Long> expected = new HashMap<>();
@@ -189,8 +189,10 @@ public class TableWriteTest {
         conf.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.LOOKUP);
         FileStoreTable table = createFileStoreTable(conf);
 
-        TableWriteImpl<?> write =
-                table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
+        TableWriteApi<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString()))
+                        .asTableWriteApi();
         StreamTableCommit commit = table.newCommit(commitUser);
 
         int numPartitions = 5;
@@ -234,8 +236,10 @@ public class TableWriteTest {
         conf.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.FULL_COMPACTION);
 
         FileStoreTable table = createFileStoreTable(conf);
-        TableWriteImpl<?> write =
-                table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
+        TableWriteApi<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString()))
+                        .asTableWriteApi();
         StreamTableCommit commit = table.newCommit(commitUser);
 
         write.write(GenericRow.of(1, 1, 10L));
@@ -269,8 +273,10 @@ public class TableWriteTest {
         conf.set(CoreOptions.BUCKET, 1);
 
         FileStoreTable table = createFileStoreTable(conf);
-        TableWriteImpl<?> write =
-                table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
+        TableWriteApi<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString()))
+                        .asTableWriteApi();
         StreamTableCommit commit = table.newCommit(commitUser);
 
         write.write(GenericRow.of(1, 1, 10L));

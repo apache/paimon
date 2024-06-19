@@ -45,4 +45,12 @@ public interface InnerTableCommit extends StreamTableCommit, BatchTableCommit {
     InnerTableCommit ignoreEmptyCommit(boolean ignoreEmptyCommit);
 
     InnerTableCommit withMetricRegistry(MetricRegistry registry);
+
+    default boolean isInnerTableCommit() {
+        return true;
+    }
+
+    default InnerTableCommit asInnerTableCommit() {
+        return this;
+    }
 }

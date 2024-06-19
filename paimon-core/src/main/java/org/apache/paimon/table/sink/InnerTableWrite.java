@@ -30,7 +30,7 @@ public interface InnerTableWrite extends StreamTableWrite, BatchTableWrite {
         return true;
     }
 
-    default InnerTableWrite asInnerTableWrite(){
+    default InnerTableWrite asInnerTableWrite() {
         return this;
     }
 }

@@ -25,7 +25,7 @@ import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.TableCommit;
-import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableCommitApi;
 
 import org.apache.flink.metrics.groups.OperatorMetricGroup;
 
@@ -41,11 +41,11 @@ import java.util.Map;
 /** {@link Committer} for dynamic store. */
 public class StoreCommitter implements Committer<Committable, ManifestCommittable> {
 
-    private final TableCommitImpl commit;
+    private final TableCommitApi commit;
     @Nullable private final CommitterMetrics committerMetrics;
 
     public StoreCommitter(TableCommit commit, @Nullable OperatorMetricGroup metricGroup) {
-        this.commit = (TableCommitImpl) commit;
+        this.commit = (TableCommitApi) commit;
 
         if (metricGroup != null) {
             this.commit.withMetricRegistry(new FlinkMetricRegistry(metricGroup));

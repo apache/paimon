@@ -38,7 +38,7 @@ public interface TableWrite extends AutoCloseable {
         return false;
     }
 
-    default TableWriteApi<?> asTableWriteApi(){
+    default TableWriteApi<?> asTableWriteApi() {
         throw new RuntimeException("not impl for asTableWriteApi");
     }
 
@@ -46,7 +46,7 @@ public interface TableWrite extends AutoCloseable {
         return false;
     }
 
-    default BatchTableWrite asBatchTableWrite(){
+    default BatchTableWrite asBatchTableWrite() {
         throw new RuntimeException("not impl for asBatchTableWrite");
     }
 
@@ -54,7 +54,7 @@ public interface TableWrite extends AutoCloseable {
         return false;
     }
 
-    default StreamTableWrite asStreamTableWrite(){
+    default StreamTableWrite asStreamTableWrite() {
         throw new RuntimeException("not impl for asStreamTableWrite");
     }
 
@@ -62,7 +62,7 @@ public interface TableWrite extends AutoCloseable {
         return false;
     }
 
-    default InnerTableWrite asInnerTableWrite(){
+    default InnerTableWrite asInnerTableWrite() {
         throw new RuntimeException("not impl for asInnerTableWrite");
     }
 

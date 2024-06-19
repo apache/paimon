@@ -32,7 +32,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.table.sink.TableWriteApi;
-import org.apache.paimon.table.sink.TableWriteImpl;
 
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
@@ -140,14 +139,16 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                 !(memoryPool != null && memoryPoolFactory != null),
                 "memoryPool and memoryPoolFactory cannot be set at the same time.");
 
-        TableWriteImpl<?> tableWrite =
+        TableWriteApi<?> tableWrite =
                 table.newWrite(
                                 commitUser,
                                 (part, bucket) ->
                                         state.stateValueFilter().filter(table.name(), part, bucket))
-                        .withIOManager(paimonIOManager).asTableWriteApi()
+                        .withIOManager(paimonIOManager)
+                        .asTableWriteApi()
                         .withIgnorePreviousFiles(ignorePreviousFiles)
-                        .withExecutionMode(isStreamingMode).asTableWriteApi()
+                        .withExecutionMode(isStreamingMode)
+                        .asTableWriteApi()
                         .withBucketMode(table.bucketMode());
 
         if (metricGroup != null) {
@@ -157,12 +158,14 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
         if (memoryPoolFactory != null) {
             return tableWrite.withMemoryPoolFactory(memoryPoolFactory);
         } else {
-            return tableWrite.withMemoryPool(
-                    memoryPool != null
-                            ? memoryPool
-                            : new HeapMemorySegmentPool(
-                                    table.coreOptions().writeBufferSize(),
-                                    table.coreOptions().pageSize()));
+            return tableWrite
+                    .withMemoryPool(
+                            memoryPool != null
+                                    ? memoryPool
+                                    : new HeapMemorySegmentPool(
+                                            table.coreOptions().writeBufferSize(),
+                                            table.coreOptions().pageSize()))
+                    .asTableWriteApi();
         }
     }
 

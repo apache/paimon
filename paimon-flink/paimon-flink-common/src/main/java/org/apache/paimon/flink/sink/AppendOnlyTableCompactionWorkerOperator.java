@@ -25,7 +25,7 @@ import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableCommitApi;
 import org.apache.paimon.utils.ExecutorThreadFactory;
 
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
@@ -149,7 +149,7 @@ public class AppendOnlyTableCompactionWorkerOperator
                 return;
             }
 
-            try (TableCommitImpl tableCommit = table.newCommit(commitUser)) {
+            try (TableCommitApi tableCommit = table.newCommit(commitUser)) {
                 tableCommit.abort(messages);
             }
         }

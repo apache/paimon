@@ -26,7 +26,7 @@ import org.apache.paimon.catalog.PrimaryKeyTableTestBase;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableCommitApi;
 import org.apache.paimon.utils.TagManager;
 
 import org.junit.jupiter.api.Test;
@@ -58,7 +58,8 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
         options.set(TAG_NUM_RETAINED_MAX, 3);
         FileStoreTable table = this.table.copy(options.toMap());
-        TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        TableCommitApi commit =
+                table.newCommit(commitUser).ignoreEmptyCommit(false).asTableCommitApi();
         TagManager tagManager = table.store().newTagManager();
 
         // test normal creation
@@ -88,7 +89,11 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
         expireSetting.set(SNAPSHOT_NUM_RETAINED_MAX, 1);
         commit.close();
 
-        commit = table.copy(expireSetting.toMap()).newCommit(commitUser).ignoreEmptyCommit(false);
+        commit =
+                table.copy(expireSetting.toMap())
+                        .newCommit(commitUser)
+                        .ignoreEmptyCommit(false)
+                        .asTableCommitApi();
 
         // trigger snapshot expiration
         commit.commit(new ManifestCommittable(7, utcMills("2023-07-18T15:03:00")));
@@ -108,7 +113,8 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
         options.set(TAG_CREATION_DELAY, Duration.ofSeconds(10));
         FileStoreTable table = this.table.copy(options.toMap());
-        TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        TableCommitApi commit =
+                table.newCommit(commitUser).ignoreEmptyCommit(false).asTableCommitApi();
         TagManager tagManager = table.store().newTagManager();
 
         // test first create tag anyway
@@ -132,7 +138,8 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
         options.set(SINK_WATERMARK_TIME_ZONE, ZoneId.systemDefault().toString());
         FileStoreTable table = this.table.copy(options.toMap());
-        TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        TableCommitApi commit =
+                table.newCommit(commitUser).ignoreEmptyCommit(false).asTableCommitApi();
         TagManager tagManager = table.store().newTagManager();
 
         // test watermark is Long.MIN_VALUE.
@@ -155,7 +162,8 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
         options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.TWO_HOURS);
         FileStoreTable table = this.table.copy(options.toMap());
-        TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        TableCommitApi commit =
+                table.newCommit(commitUser).ignoreEmptyCommit(false).asTableCommitApi();
         TagManager tagManager = table.store().newTagManager();
 
         // test first create
@@ -178,7 +186,8 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
         options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.DAILY);
         FileStoreTable table = this.table.copy(options.toMap());
-        TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        TableCommitApi commit =
+                table.newCommit(commitUser).ignoreEmptyCommit(false).asTableCommitApi();
         TagManager tagManager = table.store().newTagManager();
 
         // test first create
@@ -191,7 +200,7 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
 
         // test newCommit create
         commit.close();
-        commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        commit = table.newCommit(commitUser).ignoreEmptyCommit(false).asTableCommitApi();
         commit.commit(new ManifestCommittable(0, utcMills("2023-07-20T12:00:01")));
         assertThat(tagManager.allTagNames()).containsOnly("2023-07-17", "2023-07-18", "2023-07-19");
         commit.close();
@@ -203,10 +212,10 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
         options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
         FileStoreTable table;
-        TableCommitImpl commit;
+        TableCommitApi commit;
         TagManager tagManager;
         table = this.table.copy(options.toMap());
-        commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        commit = table.newCommit(commitUser).ignoreEmptyCommit(false).asTableCommitApi();
         tagManager = table.store().newTagManager();
 
         // test first create
@@ -215,7 +224,7 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
 
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.DAILY);
         table = table.copy(options.toMap());
-        commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        commit = table.newCommit(commitUser).ignoreEmptyCommit(false).asTableCommitApi();
         tagManager = table.store().newTagManager();
 
         // test newCommit create
@@ -230,11 +239,11 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
         options.set(TAG_NUM_RETAINED_MAX, 3);
         FileStoreTable table;
-        TableCommitImpl commit;
+        TableCommitApi commit;
         TagManager tagManager;
         table = this.table.copy(options.toMap());
 
-        commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        commit = table.newCommit(commitUser).ignoreEmptyCommit(false).asTableCommitApi();
         tagManager = table.store().newTagManager();
 
         // test normal creation
@@ -263,7 +272,8 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.DAILY);
         options.set(TAG_PERIOD_FORMATTER, TagPeriodFormatter.WITHOUT_DASHES);
         FileStoreTable table = this.table.copy(options.toMap());
-        TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        TableCommitApi commit =
+                table.newCommit(commitUser).ignoreEmptyCommit(false).asTableCommitApi();
         TagManager tagManager = table.store().newTagManager();
 
         commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T12:12:00")));
@@ -280,7 +290,8 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
         options.set(TAG_PERIOD_FORMATTER, TagPeriodFormatter.WITHOUT_DASHES);
         FileStoreTable table = this.table.copy(options.toMap());
-        TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        TableCommitApi commit =
+                table.newCommit(commitUser).ignoreEmptyCommit(false).asTableCommitApi();
         TagManager tagManager = table.store().newTagManager();
 
         commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T12:12:00")));
@@ -297,7 +308,8 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
         options.set(TAG_NUM_RETAINED_MAX, 1);
         FileStoreTable table = this.table.copy(options.toMap());
-        TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        TableCommitApi commit =
+                table.newCommit(commitUser).ignoreEmptyCommit(false).asTableCommitApi();
         TagManager tagManager = table.store().newTagManager();
 
         commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T12:12:00")));
@@ -316,7 +328,8 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
         options.set(SINK_WATERMARK_TIME_ZONE, ZoneId.systemDefault().toString());
         options.set(SNAPSHOT_WATERMARK_IDLE_TIMEOUT.key(), "10 s");
         FileStoreTable table = this.table.copy(options.toMap());
-        TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        TableCommitApi commit =
+                table.newCommit(commitUser).ignoreEmptyCommit(false).asTableCommitApi();
 
         commit.commit(new ManifestCommittable(0, localZoneMills("2023-07-18T12:00:00")));
         commit.commit(new ManifestCommittable(0, localZoneMills("2023-07-18T12:00:10")));
@@ -335,7 +348,8 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
         options.set(TAG_NUM_RETAINED_MAX, 3);
         options.set(TAG_DEFAULT_TIME_RETAINED, Duration.ofMillis(500));
         FileStoreTable table = this.table.copy(options.toMap());
-        TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        TableCommitApi commit =
+                table.newCommit(commitUser).ignoreEmptyCommit(false).asTableCommitApi();
         TagManager tagManager = table.store().newTagManager();
 
         // test normal creation
@@ -360,7 +374,8 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
         options.set(TAG_NUM_RETAINED_MAX, 3);
         options.set(TAG_DEFAULT_TIME_RETAINED, Duration.ofMillis(500));
         FileStoreTable table = this.table.copy(options.toMap());
-        TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        TableCommitApi commit =
+                table.newCommit(commitUser).ignoreEmptyCommit(false).asTableCommitApi();
         TagManager tagManager = table.store().newTagManager();
 
         // test normal creation

@@ -56,4 +56,12 @@ public interface BatchTableCommit extends TableCommit {
      * logically deleted and will be deleted after the snapshot expires.
      */
     void truncateTable();
+
+    default boolean isBatchTableCommit() {
+        return true;
+    }
+
+    default BatchTableCommit asBatchTableCommit() {
+        return this;
+    }
 }

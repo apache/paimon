@@ -30,7 +30,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.InnerTableWrite;
-import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableCommitApi;
 import org.apache.paimon.table.system.ReadOptimizedTable;
 import org.apache.paimon.types.DataTypes;
 
@@ -175,7 +175,7 @@ class DataTableSourceTest {
 
     private void writeData(FileStoreTable table) throws Exception {
         InnerTableWrite writer = table.newWrite("test");
-        TableCommitImpl commit = table.newCommit("test");
+        TableCommitApi commit = table.newCommit("test");
         writer.write(GenericRow.of(1, 2L));
         commit.commit(writer.prepareCommit());
         commit.close();

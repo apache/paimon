@@ -20,7 +20,7 @@ package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.manifest.ManifestCommittable;
-import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableCommitApi;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
@@ -33,7 +33,8 @@ public class BoundedWatermarkCheckerTest extends ScannerTestBase {
     @Test
     public void testBounded() throws Exception {
         SnapshotManager snapshotManager = table.snapshotManager();
-        TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        TableCommitApi commit =
+                table.newCommit(commitUser).ignoreEmptyCommit(false).asTableCommitApi();
         BoundedChecker checker = BoundedChecker.watermark(2000L);
 
         commit.commit(new ManifestCommittable(0, 1024L));

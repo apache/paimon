@@ -41,7 +41,7 @@ public interface BatchTableWrite extends TableWrite {
         return true;
     }
 
-    default BatchTableWrite asBatchTableWrite(){
+    default BatchTableWrite asBatchTableWrite() {
         return this;
     }
 }

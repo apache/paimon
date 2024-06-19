@@ -26,7 +26,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
-import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableCommitApi;
 import org.apache.paimon.table.source.snapshot.ScannerTestBase;
 import org.apache.paimon.types.RowKind;
 
@@ -180,7 +180,7 @@ public class StreamTableScanTest extends ScannerTestBase {
         FileStoreTable table = this.table.copy(options);
         TableRead read = table.newRead();
         StreamTableWrite write = table.newWrite(commitUser);
-        TableCommitImpl commit = table.newCommit(commitUser);
+        TableCommitApi commit = table.newCommit(commitUser);
         StreamTableScan scan = table.newStreamScan();
 
         write.write(rowData(1, 10, 100L));
@@ -205,7 +205,7 @@ public class StreamTableScanTest extends ScannerTestBase {
         FileStoreTable table = this.table.copy(options);
         TableRead read = table.newRead();
         StreamTableWrite write = table.newWrite(commitUser);
-        TableCommitImpl commit = table.newCommit(commitUser);
+        TableCommitApi commit = table.newCommit(commitUser);
         StreamTableScan scan = table.newStreamScan();
 
         write.write(rowData(1, 10, 100L));

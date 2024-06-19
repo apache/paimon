@@ -31,7 +31,7 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
-import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableCommitApi;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.SnapshotManager;
@@ -243,7 +243,7 @@ public class PartitionExpireTest {
         StreamTableWrite write =
                 table.copy(Collections.singletonMap(WRITE_ONLY.key(), "true")).newWrite("");
         write.write(GenericRow.of(BinaryString.fromString(f0), BinaryString.fromString(f1)));
-        TableCommitImpl commit = table.newCommit("");
+        TableCommitApi commit = table.newCommit("");
         commit.commit(0, write.prepareCommit(true, 0));
         write.close();
         commit.close();

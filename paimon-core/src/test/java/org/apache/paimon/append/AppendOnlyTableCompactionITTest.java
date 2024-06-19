@@ -33,7 +33,7 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.StreamTableWrite;
-import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableCommitApi;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -147,7 +147,7 @@ public class AppendOnlyTableCompactionITTest {
     }
 
     private void commit(List<CommitMessage> messages) throws Exception {
-        TableCommitImpl commit = appendOnlyFileStoreTable.newCommit(commitUser);
+        TableCommitApi commit = appendOnlyFileStoreTable.newCommit(commitUser);
         commit.commit(messages);
         commit.close();
     }

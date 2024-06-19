@@ -37,4 +37,36 @@ public interface TableCommit extends AutoCloseable {
 
     /** Abort an unsuccessful commit. The data files will be deleted. */
     void abort(List<CommitMessage> commitMessages);
+
+    default boolean isBatchTableCommit() {
+        return false;
+    }
+
+    default BatchTableCommit asBatchTableCommit() {
+        throw new RuntimeException("not impl for asBatchTableCommit");
+    }
+
+    default boolean isInnerTableCommit() {
+        return false;
+    }
+
+    default InnerTableCommit asInnerTableCommit() {
+        throw new RuntimeException("not impl for asInnerTableCommit");
+    }
+
+    default boolean isStreamTableCommit() {
+        return false;
+    }
+
+    default StreamTableCommit asStreamTableCommit() {
+        throw new RuntimeException("not impl for asStreamTableCommit");
+    }
+
+    default boolean isTableCommitApi() {
+        return false;
+    }
+
+    default TableCommitApi asTableCommitApi() {
+        throw new RuntimeException("not impl for asTableCommitApi");
+    }
 }

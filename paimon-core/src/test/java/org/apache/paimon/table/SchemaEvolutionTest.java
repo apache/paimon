@@ -33,7 +33,7 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.StreamTableWrite;
-import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableCommitApi;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
@@ -217,7 +217,7 @@ public class SchemaEvolutionTest {
         StreamTableWrite write = table.newWrite(commitUser);
         write.write(GenericRow.of(1, 1L));
         write.write(GenericRow.of(2, 2L));
-        TableCommitImpl commit = table.newCommit(commitUser);
+        TableCommitApi commit = table.newCommit(commitUser);
         commit.commit(0, write.prepareCommit(true, 0));
         write.close();
         commit.close();

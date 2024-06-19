@@ -24,7 +24,7 @@ import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestCommittableSerializer;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamTableWrite;
-import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableCommitApi;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -65,7 +65,7 @@ public class BatchWriteGeneratorTagOperatorTest extends CommitterOperatorTest {
                                                 new ManifestCommittableSerializer())));
         committerOperator.open();
 
-        TableCommitImpl tableCommit = table.newCommit(initialCommitUser);
+        TableCommitApi tableCommit = table.newCommit(initialCommitUser);
 
         write.write(GenericRow.of(1, 10L));
         tableCommit.commit(write.prepareCommit(false, 1));

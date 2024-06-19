@@ -443,7 +443,9 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                             configure.accept(conf);
                         });
         StreamTableWrite write =
-                table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString()))
+                        .asStreamTableWrite();
         StreamTableCommit commit = table.newCommit(commitUser);
 
         write.write(rowData(1, 10, 110L));

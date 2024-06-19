@@ -28,8 +28,8 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
-import org.apache.paimon.table.sink.TableCommitImpl;
-import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.table.sink.TableCommitApi;
+import org.apache.paimon.table.sink.TableWriteApi;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
@@ -122,9 +122,9 @@ public class PaimonInputSplitTest {
 
     private void writeData(FileStoreTable fileStoreTable) throws Exception {
         String commitUser = UUID.randomUUID().toString();
-        TableWriteImpl<?> tableWrite = fileStoreTable.newWrite(commitUser);
+        TableWriteApi<?> tableWrite = fileStoreTable.newWrite(commitUser);
         tableWrite.write(GenericRow.of(BinaryString.fromString("1111")));
-        TableCommitImpl commit = fileStoreTable.newCommit(commitUser);
+        TableCommitApi commit = fileStoreTable.newCommit(commitUser);
         commit.commit(0, tableWrite.prepareCommit(true, 0));
         tableWrite.close();
         commit.close();

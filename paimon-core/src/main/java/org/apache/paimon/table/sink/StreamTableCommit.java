@@ -74,4 +74,12 @@ public interface StreamTableCommit extends TableCommit {
      * @return number of {@code List<CommitMessage>} committed.
      */
     int filterAndCommit(Map<Long, List<CommitMessage>> commitIdentifiersAndMessages);
+
+    default boolean isStreamTableCommit() {
+        return true;
+    }
+
+    default StreamTableCommit asStreamTableCommit() {
+        return this;
+    }
 }

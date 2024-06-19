@@ -41,6 +41,7 @@ import org.apache.paimon.table.sink.DynamicBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.RowKindGenerator;
+import org.apache.paimon.table.sink.TableCommitApi;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.UnawareBucketRowKeyExtractor;
 import org.apache.paimon.table.source.InnerStreamTableScan;
@@ -308,12 +309,12 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public TableCommitImpl newCommit(String commitUser) {
+    public TableCommitApi newCommit(String commitUser) {
         // Compatibility with previous design, the main branch is written by default
         return newCommit(commitUser, DEFAULT_MAIN_BRANCH);
     }
 
-    public TableCommitImpl newCommit(String commitUser, String branchName) {
+    public TableCommitApi newCommit(String commitUser, String branchName) {
         CoreOptions options = coreOptions();
         Runnable snapshotExpire = null;
         if (!options.writeOnly()) {

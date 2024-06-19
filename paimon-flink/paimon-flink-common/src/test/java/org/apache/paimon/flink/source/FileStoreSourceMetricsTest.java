@@ -30,7 +30,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.InnerTableWrite;
-import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableCommitApi;
 import org.apache.paimon.types.DataTypes;
 
 import org.apache.flink.api.common.JobID;
@@ -141,7 +141,7 @@ public class FileStoreSourceMetricsTest {
 
     private void writeOnce() throws Exception {
         InnerTableWrite writer = table.newWrite("test");
-        TableCommitImpl commit = table.newCommit("test");
+        TableCommitApi commit = table.newCommit("test");
         writer.write(GenericRow.of(1, 2L));
         writer.write(GenericRow.of(3, 4L));
         writer.write(GenericRow.of(5, 6L));
@@ -155,7 +155,7 @@ public class FileStoreSourceMetricsTest {
 
     private void writeAgain() throws Exception {
         InnerTableWrite writer = table.newWrite("test");
-        TableCommitImpl commit = table.newCommit("test");
+        TableCommitApi commit = table.newCommit("test");
         writer.write(GenericRow.of(10, 2L));
         writer.write(GenericRow.of(13, 24L));
         writer.write(GenericRow.of(15, 26L));
