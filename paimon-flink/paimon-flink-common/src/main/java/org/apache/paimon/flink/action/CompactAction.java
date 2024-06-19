@@ -20,13 +20,13 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.compact.UnawareBucketCompactionTopoBuilder;
+import org.apache.paimon.flink.predicate.SimpleSqlPredicateConvertor;
 import org.apache.paimon.flink.sink.CompactorSinkBuilder;
 import org.apache.paimon.flink.source.CompactorSourceBuilder;
 import org.apache.paimon.predicate.PartitionPredicateVisitor;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
@@ -38,9 +38,6 @@ import org.apache.flink.table.data.RowData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.lang.reflect.Constructor;
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -50,11 +47,6 @@ import static org.apache.paimon.partition.PartitionPredicate.createPartitionPred
 
 /** Table compact action for Flink. */
 public class CompactAction extends TableActionBase {
-    private static final String Flink_PLANNER_MODULE_CLASS =
-            "org.apache.flink.table.planner.loader.PlannerModule";
-    private static final String PLANNER_MODULE_METHOD = "getInstance";
-
-    private static final String CALCITECLASSLOADER = "submoduleClassLoader";
 
     private static final Logger LOGGER = LoggerFactory.getLogger(CompactAction.class);
 
@@ -162,26 +154,9 @@ public class CompactAction extends TableActionBase {
                                                                     .partitionDefaultName()))
                                     .toArray(Predicate[]::new));
         } else if (whereSql != null) {
-            Class<?> plannerModuleClass = Class.forName(Flink_PLANNER_MODULE_CLASS);
-            Method getInstanceMethod = plannerModuleClass.getDeclaredMethod(PLANNER_MODULE_METHOD);
-            getInstanceMethod.setAccessible(true);
-            Object plannerModuleInstance = getInstanceMethod.invoke(null);
-
-            Field submoduleClassLoaderField =
-                    plannerModuleClass.getDeclaredField(CALCITECLASSLOADER);
-            submoduleClassLoaderField.setAccessible(true);
-            ClassLoader classLoader =
-                    (ClassLoader) submoduleClassLoaderField.get(plannerModuleInstance);
-            Class<?> clazz =
-                    classLoader.loadClass(
-                            "org.apache.paimon.flink.predicate.SimpleSqlPredicateConvertor");
-            Constructor<?> constructor = clazz.getConstructor(RowType.class);
-            // convertor
-            Object o = constructor.newInstance(table.rowType());
-
-            // convert
-            Method method = clazz.getMethod("convertSqlToPredicate", String.class);
-            predicate = (Predicate) method.invoke(o, whereSql);
+            SimpleSqlPredicateConvertor simpleSqlPredicateConvertor =
+                    new SimpleSqlPredicateConvertor(table.rowType());
+            predicate = simpleSqlPredicateConvertor.convertSqlToPredicate(whereSql);
         }
 
         // Check whether predicate contain non parition key.

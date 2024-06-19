@@ -18,135 +18,100 @@
 
 package org.apache.paimon.flink.predicate;
 
+import org.apache.paimon.flink.utils.CalciteModule3;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.TypeUtils;
 
-import org.apache.calcite.sql.SqlBasicCall;
-import org.apache.calcite.sql.SqlBinaryOperator;
-import org.apache.calcite.sql.SqlIdentifier;
-import org.apache.calcite.sql.SqlKind;
-import org.apache.calcite.sql.SqlLiteral;
-import org.apache.calcite.sql.SqlNode;
-import org.apache.calcite.sql.SqlNodeList;
-import org.apache.calcite.sql.SqlOperator;
-import org.apache.calcite.sql.SqlPostfixOperator;
-import org.apache.calcite.sql.SqlPrefixOperator;
-import org.apache.calcite.sql.parser.SqlParseException;
-import org.apache.calcite.sql.parser.SqlParser;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BiFunction;
 
-import static org.apache.calcite.avatica.util.Casing.UNCHANGED;
-
 /** convert sql to predicate. */
 public class SimpleSqlPredicateConvertor {
-
     private final PredicateBuilder builder;
     private final RowType rowType;
 
-    //    private final ClassLoader calciteClassLoader;
+    private CalciteModule3 calciteModule3;
 
     public SimpleSqlPredicateConvertor(RowType type) throws Exception {
         this.rowType = type;
         this.builder = new PredicateBuilder(type);
-        //        calciteClassLoader = initCalciteClassLoader();
+        calciteModule3 = new CalciteModule3();
     }
 
-    public Predicate convertSqlToPredicate(String conditionSql) throws SqlParseException {
-        ClassLoader pre = Thread.currentThread().getContextClassLoader();
-        try {
-            //            Thread.currentThread().setContextClassLoader(calciteClassLoader);
-            //            try {
-            //                Class<?> aClass =
-            //                        Thread.currentThread()
-            //                                .getContextClassLoader()
-            //                                .loadClass("org.apache.calcite.sql.parser.SqlParser");
-            //                Field defaultIdentifierMaxLength =
-            // aClass.getField("DEFAULT_IDENTIFIER_MAX_LENGTH");
-            //                Object o = defaultIdentifierMaxLength.get(null);
-
-            SqlParser parser =
-                    SqlParser.create(
-                            conditionSql, SqlParser.config().withUnquotedCasing(UNCHANGED));
-            SqlNode sqlNode = parser.parseExpression();
-            return convert((SqlBasicCall) sqlNode);
-            //            } catch (ClassNotFoundException e) {
-            //                throw new RuntimeException(e);
-            //            } catch (NoSuchFieldException e) {
-            //                throw new RuntimeException(e);
-            //            } catch (IllegalAccessException e) {
-            //                throw new RuntimeException(e);
-            //            }
-        } finally {
-            Thread.currentThread().setContextClassLoader(pre);
-        }
+    public Predicate convertSqlToPredicate(String whereSql) throws Exception {
+        Object config =
+                calciteModule3
+                        .configDelegate()
+                        .withUnquotedCasing(
+                                calciteModule3.sqlParserDelegate().config(),
+                                calciteModule3.casingDelegate().unchanged());
+        Object sqlParser = calciteModule3.sqlParserDelegate().create(whereSql, config);
+        Object sqlBasicCall = calciteModule3.sqlParserDelegate().parseExpression(sqlParser);
+        return convert(sqlBasicCall);
     }
 
-    public Predicate convert(SqlBasicCall sqlBasicCall) {
-        SqlOperator operator = sqlBasicCall.getOperator();
-        SqlKind kind = operator.getKind();
-        if (operator instanceof SqlBinaryOperator) {
-            List<SqlNode> operandList = sqlBasicCall.getOperandList();
-            SqlNode left = operandList.get(0);
-            SqlNode right = operandList.get(1);
-            switch (kind) {
-                case OR:
-                    return PredicateBuilder.or(
-                            convert((SqlBasicCall) left), convert((SqlBasicCall) right));
-                case AND:
-                    return PredicateBuilder.and(
-                            convert((SqlBasicCall) left), convert((SqlBasicCall) right));
-                case EQUALS:
-                    return visitBiFunction(left, right, builder::equal, builder::equal);
-                case NOT_EQUALS:
-                    return visitBiFunction(left, right, builder::notEqual, builder::notEqual);
-                case LESS_THAN:
-                    return visitBiFunction(left, right, builder::lessThan, builder::greaterThan);
-                case LESS_THAN_OR_EQUAL:
-                    return visitBiFunction(
-                            left, right, builder::lessOrEqual, builder::greaterOrEqual);
-                case GREATER_THAN:
-                    return visitBiFunction(left, right, builder::greaterThan, builder::lessThan);
-                case GREATER_THAN_OR_EQUAL:
-                    return visitBiFunction(
-                            left, right, builder::greaterOrEqual, builder::lessOrEqual);
-                case IN:
-                    {
-                        int index = getfieldIndex(left.toString());
-                        SqlNodeList elementslist = (SqlNodeList) right;
+    public Predicate convert(Object sqlBasicCall) throws Exception {
+        Object operator = calciteModule3.sqlBasicCallDelegate().getOperator(sqlBasicCall);
+        Object kind = calciteModule3.sqlOperatorDelegate().getKind(operator);
 
-                        List<Object> list = new ArrayList<>();
-                        for (SqlNode sqlNode : elementslist) {
-                            Object literal =
-                                    TypeUtils.castFromString(
-                                            ((SqlLiteral) sqlNode).toValue(),
-                                            rowType.getFieldTypes().get(index));
-                            list.add(literal);
-                        }
-                        return builder.in(index, list);
-                    }
+        if (calciteModule3.sqlOperatorDelegate().instanceOfSqlBinaryOperator(operator)) {
+            List<?> operandList =
+                    calciteModule3.sqlBasicCallDelegate().getOperandList(sqlBasicCall);
+            Object left = operandList.get(0);
+            Object right = operandList.get(1);
+            if (kind == calciteModule3.sqlKindDelegate().or()) {
+                return PredicateBuilder.or(convert(left), convert(right));
+            } else if (kind == calciteModule3.sqlKindDelegate().and()) {
+                return PredicateBuilder.and(convert(left), convert(right));
+            } else if (kind == calciteModule3.sqlKindDelegate().equals()) {
+                return visitBiFunction(left, right, builder::equal, builder::equal);
+            } else if (kind == calciteModule3.sqlKindDelegate().notEquals()) {
+                return visitBiFunction(left, right, builder::notEqual, builder::notEqual);
+            } else if (kind == calciteModule3.sqlKindDelegate().lessThan()) {
+                return visitBiFunction(left, right, builder::lessThan, builder::greaterThan);
+            } else if (kind == calciteModule3.sqlKindDelegate().lessThanOrEqual()) {
+                return visitBiFunction(left, right, builder::lessOrEqual, builder::greaterOrEqual);
+            } else if (kind == calciteModule3.sqlKindDelegate().greaterThan()) {
+                return visitBiFunction(left, right, builder::greaterThan, builder::lessThan);
+            } else if (kind == calciteModule3.sqlKindDelegate().greaterThanOrEqual()) {
+                return visitBiFunction(left, right, builder::greaterOrEqual, builder::lessOrEqual);
+            } else if (kind == calciteModule3.sqlKindDelegate().in()) {
+                int index = getfieldIndex(left.toString());
+                List<?> elementslist = calciteModule3.sqlNodeListDelegate().getList(right);
+
+                List<Object> list = new ArrayList<>();
+                for (Object sqlNode : elementslist) {
+                    Object literal =
+                            TypeUtils.castFromString(
+                                    calciteModule3.sqlLiteralDelegate().toValue(sqlNode),
+                                    rowType.getFieldTypes().get(index));
+                    list.add(literal);
+                }
+                return builder.in(index, list);
             }
-        } else if (operator instanceof SqlPostfixOperator) {
-            SqlNode child = sqlBasicCall.getOperandList().get(0);
-            switch (kind) {
-                case IS_NULL:
-                    {
-                        String field = String.valueOf(child);
-                        return builder.isNull(getfieldIndex(field));
-                    }
-                case IS_NOT_NULL:
-                    String field = String.valueOf(child);
-                    return builder.isNotNull(getfieldIndex(field));
+        } else if (calciteModule3.sqlOperatorDelegate().instanceOfSqlPostfixOperator(operator)) {
+            Object child =
+                    calciteModule3.sqlBasicCallDelegate().getOperandList(sqlBasicCall).get(0);
+            if (kind == calciteModule3.sqlKindDelegate().isNull()) {
+                String field = String.valueOf(child);
+                return builder.isNull(getfieldIndex(field));
+            } else if (kind == calciteModule3.sqlKindDelegate().isNotNull()) {
+                String field = String.valueOf(child);
+                return builder.isNotNull(getfieldIndex(field));
             }
-        } else if (operator instanceof SqlPrefixOperator) {
-            if (kind == SqlKind.NOT) {
-                SqlBasicCall child = (SqlBasicCall) sqlBasicCall.getOperandList().get(0);
-                return convert(child).negate().get();
+        } else if (calciteModule3.sqlOperatorDelegate().instanceOfSqlPrefixOperator(operator)) {
+            if (kind == calciteModule3.sqlKindDelegate().not()) {
+                return convert(
+                                calciteModule3
+                                        .sqlBasicCallDelegate()
+                                        .getOperandList(sqlBasicCall)
+                                        .get(0))
+                        .negate()
+                        .get();
             }
         }
 
@@ -154,21 +119,25 @@ public class SimpleSqlPredicateConvertor {
     }
 
     public Predicate visitBiFunction(
-            SqlNode left,
-            SqlNode right,
+            Object left,
+            Object right,
             BiFunction<Integer, Object, Predicate> visitLeft,
-            BiFunction<Integer, Object, Predicate> visitRight) {
-        if (left instanceof SqlIdentifier && right instanceof SqlLiteral) {
-            int index = getfieldIndex(left.toString());
-            String value = ((SqlLiteral) right).toValue();
+            BiFunction<Integer, Object, Predicate> visitRight)
+            throws Exception {
+        if (calciteModule3.sqlIndentifierDelegate().isInstanceOfSqlIdentifier(left)
+                && calciteModule3.sqlLiteralDelegate().instanceOfSqlLiteral(right)) {
+            int index = getfieldIndex(String.valueOf(left));
+            String value = calciteModule3.sqlLiteralDelegate().toValue(right);
             DataType type = rowType.getFieldTypes().get(index);
             return visitLeft.apply(index, TypeUtils.castFromString(value, type));
-        } else if (right instanceof SqlIdentifier && left instanceof SqlLiteral) {
+        } else if (calciteModule3.sqlIndentifierDelegate().isInstanceOfSqlIdentifier(right)
+                && calciteModule3.sqlLiteralDelegate().instanceOfSqlLiteral(left)) {
             int index = getfieldIndex(right.toString());
             return visitRight.apply(
                     index,
                     TypeUtils.castFromString(
-                            ((SqlLiteral) left).toValue(), rowType.getFieldTypes().get(index)));
+                            calciteModule3.sqlLiteralDelegate().toValue(left),
+                            rowType.getFieldTypes().get(index)));
         }
 
         throw new UnsupportedOperationException(

@@ -25,7 +25,6 @@ import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
-import org.apache.calcite.sql.parser.SqlParseException;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -52,8 +51,10 @@ class SimpleSqlPredicateConvertorTest {
     }
 
     @Test
-    public void testEqual() throws SqlParseException {
+    public void testEqual() throws Exception {
         {
+            //
+            // org.apache.calcite.sql.parser.ImmutableSqlParser$Config.withUnquotedCasing(org.apache.calcite.avatica.util.Casing)
             Predicate predicate = simpleSqlPredicateConvertor.convertSqlToPredicate("a ='1'");
             Assertions.assertThat(predicate)
                     .isEqualTo(predicateBuilder.equal(predicateBuilder.indexOf("a"), 1));
@@ -68,7 +69,7 @@ class SimpleSqlPredicateConvertorTest {
     }
 
     @Test
-    public void testNotEqual() throws SqlParseException {
+    public void testNotEqual() throws Exception {
         {
             Predicate predicate = simpleSqlPredicateConvertor.convertSqlToPredicate("a <>'1'");
             Assertions.assertThat(predicate)
@@ -84,7 +85,7 @@ class SimpleSqlPredicateConvertorTest {
     }
 
     @Test
-    public void testLessThan() throws SqlParseException {
+    public void testLessThan() throws Exception {
         {
             Predicate predicate = simpleSqlPredicateConvertor.convertSqlToPredicate("a <'1'");
             Assertions.assertThat(predicate)
@@ -100,7 +101,7 @@ class SimpleSqlPredicateConvertorTest {
     }
 
     @Test
-    public void testLessThanOrEqual() throws SqlParseException {
+    public void testLessThanOrEqual() throws Exception {
         {
             Predicate predicate = simpleSqlPredicateConvertor.convertSqlToPredicate("a <='1'");
             Assertions.assertThat(predicate)
@@ -117,7 +118,7 @@ class SimpleSqlPredicateConvertorTest {
     }
 
     @Test
-    public void testGreatThan() throws SqlParseException {
+    public void testGreatThan() throws Exception {
         {
             Predicate predicate = simpleSqlPredicateConvertor.convertSqlToPredicate("a >'1'");
             Assertions.assertThat(predicate)
@@ -133,7 +134,7 @@ class SimpleSqlPredicateConvertorTest {
     }
 
     @Test
-    public void testGreatEqual() throws SqlParseException {
+    public void testGreatEqual() throws Exception {
         {
             Predicate predicate = simpleSqlPredicateConvertor.convertSqlToPredicate("a >='1'");
             Assertions.assertThat(predicate)
@@ -149,7 +150,7 @@ class SimpleSqlPredicateConvertorTest {
     }
 
     @Test
-    public void testIN() throws SqlParseException {
+    public void testIN() throws Exception {
         Predicate predicate = simpleSqlPredicateConvertor.convertSqlToPredicate("a in ('1','2')");
         List<Object> elements = Lists.newArrayList(1, 2);
         Assertions.assertThat(predicate)
@@ -157,21 +158,21 @@ class SimpleSqlPredicateConvertorTest {
     }
 
     @Test
-    public void testIsNull() throws SqlParseException {
+    public void testIsNull() throws Exception {
         Predicate predicate = simpleSqlPredicateConvertor.convertSqlToPredicate("a is null ");
         Assertions.assertThat(predicate)
                 .isEqualTo(predicateBuilder.isNull(predicateBuilder.indexOf("a")));
     }
 
     @Test
-    public void testIsNotNull() throws SqlParseException {
+    public void testIsNotNull() throws Exception {
         Predicate predicate = simpleSqlPredicateConvertor.convertSqlToPredicate("a is not  null ");
         Assertions.assertThat(predicate)
                 .isEqualTo(predicateBuilder.isNotNull(predicateBuilder.indexOf("a")));
     }
 
     @Test
-    public void testAnd() throws SqlParseException {
+    public void testAnd() throws Exception {
         Predicate actual =
                 simpleSqlPredicateConvertor.convertSqlToPredicate("a is not null and c is null");
         Predicate expected =
@@ -182,7 +183,7 @@ class SimpleSqlPredicateConvertorTest {
     }
 
     @Test
-    public void testOr() throws SqlParseException {
+    public void testOr() throws Exception {
         Predicate actual =
                 simpleSqlPredicateConvertor.convertSqlToPredicate("a is not  null or c is null ");
         Predicate expected =
@@ -193,14 +194,14 @@ class SimpleSqlPredicateConvertorTest {
     }
 
     @Test
-    public void testNOT() throws SqlParseException {
+    public void testNOT() throws Exception {
         Predicate actual = simpleSqlPredicateConvertor.convertSqlToPredicate("not (a is null) ");
         Predicate expected = predicateBuilder.isNull(predicateBuilder.indexOf("a")).negate().get();
         Assertions.assertThat(actual).isEqualTo(expected);
     }
 
     @Test
-    public void testFieldNoFound() throws SqlParseException {
+    public void testFieldNoFound() {
         Assertions.assertThatThrownBy(
                         () -> simpleSqlPredicateConvertor.convertSqlToPredicate("f =1"))
                 .hasMessage("Field `f` not found");

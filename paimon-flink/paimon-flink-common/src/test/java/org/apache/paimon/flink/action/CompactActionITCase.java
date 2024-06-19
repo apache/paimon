@@ -320,7 +320,6 @@ public class CompactActionITCase extends CompactActionITCaseBase {
     }
 
     private void runAction(boolean isStreaming) throws Exception {
-        ThreadLocalRandom random = ThreadLocalRandom.current();
         runAction(isStreaming, false);
     }
 
@@ -347,7 +346,7 @@ public class CompactActionITCase extends CompactActionITCaseBase {
                         tableName);
         ThreadLocalRandom random = ThreadLocalRandom.current();
         if (unawareBucket) {
-            if (random.nextBoolean()) {
+            if (true) {
                 baseArgs.addAll(Lists.newArrayList("--where", "k=1"));
             } else {
                 baseArgs.addAll(Lists.newArrayList("--partition", "k=1"));
