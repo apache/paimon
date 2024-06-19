@@ -101,7 +101,7 @@ under the License.
         <test.randomization.seed/>
         <test.unit.pattern>**/*Test.*</test.unit.pattern>
         <test.flink.main.version>1.19</test.flink.main.version>
-        <test.flink.version>1.19.0</test.flink.version>
+        <test.flink.version>1.19.1</test.flink.version>
         <!-- TODO upgrade after connector releases x-1.19 version -->
         <test.flink.connector.kafka.version>3.0.1-1.18</test.flink.connector.kafka.version>
 
