@@ -45,7 +45,9 @@ public class IncrementalStartingScannerTest extends ScannerTestBase {
     public void testScan() throws Exception {
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write =
-                table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString()))
+                        .asStreamTableWrite();
         StreamTableCommit commit = table.newCommit(commitUser);
 
         write.write(rowData(1, 10, 100L));
