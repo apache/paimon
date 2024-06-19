@@ -1269,7 +1269,7 @@ public abstract class HiveCatalogITCaseBase {
                         "CALL sys.expire_partitions(`table` => 'default.students', expiration_time => '1 d', timestamp_formatter => 'yyyy-MM-dd')")
                 .await();
 
-        assertThat(hiveShell.executeQuery("SHOW PARTITIONS students"))
+        assertThat(hiveShell.executeQuery("show partitions students"))
                 .containsExactlyInAnyOrder("dt=2024-06-15");
     }
 
