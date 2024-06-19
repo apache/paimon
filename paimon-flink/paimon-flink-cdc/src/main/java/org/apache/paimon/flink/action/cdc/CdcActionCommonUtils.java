@@ -113,7 +113,8 @@ public class CdcActionCommonUtils {
                             }
                             String columnLowerCase = field.name().toLowerCase();
                             if (!existedFields.add(columnLowerCase)) {
-                                columnDuplicateErrMsg.apply(field.name());
+                                throw new IllegalArgumentException(
+                                        columnDuplicateErrMsg.apply(field.name()));
                             }
                             return field.newName(columnLowerCase);
                         })
@@ -146,7 +147,7 @@ public class CdcActionCommonUtils {
             for (Map.Entry<String, T> entry : origin.entrySet()) {
                 String key = entry.getKey();
                 if (newMap.containsKey(key.toLowerCase())) {
-                    duplicateErrMsg.apply(key);
+                    throw new IllegalArgumentException(duplicateErrMsg.apply(key));
                 }
                 newMap.put(key.toLowerCase(), entry.getValue());
             }
@@ -183,7 +184,7 @@ public class CdcActionCommonUtils {
         }
         String columnLowerCase = column.toLowerCase();
         if (!existedFields.add(columnLowerCase)) {
-            columnDuplicateErrMsg.apply(column);
+            throw new IllegalArgumentException(columnDuplicateErrMsg.apply(column));
         }
         return columnLowerCase;
     }
