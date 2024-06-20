@@ -24,7 +24,7 @@ import org.apache.paimon.spark.catalyst.analysis.Update
 
 import org.assertj.core.api.Assertions.{assertThat, assertThatThrownBy}
 
-class UpdateTableTest extends PaimonSparkTestBase {
+abstract class UpdateTableTest extends PaimonSparkTestBase {
 
   import testImplicits._
 
