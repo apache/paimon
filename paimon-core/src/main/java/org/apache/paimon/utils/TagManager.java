@@ -104,11 +104,8 @@ public class TagManager {
             try {
                 fileIO.writeFileUtf8(
                         newTagPath,
-                        timeRetained != null
-                                ? Tag.fromSnapshotAndTagTtl(
-                                                snapshot, timeRetained, LocalDateTime.now())
-                                        .toJson()
-                                : snapshot.toJson());
+                        Tag.fromSnapshotAndTagTtl(snapshot, timeRetained, LocalDateTime.now())
+                                .toJson());
             } catch (IOException e) {
                 throw new RuntimeException(
                         String.format(
