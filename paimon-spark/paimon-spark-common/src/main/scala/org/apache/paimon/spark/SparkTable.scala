@@ -35,7 +35,7 @@ import java.util.{Collections, EnumSet => JEnumSet, HashMap => JHashMap, Map => 
 import scala.collection.JavaConverters._
 
 /** A spark [[org.apache.spark.sql.connector.catalog.Table]] for paimon. */
-case class SparkTable(table: Table)
+case class SparkTable(table: Table, db: String = null)
   extends org.apache.spark.sql.connector.catalog.Table
   with SupportsRead
   with SupportsWrite
@@ -44,7 +44,7 @@ case class SparkTable(table: Table)
 
   def getTable: Table = table
 
-  override def name: String = table.name
+  override def name: String = if (db == null) table.name() else (db + "." + table.name)
 
   override lazy val schema: StructType = SparkTypeUtils.fromPaimonRowType(table.rowType)
 

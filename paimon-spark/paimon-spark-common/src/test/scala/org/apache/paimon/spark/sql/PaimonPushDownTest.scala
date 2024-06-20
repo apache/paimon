@@ -177,7 +177,7 @@ class PaimonPushDownTest extends PaimonSparkTestBase {
   }
 
   private def getScanBuilder(tableName: String = "T"): ScanBuilder = {
-    new SparkTable(loadTable(tableName))
+    new SparkTable(loadTable(tableName), dbName0)
       .newScanBuilder(CaseInsensitiveStringMap.empty())
   }
 
