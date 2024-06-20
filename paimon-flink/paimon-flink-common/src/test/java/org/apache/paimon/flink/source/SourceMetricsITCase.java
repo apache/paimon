@@ -55,7 +55,7 @@ public class SourceMetricsITCase {
                             .setConfiguration(reporter.addToConfiguration(new Configuration()))
                             .build());
 
-    @TempDir protected static Path tempPath;
+    @TempDir Path tempPath;
 
     @AfterEach
     public final void cleanupRunningJobs() throws Exception {
