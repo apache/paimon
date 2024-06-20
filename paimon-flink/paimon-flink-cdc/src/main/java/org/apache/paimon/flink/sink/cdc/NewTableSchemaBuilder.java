@@ -67,7 +67,7 @@ public class NewTableSchemaBuilder implements Serializable {
                         Collections.emptyList(),
                         tableConfig,
                         sourceSchema,
-                        new CdcMetadataConverter[0],
+                        metadataConverters,
                         caseSensitive,
                         false,
                         true));
