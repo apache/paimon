@@ -1017,13 +1017,16 @@ public class CoreOptions implements Serializable {
             key("tag.num-retained-max")
                     .intType()
                     .noDefaultValue()
-                    .withDescription("The maximum number of tags to retain.");
+                    .withDescription(
+                            "The maximum number of tags to retain. It only affects auto-created tags.");
 
     public static final ConfigOption<Duration> TAG_DEFAULT_TIME_RETAINED =
             key("tag.default-time-retained")
                     .durationType()
                     .noDefaultValue()
-                    .withDescription("The default maximum time retained for newly created tags.");
+                    .withDescription(
+                            "The default maximum time retained for newly created tags. "
+                                    + "It affects both auto-created tags and manually created (by procedure) tags.");
 
     public static final ConfigOption<Duration> SNAPSHOT_WATERMARK_IDLE_TIMEOUT =
             key("snapshot.watermark-idle-timeout")
