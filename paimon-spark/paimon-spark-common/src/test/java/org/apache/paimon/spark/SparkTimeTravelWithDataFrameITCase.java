@@ -120,7 +120,8 @@ public class SparkTimeTravelWithDataFrameITCase extends SparkReadTestBase {
                                         .collectAsList())
                 .satisfies(
                         anyCauseMatches(
-                                RuntimeException.class, "Fails to read snapshot from path file"));
+                                IllegalArgumentException.class,
+                                "The specified scan snapshotId 3 is out of available snapshotId range [1, 1]"));
     }
 
     @Test
