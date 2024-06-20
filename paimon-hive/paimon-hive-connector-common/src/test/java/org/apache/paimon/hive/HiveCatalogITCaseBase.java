@@ -1249,24 +1249,7 @@ public abstract class HiveCatalogITCaseBase {
     @Test
     public void testExpiredPartitionsSyncToMetastore() throws Exception {
         // Use flink to create a partitioned table and write data, hive read.
-        path = folder.newFolder().toURI().toString();
-        EnvironmentSettings settings = EnvironmentSettings.newInstance().inBatchMode().build();
-        tEnv = TableEnvironmentImpl.create(settings);
-        tEnv.executeSql(
-                        "create catalog my_hive with (\n"
-                                + "  'type' = 'paimon',\n"
-                                + "  'metastore' = 'hive',\n"
-                                + "  'uri' = '',\n"
-                                + "  'warehouse' = '"
-                                + path
-                                + "',\n"
-                                + "  'metastore.client.class' = '"
-                                + HiveCatalogITCaseBase.class.getName()
-                                + "'\n"
-                                + ");")
-                .await();
-        tEnv.executeSql("USE CATALOG my_hive").await();
-        // Use flink to create a partitioned table and write data, hive read.
+        tEnv.executeSql("drop table if exists students").await();
         tEnv.executeSql(
                         "create table students\n"
                                 + "(id string\n"
@@ -1279,17 +1262,18 @@ public abstract class HiveCatalogITCaseBase {
                                 + "'metastore.partitioned-table' = 'true'\n"
                                 + ");")
                 .await();
+
         tEnv.executeSql("insert into students values('1', '2024-06-15')").await();
         tEnv.executeSql("insert into students values('1', '9998-06-15')").await();
         tEnv.executeSql("insert into students values('1', '9999-06-15')").await();
 
-        tEnv.executeSql(
-                        "CALL sys.expire_partitions(`table` => 'default.students', expiration_time => '1 d', timestamp_formatter => 'yyyy-MM-dd')")
-                .await();
-
-        hiveShell.execute("use default");
         assertThat(hiveShell.executeQuery("show partitions students"))
-                .containsExactlyInAnyOrder("dt=2024-06-15");
+                .containsExactlyInAnyOrder("dt=2024-06-15", "dt=9998-06-15", "dt=9999-06-15");
+        tEnv.executeSql(
+                        "CALL sys.expire_partitions(`table` => 'test_db.students', expiration_time => '1 d', timestamp_formatter => 'yyyy-MM-dd')")
+                .await();
+        assertThat(hiveShell.executeQuery("show partitions students"))
+                .containsExactlyInAnyOrder("dt=9998-06-15", "dt=9999-06-15");
     }
 
     /** Prepare to update a paimon table with a custom path in the paimon file system. */
