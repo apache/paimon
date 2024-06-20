@@ -1430,7 +1430,8 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                             conf.set("num-levels", "2");
                         });
         IOManager ioManager = IOManager.create(tablePath.toString());
-        StreamTableWrite write = table.newWrite(commitUser).withIOManager(ioManager);
+        StreamTableWrite write =
+                table.newWrite(commitUser).withIOManager(ioManager).asStreamTableWrite();
         StreamTableCommit commit = table.newCommit(commitUser);
         write.write(rowData(1, 1, 100L));
         write.write(rowData(1, 2, 200L));
@@ -1533,7 +1534,8 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
 
     private void innerTestTableQuery(FileStoreTable table) throws Exception {
         IOManager ioManager = IOManager.create(tablePath.toString());
-        StreamTableWrite write = table.newWrite(commitUser).withIOManager(ioManager);
+        StreamTableWrite write =
+                table.newWrite(commitUser).withIOManager(ioManager).asStreamTableWrite();
         StreamTableCommit commit = table.newCommit(commitUser);
 
         // first write
