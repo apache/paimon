@@ -51,10 +51,6 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.fieldNameCaseConvert;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.listCaseConvert;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.recordKeyDuplicateErrMsg;
 import static org.apache.paimon.utils.JsonSerdeUtil.convertValue;
 import static org.apache.paimon.utils.JsonSerdeUtil.getNodeAs;
 import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
@@ -75,15 +71,12 @@ public abstract class RecordParser
 
     protected static final String FIELD_TABLE = "table";
     protected static final String FIELD_DATABASE = "database";
-    private final boolean caseSensitive;
     protected final TypeMapping typeMapping;
     protected final List<ComputedColumn> computedColumns;
 
     protected JsonNode root;
 
-    public RecordParser(
-            boolean caseSensitive, TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        this.caseSensitive = caseSensitive;
+    public RecordParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
         this.typeMapping = typeMapping;
         this.computedColumns = computedColumns;
     }
@@ -203,15 +196,12 @@ public abstract class RecordParser
     /** Handle case sensitivity here. */
     private RichCdcMultiplexRecord createRecord(
             RowKind rowKind, Map<String, String> data, List<DataField> paimonFields) {
-        String databaseName = getDatabaseName();
-        String tableName = getTableName();
-        paimonFields = fieldNameCaseConvert(paimonFields, caseSensitive, tableName);
-
-        data = mapKeyCaseConvert(data, caseSensitive, recordKeyDuplicateErrMsg(data));
-        List<String> primaryKeys = listCaseConvert(extractPrimaryKeys(), caseSensitive);
-
         return new RichCdcMultiplexRecord(
-                databaseName, tableName, paimonFields, primaryKeys, new CdcRecord(rowKind, data));
+                getDatabaseName(),
+                getTableName(),
+                paimonFields,
+                extractPrimaryKeys(),
+                new CdcRecord(rowKind, data));
     }
 
     protected void setRoot(CdcSourceRecord record) {

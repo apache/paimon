@@ -58,13 +58,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Function;
 
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnCaseConvertAndDuplicateCheck;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.listCaseConvert;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.recordKeyDuplicateErrMsg;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
 import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
 
@@ -78,7 +72,6 @@ public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichC
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ZoneId serverTimeZone;
-    private final boolean caseSensitive;
     private final List<ComputedColumn> computedColumns;
     private final TypeMapping typeMapping;
 
@@ -93,11 +86,9 @@ public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichC
 
     public MySqlRecordParser(
             Configuration mySqlConfig,
-            boolean caseSensitive,
             List<ComputedColumn> computedColumns,
             TypeMapping typeMapping,
             CdcMetadataConverter[] metadataConverters) {
-        this.caseSensitive = caseSensitive;
         this.computedColumns = computedColumns;
         this.typeMapping = typeMapping;
         this.metadataConverters = metadataConverters;
@@ -162,7 +153,7 @@ public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichC
         Table table = tableChange.getTable();
 
         List<DataField> fields = extractFields(table);
-        List<String> primaryKeys = listCaseConvert(table.primaryKeyColumnNames(), caseSensitive);
+        List<String> primaryKeys = table.primaryKeyColumnNames();
 
         // TODO : add table comment and column comment when we upgrade flink cdc to 2.4
         return Collections.singletonList(
@@ -173,15 +164,8 @@ public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichC
     private List<DataField> extractFields(Table table) {
         RowType.Builder rowType = RowType.builder();
         List<Column> columns = table.columns();
-        Set<String> existedFields = new HashSet<>();
-        Function<String, String> columnDuplicateErrMsg =
-                columnDuplicateErrMsg(table.id().toString());
 
         for (Column column : columns) {
-            String columnName =
-                    columnCaseConvertAndDuplicateCheck(
-                            column.name(), existedFields, caseSensitive, columnDuplicateErrMsg);
-
             DataType dataType =
                     MySqlTypeUtils.toDataType(
                             column.typeExpression(),
@@ -190,7 +174,7 @@ public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichC
                             typeMapping);
             dataType = dataType.copy(typeMapping.containsMode(TO_NULLABLE) || column.isOptional());
 
-            rowType.field(columnName, dataType);
+            rowType.field(column.name(), dataType);
         }
         return rowType.build().getFields();
     }
@@ -203,13 +187,11 @@ public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichC
 
         Map<String, String> before = extractRow(root.payload().before());
         if (!before.isEmpty()) {
-            before = mapKeyCaseConvert(before, caseSensitive, recordKeyDuplicateErrMsg(before));
             records.add(createRecord(RowKind.DELETE, before));
         }
 
         Map<String, String> after = extractRow(root.payload().after());
         if (!after.isEmpty()) {
-            after = mapKeyCaseConvert(after, caseSensitive, recordKeyDuplicateErrMsg(after));
             records.add(createRecord(RowKind.INSERT, after));
         }
 

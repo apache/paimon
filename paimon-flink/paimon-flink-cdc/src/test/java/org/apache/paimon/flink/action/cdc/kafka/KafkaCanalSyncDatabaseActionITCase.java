@@ -542,11 +542,17 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.INT()
+                            DataTypes.INT().notNull(),
+                            DataTypes.VARCHAR(10),
+                            DataTypes.INT(),
+                            DataTypes.VARCHAR(10)
                         },
-                        new String[] {"k1", "v0", "v1"});
+                        new String[] {"k1", "v0", "v1", "v2"});
         waitForResult(
-                Arrays.asList("+I[5, five, 50]", "+I[7, seven, 70]"),
+                Arrays.asList(
+                        "+I[5, five, 50, NULL]",
+                        "+I[7, seven, 70, NULL]",
+                        "+I[8, eight, 80, added]"),
                 table,
                 rowType,
                 Collections.singletonList("k1"));

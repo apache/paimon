@@ -60,15 +60,10 @@ public class MongoDBRecordParser
     private static final String FIELD_NAMESPACE = "ns";
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private final List<ComputedColumn> computedColumns;
-    private final boolean caseSensitive;
     private final Configuration mongodbConfig;
     private JsonNode root;
 
-    public MongoDBRecordParser(
-            boolean caseSensitive,
-            List<ComputedColumn> computedColumns,
-            Configuration mongodbConfig) {
-        this.caseSensitive = caseSensitive;
+    public MongoDBRecordParser(List<ComputedColumn> computedColumns, Configuration mongodbConfig) {
         this.computedColumns = computedColumns;
         this.mongodbConfig = mongodbConfig;
     }
@@ -81,7 +76,7 @@ public class MongoDBRecordParser
         String collection = extractString(FIELD_TABLE);
         MongoVersionStrategy versionStrategy =
                 VersionStrategyFactory.create(
-                        databaseName, collection, caseSensitive, computedColumns, mongodbConfig);
+                        databaseName, collection, computedColumns, mongodbConfig);
         versionStrategy.extractRecords(root).forEach(out::collect);
     }
 
@@ -93,7 +88,6 @@ public class MongoDBRecordParser
         static MongoVersionStrategy create(
                 String databaseName,
                 String collection,
-                boolean caseSensitive,
                 List<ComputedColumn> computedColumns,
                 Configuration mongodbConfig) {
             // TODO: When MongoDB CDC is upgraded to 2.5, uncomment the version check logic
@@ -101,7 +95,7 @@ public class MongoDBRecordParser
             //     return new Mongo6VersionStrategy(databaseName, collection, caseSensitive);
             // }
             return new Mongo4VersionStrategy(
-                    databaseName, collection, caseSensitive, computedColumns, mongodbConfig);
+                    databaseName, collection, computedColumns, mongodbConfig);
         }
     }
 }

@@ -23,6 +23,7 @@ import org.apache.paimon.types.RowKind;
 
 import java.io.Serializable;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 
@@ -41,11 +42,6 @@ public class CdcRecord implements Serializable {
         this.fields = fields;
     }
 
-    public CdcRecord setRowKind(RowKind kind) {
-        this.kind = kind;
-        return this;
-    }
-
     public static CdcRecord emptyRecord() {
         return new CdcRecord(RowKind.INSERT, Collections.emptyMap());
     }
@@ -56,6 +52,14 @@ public class CdcRecord implements Serializable {
 
     public Map<String, String> fields() {
         return fields;
+    }
+
+    public CdcRecord fieldNameLowerCase() {
+        Map<String, String> newFields = new HashMap<>();
+        for (Map.Entry<String, String> entry : fields.entrySet()) {
+            newFields.put(entry.getKey().toLowerCase(), entry.getValue());
+        }
+        return new CdcRecord(kind, newFields);
     }
 
     @Override

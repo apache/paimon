@@ -82,9 +82,8 @@ public class CanalRecordParser extends RecordParser {
         return !isNull(node) && node.asBoolean();
     }
 
-    public CanalRecordParser(
-            boolean caseSensitive, TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        super(caseSensitive, typeMapping, computedColumns);
+    public CanalRecordParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
+        super(typeMapping, computedColumns);
     }
 
     @Override

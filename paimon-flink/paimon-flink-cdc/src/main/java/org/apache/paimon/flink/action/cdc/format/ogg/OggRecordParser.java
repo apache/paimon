@@ -58,9 +58,8 @@ public class OggRecordParser extends RecordParser {
     private static final String OP_INSERT = "I";
     private static final String OP_DELETE = "D";
 
-    public OggRecordParser(
-            boolean caseSensitive, TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        super(caseSensitive, typeMapping, computedColumns);
+    public OggRecordParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
+        super(typeMapping, computedColumns);
     }
 
     @Override

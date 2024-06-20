@@ -18,3 +18,4 @@
 
 {"data":[{"k1":"5","v0":"five","V1":"50"}],"database":"paimon_sync_database_affix","es":1684770072000,"id":81,"isDdl":false,"mysqlType":{"k1":"INT","v0":"VARCHAR(10)","V1":"INT"},"old":null,"pkNames":["k1"],"sql":"","sqlType":{"k1":4,"v0":12,"v1":4},"table":"t1","ts":1684770072286,"type":"INSERT"}
 {"data":[{"K1":"7","v0":"seven","V1":"70"}],"database":"paimon_sync_database_affix","es":1684770073000,"id":84,"isDdl":false,"mysqlType":{"K1":"INT","v0":"VARCHAR(10)","V1":"INT"},"old":null,"pkNames":["k1"],"sql":"","sqlType":{"k1":4,"v0":12,"v1":4},"table":"t1","ts":1684770073254,"type":"INSERT"}
+{"data":[{"K1":"8","v0":"eight","V1":"80", "V2":"added"}],"database":"paimon_sync_database_affix","es":1684770074000,"id":84,"isDdl":false,"mysqlType":{"K1":"INT","v0":"VARCHAR(10)","V1":"INT","V2":"VARCHAR(10)"},"old":null,"pkNames":["k1"],"sql":"","sqlType":{"k1":4,"v0":12,"v1":4,"v2":12},"table":"t1","ts":1684770073254,"type":"INSERT"}

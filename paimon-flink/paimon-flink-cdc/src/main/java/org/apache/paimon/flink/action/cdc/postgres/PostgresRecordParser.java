@@ -64,17 +64,10 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.function.Function;
 
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnCaseConvertAndDuplicateCheck;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.recordKeyDuplicateErrMsg;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
 import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.decimalLogicalName;
@@ -91,7 +84,6 @@ public class PostgresRecordParser
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ZoneId serverTimeZone;
-    private final boolean caseSensitive;
     private final List<ComputedColumn> computedColumns;
     private final TypeMapping typeMapping;
 
@@ -104,24 +96,9 @@ public class PostgresRecordParser
 
     public PostgresRecordParser(
             Configuration postgresConfig,
-            boolean caseSensitive,
-            TypeMapping typeMapping,
-            CdcMetadataConverter[] metadataConverters) {
-        this(
-                postgresConfig,
-                caseSensitive,
-                Collections.emptyList(),
-                typeMapping,
-                metadataConverters);
-    }
-
-    public PostgresRecordParser(
-            Configuration postgresConfig,
-            boolean caseSensitive,
             List<ComputedColumn> computedColumns,
             TypeMapping typeMapping,
             CdcMetadataConverter[] metadataConverters) {
-        this.caseSensitive = caseSensitive;
         this.computedColumns = computedColumns;
         this.typeMapping = typeMapping;
         this.metadataConverters = metadataConverters;
@@ -155,20 +132,14 @@ public class PostgresRecordParser
                         + "in the JsonDebeziumDeserializationSchema you created");
 
         RowType.Builder rowType = RowType.builder();
-        Set<String> existedFields = new HashSet<>();
-        Function<String, String> columnDuplicateErrMsg = columnDuplicateErrMsg(currentTable);
         afterFields.forEach(
                 (key, value) -> {
-                    String columnName =
-                            columnCaseConvertAndDuplicateCheck(
-                                    key, existedFields, caseSensitive, columnDuplicateErrMsg);
-
                     DataType dataType = extractFieldType(value);
                     dataType =
                             dataType.copy(
                                     typeMapping.containsMode(TO_NULLABLE) || value.optional());
 
-                    rowType.field(columnName, dataType);
+                    rowType.field(key, dataType);
                 });
         return rowType.build().getFields();
     }
@@ -241,13 +212,11 @@ public class PostgresRecordParser
 
         Map<String, String> before = extractRow(root.payload().before());
         if (!before.isEmpty()) {
-            before = mapKeyCaseConvert(before, caseSensitive, recordKeyDuplicateErrMsg(before));
             records.add(createRecord(RowKind.DELETE, before));
         }
 
         Map<String, String> after = extractRow(root.payload().after());
         if (!after.isEmpty()) {
-            after = mapKeyCaseConvert(after, caseSensitive, recordKeyDuplicateErrMsg(after));
             List<DataField> fields = extractFields(root.schema());
             records.add(
                     new RichCdcMultiplexRecord(
