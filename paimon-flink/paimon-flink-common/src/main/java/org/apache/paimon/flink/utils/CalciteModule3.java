@@ -46,21 +46,19 @@ public class CalciteModule3 {
     private final SqlIndentifierDelegate sqlIndentifierDelegate;
 
     static {
-        boolean findCalciteInCurrentClassLoader =false;
+        boolean findCalciteInCurrentClassLoader = false;
         ClassLoader currentClassLoader = Thread.currentThread().getContextClassLoader();
         try {
             currentClassLoader.loadClass(SqlParserDelegate.CLASS_NAME);
-            findCalciteInCurrentClassLoader =true;
+            findCalciteInCurrentClassLoader = true;
         } catch (ClassNotFoundException e) {
         }
 
-
         try {
-            if (findCalciteInCurrentClassLoader){
+            if (findCalciteInCurrentClassLoader) {
                 submoduleClassLoader = currentClassLoader;
-            }else {
+            } else {
                 submoduleClassLoader = initCalciteClassLoader();
-
             }
         } catch (Exception e) {
             LOGGER.error(String.format("Load Calcite class Fail: %s", e.getMessage()), e);
