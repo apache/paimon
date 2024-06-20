@@ -42,6 +42,12 @@ public class FieldCountAgg extends FieldAggregator {
         } else {
             // ordered by type root definition
             switch (fieldType.getTypeRoot()) {
+                case TINYINT:
+                    count = (byte) ((byte) accumulator + 1);
+                    break;
+                case SMALLINT:
+                    count = (short) ((short) accumulator + 1);
+                    break;
                 case INTEGER:
                     count = (int) accumulator + 1;
                     break;
@@ -63,6 +69,12 @@ public class FieldCountAgg extends FieldAggregator {
         } else {
             // ordered by type root definition
             switch (fieldType.getTypeRoot()) {
+                case TINYINT:
+                    count = (byte) ((byte) accumulator - 1);
+                    break;
+                case SMALLINT:
+                    count = (short) ((short) accumulator - 1);
+                    break;
                 case INTEGER:
                     count = (int) accumulator - 1;
                     break;

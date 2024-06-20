@@ -154,12 +154,33 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldCountIntAgg() {
-        FieldCountAgg fieldCountAgg = new FieldCountAgg(new IntType());
-        assertThat(fieldCountAgg.agg(null, null)).isEqualTo(0);
-        assertThat(fieldCountAgg.agg(1, null)).isEqualTo(1);
-        assertThat(fieldCountAgg.agg(null, 15)).isEqualTo(1);
-        assertThat(fieldCountAgg.agg(1, 0)).isEqualTo(2);
-        assertThat(fieldCountAgg.agg(3, 6)).isEqualTo(4);
+        FieldCountAgg fieldCountAggInt = new FieldCountAgg(new IntType());
+        assertThat(fieldCountAggInt.agg(null, null)).isEqualTo(0);
+        assertThat(fieldCountAggInt.agg(1, null)).isEqualTo(1);
+        assertThat(fieldCountAggInt.agg(null, 15)).isEqualTo(1);
+        assertThat(fieldCountAggInt.agg(1, 0)).isEqualTo(2);
+        assertThat(fieldCountAggInt.agg(3, 6)).isEqualTo(4);
+
+        FieldCountAgg fieldCountAggLong = new FieldCountAgg(new BigIntType());
+        assertThat(fieldCountAggLong.agg(null, null)).isEqualTo(0);
+        assertThat(fieldCountAggLong.agg((long) 1, null)).isEqualTo((long) 1);
+        assertThat(fieldCountAggLong.agg(null, (long) 15)).isEqualTo(1);
+        assertThat(fieldCountAggLong.agg((long) 1, 0)).isEqualTo((long) 2);
+        assertThat(fieldCountAggLong.agg((long) 3, (long) 6)).isEqualTo((long) 4);
+
+        FieldCountAgg fieldCountAggByte = new FieldCountAgg(new TinyIntType());
+        assertThat(fieldCountAggByte.agg(null, null)).isEqualTo(0);
+        assertThat(fieldCountAggByte.agg((byte) 1, null)).isEqualTo((byte) 1);
+        assertThat(fieldCountAggByte.agg(null, (byte) 15)).isEqualTo(1);
+        assertThat(fieldCountAggByte.agg((byte) 1, 0)).isEqualTo((byte) 2);
+        assertThat(fieldCountAggByte.agg((byte) 3, (byte) 6)).isEqualTo((byte) 4);
+
+        FieldCountAgg fieldCountAggShort = new FieldCountAgg(new SmallIntType());
+        assertThat(fieldCountAggShort.agg(null, null)).isEqualTo(0);
+        assertThat(fieldCountAggShort.agg((short) 1, null)).isEqualTo((short) 1);
+        assertThat(fieldCountAggShort.agg(null, (short) 15)).isEqualTo(1);
+        assertThat(fieldCountAggShort.agg((short) 1, 0)).isEqualTo((short) 2);
+        assertThat(fieldCountAggShort.agg((short) 3, (short) 6)).isEqualTo((short) 4);
     }
 
     @Test
