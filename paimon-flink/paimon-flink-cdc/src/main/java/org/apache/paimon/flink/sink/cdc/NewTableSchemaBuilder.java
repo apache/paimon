@@ -20,58 +20,56 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.types.DataField;
 
 import java.io.Serializable;
-import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.checkDuplicateFields;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.listCaseConvert;
-import static org.apache.paimon.utils.StringUtils.caseSensitiveConversion;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.buildPaimonSchema;
 
 /** Build schema for new table found in database synchronization. */
 public class NewTableSchemaBuilder implements Serializable {
 
     private final Map<String, String> tableConfig;
     private final boolean caseSensitive;
+    private final List<String> partitionKeys;
+    private final List<String> primaryKeys;
     private final CdcMetadataConverter[] metadataConverters;
 
     public NewTableSchemaBuilder(
             Map<String, String> tableConfig,
             boolean caseSensitive,
+            List<String> partitionKeys,
+            List<String> primaryKeys,
             CdcMetadataConverter[] metadataConverters) {
         this.tableConfig = tableConfig;
         this.caseSensitive = caseSensitive;
         this.metadataConverters = metadataConverters;
+        this.partitionKeys = partitionKeys;
+        this.primaryKeys = primaryKeys;
     }
 
     public Optional<Schema> build(RichCdcMultiplexRecord record) {
-        Schema.Builder builder = Schema.newBuilder();
-        builder.options(tableConfig);
-
-        // fields
-        List<String> allFieldNames = new ArrayList<>();
-
-        for (DataField dataField : record.fields()) {
-            String fieldName = caseSensitiveConversion(dataField.name(), caseSensitive);
-            allFieldNames.add(fieldName);
-            builder.column(fieldName, dataField.type(), dataField.description());
-        }
-
-        for (CdcMetadataConverter metadataConverter : metadataConverters) {
-            String metadataColumnName =
-                    caseSensitiveConversion(metadataConverter.columnName(), caseSensitive);
-            allFieldNames.add(metadataColumnName);
-            builder.column(metadataColumnName, metadataConverter.dataType());
-        }
-
-        checkDuplicateFields(record.tableName(), allFieldNames);
-
-        builder.primaryKey(listCaseConvert(record.primaryKeys(), caseSensitive));
-
-        return Optional.of(builder.build());
+        Schema sourceSchema =
+                new Schema(
+                        record.fields(),
+                        Collections.emptyList(),
+                        record.primaryKeys(),
+                        Collections.emptyMap(),
+                        null);
+        return Optional.of(
+                buildPaimonSchema(
+                        record.tableName(),
+                        partitionKeys,
+                        primaryKeys,
+                        Collections.emptyList(),
+                        tableConfig,
+                        sourceSchema,
+                        new CdcMetadataConverter[0],
+                        caseSensitive,
+                        false,
+                        true));
     }
 }

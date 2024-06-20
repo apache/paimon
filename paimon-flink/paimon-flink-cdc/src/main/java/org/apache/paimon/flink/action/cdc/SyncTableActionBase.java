@@ -108,6 +108,7 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
                 retrievedSchema,
                 metadataConverters,
                 caseSensitive,
+                true,
                 true);
     }
 

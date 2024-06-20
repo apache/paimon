@@ -36,7 +36,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
@@ -114,6 +113,7 @@ public class CdcActionCommonUtils {
             Schema sourceSchema,
             CdcMetadataConverter[] metadataConverters,
             boolean caseSensitive,
+            boolean strictlyCheckSpecified,
             boolean requirePrimaryKeys) {
         Schema.Builder builder = Schema.newBuilder();
 
@@ -147,39 +147,92 @@ public class CdcActionCommonUtils {
         checkDuplicateFields(tableName, allFieldNames);
 
         // primary keys
-        if (!specifiedPrimaryKeys.isEmpty()) {
-            Set<String> sourceColumns =
-                    sourceSchema.fields().stream().map(DataField::name).collect(Collectors.toSet());
-            sourceColumns.addAll(
-                    computedColumns.stream()
-                            .map(ComputedColumn::columnName)
-                            .collect(Collectors.toSet()));
-            for (String key : specifiedPrimaryKeys) {
-                checkArgument(
-                        sourceColumns.contains(key),
-                        "Specified primary key '%s' does not exist in source tables or computed columns %s.",
-                        key,
-                        sourceColumns);
-            }
-            builder.primaryKey(listCaseConvert(specifiedPrimaryKeys, caseSensitive));
-        } else if (!sourceSchema.primaryKeys().isEmpty()) {
-            builder.primaryKey(listCaseConvert(sourceSchema.primaryKeys(), caseSensitive));
-        } else if (requirePrimaryKeys) {
-            throw new IllegalArgumentException(
-                    "Primary keys are not specified. "
-                            + "Also, can't infer primary keys from source table schemas because "
-                            + "source tables have no primary keys or have different primary keys.");
-        }
+        specifiedPrimaryKeys = listCaseConvert(specifiedPrimaryKeys, caseSensitive);
+        List<String> sourceSchemaPrimaryKeys =
+                listCaseConvert(sourceSchema.primaryKeys(), caseSensitive);
+        setPrimaryKeys(
+                tableName,
+                builder,
+                specifiedPrimaryKeys,
+                sourceSchemaPrimaryKeys,
+                allFieldNames,
+                strictlyCheckSpecified,
+                requirePrimaryKeys);
 
         // partition keys
-        if (!specifiedPartitionKeys.isEmpty()) {
-            builder.partitionKeys(listCaseConvert(specifiedPartitionKeys, caseSensitive));
-        }
+        specifiedPartitionKeys = listCaseConvert(specifiedPartitionKeys, caseSensitive);
+        setPartitionKeys(
+                tableName, builder, specifiedPartitionKeys, allFieldNames, strictlyCheckSpecified);
 
         // comment
         builder.comment(sourceSchema.comment());
 
         return builder.build();
+    }
+
+    private static void setPrimaryKeys(
+            String tableName,
+            Schema.Builder builder,
+            List<String> specifiedPrimaryKeys,
+            List<String> sourceSchemaPrimaryKeys,
+            List<String> allFieldNames,
+            boolean strictlyCheckSpecified,
+            boolean requirePrimaryKeys) {
+        if (!specifiedPrimaryKeys.isEmpty()) {
+            if (allFieldNames.containsAll(specifiedPrimaryKeys)) {
+                builder.primaryKey(specifiedPrimaryKeys);
+                return;
+            }
+
+            String message =
+                    String.format(
+                            "For sink table %s, not all specified primary keys '%s' exist in source tables or computed columns '%s'.",
+                            tableName, specifiedPrimaryKeys, allFieldNames);
+            if (strictlyCheckSpecified) {
+                throw new IllegalArgumentException(message);
+            } else {
+                LOG.info(
+                        "{} In this case at database-sync, we will set primary keys from source tables if exist, otherwise, primary keys are not set.",
+                        message);
+            }
+        }
+
+        if (!sourceSchemaPrimaryKeys.isEmpty()) {
+            builder.primaryKey(sourceSchemaPrimaryKeys);
+            return;
+        }
+
+        if (requirePrimaryKeys) {
+            throw new IllegalArgumentException(
+                    "Failed to set specified primary keys for sink table "
+                            + tableName
+                            + ". Also, can't infer primary keys from source table schemas because "
+                            + "source tables have no primary keys or have different primary keys.");
+        }
+    }
+
+    private static void setPartitionKeys(
+            String tableName,
+            Schema.Builder builder,
+            List<String> specifiedPartitionKeys,
+            List<String> allFieldNames,
+            boolean strictlyCheckSpecified) {
+        if (!specifiedPartitionKeys.isEmpty()) {
+            if (allFieldNames.containsAll(specifiedPartitionKeys)) {
+                builder.partitionKeys(specifiedPartitionKeys);
+                return;
+            }
+
+            String message =
+                    String.format(
+                            "For sink table %s, not all specified partition keys '%s' exist in source tables or computed columns '%s'.",
+                            tableName, specifiedPartitionKeys, allFieldNames);
+            if (strictlyCheckSpecified) {
+                throw new IllegalArgumentException(message);
+            } else {
+                LOG.info("{} In this case at database-sync, partition keys are not set.", message);
+            }
+        }
     }
 
     public static void checkDuplicateFields(String tableName, List<String> fieldNames) {
