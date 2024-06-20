@@ -350,7 +350,7 @@ public class JdbcCatalog extends AbstractCatalog {
 
     @Override
     public Optional<CatalogLockContext> lockContext() {
-        return Optional.of(new JdbcCatalogLockContext(connections, catalogKey, options));
+        return Optional.of(new JdbcCatalogLockContext(catalogKey, options));
     }
 
     private Lock lock(Identifier identifier) {
