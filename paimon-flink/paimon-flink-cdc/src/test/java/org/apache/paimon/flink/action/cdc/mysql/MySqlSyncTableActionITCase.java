@@ -695,8 +695,9 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                 .satisfies(
                         anyCauseMatches(
                                 IllegalArgumentException.class,
-                                "Primary keys are not specified. "
-                                        + "Also, can't infer primary keys from source table schemas because "
+                                "Failed to set specified primary keys for sink table "
+                                        + tableName
+                                        + ". Also, can't infer primary keys from source table schemas because "
                                         + "source tables have no primary keys or have different primary keys."));
     }
 
