@@ -94,26 +94,36 @@ public class TagManager {
             List<TagCallback> callbacks) {
         checkArgument(!StringUtils.isBlank(tagName), "Tag name '%s' is blank.", tagName);
 
-        // skip create tag for the same snapshot of the same name.
+        // When timeRetained is not defined, please do not write the tagCreatorTime field,
+        // as this will cause older versions (<= 0.7) of readers to be unable to read this
+        // tag.
+        // When timeRetained is defined, it is fine, because timeRetained is the new
+        // feature.
+        String content =
+                timeRetained != null
+                        ? Tag.fromSnapshotAndTagTtl(snapshot, timeRetained, LocalDateTime.now())
+                                .toJson()
+                        : snapshot.toJson();
+
+        // update tag metadata into for the same snapshot of the same tag name.
         if (tagExists(tagName)) {
             Snapshot tagged = taggedSnapshot(tagName);
             Preconditions.checkArgument(
                     tagged.id() == snapshot.id(), "Tag name '%s' already exists.", tagName);
+
+            Path tagPath = tagPath(tagName);
+            try {
+                fileIO.overwriteFileUtf8(tagPath, content);
+            } catch (IOException ignored) {
+                LOG.info(
+                        String.format(
+                                "Tag already exists. Failed to update tag metadata info for tag '%s' (path %s).",
+                                tagName, tagPath));
+            }
         } else {
             Path newTagPath = tagPath(tagName);
             try {
-                // When timeRetained is not defined, please do not write the tagCreatorTime field,
-                // as this will cause older versions (<= 0.7) of readers to be unable to read this
-                // tag.
-                // When timeRetained is defined, it is fine, because timeRetained is the new
-                // feature.
-                fileIO.writeFileUtf8(
-                        newTagPath,
-                        timeRetained != null
-                                ? Tag.fromSnapshotAndTagTtl(
-                                                snapshot, timeRetained, LocalDateTime.now())
-                                        .toJson()
-                                : snapshot.toJson());
+                fileIO.writeFileUtf8(newTagPath, content);
             } catch (IOException e) {
                 throw new RuntimeException(
                         String.format(
