@@ -66,6 +66,16 @@ This section introduce all available spark procedures about paimon.
       <td>CALL sys.expire_snapshots(table => 'default.T', retain_max => 10)</td>
     </tr>
     <tr>
+      <td>expire_partitions</td>
+      <td>
+         To expire partitions. Argument:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>expiration_time: the expiration interval of a partition. A partition will be expired if it‘s lifetime is over this value. Partition time is extracted from the partition value.</li>
+            <li>timestamp_formatter: the formatter to format timestamp from string.</li>
+      </td>
+      <td>CALL sys.expire_partitions(table => 'default.T', expiration_time => '1 d', timestamp_formatter => 'yyyy-MM-dd')</td>
+    </tr>
+    <tr>
       <td>create_tag</td>
       <td>
          To create a tag based on given snapshot. Arguments:
