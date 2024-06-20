@@ -64,7 +64,11 @@ public final class FileIndexWriter implements Closeable {
     private byte[] embeddedIndexBytes;
 
     public FileIndexWriter(
-            FileIO fileIO, Path path, RowType rowType, FileIndexOptions fileIndexOptions) {
+            FileIO fileIO,
+            Path path,
+            RowType rowType,
+            FileIndexOptions fileIndexOptions,
+            @Nullable Map<String, String> evolutionMap) {
         this.fileIO = fileIO;
         this.path = path;
         List<DataField> fields = rowType.getFields();
@@ -78,7 +82,15 @@ public final class FileIndexWriter implements Closeable {
         for (Map.Entry<FileIndexOptions.Column, Map<String, Options>> entry :
                 fileIndexOptions.entrySet()) {
             FileIndexOptions.Column entryColumn = entry.getKey();
-            String columnName = entryColumn.getColumnName();
+            String tempName = entryColumn.getColumnName();
+            if (evolutionMap != null) {
+                tempName = evolutionMap.getOrDefault(tempName, null);
+                if (tempName == null) {
+                    continue;
+                }
+            }
+
+            final String columnName = tempName;
             DataField field = map.get(columnName);
             if (field == null) {
                 throw new IllegalArgumentException(columnName + " does not exist in column fields");
@@ -135,8 +147,25 @@ public final class FileIndexWriter implements Closeable {
 
     @Override
     public void close() throws IOException {
-        Map<String, Map<String, byte[]>> indexMaps = new HashMap<>();
+        Map<String, Map<String, byte[]>> indexMaps = serializeMaintainers();
 
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        try (FileIndexFormat.Writer writer = FileIndexFormat.createWriter(baos)) {
+            writer.writeColumnIndexes(indexMaps);
+        }
+
+        if (baos.size() > inManifestThreshold) {
+            try (OutputStream outputStream = fileIO.newOutputStream(path, true)) {
+                outputStream.write(baos.toByteArray());
+            }
+            resultFileName = path.getName();
+        } else {
+            embeddedIndexBytes = baos.toByteArray();
+        }
+    }
+
+    public Map<String, Map<String, byte[]>> serializeMaintainers() {
+        Map<String, Map<String, byte[]>> indexMaps = new HashMap<>();
         for (IndexMaintainer indexMaintainer : indexMaintainers.values()) {
             Map<String, byte[]> mapBytes = indexMaintainer.serializedBytes();
             for (Map.Entry<String, byte[]> entry : mapBytes.entrySet()) {
@@ -145,20 +174,7 @@ public final class FileIndexWriter implements Closeable {
                         .put(indexMaintainer.getIndexType(), entry.getValue());
             }
         }
-
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        try (FileIndexFormat.Writer writer = FileIndexFormat.createWriter(baos)) {
-            writer.writeColumnIndexes(indexMaps);
-        }
-
-        if (baos.size() > inManifestThreshold) {
-            try (OutputStream outputStream = fileIO.newOutputStream(path, false)) {
-                outputStream.write(baos.toByteArray());
-            }
-            resultFileName = path.getName();
-        } else {
-            embeddedIndexBytes = baos.toByteArray();
-        }
+        return indexMaps;
     }
 
     public FileIndexResult result() {
@@ -168,9 +184,19 @@ public final class FileIndexWriter implements Closeable {
     @Nullable
     public static FileIndexWriter create(
             FileIO fileIO, Path path, RowType rowType, FileIndexOptions fileIndexOptions) {
+        return create(fileIO, path, rowType, fileIndexOptions, null);
+    }
+
+    @Nullable
+    public static FileIndexWriter create(
+            FileIO fileIO,
+            Path path,
+            RowType rowType,
+            FileIndexOptions fileIndexOptions,
+            @Nullable Map<String, String> evolutionMap) {
         return fileIndexOptions.isEmpty()
                 ? null
-                : new FileIndexWriter(fileIO, path, rowType, fileIndexOptions);
+                : new FileIndexWriter(fileIO, path, rowType, fileIndexOptions, evolutionMap);
     }
 
     /** File index result. */

@@ -38,6 +38,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -137,13 +138,13 @@ public final class FileIndexFormat {
         public void writeColumnIndexes(Map<String, Map<String, byte[]>> indexes)
                 throws IOException {
 
-            Map<String, Map<String, Pair<Integer, Integer>>> bodyInfo = new HashMap<>();
+            Map<String, Map<String, Pair<Integer, Integer>>> bodyInfo = new LinkedHashMap<>();
 
             // construct body
             ByteArrayOutputStream baos = new ByteArrayOutputStream(256);
             for (Map.Entry<String, Map<String, byte[]>> columnMap : indexes.entrySet()) {
                 Map<String, Pair<Integer, Integer>> innerMap =
-                        bodyInfo.computeIfAbsent(columnMap.getKey(), k -> new HashMap<>());
+                        bodyInfo.computeIfAbsent(columnMap.getKey(), k -> new LinkedHashMap<>());
                 Map<String, byte[]> bytesMap = columnMap.getValue();
                 for (Map.Entry<String, byte[]> entry : bytesMap.entrySet()) {
                     int startPosition = baos.size();
@@ -333,6 +334,21 @@ public final class FileIndexFormat {
                 throw new RuntimeException(e);
             }
             return b;
+        }
+
+        public Map<String, Map<String, byte[]>> readAll() {
+            Map<String, Map<String, byte[]>> result = new HashMap<>();
+            for (Map.Entry<String, Map<String, Pair<Integer, Integer>>> entryOuter :
+                    header.entrySet()) {
+                for (Map.Entry<String, Pair<Integer, Integer>> entryInner :
+                        entryOuter.getValue().entrySet()) {
+                    result.computeIfAbsent(entryOuter.getKey(), key -> new HashMap<>())
+                            .put(
+                                    entryInner.getKey(),
+                                    getBytesWithStartAndLength(entryInner.getValue()));
+                }
+            }
+            return result;
         }
 
         @VisibleForTesting

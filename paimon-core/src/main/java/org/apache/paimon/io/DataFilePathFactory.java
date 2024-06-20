@@ -76,6 +76,25 @@ public class DataFilePathFactory {
         return new Path(filePath.getParent(), filePath.getName() + INDEX_PATH_SUFFIX);
     }
 
+    public static Path fileIndexPathIncrease(Path filePath) {
+        String fileName = filePath.getName();
+        int dot = fileName.lastIndexOf(".");
+        int dash = fileName.lastIndexOf("-");
+
+        if (dash != -1) {
+            try {
+                int num = Integer.parseInt(fileName.substring(dash + 1, dot));
+                return new Path(
+                        filePath.getParent(),
+                        fileName.substring(0, dash + 1) + (num + 1) + INDEX_PATH_SUFFIX);
+            } catch (NumberFormatException e) {
+                // ignore
+            }
+        }
+        return new Path(
+                filePath.getParent(), fileName.substring(0, dot) + "-" + 1 + INDEX_PATH_SUFFIX);
+    }
+
     public static String formatIdentifier(String fileName) {
         int index = fileName.lastIndexOf('.');
         if (index == -1) {
