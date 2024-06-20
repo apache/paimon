@@ -25,7 +25,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.List;
 
-/** Util Class for load calcite dependency through reflection. */
+/** Class for load calcite dependency via reflection. */
 public class CalciteModule3 {
     private static final Logger LOGGER = LoggerFactory.getLogger(CalciteModule3.class);
     private static final String Flink_PLANNER_MODULE_CLASS =
@@ -46,16 +46,16 @@ public class CalciteModule3 {
     private final SqlIndentifierDelegate sqlIndentifierDelegate;
 
     static {
-        boolean findCalciteInCurrentClassLoader = false;
+        boolean calciteFound = false;
         ClassLoader currentClassLoader = Thread.currentThread().getContextClassLoader();
         try {
             currentClassLoader.loadClass(SqlParserDelegate.CLASS_NAME);
-            findCalciteInCurrentClassLoader = true;
+            calciteFound = true;
         } catch (ClassNotFoundException e) {
         }
 
         try {
-            if (findCalciteInCurrentClassLoader) {
+            if (calciteFound) {
                 submoduleClassLoader = currentClassLoader;
             } else {
                 submoduleClassLoader = initCalciteClassLoader();
