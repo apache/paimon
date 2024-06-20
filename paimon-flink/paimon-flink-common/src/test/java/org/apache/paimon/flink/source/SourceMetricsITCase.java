@@ -93,4 +93,46 @@ public class SourceMetricsITCase {
             assertThat(group.getIOMetricGroup().getNumRecordsInCounter().getCount()).isEqualTo(3);
         }
     }
+
+    @Test
+    public void testNumRecordsInWithConsumerId() throws Exception {
+        TableEnvironment tEnv =
+                TableEnvironment.create(
+                        EnvironmentSettings.newInstance().inStreamingMode().build());
+        tEnv.executeSql(
+                "CREATE CATALOG mycat WITH ( 'type' = 'paimon', 'warehouse' = '"
+                        + tempPath
+                        + "' )");
+        tEnv.executeSql("USE CATALOG mycat");
+        tEnv.executeSql(
+                "CREATE TABLE T ( k INT, v INT, PRIMARY KEY (k) NOT ENFORCED ) WITH ( 'changelog-producer' = 'lookup' )");
+        tEnv.executeSql("INSERT INTO T VALUES (1, 10), (2, 20), (3, 30)").await();
+        tEnv.executeSql(
+                "CREATE TEMPORARY TABLE B ( k INT, v INT ) WITH ( 'connector' = 'blackhole' )");
+        TableResult tableResult =
+                tEnv.executeSql(
+                        "INSERT INTO B SELECT * FROM T /*+ OPTIONS('consumer-id' = 'test') */");
+        JobClient client = tableResult.getJobClient().get();
+        JobID jobId = client.getJobID();
+
+        assertThat(testNumRecordsInWithConsumerIdChecker(jobId)).isTrue();
+        client.cancel().get();
+    }
+
+    private boolean testNumRecordsInWithConsumerIdChecker(JobID jobId) throws Exception {
+        for (int tries = 1; tries <= 20; tries++) {
+            for (OperatorMetricGroup group : reporter.findOperatorMetricGroups(jobId, "T\\[")) {
+                try {
+                    long numRecordsIn =
+                            group.getIOMetricGroup().getNumRecordsInCounter().getCount();
+                    if (numRecordsIn == 3) {
+                        return true;
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+            Thread.sleep(1000);
+        }
+        return false;
+    }
 }
