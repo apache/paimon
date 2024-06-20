@@ -44,7 +44,9 @@ import java.util.UUID;
 
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.StartupMode;
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link StartupMode}. */
 public class StartupModeTest extends ScannerTestBase {
@@ -249,8 +251,11 @@ public class StartupModeTest extends ScannerTestBase {
 
         // batch mode
         TableScan batchScan = table.newScan();
-        TableScan.Plan plan = batchScan.plan();
-        assertThat(plan.splits()).isEmpty();
+        assertThatThrownBy(() -> batchScan.plan())
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "The specified scan snapshotId 1 is out of available snapshotId range [2, 3]."));
     }
 
     @Test
@@ -299,8 +304,11 @@ public class StartupModeTest extends ScannerTestBase {
 
         // batch mode
         TableScan batchScan = table.newScan();
-        TableScan.Plan plan = batchScan.plan();
-        assertThat(plan.splits()).isEmpty();
+        assertThatThrownBy(() -> batchScan.plan())
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "The specified scan snapshotId 1 is out of available snapshotId range [2, 3]."));
     }
 
     private void initializeTable(CoreOptions.StartupMode startupMode) throws Exception {

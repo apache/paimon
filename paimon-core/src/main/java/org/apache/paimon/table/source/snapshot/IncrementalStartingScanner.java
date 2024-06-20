@@ -65,8 +65,7 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
 
     @Override
     public Result scan(SnapshotReader reader) {
-        // Checks earlier whether the specified scan snapshot id is valid and throws the correct
-        // exception.
+        // Check the validity of scan staring snapshotId.
         Optional<Result> checkResult = checkScanSnapshotIdValidity();
         if (checkResult.isPresent()) {
             return checkResult.get();
@@ -117,8 +116,7 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
     }
 
     /**
-     * Checks earlier whether the specified scan snapshot id is valid and throws the correct
-     * exception.
+     * Check the validity of staring snapshotId early.
      *
      * @return If the check passes return empty.
      */
@@ -137,8 +135,12 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
                 startingSnapshotId,
                 endingSnapshotId);
 
+        // because of the left open right closed rule of IncrementalStartingScanner that is
+        // different from StaticFromStartingScanner, so we should allow starting snapshotId to be
+        // equal to the earliestSnapshotId - 1.
         checkArgument(
-                startingSnapshotId >= earliestSnapshotId && endingSnapshotId <= latestSnapshotId,
+                startingSnapshotId >= earliestSnapshotId - 1
+                        && endingSnapshotId <= latestSnapshotId,
                 "The specified scan snapshotId range [%s, %s] is out of available snapshotId range [%s, %s].",
                 startingSnapshotId,
                 endingSnapshotId,

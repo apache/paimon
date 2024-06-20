@@ -39,6 +39,7 @@ import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_SCAN_MODE;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link IncrementalStartingScanner}. */
@@ -105,9 +106,19 @@ public class IncrementalStartingScannerTest extends ScannerTestBase {
 
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(4);
 
+        // Allowed starting snapshotId to be equal to the earliest snapshotId -1.
+        assertThatNoException()
+                .isThrownBy(
+                        () ->
+                                new IncrementalStartingScanner(
+                                                snapshotManager, 0, 4, ScanMode.DELTA)
+                                        .scan(snapshotReader));
+
+        // Starting snapshotId must less than ending snapshotId.
         assertThatThrownBy(
                         () ->
-                                new IncrementalStartingScanner(snapshotManager, 4, 3, ScanMode.ALL)
+                                new IncrementalStartingScanner(
+                                                snapshotManager, 4, 3, ScanMode.DELTA)
                                         .scan(snapshotReader))
                 .satisfies(
                         anyCauseMatches(
@@ -116,16 +127,8 @@ public class IncrementalStartingScannerTest extends ScannerTestBase {
 
         assertThatThrownBy(
                         () ->
-                                new IncrementalStartingScanner(snapshotManager, 0, 3, ScanMode.ALL)
-                                        .scan(snapshotReader))
-                .satisfies(
-                        anyCauseMatches(
-                                IllegalArgumentException.class,
-                                "The specified scan snapshotId range [0, 3] is out of available snapshotId range [1, 4]."));
-
-        assertThatThrownBy(
-                        () ->
-                                new IncrementalStartingScanner(snapshotManager, 1, 5, ScanMode.ALL)
+                                new IncrementalStartingScanner(
+                                                snapshotManager, 1, 5, ScanMode.DELTA)
                                         .scan(snapshotReader))
                 .satisfies(
                         anyCauseMatches(
