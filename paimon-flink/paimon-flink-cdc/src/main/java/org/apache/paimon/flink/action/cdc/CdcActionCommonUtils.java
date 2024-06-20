@@ -112,9 +112,10 @@ public class CdcActionCommonUtils {
                                 return field;
                             }
                             String columnLowerCase = field.name().toLowerCase();
-                            checkArgument(
-                                    existedFields.add(columnLowerCase),
-                                    columnDuplicateErrMsg.apply(field.name()));
+                            if (!existedFields.add(columnLowerCase)) {
+                                throw new IllegalArgumentException(
+                                        columnDuplicateErrMsg.apply(field.name()));
+                            }
                             return field.newName(columnLowerCase);
                         })
                 .collect(Collectors.toList());
@@ -145,7 +146,9 @@ public class CdcActionCommonUtils {
             M newMap = mapSupplier.get();
             for (Map.Entry<String, T> entry : origin.entrySet()) {
                 String key = entry.getKey();
-                checkArgument(!newMap.containsKey(key.toLowerCase()), duplicateErrMsg.apply(key));
+                if (newMap.containsKey(key.toLowerCase())) {
+                    throw new IllegalArgumentException(duplicateErrMsg.apply(key));
+                }
                 newMap.put(key.toLowerCase(), entry.getValue());
             }
             return newMap;
@@ -180,7 +183,9 @@ public class CdcActionCommonUtils {
             return column;
         }
         String columnLowerCase = column.toLowerCase();
-        checkArgument(existedFields.add(columnLowerCase), columnDuplicateErrMsg.apply(column));
+        if (!existedFields.add(columnLowerCase)) {
+            throw new IllegalArgumentException(columnDuplicateErrMsg.apply(column));
+        }
         return columnLowerCase;
     }
 
