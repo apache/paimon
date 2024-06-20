@@ -190,8 +190,8 @@ public class CdcActionCommonUtils {
         checkState(
                 duplicates.isEmpty(),
                 "Table %s contains duplicate columns: %s.\n"
-                        + "Possible causes is: "
-                        + "1. computed columns or metadata columns contain duplicate field; "
+                        + "Possible causes are: "
+                        + "1. computed columns or metadata columns contain duplicate fields; "
                         + "2. the catalog is case-insensitive and the table columns duplicate after they are all converted to lower-case.",
                 tableName,
                 duplicates);
