@@ -95,6 +95,11 @@ public class TagManager {
         } else {
             Path newTagPath = tagPath(tagName);
             try {
+                // When timeRetained is not defined, please do not write the tagCreatorTime field,
+                // as this will cause older versions (<= 0.7) of readers to be unable to read this
+                // tag.
+                // When timeRetained is defined, it is fine, because timeRetained is the new
+                // feature.
                 fileIO.writeFileUtf8(
                         newTagPath,
                         timeRetained != null
