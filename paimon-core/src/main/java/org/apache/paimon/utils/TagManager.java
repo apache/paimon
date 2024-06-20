@@ -355,9 +355,16 @@ public class TagManager {
     }
 
     private int findIndex(Snapshot taggedSnapshot, List<Snapshot> taggedSnapshots) {
-        for (int i = 0; i < taggedSnapshots.size(); i++) {
-            if (taggedSnapshot.id() == taggedSnapshots.get(i).id()) {
-                return i;
+        int left = 0;
+        int right = taggedSnapshots.size() - 1;
+        while (left <= right) {
+            int mid = left + (right - left) / 2;
+            if (taggedSnapshots.get(mid).id() == taggedSnapshot.id()) {
+                return mid;
+            } else if (taggedSnapshots.get(mid).id() < taggedSnapshot.id()) {
+                left = mid + 1;
+            } else {
+                right = mid - 1;
             }
         }
         throw new RuntimeException(
