@@ -20,9 +20,9 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.sink.FileIndexSink;
 import org.apache.paimon.flink.sink.NoneCopyVersionedSerializerTypeSerializerProxy;
-import org.apache.paimon.flink.source.FileIndexScanSource;
+import org.apache.paimon.flink.sink.RewriteFileIndexSink;
+import org.apache.paimon.flink.source.RewriteFileIndexSource;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestEntrySerializer;
 import org.apache.paimon.predicate.Predicate;
@@ -46,12 +46,12 @@ import java.util.Map;
 
 import static org.apache.paimon.utils.ParameterUtils.getPartitions;
 
-/** Migrate procedure to migrate hive table to paimon table. */
-public class FileIndexProcedure extends ProcedureBase {
+/** Rewrite file index procedure to re-generated all file index. */
+public class RewriteFileIndexProcedure extends ProcedureBase {
 
     @Override
     public String identifier() {
-        return "file_index_rewrite";
+        return "rewrite_file_index";
     }
 
     public String[] call(ProcedureContext procedureContext, String sourceTablePath)
@@ -89,30 +89,20 @@ public class FileIndexProcedure extends ProcedureBase {
             partitionPredicate = null;
         }
 
-        TopoBuilder.build(env, (FileStoreTable) table, partitionPredicate);
-
+        FileStoreTable storeTable = (FileStoreTable) table;
+        DataStreamSource<ManifestEntry> source =
+                env.fromSource(
+                        new RewriteFileIndexSource(storeTable, partitionPredicate),
+                        WatermarkStrategy.noWatermarks(),
+                        "index source",
+                        new ManifestEntryTypeInfo());
+        new RewriteFileIndexSink(storeTable).sinkFrom(source);
         return execute(env, "Add file index for table: " + sourceTablePath);
     }
 
-    private static class TopoBuilder {
+    private static class ManifestEntryTypeInfo extends GenericTypeInfo<ManifestEntry> {
 
-        public static void build(
-                StreamExecutionEnvironment env,
-                FileStoreTable table,
-                Predicate partitionPredicate) {
-            DataStreamSource<ManifestEntry> source =
-                    env.fromSource(
-                            new FileIndexScanSource(table, partitionPredicate),
-                            WatermarkStrategy.noWatermarks(),
-                            "index source",
-                            new TypeInfo());
-            new FileIndexSink(table).sinkFrom(source);
-        }
-    }
-
-    private static class TypeInfo extends GenericTypeInfo<ManifestEntry> {
-
-        public TypeInfo() {
+        public ManifestEntryTypeInfo() {
             super(ManifestEntry.class);
         }
 

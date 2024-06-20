@@ -51,16 +51,18 @@ import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 /** Bounded {@link FlinkSource} for reading records. It does not monitor new snapshots. */
-public class FileIndexScanSource
+public class RewriteFileIndexSource
         implements Source<
-                ManifestEntry, FileIndexScanSource.Split, FileIndexScanSource.CheckpointState> {
+                ManifestEntry,
+                RewriteFileIndexSource.Split,
+                RewriteFileIndexSource.CheckpointState> {
 
-    private static final long serialVersionUID = 2319102734891237489L;
+    private static final long serialVersionUID = 1L;
 
     private final FileStoreTable table;
     @Nullable private final Predicate partitionPredicate;
 
-    public FileIndexScanSource(FileStoreTable table, @Nullable Predicate partitionPredicate) {
+    public RewriteFileIndexSource(FileStoreTable table, @Nullable Predicate partitionPredicate) {
         this.table = table;
         this.partitionPredicate = partitionPredicate;
     }

@@ -40,8 +40,8 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
-/** IT Case for {@link FileIndexProcedure}. */
-public class FileIndexProcedureITCase extends CatalogITCaseBase {
+/** IT Case for {@link RewriteFileIndexProcedure}. */
+public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
 
     @Test
     public void testFileIndexProcedureAddIndex() throws Exception {
@@ -61,7 +61,7 @@ public class FileIndexProcedureITCase extends CatalogITCaseBase {
 
         tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
         sql("ALTER TABLE T SET ('file-index.bloom-filter.columns'='k,v')");
-        sql("CALL sys.file_index_rewrite('default.T')");
+        sql("CALL sys.rewrite_file_index('default.T')");
 
         FileStoreTable table = paimonTable("T");
         List<ManifestEntry> list = table.store().newScan().plan().files();
@@ -156,7 +156,7 @@ public class FileIndexProcedureITCase extends CatalogITCaseBase {
 
         tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
         sql("ALTER TABLE T SET ('file-index.bloom-filter.columns'='order_id,v')");
-        sql("CALL sys.file_index_rewrite('default.T')");
+        sql("CALL sys.rewrite_file_index('default.T')");
 
         reader =
                 table.newRead()
@@ -188,7 +188,7 @@ public class FileIndexProcedureITCase extends CatalogITCaseBase {
 
         tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
         sql("ALTER TABLE T SET ('file-index.bloom-filter.columns'='k')");
-        sql("CALL sys.file_index_rewrite('default.T')");
+        sql("CALL sys.rewrite_file_index('default.T')");
 
         FileStoreTable table = paimonTable("T");
         List<ManifestEntry> list = table.store().newScan().plan().files();
@@ -219,7 +219,7 @@ public class FileIndexProcedureITCase extends CatalogITCaseBase {
 
         sql("ALTER TABLE T RESET ('file-index.bloom-filter.columns')");
 
-        sql("CALL sys.file_index_rewrite('default.T')");
+        sql("CALL sys.rewrite_file_index('default.T')");
 
         table = paimonTable("T");
         list = table.store().newScan().plan().files();

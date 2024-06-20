@@ -24,6 +24,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexCommon;
 import org.apache.paimon.fileindex.FileIndexFormat;
 import org.apache.paimon.fileindex.FileIndexOptions;
+import org.apache.paimon.fileindex.FileIndexWriter;
 import org.apache.paimon.fileindex.FileIndexer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -45,8 +46,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Index file writer. */
-public final class FileIndexWriter implements Closeable {
+/** Index file writer for a data file. */
+public final class DataFileIndexWriter implements Closeable {
 
     public static final FileIndexResult EMPTY_RESULT = FileIndexResult.of(null, null);
 
@@ -63,12 +64,12 @@ public final class FileIndexWriter implements Closeable {
 
     private byte[] embeddedIndexBytes;
 
-    public FileIndexWriter(
+    public DataFileIndexWriter(
             FileIO fileIO,
             Path path,
             RowType rowType,
             FileIndexOptions fileIndexOptions,
-            @Nullable Map<String, String> evolutionMap) {
+            @Nullable Map<String, String> colNameMapping) {
         this.fileIO = fileIO;
         this.path = path;
         List<DataField> fields = rowType.getFields();
@@ -82,15 +83,15 @@ public final class FileIndexWriter implements Closeable {
         for (Map.Entry<FileIndexOptions.Column, Map<String, Options>> entry :
                 fileIndexOptions.entrySet()) {
             FileIndexOptions.Column entryColumn = entry.getKey();
-            String tempName = entryColumn.getColumnName();
-            if (evolutionMap != null) {
-                tempName = evolutionMap.getOrDefault(tempName, null);
-                if (tempName == null) {
+            String colName = entryColumn.getColumnName();
+            if (colNameMapping != null) {
+                colName = colNameMapping.getOrDefault(colName, null);
+                if (colName == null) {
                     continue;
                 }
             }
 
-            final String columnName = tempName;
+            String columnName = colName;
             DataField field = map.get(columnName);
             if (field == null) {
                 throw new IllegalArgumentException(columnName + " does not exist in column fields");
@@ -98,6 +99,7 @@ public final class FileIndexWriter implements Closeable {
 
             for (Map.Entry<String, Options> typeEntry : entry.getValue().entrySet()) {
                 String indexType = typeEntry.getKey();
+                IndexMaintainer maintainer = indexMaintainers.get(columnName);
                 if (entryColumn.isNestedColumn()) {
                     if (field.type().getTypeRoot() != DataTypeRoot.MAP) {
                         throw new IllegalArgumentException(
@@ -105,34 +107,36 @@ public final class FileIndexWriter implements Closeable {
                                         + columnName
                                         + " is nested column, but is not map type. Only should map type yet.");
                     }
-                    MapType mapType = (MapType) field.type();
-                    ((MapFileIndexMaintainer)
-                                    indexMaintainers.computeIfAbsent(
-                                            columnName,
-                                            name ->
-                                                    new MapFileIndexMaintainer(
-                                                            columnName,
-                                                            indexType,
-                                                            mapType.getKeyType(),
-                                                            mapType.getValueType(),
-                                                            fileIndexOptions.getMapTopLevelOptions(
-                                                                    columnName, typeEntry.getKey()),
-                                                            index.get(columnName))))
-                            .add(entryColumn.getNestedColumnName(), typeEntry.getValue());
+                    MapFileIndexMaintainer mapMaintainer = (MapFileIndexMaintainer) maintainer;
+                    if (mapMaintainer == null) {
+                        MapType mapType = (MapType) field.type();
+                        mapMaintainer =
+                                new MapFileIndexMaintainer(
+                                        columnName,
+                                        indexType,
+                                        mapType.getKeyType(),
+                                        mapType.getValueType(),
+                                        fileIndexOptions.getMapTopLevelOptions(
+                                                columnName, typeEntry.getKey()),
+                                        index.get(columnName));
+                        indexMaintainers.put(columnName, mapMaintainer);
+                    }
+                    mapMaintainer.add(entryColumn.getNestedColumnName(), typeEntry.getValue());
                 } else {
-                    indexMaintainers.computeIfAbsent(
-                            columnName,
-                            name ->
-                                    new FileIndexMaintainer(
-                                            columnName,
-                                            indexType,
-                                            FileIndexer.create(
-                                                            indexType,
-                                                            field.type(),
-                                                            typeEntry.getValue())
-                                                    .createWriter(),
-                                            InternalRow.createFieldGetter(
-                                                    field.type(), index.get(columnName))));
+                    if (maintainer == null) {
+                        maintainer =
+                                new FileIndexMaintainer(
+                                        columnName,
+                                        indexType,
+                                        FileIndexer.create(
+                                                        indexType,
+                                                        field.type(),
+                                                        typeEntry.getValue())
+                                                .createWriter(),
+                                        InternalRow.createFieldGetter(
+                                                field.type(), index.get(columnName)));
+                        indexMaintainers.put(columnName, maintainer);
+                    }
                 }
             }
         }
@@ -149,18 +153,18 @@ public final class FileIndexWriter implements Closeable {
     public void close() throws IOException {
         Map<String, Map<String, byte[]>> indexMaps = serializeMaintainers();
 
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        try (FileIndexFormat.Writer writer = FileIndexFormat.createWriter(baos)) {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try (FileIndexFormat.Writer writer = FileIndexFormat.createWriter(out)) {
             writer.writeColumnIndexes(indexMaps);
         }
 
-        if (baos.size() > inManifestThreshold) {
+        if (out.size() > inManifestThreshold) {
             try (OutputStream outputStream = fileIO.newOutputStream(path, true)) {
-                outputStream.write(baos.toByteArray());
+                outputStream.write(out.toByteArray());
             }
             resultFileName = path.getName();
         } else {
-            embeddedIndexBytes = baos.toByteArray();
+            embeddedIndexBytes = out.toByteArray();
         }
     }
 
@@ -182,21 +186,21 @@ public final class FileIndexWriter implements Closeable {
     }
 
     @Nullable
-    public static FileIndexWriter create(
+    public static DataFileIndexWriter create(
             FileIO fileIO, Path path, RowType rowType, FileIndexOptions fileIndexOptions) {
         return create(fileIO, path, rowType, fileIndexOptions, null);
     }
 
     @Nullable
-    public static FileIndexWriter create(
+    public static DataFileIndexWriter create(
             FileIO fileIO,
             Path path,
             RowType rowType,
             FileIndexOptions fileIndexOptions,
-            @Nullable Map<String, String> evolutionMap) {
+            @Nullable Map<String, String> colNameMapping) {
         return fileIndexOptions.isEmpty()
                 ? null
-                : new FileIndexWriter(fileIO, path, rowType, fileIndexOptions, evolutionMap);
+                : new DataFileIndexWriter(fileIO, path, rowType, fileIndexOptions, colNameMapping);
     }
 
     /** File index result. */
@@ -238,13 +242,13 @@ public final class FileIndexWriter implements Closeable {
 
         private final String columnName;
         private final String indexType;
-        private final org.apache.paimon.fileindex.FileIndexWriter fileIndexWriter;
+        private final FileIndexWriter fileIndexWriter;
         private final InternalRow.FieldGetter getter;
 
         public FileIndexMaintainer(
                 String columnName,
                 String indexType,
-                org.apache.paimon.fileindex.FileIndexWriter fileIndexWriter,
+                FileIndexWriter fileIndexWriter,
                 InternalRow.FieldGetter getter) {
             this.columnName = columnName;
             this.indexType = indexType;

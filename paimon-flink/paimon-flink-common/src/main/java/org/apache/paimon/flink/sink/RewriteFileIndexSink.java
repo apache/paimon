@@ -23,14 +23,14 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexCommon;
 import org.apache.paimon.fileindex.FileIndexFormat;
 import org.apache.paimon.fileindex.FileIndexOptions;
-import org.apache.paimon.flink.procedure.FileIndexProcedure;
+import org.apache.paimon.flink.procedure.RewriteFileIndexProcedure;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataFileIndexWriter;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataIncrement;
-import org.apache.paimon.io.FileIndexWriter;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
@@ -45,12 +45,13 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
 
-import org.apache.flink.api.java.tuple.Tuple4;
 import org.apache.flink.streaming.api.graph.StreamConfig;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.operators.Output;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.runtime.tasks.StreamTask;
+
+import javax.annotation.Nullable;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -64,13 +65,13 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.io.DataFilePathFactory.fileIndexPathIncrease;
-import static org.apache.paimon.io.DataFilePathFactory.toFileIndexPath;
+import static org.apache.paimon.io.DataFilePathFactory.createNewFileIndexFilePath;
+import static org.apache.paimon.io.DataFilePathFactory.dataFileToFileIndexPath;
 
-/** File index sink for {@link FileIndexProcedure}. */
-public class FileIndexSink extends FlinkWriteSink<ManifestEntry> {
+/** File index sink for {@link RewriteFileIndexProcedure}. */
+public class RewriteFileIndexSink extends FlinkWriteSink<ManifestEntry> {
 
-    public FileIndexSink(FileStoreTable table) {
+    public RewriteFileIndexSink(FileStoreTable table) {
         super(table, null);
     }
 
@@ -83,6 +84,8 @@ public class FileIndexSink extends FlinkWriteSink<ManifestEntry> {
     /** File index modification operator to rewrite file index. */
     private static class FileIndexModificationOperator
             extends PrepareCommitOperator<ManifestEntry, Committable> {
+
+        private static final long serialVersionUID = 1L;
 
         private final FileStoreTable table;
 
@@ -145,7 +148,7 @@ public class FileIndexSink extends FlinkWriteSink<ManifestEntry> {
         private final FileIO fileIO;
         private final FileStorePathFactory pathFactory;
         private final Map<Pair<BinaryRow, Integer>, DataFilePathFactory> dataFilePathFactoryMap;
-        private final SchemaCache schemaCache;
+        private final SchemaCache schemaInfoCache;
         private final long sizeInMeta;
 
         public FileIndexProcessor(FileStoreTable table) {
@@ -154,7 +157,7 @@ public class FileIndexSink extends FlinkWriteSink<ManifestEntry> {
             this.fileIO = table.fileIO();
             this.pathFactory = table.store().pathFactory();
             this.dataFilePathFactoryMap = new HashMap<>();
-            this.schemaCache =
+            this.schemaInfoCache =
                     new SchemaCache(fileIndexOptions, new SchemaManager(fileIO, table.location()));
             this.sizeInMeta = table.coreOptions().fileIndexInManifestThreshold();
         }
@@ -166,13 +169,7 @@ public class FileIndexSink extends FlinkWriteSink<ManifestEntry> {
                             Pair.of(partition, bucket),
                             p -> pathFactory.createDataFilePathFactory(partition, bucket));
 
-            Tuple4<RowType, Map<String, String>, int[], Map<String, Set<String>>> t4 =
-                    schemaCache.schemaInfo(dataFileMeta.schemaId());
-            RowType fileSchema = t4.f0;
-            Map<String, String> evolutionNameMap = t4.f1;
-            int[] projection = t4.f2;
-            Map<String, Set<String>> expectedFileIndex = t4.f3;
-
+            SchemaInfo schemaInfo = schemaInfoCache.schemaInfo(dataFileMeta.schemaId());
             List<String> extras = new ArrayList<>(dataFileMeta.extraFiles());
             List<String> indexFiles =
                     dataFileMeta.extraFiles().stream()
@@ -188,20 +185,22 @@ public class FileIndexSink extends FlinkWriteSink<ManifestEntry> {
                 try (FileIndexFormat.Reader indexReader =
                         FileIndexFormat.createReader(
                                 fileIO.newInputStream(dataFilePathFactory.toPath(indexFile)),
-                                fileSchema)) {
+                                schemaInfo.fileSchema)) {
                     maintainers = indexReader.readAll();
                 }
-                newIndexPath = fileIndexPathIncrease(dataFilePathFactory.toPath(indexFile));
+                newIndexPath = createNewFileIndexFilePath(dataFilePathFactory.toPath(indexFile));
             } else {
                 maintainers = new HashMap<>();
-                newIndexPath = toFileIndexPath(dataFilePathFactory.toPath(dataFileMeta.fileName()));
+                newIndexPath =
+                        dataFileToFileIndexPath(
+                                dataFilePathFactory.toPath(dataFileMeta.fileName()));
             }
 
             // remove unnecessary
             for (Map.Entry<String, Map<String, byte[]>> entry :
                     new HashSet<>(maintainers.entrySet())) {
                 String name = entry.getKey();
-                if (!expectedFileIndex.containsKey(name)) {
+                if (!schemaInfo.projectedColFullNames.contains(name)) {
                     maintainers.remove(name);
                 } else {
                     Map<String, byte[]> indexTypeBytes = maintainers.get(name);
@@ -213,18 +212,19 @@ public class FileIndexSink extends FlinkWriteSink<ManifestEntry> {
                 }
             }
 
-            // ignore close
-            FileIndexWriter fileIndexWriter =
-                    FileIndexWriter.create(
+            // ignore close, do not close to write file, only collect serialized maintainers
+            @SuppressWarnings("resource")
+            DataFileIndexWriter dataFileIndexWriter =
+                    DataFileIndexWriter.create(
                             fileIO,
                             newIndexPath,
-                            fileSchema.project(projection),
+                            schemaInfo.fileSchema.project(schemaInfo.projectedIndexCols),
                             fileIndexOptions,
-                            evolutionNameMap);
-            if (fileIndexWriter != null) {
+                            schemaInfo.colNameMapping);
+            if (dataFileIndexWriter != null) {
                 try (RecordReader<InternalRow> reader =
                         table.newReadBuilder()
-                                .withProjection(projection)
+                                .withProjection(schemaInfo.projectedIndexCols)
                                 .newRead()
                                 .createReader(
                                         DataSplit.builder()
@@ -238,10 +238,10 @@ public class FileIndexSink extends FlinkWriteSink<ManifestEntry> {
                                                         Collections.singletonList(dataFileMeta))
                                                 .rawConvertible(true)
                                                 .build())) {
-                    reader.forEachRemaining(fileIndexWriter::write);
+                    reader.forEachRemaining(dataFileIndexWriter::write);
                 }
 
-                fileIndexWriter
+                dataFileIndexWriter
                         .serializeMaintainers()
                         .forEach(
                                 (key, value) ->
@@ -276,38 +276,37 @@ public class FileIndexSink extends FlinkWriteSink<ManifestEntry> {
 
         private final FileIndexOptions fileIndexOptions;
         private final SchemaManager schemaManager;
-        private final TableSchema latest;
-        private final Map<
-                        Long, Tuple4<RowType, Map<String, String>, int[], Map<String, Set<String>>>>
-                schemaInfos;
-
+        private final TableSchema currentSchema;
+        private final Map<Long, SchemaInfo> schemaInfos;
         private final Set<Long> fileSchemaIds;
 
         public SchemaCache(FileIndexOptions fileIndexOptions, SchemaManager schemaManager) {
             this.fileIndexOptions = fileIndexOptions;
             this.schemaManager = schemaManager;
-            this.latest = schemaManager.latest().orElseThrow(RuntimeException::new);
+            this.currentSchema = schemaManager.latest().orElseThrow(RuntimeException::new);
             this.schemaInfos = new HashMap<>();
             this.fileSchemaIds = new HashSet<>();
         }
 
-        public Tuple4<RowType, Map<String, String>, int[], Map<String, Set<String>>> schemaInfo(
-                long schemaId) {
+        public SchemaInfo schemaInfo(long schemaId) {
             if (!fileSchemaIds.contains(schemaId)) {
                 RowType fileSchema = schemaManager.schema(schemaId).logicalRowType();
-                Map<String, String> evolutionmap =
-                        schemaId == latest.id()
-                                ? null
-                                : createIndexNameMapping(latest.fields(), fileSchema.getFields());
 
-                List<String> projectedColumnNames = new ArrayList<>();
-                Map<String, Set<String>> expectedIndexNameType = new HashMap<>();
+                @Nullable
+                Map<String, String> colNameMapping =
+                        schemaId == currentSchema.id()
+                                ? null
+                                : createIndexNameMapping(
+                                        currentSchema.fields(), fileSchema.getFields());
+
+                List<String> projectedColNames = new ArrayList<>();
+                Set<String> projectedColFullNames = new HashSet<>();
                 for (Map.Entry<FileIndexOptions.Column, Map<String, Options>> entry :
                         fileIndexOptions.entrySet()) {
                     FileIndexOptions.Column column = entry.getKey();
                     String columnName;
-                    if (evolutionmap != null) {
-                        columnName = evolutionmap.getOrDefault(column.getColumnName(), null);
+                    if (colNameMapping != null) {
+                        columnName = colNameMapping.getOrDefault(column.getColumnName(), null);
                         // if column name has no corresponding field, then we just skip it
                         if (columnName == null) {
                             continue;
@@ -315,26 +314,24 @@ public class FileIndexSink extends FlinkWriteSink<ManifestEntry> {
                     } else {
                         columnName = column.getColumnName();
                     }
-                    projectedColumnNames.add(columnName);
+                    projectedColNames.add(columnName);
                     String fullColumnName =
                             column.isNestedColumn()
                                     ? FileIndexCommon.toMapKey(
                                             columnName, column.getNestedColumnName())
                                     : column.getColumnName();
-                    expectedIndexNameType
-                            .computeIfAbsent(fullColumnName, name -> new HashSet<>())
-                            .addAll(entry.getValue().keySet());
+                    projectedColFullNames.add(fullColumnName);
                 }
 
                 schemaInfos.put(
                         schemaId,
-                        Tuple4.of(
+                        new SchemaInfo(
                                 fileSchema,
-                                evolutionmap,
-                                projectedColumnNames.stream()
+                                colNameMapping,
+                                projectedColNames.stream()
                                         .mapToInt(fileSchema::getFieldIndex)
                                         .toArray(),
-                                expectedIndexNameType));
+                                projectedColFullNames));
                 fileSchemaIds.add(schemaId);
             }
 
@@ -357,6 +354,25 @@ public class FileIndexSink extends FlinkWriteSink<ManifestEntry> {
             }
 
             return indexMapping;
+        }
+    }
+
+    private static class SchemaInfo {
+
+        private final RowType fileSchema;
+        private final Map<String, String> colNameMapping;
+        private final int[] projectedIndexCols;
+        private final Set<String> projectedColFullNames;
+
+        private SchemaInfo(
+                RowType fileSchema,
+                Map<String, String> colNameMapping,
+                int[] projectedIndexCols,
+                Set<String> projectedColFullNames) {
+            this.fileSchema = fileSchema;
+            this.colNameMapping = colNameMapping;
+            this.projectedIndexCols = projectedIndexCols;
+            this.projectedColFullNames = projectedColFullNames;
         }
     }
 }

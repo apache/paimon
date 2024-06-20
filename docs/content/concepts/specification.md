@@ -247,33 +247,7 @@ Global Index is in the index directory, currently, only two places will use glob
 
 ## Data File Index
 
-### Concept
-
-Data file index is an external index file corresponding to a certain data file. If the index file is too small, it will
-be stored directly in the manifest, otherwise in the directory of the data file. Each data file corresponds to an index file, 
-which has a separate file definition and can contain different types of indexes with multiple columns.
-
-### Usage
-
-Different file index may be efficient in different scenario. For example bloom filter may speed up query in point lookup
-scenario. Using a bitmap may consume more space but can result in greater accuracy. Though we only realize bloom filter 
-currently, but other types of index will be supported in the future. 
-
-Currently, file index is only supported in append-only table.
-
-`Bloom Filter`:
-* `file-index.bloom-filter.columns`: specify the columns that need bloom filter index.
-* `file-index.bloom-filter.<column_name>.fpp` to config false positive probability.
-* `file-index.bloom-filter.<column_name>.items` to config the expected distinct items in one data file.
-
-
-More filter types will be supported...
-
-### Procedure
-
-If you want to add file index to existing table, without any rewrite, you can use `file_index_rewrite` procedure. Before
-we use the procedure, you should config appropriate configurations in target table. You can use ALTER clause to config 
-`file-index.<filter-type>.columns` to the table. 
-
-How to invoke: see [flink procedures]({{< ref "flink/procedures#procedures" >}}) 
-
+Define `file-index.bloom-filter.columns`, Paimon will create its corresponding index file for each file. If the index
+file is too small, it will be stored directly in the manifest, or in the directory of the data file. Each data file
+corresponds to an index file, which has a separate file definition and can contain different types of indexes with
+multiple columns.

@@ -275,20 +275,20 @@ All available procedures are listed below.
       <td>CALL sys.repair('test_db.T')</td>
    </tr>
     <tr>
-      <td>file_index_rewrite</td>
+      <td>rewrite_file_index</td>
       <td>
-         CALL sys.file_index_rewrite(&ltidentifier&gt [, &ltpartitions&gt])<br/><br/>
+         CALL sys.rewrite_file_index(&ltidentifier&gt [, &ltpartitions&gt])<br/><br/>
       </td>
       <td>
          Rewrite the file index for the table. Argument:
             <li>identifier: &ltdatabaseName&gt.&lttableName&gt.</li>
-            <li>partitions : partition filter.</li>
+            <li>partitions : specific partitions.</li>
       </td>
       <td>
          -- rewrite the file index for the whole table<br/>
-         CALL sys.file_index_rewrite('test_db.T')<br/><br/>
+         CALL sys.rewrite_file_index('test_db.T')<br/><br/>
          -- repair all tables in a specific partition<br/>
-         CALL sys.file_index_rewrite('test_db.T', 'pt=a')<br/><br/>
+         CALL sys.rewrite_file_index('test_db.T', 'pt=a')<br/><br/>
      </td>
    </tr>
    </tbody>
