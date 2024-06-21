@@ -18,6 +18,4 @@
 
 package org.apache.paimon.spark.sql
 
-class DDLWithHiveCatalogTest extends DDLWithHiveCatalogTestBase {
-  override def supportDefaultDatabaseWithSessionCatalog = false
-}
+class DDLWithHiveCatalogTest extends DDLWithHiveCatalogTestBase {}

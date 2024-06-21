@@ -340,7 +340,7 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
 
     val stats = getScanStatistic("SELECT * FROM T")
     Assertions.assertEquals(2L, stats.rowCount.get.longValue())
-    Assertions.assertEquals(if (supportsColStats()) 4 else 0, stats.attributeStats.size)
+    Assertions.assertEquals(if (gteqSpark3_4) 4 else 0, stats.attributeStats.size)
   }
 
   test("Paimon analyze: partition filter push down hit") {
@@ -357,14 +357,14 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     // partition push down hit
     var sql = "SELECT * FROM T WHERE pt < 1"
     Assertions.assertEquals(
-      if (supportsColStats()) 0L else 4L,
+      if (gteqSpark3_4) 0L else 4L,
       getScanStatistic(sql).rowCount.get.longValue())
     checkAnswer(spark.sql(sql), Nil)
 
     // partition push down hit and select without it
     sql = "SELECT id FROM T WHERE pt < 1"
     Assertions.assertEquals(
-      if (supportsColStats()) 0L else 4L,
+      if (gteqSpark3_4) 0L else 4L,
       getScanStatistic(sql).rowCount.get.longValue())
     checkAnswer(spark.sql(sql), Nil)
 
@@ -388,6 +388,4 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     relation.computeStats()
   }
 
-  /** Spark supports the use of col stats for v2 table since 3.4+. */
-  protected def supportsColStats(): Boolean = true
 }
