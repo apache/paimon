@@ -47,8 +47,7 @@ public interface Committer<CommitT, GlobalCommitT> extends AutoCloseable {
             long checkpointId, long watermark, GlobalCommitT t, List<CommitT> committables);
 
     /** Commits the given {@link GlobalCommitT}. */
-    void commit(List<GlobalCommitT> globalCommittables, boolean endInput)
-            throws IOException, InterruptedException;
+    void commit(List<GlobalCommitT> globalCommittables) throws IOException, InterruptedException;
 
     /**
      * Filter out all {@link GlobalCommitT} which have committed, and commit the remaining {@link

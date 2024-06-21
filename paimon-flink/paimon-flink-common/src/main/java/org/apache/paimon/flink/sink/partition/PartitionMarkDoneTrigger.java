@@ -111,10 +111,8 @@ public class PartitionMarkDoneTrigger {
     }
 
     public List<String> donePartitions(boolean endInput, long currentTimeMillis) {
-        if (endInput) {
-            return partitionMarkDoneWhenEndInput
-                    ? new ArrayList<>(pendingPartitions.keySet())
-                    : Collections.emptyList();
+        if (endInput && partitionMarkDoneWhenEndInput) {
+            return new ArrayList<>(pendingPartitions.keySet());
         }
 
         List<String> needDone = new ArrayList<>();

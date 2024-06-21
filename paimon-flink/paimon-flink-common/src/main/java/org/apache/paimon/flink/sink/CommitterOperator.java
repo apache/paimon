@@ -201,13 +201,13 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
         NavigableMap<Long, GlobalCommitT> headMap =
                 committablesPerCheckpoint.headMap(checkpointId, true);
         List<GlobalCommitT> committables = committables(headMap);
-        committer.commit(committables, endInput);
+        committer.commit(committables);
         headMap.clear();
 
         if (committables.isEmpty()) {
             if (committer.forceCreatingSnapshot()) {
                 GlobalCommitT commit = toCommittables(checkpointId, Collections.emptyList());
-                committer.commit(Collections.singletonList(commit), endInput);
+                committer.commit(Collections.singletonList(commit));
             }
         }
     }

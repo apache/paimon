@@ -65,7 +65,7 @@ public class PartitionMarkDone implements Closeable {
         CoreOptions coreOptions = table.coreOptions();
         Options options = coreOptions.toConfiguration();
 
-        if (closePartitionMarkDone(isStreaming, table, options)) {
+        if (disablePartitionMarkDone(isStreaming, table, options)) {
             return null;
         }
 
@@ -99,7 +99,7 @@ public class PartitionMarkDone implements Closeable {
         return new PartitionMarkDone(partitionComputer, trigger, actions);
     }
 
-    private static boolean closePartitionMarkDone(
+    private static boolean disablePartitionMarkDone(
             boolean isStreaming, FileStoreTable table, Options options) {
         boolean partitionMarkDoneWhenEndInput = options.get(PARTITION_MARK_DONE_WHEN_END_INPUT);
         if (!isStreaming && !partitionMarkDoneWhenEndInput) {
@@ -146,12 +146,16 @@ public class PartitionMarkDone implements Closeable {
         this.actions = actions;
     }
 
-    public void notifyCommittable(List<ManifestCommittable> committables, boolean endInput) {
+    public void notifyCommittable(List<ManifestCommittable> committables) {
         Set<BinaryRow> partitions = new HashSet<>();
+        boolean endInput = false;
         for (ManifestCommittable committable : committables) {
             committable.fileCommittables().stream()
                     .map(CommitMessage::partition)
                     .forEach(partitions::add);
+            if (committable.identifier() == Long.MAX_VALUE) {
+                endInput = true;
+            }
         }
 
         partitions.stream()
