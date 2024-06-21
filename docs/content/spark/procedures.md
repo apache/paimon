@@ -72,10 +72,11 @@ This section introduce all available spark procedures about paimon.
             <li>table: the target table identifier. Cannot be empty.</li>
             <li>tag: name of the new tag. Cannot be empty.</li>
             <li>snapshot(Long):  id of the snapshot which the new tag is based on.</li>
+            <li>time_retained: The maximum time retained for newly created tags.</li>
       </td>
       <td>
-         -- based on snapshot 10 <br/>
-         CALL sys.create_tag(table => 'default.T', tag => 'my_tag', snapshot => 10) <br/>
+         -- based on snapshot 10 with 1d <br/>
+         CALL sys.create_tag(table => 'default.T', tag => 'my_tag', snapshot => 10, time_retained => '1 d') <br/>
          -- based on the latest snapshot <br/>
          CALL sys.create_tag(table => 'default.T', tag => 'my_tag')
       </td>
