@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.spark.PaimonSplitScan
+import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.catalyst.analysis.AssignmentAlignmentHelper
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.schema.SparkSystemColumns.ROW_KIND_COL
@@ -107,7 +108,7 @@ case class UpdatePaimonTableCommand(
         touchedFiles,
         rawConvertible = true,
         table.store().pathFactory())
-      val toUpdateScanRelation = DataSourceV2ScanRelation(
+      val toUpdateScanRelation = Compatibility.createDataSourceV2ScanRelation(
         relation,
         PaimonSplitScan(table, touchedDataSplits),
         relation.output)
