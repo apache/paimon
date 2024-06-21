@@ -89,7 +89,7 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
             .config(s"spark.sql.catalog.$catalogName.defaultDatabase", dbName)
             .getOrCreate()
 
-          if (catalogName.equals(sparkCatalogName) && !supportDefaultDatabaseWithSessionCatalog) {
+          if (catalogName.equals(sparkCatalogName) && !gteqSpark3_4) {
             checkAnswer(reusedSpark.sql("show tables").select("tableName"), Nil)
             reusedSpark.sql(s"use $dbName")
           }
@@ -124,8 +124,6 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
       }
     }
   }
-
-  def supportDefaultDatabaseWithSessionCatalog = true
 
   def getDatabaseLocation(dbName: String): String = {
     spark
