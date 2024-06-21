@@ -1361,6 +1361,79 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         }
     }
 
+    @Test
+    @Timeout(60)
+    public void testSpecifyKeys() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "test_specify_keys");
+
+        MultiTablesSinkMode mode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
+        MySqlSyncDatabaseAction action =
+                syncDatabaseActionBuilder(mySqlConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .withMode(mode.configString())
+                        .withPartitionKeys("part")
+                        .withPrimaryKeys("k", "part")
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        try (Statement statement = getStatement()) {
+            statement.executeUpdate("USE test_specify_keys");
+            testSpecifyKeysVerify1("t1", statement);
+            testSpecifyKeysVerify2("t2", statement);
+
+            // test newly created table
+            if (mode == COMBINED) {
+                statement.executeUpdate(
+                        "CREATE TABLE t3 (k INT, part INT, v1 VARCHAR(10), PRIMARY KEY (k))");
+                statement.executeUpdate("CREATE TABLE t4 (k INT, v1 VARCHAR(10), PRIMARY KEY (k))");
+                waitingTables("t3", "t4");
+                testSpecifyKeysVerify1("t3", statement);
+                testSpecifyKeysVerify2("t4", statement);
+            }
+        }
+    }
+
+    private void testSpecifyKeysVerify1(String tableName, Statement statement) throws Exception {
+        FileStoreTable table = getFileStoreTable(tableName);
+        assertThat(table.partitionKeys()).containsExactly("part");
+        assertThat(table.primaryKeys()).containsExactly("k", "part");
+
+        statement.executeUpdate("INSERT INTO " + tableName + " VALUES(1, 1, 'A')");
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.VARCHAR(10),
+                        },
+                        new String[] {"k", "part", "v1"});
+        waitForResult(
+                Collections.singletonList("+I[1, 1, A]"),
+                table,
+                rowType,
+                Arrays.asList("k", "part"));
+    }
+
+    private void testSpecifyKeysVerify2(String tableName, Statement statement) throws Exception {
+        FileStoreTable table = getFileStoreTable(tableName);
+        assertThat(table.partitionKeys()).isEmpty();
+        assertThat(table.primaryKeys()).containsExactly("k");
+
+        statement.executeUpdate("INSERT INTO " + tableName + " VALUES(1, 'A')");
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10),
+                        },
+                        new String[] {"k", "v1"});
+        waitForResult(
+                Collections.singletonList("+I[1, A]"),
+                table,
+                rowType,
+                Collections.singletonList("k"));
+    }
+
     private class SyncNewTableJob implements Runnable {
 
         private final int ith;

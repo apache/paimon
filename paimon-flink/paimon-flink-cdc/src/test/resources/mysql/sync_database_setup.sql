@@ -494,3 +494,23 @@ CREATE TABLE t2 (
     v1 VARCHAR(10),
     PRIMARY KEY (k)
 );
+
+-- ################################################################################
+--  testSpecifyKeys
+-- ################################################################################
+
+CREATE DATABASE test_specify_keys;
+USE test_specify_keys;
+
+CREATE TABLE t1 (
+    k INT,
+    part INT,
+    v1 VARCHAR(10),
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE t2 (
+    k INT,
+    v1 VARCHAR(10),
+    PRIMARY KEY (k)
+);

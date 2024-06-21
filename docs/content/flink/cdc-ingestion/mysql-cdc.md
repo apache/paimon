@@ -137,6 +137,8 @@ To use this feature through `flink run`, run the following shell command.
     [--mode <sync-mode>] \
     [--metadata_column <metadata-column>] \
     [--type_mapping <option1,option2...>] \
+    [--partition_keys <partition_keys>] \
+    [--primary_keys <primary-keys>] \
     [--mysql_conf <mysql-cdc-source-conf> [--mysql_conf <mysql-cdc-source-conf> ...]] \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
     [--table_conf <paimon-table-sink-conf> [--table_conf <paimon-table-sink-conf> ...]]

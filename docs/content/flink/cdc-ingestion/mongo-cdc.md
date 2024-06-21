@@ -194,6 +194,8 @@ To use this feature through `flink run`, run the following shell command.
     [--table_suffix <paimon-table-suffix>] \
     [--including_tables <mongodb-table-name|name-regular-expr>] \
     [--excluding_tables <mongodb-table-name|name-regular-expr>] \
+    [--partition_keys <partition_keys>] \
+    [--primary_keys <primary-keys>] \
     [--mongodb_conf <mongodb-cdc-source-conf> [--mongodb_conf <mongodb-cdc-source-conf> ...]] \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
     [--table_conf <paimon-table-sink-conf> [--table_conf <paimon-table-sink-conf> ...]]

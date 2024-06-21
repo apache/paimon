@@ -146,13 +146,14 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
             Schema fromMySql =
                     CdcActionCommonUtils.buildPaimonSchema(
                             identifier.getFullName(),
-                            Collections.emptyList(),
-                            Collections.emptyList(),
+                            partitionKeys,
+                            primaryKeys,
                             Collections.emptyList(),
                             tableConfig,
                             tableInfo.schema(),
                             metadataConverters,
                             caseSensitive,
+                            false,
                             true);
             try {
                 table = (FileStoreTable) catalog.getTable(identifier);
