@@ -30,6 +30,9 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.utils.SnapshotManager;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
@@ -39,9 +42,14 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** {@link StartingScanner} for incremental changes by snapshot. */
 public class IncrementalStartingScanner extends AbstractStartingScanner {
+
+    private static final Logger LOG = LoggerFactory.getLogger(IncrementalStartingScanner.class);
 
     private long endingSnapshotId;
 
@@ -57,6 +65,11 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
 
     @Override
     public Result scan(SnapshotReader reader) {
+        // Check the validity of scan staring snapshotId.
+        Optional<Result> checkResult = checkScanSnapshotIdValidity();
+        if (checkResult.isPresent()) {
+            return checkResult.get();
+        }
         Map<SplitInfo, List<DataFileMeta>> grouped = new HashMap<>();
         for (long i = startingSnapshotId + 1; i < endingSnapshotId + 1; i++) {
             List<DataSplit> splits = readSplits(reader, snapshotManager.snapshot(i));
@@ -100,6 +113,41 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
         }
 
         return StartingScanner.fromPlan(new PlanImpl(null, endingSnapshotId, result));
+    }
+
+    /**
+     * Check the validity of staring snapshotId early.
+     *
+     * @return If the check passes return empty.
+     */
+    public Optional<Result> checkScanSnapshotIdValidity() {
+        Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
+        Long latestSnapshotId = snapshotManager.latestSnapshotId();
+
+        if (earliestSnapshotId == null || latestSnapshotId == null) {
+            LOG.warn("There is currently no snapshot. Waiting for snapshot generation.");
+            return Optional.of(new NoSnapshot());
+        }
+
+        checkArgument(
+                startingSnapshotId <= endingSnapshotId,
+                "Starting snapshotId %s must less than ending snapshotId %s.",
+                startingSnapshotId,
+                endingSnapshotId);
+
+        // because of the left open right closed rule of IncrementalStartingScanner that is
+        // different from StaticFromStartingScanner, so we should allow starting snapshotId to be
+        // equal to the earliestSnapshotId - 1.
+        checkArgument(
+                startingSnapshotId >= earliestSnapshotId - 1
+                        && endingSnapshotId <= latestSnapshotId,
+                "The specified scan snapshotId range [%s, %s] is out of available snapshotId range [%s, %s].",
+                startingSnapshotId,
+                endingSnapshotId,
+                earliestSnapshotId,
+                latestSnapshotId);
+
+        return Optional.empty();
     }
 
     private List<DataSplit> readSplits(SnapshotReader reader, Snapshot s) {
