@@ -107,12 +107,12 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     }
 
     @Override
-    public void commit(List<ManifestCommittable> committables)
+    public void commit(List<ManifestCommittable> committables, boolean endInput)
             throws IOException, InterruptedException {
         commit.commitMultiple(committables, false);
         calcNumBytesAndRecordsOut(committables);
         if (partitionMarkDone != null) {
-            partitionMarkDone.notifyCommittable(committables);
+            partitionMarkDone.notifyCommittable(committables, endInput);
         }
     }
 
@@ -120,7 +120,7 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     public int filterAndCommit(List<ManifestCommittable> globalCommittables) {
         int committed = commit.filterAndCommitMultiple(globalCommittables);
         if (partitionMarkDone != null) {
-            partitionMarkDone.notifyCommittable(globalCommittables);
+            partitionMarkDone.notifyCommittable(globalCommittables, false);
         }
         return committed;
     }

@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink.partition;
 
 import org.apache.paimon.partition.PartitionTimeExtractor;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -34,10 +35,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class PartitionMarkDoneTriggerTest {
 
-    @Test
-    public void test() throws Exception {
-        List<String> pendingPartitions = new ArrayList<>();
-        PartitionMarkDoneTrigger.State state =
+    private static final Duration timeInterval = Duration.ofDays(1);
+    private static final Duration idleTime = Duration.ofMinutes(15);
+
+    private List<String> pendingPartitions;
+    private PartitionMarkDoneTrigger.State state;
+    private PartitionTimeExtractor extractor;
+
+    @BeforeEach
+    public void before() throws Exception {
+        this.pendingPartitions = new ArrayList<>();
+        this.state =
                 new PartitionMarkDoneTrigger.State() {
                     @Override
                     public List<String> restore() {
@@ -50,17 +58,23 @@ class PartitionMarkDoneTriggerTest {
                         pendingPartitions.addAll(partitions);
                     }
                 };
+        this.extractor = new PartitionTimeExtractor("$dt", "yyyy-MM-dd");
+    }
 
-        PartitionTimeExtractor extractor = new PartitionTimeExtractor("$dt", "yyyy-MM-dd");
-        Duration timeInterval = Duration.ofDays(1);
-        Duration idleTime = Duration.ofMinutes(15);
+    @Test
+    public void testWithoutEndInput() throws Exception {
         PartitionMarkDoneTrigger trigger =
                 new PartitionMarkDoneTrigger(
-                        state, extractor, timeInterval, idleTime, toEpochMillis("2024-02-01"));
+                        state,
+                        extractor,
+                        timeInterval,
+                        idleTime,
+                        toEpochMillis("2024-02-01"),
+                        false);
 
         // test not reach partition end + idle time
         trigger.notifyPartition("dt=2024-02-02", toEpochMillis("2024-02-01"));
-        List<String> partitions = trigger.donePartitions(toEpochMillis("2024-02-03"));
+        List<String> partitions = trigger.donePartitions(false, toEpochMillis("2024-02-03"));
         assertThat(partitions).isEmpty();
 
         // test state
@@ -69,9 +83,12 @@ class PartitionMarkDoneTriggerTest {
         assertThat(pendingPartitions).containsOnly("dt=2024-02-02");
 
         // test trigger
-        partitions = trigger.donePartitions(toEpochMillis("2024-02-03") + idleTime.toMillis());
+        partitions =
+                trigger.donePartitions(false, toEpochMillis("2024-02-03") + idleTime.toMillis());
         assertThat(partitions).isEmpty();
-        partitions = trigger.donePartitions(toEpochMillis("2024-02-03") + idleTime.toMillis() + 1);
+        partitions =
+                trigger.donePartitions(
+                        false, toEpochMillis("2024-02-03") + idleTime.toMillis() + 1);
         assertThat(partitions).containsOnly("dt=2024-02-02");
 
         // test state
@@ -81,21 +98,48 @@ class PartitionMarkDoneTriggerTest {
         // test refresh
         trigger.notifyPartition("dt=2024-02-03", toEpochMillis("2024-02-03"));
         trigger.notifyPartition("dt=2024-02-03", toEpochMillis("2024-02-04") + idleTime.toMillis());
-        partitions = trigger.donePartitions(toEpochMillis("2024-02-04") + idleTime.toMillis() + 1);
+        partitions =
+                trigger.donePartitions(
+                        false, toEpochMillis("2024-02-04") + idleTime.toMillis() + 1);
         assertThat(partitions).isEmpty();
         partitions =
-                trigger.donePartitions(toEpochMillis("2024-02-04") + 2 * idleTime.toMillis() + 1);
+                trigger.donePartitions(
+                        false, toEpochMillis("2024-02-04") + 2 * idleTime.toMillis() + 1);
         assertThat(partitions).containsOnly("dt=2024-02-03");
 
         // test restore
         pendingPartitions.add("dt=2024-02-04");
         trigger =
                 new PartitionMarkDoneTrigger(
-                        state, extractor, timeInterval, idleTime, toEpochMillis("2024-02-06"));
-        partitions = trigger.donePartitions(toEpochMillis("2024-02-06"));
+                        state,
+                        extractor,
+                        timeInterval,
+                        idleTime,
+                        toEpochMillis("2024-02-06"),
+                        false);
+        partitions = trigger.donePartitions(false, toEpochMillis("2024-02-06"));
         assertThat(partitions).isEmpty();
-        partitions = trigger.donePartitions(toEpochMillis("2024-02-06") + idleTime.toMillis() + 1);
+        partitions =
+                trigger.donePartitions(
+                        false, toEpochMillis("2024-02-06") + idleTime.toMillis() + 1);
         assertThat(partitions).containsOnly("dt=2024-02-04");
+    }
+
+    @Test
+    public void testWithEndInput() throws Exception {
+        PartitionMarkDoneTrigger trigger =
+                new PartitionMarkDoneTrigger(
+                        state,
+                        extractor,
+                        timeInterval,
+                        idleTime,
+                        toEpochMillis("2024-02-01"),
+                        true);
+
+        // test not reach partition end + idle time
+        trigger.notifyPartition("dt=2024-02-02", toEpochMillis("2024-02-01"));
+        List<String> partitions = trigger.donePartitions(true, toEpochMillis("2024-02-03"));
+        assertThat(partitions).containsOnly("dt=2024-02-02");
     }
 
     private long toEpochMillis(String dt) {

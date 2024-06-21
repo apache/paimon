@@ -114,7 +114,7 @@ public class StoreMultiCommitter
     }
 
     @Override
-    public void commit(List<WrappedManifestCommittable> committables)
+    public void commit(List<WrappedManifestCommittable> committables, boolean endInput)
             throws IOException, InterruptedException {
         if (committables.isEmpty()) {
             return;
@@ -130,13 +130,13 @@ public class StoreMultiCommitter
             List<ManifestCommittable> committableList = committableMap.get(entry.getKey());
             StoreCommitter committer = entry.getValue();
             if (committableList != null) {
-                committer.commit(committableList);
+                committer.commit(committableList, endInput);
             } else {
                 // try best to commit empty snapshot, but tableCommitters may not contain all tables
                 if (committer.forceCreatingSnapshot()) {
                     ManifestCommittable combine =
                             committer.combine(checkpointId, watermark, Collections.emptyList());
-                    committer.commit(Collections.singletonList(combine));
+                    committer.commit(Collections.singletonList(combine), endInput);
                 }
             }
         }

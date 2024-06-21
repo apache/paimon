@@ -376,6 +376,13 @@ public class FlinkConnectorOptions {
                                             "Both can be configured at the same time: 'done-partition,success-file'.")
                                     .build());
 
+    public static final ConfigOption<Boolean> PARTITION_MARK_DONE_WHEN_END_INPUT =
+            ConfigOptions.key("partition.end-input-to-done")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether mark the done status to indicate that the data is ready when end input.");
+
     public static final ConfigOption<String> CLUSTERING_COLUMNS =
             key("sink.clustering.by-columns")
                     .stringType()
