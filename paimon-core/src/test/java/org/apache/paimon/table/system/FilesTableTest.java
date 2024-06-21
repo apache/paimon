@@ -47,7 +47,6 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -55,6 +54,7 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.io.DataFileTestUtils.row;
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -159,13 +159,14 @@ public class FilesTableTest extends TableTestBase {
     }
 
     @Test
-    public void testReadFilesFromNotExistSnapshot() {
+    public void testReadFilesFromNotExistSnapshot() throws Exception {
+
         filesTable =
                 (FilesTable)
                         filesTable.copy(
                                 Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "3"));
         assertThatThrownBy(() -> read(filesTable))
-                .hasRootCauseInstanceOf(FileNotFoundException.class);
+                .satisfies(anyCauseMatches(IllegalArgumentException.class));
     }
 
     private List<InternalRow> getExceptedResult(long snapshotId) {
