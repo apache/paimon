@@ -104,14 +104,13 @@ public class TagManager {
                         ? Tag.fromSnapshotAndTagTtl(snapshot, timeRetained, LocalDateTime.now())
                                 .toJson()
                         : snapshot.toJson();
+        Path tagPath = tagPath(tagName);
 
         // update tag metadata into for the same snapshot of the same tag name.
         if (tagExists(tagName)) {
             Snapshot tagged = taggedSnapshot(tagName);
             Preconditions.checkArgument(
                     tagged.id() == snapshot.id(), "Tag name '%s' already exists.", tagName);
-
-            Path tagPath = tagPath(tagName);
             try {
                 fileIO.overwriteFileUtf8(tagPath, content);
             } catch (IOException ignored) {
@@ -121,15 +120,14 @@ public class TagManager {
                                 tagName, tagPath));
             }
         } else {
-            Path newTagPath = tagPath(tagName);
             try {
-                fileIO.writeFileUtf8(newTagPath, content);
+                fileIO.writeFileUtf8(tagPath, content);
             } catch (IOException e) {
                 throw new RuntimeException(
                         String.format(
                                 "Exception occurs when committing tag '%s' (path %s). "
                                         + "Cannot clean up because we can't determine the success.",
-                                tagName, newTagPath),
+                                tagName, tagPath),
                         e);
             }
         }
