@@ -509,7 +509,9 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
                 .satisfies(
                         anyCauseMatches(
                                 IllegalArgumentException.class,
-                                "Specified primary key 'pk' does not exist in source tables or computed columns [pt, _id, v1]."));
+                                "For sink table "
+                                        + tableName
+                                        + ", not all specified primary keys '[pk]' exist in source tables or computed columns '[pt, _id, v1]'."));
     }
 
     @Test
