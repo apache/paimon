@@ -18,4 +18,8 @@
 
 package org.apache.paimon.spark.sql
 
-class UpdataPaimonTableTest extends UpdateTableTest {}
+class UpdataPaimonTableTest extends UpdateTableTest {
+
+  override protected def supportsExistsOrIn(): Boolean = false
+
+}
