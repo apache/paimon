@@ -109,9 +109,10 @@ All available procedures are listed below.
             <li>identifier: the target table identifier. Cannot be empty.</li>
             <li>tagName: name of the new tag.</li>
             <li>snapshotId (Long): id of the snapshot which the new tag is based on.</li>
+            <li>time_retained: The maximum time retained for newly created tags.</li>
       </td>
       <td>
-         CALL sys.create_tag('default.T', 'my_tag', 10)
+         CALL sys.create_tag('default.T', 'my_tag', 10, '1 d')
       </td>
    </tr>
    <tr>
