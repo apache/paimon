@@ -31,13 +31,12 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMap
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectWriter;
 
 import com.esri.core.geometry.ogc.OGCGeometry;
+import org.apache.flink.api.java.tuple.Tuple3;
 
 import javax.annotation.Nullable;
 
 import java.nio.ByteBuffer;
-import java.util.Arrays;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -140,28 +139,37 @@ public class MySqlTypeUtils {
     private static final String RIGHT_BRACKETS = ")";
     private static final String COMMA = ",";
 
-    private static final List<String> HAVE_SCALE_LIST =
-            Arrays.asList(DECIMAL, NUMERIC, DOUBLE, REAL, FIXED);
-    private static final List<String> MAP_TO_DECIMAL_TYPES =
-            Arrays.asList(
-                    NUMERIC,
-                    NUMERIC_UNSIGNED,
-                    NUMERIC_UNSIGNED_ZEROFILL,
-                    FIXED,
-                    FIXED_UNSIGNED,
-                    FIXED_UNSIGNED_ZEROFILL,
-                    DECIMAL,
-                    DECIMAL_UNSIGNED,
-                    DECIMAL_UNSIGNED_ZEROFILL);
-
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
-    public static DataType toDataType(String mysqlFullType, TypeMapping typeMapping) {
-        return toDataType(
-                MySqlTypeUtils.getShortType(mysqlFullType),
-                MySqlTypeUtils.getPrecision(mysqlFullType),
-                MySqlTypeUtils.getScale(mysqlFullType),
-                typeMapping);
+    public static Tuple3<String, Integer, Integer> getTypeInfo(String typeName) {
+        int leftBracketIndex = typeName.indexOf(LEFT_BRACKETS);
+        String shortType;
+        int length = 0;
+        int scale = 0;
+        if (leftBracketIndex != -1) {
+            int rightBracketIndex = typeName.indexOf(RIGHT_BRACKETS);
+            shortType =
+                    typeName.substring(0, leftBracketIndex).trim().toUpperCase()
+                            + typeName.substring(rightBracketIndex + 1).toUpperCase();
+
+            String insideBrackets =
+                    typeName.substring(leftBracketIndex + 1, rightBracketIndex).trim();
+            int commaIndex = insideBrackets.indexOf(COMMA);
+
+            if (commaIndex != -1 && !isEnumType(shortType) && !isSetType(shortType)) {
+                length = Integer.parseInt(insideBrackets.substring(0, commaIndex).trim());
+                scale = Integer.parseInt(insideBrackets.substring(commaIndex + 1).trim());
+            } else if (!isEnumType(shortType) && !isSetType(shortType)) {
+                length = Integer.parseInt(insideBrackets);
+            }
+        } else {
+            shortType = typeName.toUpperCase();
+            if (isDecimalType(shortType)) {
+                length = 38;
+                scale = 18;
+            }
+        }
+        return Tuple3.of(shortType, length, scale);
     }
 
     public static DataType toDataType(
@@ -354,71 +362,28 @@ public class MySqlTypeUtils {
         return objectWriter.writeValueAsString(geometryInfo);
     }
 
-    public static boolean isScaleType(String typeName) {
-        return HAVE_SCALE_LIST.stream()
-                .anyMatch(type -> getShortType(typeName).toUpperCase().startsWith(type));
+    public static boolean isEnumType(String shortType) {
+        return shortType.equals(ENUM);
     }
 
-    public static boolean isEnumType(String typeName) {
-        return typeName.toUpperCase().startsWith(ENUM);
+    public static boolean isSetType(String shortType) {
+        return shortType.equals(SET);
     }
 
-    public static boolean isSetType(String typeName) {
-        return typeName.toUpperCase().startsWith(SET);
-    }
-
-    private static boolean isDecimalType(String typeName) {
-        return MAP_TO_DECIMAL_TYPES.stream()
-                .anyMatch(type -> getShortType(typeName).toUpperCase().startsWith(type));
-    }
-
-    /* Get type after the brackets are removed.*/
-    public static String getShortType(String typeName) {
-
-        if (typeName.contains(LEFT_BRACKETS) && typeName.contains(RIGHT_BRACKETS)) {
-            return typeName.substring(0, typeName.indexOf(LEFT_BRACKETS)).trim()
-                    + typeName.substring(typeName.indexOf(RIGHT_BRACKETS) + 1);
-        } else {
-            return typeName;
-        }
-    }
-
-    public static int getPrecision(String typeName) {
-        if (typeName.contains(LEFT_BRACKETS)
-                && typeName.contains(RIGHT_BRACKETS)
-                && isScaleType(typeName)) {
-            return Integer.parseInt(
-                    typeName.substring(typeName.indexOf(LEFT_BRACKETS) + 1, typeName.indexOf(COMMA))
-                            .trim());
-        } else if ((typeName.contains(LEFT_BRACKETS)
-                && typeName.contains(RIGHT_BRACKETS)
-                && !isScaleType(typeName)
-                && !isEnumType(typeName)
-                && !isSetType(typeName))) {
-            return Integer.parseInt(
-                    typeName.substring(
-                                    typeName.indexOf(LEFT_BRACKETS) + 1,
-                                    typeName.indexOf(RIGHT_BRACKETS))
-                            .trim());
-        } else {
-            // when missing precision of the decimal, we
-            // use the max precision to avoid parse error
-            return isDecimalType(typeName) ? 38 : 0;
-        }
-    }
-
-    public static int getScale(String typeName) {
-        if (typeName.contains(LEFT_BRACKETS)
-                && typeName.contains(RIGHT_BRACKETS)
-                && isScaleType(typeName)) {
-            return Integer.parseInt(
-                    typeName.substring(
-                                    typeName.indexOf(COMMA) + 1, typeName.indexOf(RIGHT_BRACKETS))
-                            .trim());
-        } else {
-            // When missing scale of the decimal, we
-            // use the max scale to avoid parse error
-            return isDecimalType(typeName) ? 18 : 0;
+    private static boolean isDecimalType(String shortType) {
+        switch (shortType) {
+            case NUMERIC:
+            case NUMERIC_UNSIGNED:
+            case NUMERIC_UNSIGNED_ZEROFILL:
+            case FIXED:
+            case FIXED_UNSIGNED:
+            case FIXED_UNSIGNED_ZEROFILL:
+            case DECIMAL:
+            case DECIMAL_UNSIGNED:
+            case DECIMAL_UNSIGNED_ZEROFILL:
+                return true;
+            default:
+                return false;
         }
     }
 
