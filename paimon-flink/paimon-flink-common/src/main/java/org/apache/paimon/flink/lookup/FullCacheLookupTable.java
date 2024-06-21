@@ -299,12 +299,12 @@ public abstract class FullCacheLookupTable implements LookupTable {
     @Override
     public void close() throws IOException {
         try {
-            stateFactory.close();
-            FileIOUtils.deleteDirectory(context.tempPath);
-        } finally {
             if (refreshExecutor != null) {
                 refreshExecutor.shutdown();
             }
+        } finally {
+            stateFactory.close();
+            FileIOUtils.deleteDirectory(context.tempPath);
         }
     }
 
