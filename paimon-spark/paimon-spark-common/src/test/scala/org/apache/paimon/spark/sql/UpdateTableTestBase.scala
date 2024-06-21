@@ -24,7 +24,7 @@ import org.apache.paimon.spark.catalyst.analysis.Update
 
 import org.assertj.core.api.Assertions.{assertThat, assertThatThrownBy}
 
-class UpdateTableTest extends PaimonSparkTestBase {
+abstract class UpdateTableTestBase extends PaimonSparkTestBase {
 
   import testImplicits._
 
@@ -133,25 +133,30 @@ class UpdateTableTest extends PaimonSparkTestBase {
       Seq((1, "a3", "2024"), (2, "b3", "2024"), (3, "c3", "2025"), (4, "d3", "2025")).toDF()
     )
 
-    // IN
-    spark.sql("""
-                |UPDATE T
-                |SET name = concat(substring(name, 0, 1), '5')
-                |WHERE id IN (SELECT key FROM source)""".stripMargin)
-    checkAnswer(
-      spark.sql("SELECT * FROM T ORDER BY id"),
-      Seq((1, "a3", "2024"), (2, "b5", "2024"), (3, "c3", "2025"), (4, "d5", "2025")).toDF()
-    )
+    // Spark support using Exists/In subqueries in Project node since Spark34 which is needed
+    // in [[UpdatePaimonTableCommand#performUpdateForNonPkTable]].
+    // So this case can only be passed since Spark34, todo: support it with Spark33-
+    if (gteqSpark3_4) {
+      // IN
+      spark.sql("""
+                  |UPDATE T
+                  |SET name = concat(substring(name, 0, 1), '5')
+                  |WHERE id IN (SELECT key FROM source)""".stripMargin)
+      checkAnswer(
+        spark.sql("SELECT * FROM T ORDER BY id"),
+        Seq((1, "a3", "2024"), (2, "b5", "2024"), (3, "c3", "2025"), (4, "d5", "2025")).toDF()
+      )
 
-    // NOT IN
-    spark.sql("""
-                |UPDATE T
-                |SET name = concat(substring(name, 0, 1), '6')
-                |WHERE id NOT IN (SELECT key FROM source)""".stripMargin)
-    checkAnswer(
-      spark.sql("SELECT * FROM T ORDER BY id"),
-      Seq((1, "a6", "2024"), (2, "b5", "2024"), (3, "c6", "2025"), (4, "d5", "2025")).toDF()
-    )
+      // NOT IN
+      spark.sql("""
+                  |UPDATE T
+                  |SET name = concat(substring(name, 0, 1), '6')
+                  |WHERE id NOT IN (SELECT key FROM source)""".stripMargin)
+      checkAnswer(
+        spark.sql("SELECT * FROM T ORDER BY id"),
+        Seq((1, "a6", "2024"), (2, "b5", "2024"), (3, "c6", "2025"), (4, "d5", "2025")).toDF()
+      )
+    }
   }
 
   CoreOptions.MergeEngine.values().foreach {
