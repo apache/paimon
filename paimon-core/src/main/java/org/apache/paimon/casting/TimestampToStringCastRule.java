@@ -48,7 +48,7 @@ class TimestampToStringCastRule extends AbstractCastRule<Timestamp, BinaryString
         final int precision = DataTypeChecks.getPrecision(inputType);
         TimeZone timeZone =
                 inputType.is(DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE)
-                        ? DateTimeUtils.LOCAL_TZ
+                        ? TimeZone.getDefault()
                         : DateTimeUtils.UTC_ZONE;
         return value ->
                 BinaryString.fromString(DateTimeUtils.formatTimestamp(value, timeZone, precision));

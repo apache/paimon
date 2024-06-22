@@ -24,6 +24,7 @@ import org.apache.paimon.types.DataTypeChecks;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.utils.DateTimeUtils;
 
+import java.util.TimeZone;
 import java.util.function.Function;
 
 /**
@@ -57,13 +58,13 @@ class TimestampToTimestampCastRule extends AbstractCastRule<Timestamp, Timestamp
             operand =
                     value ->
                             DateTimeUtils.timestampToTimestampWithLocalZone(
-                                    value, DateTimeUtils.LOCAL_TZ);
+                                    value, TimeZone.getDefault());
         } else if (inputType.is(DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE)
                 && targetType.is(DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE)) {
             operand =
                     value ->
                             DateTimeUtils.timestampWithLocalZoneToTimestamp(
-                                    value, DateTimeUtils.LOCAL_TZ);
+                                    value, TimeZone.getDefault());
         } else {
             operand = value -> value;
         }

@@ -24,6 +24,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.TimeZone;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -79,6 +80,23 @@ public class DateTimeUtilsTest {
             Timestamp t1 = Timestamp.fromSQLTimestamp(timestamp);
             Timestamp t2 = DateTimeUtils.toInternal(timestamp.getTime(), nanos);
             assertThat(t1).isEqualTo(t2);
+        }
+    }
+
+    @Test
+    public void testToInternalWithChangedTimeZone() {
+        TimeZone timeZone = TimeZone.getDefault();
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("UTC"));
+            java.sql.Timestamp ts = java.sql.Timestamp.valueOf("2024-06-01 00:00:00");
+            Timestamp ts1 = DateTimeUtils.toInternal(ts.getTime(), ts.getNanos());
+            assertThat(ts1.toString()).isEqualTo("2024-06-01T00:00");
+
+            TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"));
+            Timestamp ts2 = DateTimeUtils.toInternal(ts.getTime(), ts.getNanos());
+            assertThat(ts2.toString()).isEqualTo("2024-06-01T08:00");
+        } finally {
+            TimeZone.setDefault(timeZone);
         }
     }
 }

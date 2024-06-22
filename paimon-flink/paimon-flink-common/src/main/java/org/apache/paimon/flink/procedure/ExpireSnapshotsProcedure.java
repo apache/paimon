@@ -29,6 +29,7 @@ import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 import java.time.Duration;
+import java.util.TimeZone;
 
 /** A procedure to expire snapshots. */
 public class ExpireSnapshotsProcedure extends ProcedureBase {
@@ -79,7 +80,7 @@ public class ExpireSnapshotsProcedure extends ProcedureBase {
                     Duration.ofMillis(
                             System.currentTimeMillis()
                                     - DateTimeUtils.parseTimestampData(
-                                                    olderThanStr, 3, DateTimeUtils.LOCAL_TZ)
+                                                    olderThanStr, 3, TimeZone.getDefault())
                                             .getMillisecond()));
         }
         if (maxDeletes != null) {

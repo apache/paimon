@@ -52,6 +52,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TimeZone;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
@@ -113,7 +114,7 @@ public class OrphanFilesClean {
     public OrphanFilesClean olderThan(String timestamp) {
         // The FileStatus#getModificationTime returns milliseconds
         this.olderThanMillis =
-                DateTimeUtils.parseTimestampData(timestamp, 3, DateTimeUtils.LOCAL_TZ)
+                DateTimeUtils.parseTimestampData(timestamp, 3, TimeZone.getDefault())
                         .getMillisecond();
         return this;
     }
