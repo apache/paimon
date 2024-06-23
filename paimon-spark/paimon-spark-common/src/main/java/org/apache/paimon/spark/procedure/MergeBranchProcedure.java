@@ -29,10 +29,10 @@ import org.apache.spark.sql.types.StructType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /**
- * Replace branch procedure for given branch. Usage:
+ * Merge branch procedure for given branch. Usage:
  *
  * <pre><code>
- *  CALL sys.replace_branch('tableId', 'branchName')
+ *  CALL sys.merge_branch('tableId', 'branchName')
  * </code></pre>
  */
 public class MergeBranchProcedure extends BaseProcedure {
