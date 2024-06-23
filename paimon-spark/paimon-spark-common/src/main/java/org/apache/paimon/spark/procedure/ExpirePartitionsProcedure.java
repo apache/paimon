@@ -18,9 +18,11 @@
 
 package org.apache.paimon.spark.procedure;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.PartitionExpire;
+import org.apache.paimon.partition.PartitionExpireStrategy;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.TimeUtils;
 
@@ -33,6 +35,7 @@ import org.apache.spark.sql.types.StructType;
 import org.apache.spark.unsafe.types.UTF8String;
 
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -45,8 +48,9 @@ public class ExpirePartitionsProcedure extends BaseProcedure {
     private static final ProcedureParameter[] PARAMETERS =
             new ProcedureParameter[] {
                 ProcedureParameter.required("table", StringType),
-                ProcedureParameter.optional("expiration_time", StringType),
-                ProcedureParameter.optional("timestamp_formatter", StringType)
+                ProcedureParameter.required("expiration_time", StringType),
+                ProcedureParameter.optional("timestamp_formatter", StringType),
+                ProcedureParameter.optional("expire_strategy", StringType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -73,19 +77,23 @@ public class ExpirePartitionsProcedure extends BaseProcedure {
     public InternalRow[] call(InternalRow args) {
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
         String expirationTime = args.getString(1);
-        String timestampFormatter = args.getString(2);
+        String timestampFormatter = args.isNullAt(2) ? null : args.getString(2);
+        String expireStrategy = args.isNullAt(3) ? null : args.getString(3);
         return modifyPaimonTable(
                 tableIdent,
                 table -> {
                     FileStoreTable fileStoreTable = (FileStoreTable) table;
                     FileStore fileStore = fileStoreTable.store();
+                    Map<String, String> map = new HashMap<>();
+                    map.put(CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(), expireStrategy);
+                    map.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), timestampFormatter);
+
                     PartitionExpire partitionExpire =
                             new PartitionExpire(
-                                    fileStore.partitionType(),
                                     TimeUtils.parseDuration(expirationTime),
                                     Duration.ofMillis(0L),
-                                    null,
-                                    timestampFormatter,
+                                    PartitionExpireStrategy.createPartitionExpireStrategy(
+                                            CoreOptions.fromMap(map), fileStore.partitionType()),
                                     fileStore.newScan(),
                                     fileStore.newCommit(""),
                                     Optional.ofNullable(

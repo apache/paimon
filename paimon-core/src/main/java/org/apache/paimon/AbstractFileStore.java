@@ -34,6 +34,7 @@ import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.partition.PartitionExpireStrategy;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.service.ServiceManager;
@@ -264,11 +265,9 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         }
 
         return new PartitionExpire(
-                partitionType(),
                 partitionExpireTime,
                 options.partitionExpireCheckInterval(),
-                options.partitionTimestampPattern(),
-                options.partitionTimestampFormatter(),
+                PartitionExpireStrategy.createPartitionExpireStrategy(options, partitionType()),
                 newScan(),
                 newCommit(commitUser),
                 metastoreClient);

@@ -18,19 +18,21 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.PartitionExpire;
+import org.apache.paimon.partition.PartitionExpireStrategy;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.TimeUtils;
 
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
 /** Expire partitions action for Flink. */
 public class ExpirePartitionsAction extends TableActionBase {
-
     private final PartitionExpire partitionExpire;
 
     public ExpirePartitionsAction(
@@ -39,7 +41,8 @@ public class ExpirePartitionsAction extends TableActionBase {
             String tableName,
             Map<String, String> catalogConfig,
             String expirationTime,
-            String timestampFormatter) {
+            String timestampFormatter,
+            String expireStrategy) {
         super(warehouse, databaseName, tableName, catalogConfig);
         if (!(table instanceof FileStoreTable)) {
             throw new UnsupportedOperationException(
@@ -47,16 +50,18 @@ public class ExpirePartitionsAction extends TableActionBase {
                             "Only FileStoreTable supports expire_partitions action. The table type is '%s'.",
                             table.getClass().getName()));
         }
+        Map<String, String> map = new HashMap<>();
+        map.put(CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(), expireStrategy);
+        map.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), timestampFormatter);
 
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         FileStore<?> fileStore = fileStoreTable.store();
         this.partitionExpire =
                 new PartitionExpire(
-                        fileStore.partitionType(),
                         TimeUtils.parseDuration(expirationTime),
                         Duration.ofMillis(0L),
-                        null,
-                        timestampFormatter,
+                        PartitionExpireStrategy.createPartitionExpireStrategy(
+                                CoreOptions.fromMap(map), fileStore.partitionType()),
                         fileStore.newScan(),
                         fileStore.newCommit(""),
                         Optional.ofNullable(

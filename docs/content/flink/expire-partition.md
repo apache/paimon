@@ -29,7 +29,7 @@ under the License.
 You can set `partition.expiration-time` when creating a partitioned table. Paimon streaming sink will periodically check
 the status of partitions and delete expired partitions according to time.
 
-How to determine whether a partition has expired: compare the time extracted from the partition with the current
+How to determine whether a partition has expired: compare the time extracted from the partition or the last update time of the partition with the current
 time to see if survival time has exceeded the `partition.expiration-time`.
 
 {{< hint info >}}
@@ -42,8 +42,9 @@ An example for single partition field:
 ```sql
 CREATE TABLE t (...) PARTITIONED BY (dt) WITH (
     'partition.expiration-time' = '7 d',
-    'partition.expiration-check-interval' = '1 d',
-    'partition.timestamp-formatter' = 'yyyyMMdd'
+    'partition.expiration-check-interval' = '1 d', -- this is required in `values-time` strategy.
+    'partition.timestamp-formatter' = 'yyyyMMdd'   -- this is required in `values-time` strategy.
+    -- ,'partition.expiration-strategy' = 'update-time'
 );
 ```
 
@@ -69,6 +70,17 @@ More options:
     </tr>
     </thead>
     <tbody>
+        <tr>
+            <td><h5>partition.expiration-strategy</h5></td>
+            <td style="word-wrap: break-word;">values-time</td>
+            <td>String</td>
+            <td>
+                Specifies the expiration strategy for partition expiration. 
+                Possible values:
+                <li>values-time: The strategy compares the time extracted from the partition value with the current time.</li>
+                <li>update-time: The strategy compares the last update time of the partition with the current time.</li>
+            </td>
+        </tr>
         <tr>
             <td><h5>partition.expiration-check-interval</h5></td>
             <td style="word-wrap: break-word;">1 h</td>
