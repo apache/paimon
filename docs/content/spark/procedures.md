@@ -145,5 +145,16 @@ This section introduce all available spark procedures about paimon.
           CALL sys.repair('test_db.T')
       </td>
     </tr>
+    <tr>
+      <td>merge_branch</td>
+      <td>
+         To merge a branch to main branch. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>branch: name of the branch to be merged.</li>
+      </td>
+      <td>
+          CALL sys.merge_branch(table => 'test_db.T', branch => 'test_branch')
+      </td>
+    </tr>
     </tbody>
 </table>
