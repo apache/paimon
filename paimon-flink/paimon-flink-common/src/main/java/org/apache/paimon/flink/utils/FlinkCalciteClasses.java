@@ -25,16 +25,23 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.List;
 
-/** Class for load calcite dependency via reflection. */
-public class CalciteModule3 {
-    private static final Logger LOGGER = LoggerFactory.getLogger(CalciteModule3.class);
+/**
+ * Class for load calcite dependency via reflection. This is because Flink hides Calcite related
+ * dependencies in a runtime classloader. What this class needs to do is extract the Calcite class
+ * from this special classloader, but it cannot explicitly rely on them and can only be called
+ * through reflection.
+ */
+public class FlinkCalciteClasses {
+
+    private static final Logger LOG = LoggerFactory.getLogger(FlinkCalciteClasses.class);
+
     private static final String Flink_PLANNER_MODULE_CLASS =
             "org.apache.flink.table.planner.loader.PlannerModule";
     private static final String PLANNER_MODULE_METHOD = "getInstance";
-
     private static final String SUBMODULE_CLASS_LOADER = "submoduleClassLoader";
 
     private static final ClassLoader submoduleClassLoader;
+
     private final SqlNodeListDelegate sqlNodeListDelegate;
     private final SqlLiteralDelegate sqlLiteralDelegate;
     private final SqlBasicCallDelegate sqlBasicCallDelegate;
@@ -49,9 +56,10 @@ public class CalciteModule3 {
         boolean calciteFound = false;
         ClassLoader currentClassLoader = Thread.currentThread().getContextClassLoader();
         try {
+            // this code path is just for testing
             currentClassLoader.loadClass(SqlParserDelegate.CLASS_NAME);
             calciteFound = true;
-        } catch (ClassNotFoundException e) {
+        } catch (ClassNotFoundException ignored) {
         }
 
         try {
@@ -61,12 +69,12 @@ public class CalciteModule3 {
                 submoduleClassLoader = initCalciteClassLoader();
             }
         } catch (Exception e) {
-            LOGGER.error(String.format("Load Calcite class Fail: %s", e.getMessage()), e);
+            LOG.error(String.format("Load Calcite class Fail: %s", e.getMessage()), e);
             throw new RuntimeException(e);
         }
     }
 
-    public CalciteModule3() throws ClassNotFoundException {
+    public FlinkCalciteClasses() throws ClassNotFoundException {
         sqlNodeListDelegate = new SqlNodeListDelegate();
         sqlLiteralDelegate = new SqlLiteralDelegate();
         sqlBasicCallDelegate = new SqlBasicCallDelegate();
@@ -204,15 +212,6 @@ public class CalciteModule3 {
     /** Accessing org.apache.calcite.sql.parser.SqlParser$Config by Reflection. */
     public static class ConfigDelegate {
         static final String CLASS_NAME = "org.apache.calcite.sql.parser.SqlParser$Config";
-        private final Class<?> clazz;
-
-        public ConfigDelegate() throws ClassNotFoundException {
-            this.clazz = loadCalciteClass(CLASS_NAME);
-        }
-
-        public Class<?> getClazz() {
-            return clazz;
-        }
 
         public Object withLex(Object config, Object lex) throws Exception {
             return invokeMethod(
