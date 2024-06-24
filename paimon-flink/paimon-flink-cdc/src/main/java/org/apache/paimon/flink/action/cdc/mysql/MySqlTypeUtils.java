@@ -165,6 +165,8 @@ public class MySqlTypeUtils {
         } else {
             shortType = typeName.toUpperCase();
             if (isDecimalType(shortType)) {
+                // when missing precision and scale of the decimal, we
+                // use the max precision and scale to avoid parse error
                 length = 38;
                 scale = 18;
             }

@@ -169,7 +169,7 @@ public class CanalRecordParser extends RecordParser {
                                 typeInfo.f0, typeInfo.f1, typeInfo.f2, typeMapping);
                 rowTypeBuilder.field(originalName, paimonDataType);
 
-                String filedValue = Objects.toString(recordMap.get(originalName), null); // get会返回空？
+                String filedValue = Objects.toString(recordMap.get(originalName), null);
                 String newValue = transformValue(filedValue, typeInfo.f0, originalType);
                 rowData.put(originalName, newValue);
             }
