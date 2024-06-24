@@ -145,7 +145,6 @@ This section introduce all available spark procedures about paimon.
           CALL sys.repair('test_db.T')
       </td>
     </tr>
-<<<<<<< HEAD
     <tr>
       <td>merge_branch</td>
       <td>
@@ -168,7 +167,5 @@ This section introduce all available spark procedures about paimon.
           CALL sys.replace_branch(table => 'test_db.T', branch => 'test_branch')
       </td>
     </tr>
-=======
->>>>>>> d53e2fb1e (fix conflict)
     </tbody>
 </table>
