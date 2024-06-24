@@ -25,8 +25,6 @@ import org.apache.paimon.flink.sorter.TableSortInfo;
 import org.apache.paimon.flink.sorter.TableSorter;
 import org.apache.paimon.flink.sorter.TableSorter.OrderType;
 import org.apache.paimon.flink.source.FlinkSourceBuilder;
-import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 
@@ -43,8 +41,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
-
-import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 
 /** Compact with sort action. */
 public class SortCompactAction extends CompactAction {
@@ -72,7 +68,7 @@ public class SortCompactAction extends CompactAction {
     }
 
     @Override
-    public void build() {
+    public void build() throws Exception {
         // only support batch sort yet
         if (env.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
                 != RuntimeExecutionMode.BATCH) {
@@ -96,21 +92,7 @@ public class SortCompactAction extends CompactAction {
                                                 identifier.getObjectName())
                                         .asSummaryString());
 
-        if (getPartitions() != null) {
-            Predicate partitionPredicate =
-                    PredicateBuilder.or(
-                            getPartitions().stream()
-                                    .map(
-                                            p ->
-                                                    createPartitionPredicate(
-                                                            p,
-                                                            table.rowType(),
-                                                            ((FileStoreTable) table)
-                                                                    .coreOptions()
-                                                                    .partitionDefaultName()))
-                                    .toArray(Predicate[]::new));
-            sourceBuilder.predicate(partitionPredicate);
-        }
+        sourceBuilder.predicate(getPredicate());
 
         String scanParallelism = tableConfig.get(FlinkConnectorOptions.SCAN_PARALLELISM.key());
         if (scanParallelism != null) {

@@ -53,6 +53,11 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
                 .doesNotThrowAnyException();
         assertThatCode(() -> sql("CALL sys.compact('default.T', '', '', '', 'sink.parallelism=1')"))
                 .doesNotThrowAnyException();
+        assertThatCode(
+                        () ->
+                                sql(
+                                        "CALL sys.compact('default.T', '', '', '', 'sink.parallelism=1','pt=1')"))
+                .doesNotThrowAnyException();
     }
 
     @Test

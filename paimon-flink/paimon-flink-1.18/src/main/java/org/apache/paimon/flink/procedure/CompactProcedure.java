@@ -56,7 +56,7 @@ public class CompactProcedure extends ProcedureBase {
 
     public String[] call(ProcedureContext procedureContext, String tableId, String partitions)
             throws Exception {
-        return call(procedureContext, tableId, partitions, "", "", "");
+        return call(procedureContext, tableId, partitions, "", "", "", "");
     }
 
     public String[] call(
@@ -66,7 +66,7 @@ public class CompactProcedure extends ProcedureBase {
             String orderStrategy,
             String orderByColumns)
             throws Exception {
-        return call(procedureContext, tableId, partitions, orderStrategy, orderByColumns, "");
+        return call(procedureContext, tableId, partitions, orderStrategy, orderByColumns, "", "");
     }
 
     public String[] call(
@@ -77,6 +77,26 @@ public class CompactProcedure extends ProcedureBase {
             String orderByColumns,
             String tableOptions)
             throws Exception {
+        return call(
+                procedureContext,
+                tableId,
+                partitions,
+                orderStrategy,
+                orderByColumns,
+                tableOptions,
+                "");
+    }
+
+    public String[] call(
+            ProcedureContext procedureContext,
+            String tableId,
+            String partitions,
+            String orderStrategy,
+            String orderByColumns,
+            String tableOptions,
+            String whereSql)
+            throws Exception {
+
         String warehouse = catalog.warehouse();
         Map<String, String> catalogOptions = catalog.options();
         Map<String, String> tableConf =
@@ -113,6 +133,10 @@ public class CompactProcedure extends ProcedureBase {
 
         if (!(StringUtils.isBlank(partitions))) {
             action.withPartitions(ParameterUtils.getPartitions(partitions.split(";")));
+        }
+
+        if (!StringUtils.isBlank(whereSql)) {
+            action.withWhereSql(whereSql);
         }
 
         return execute(procedureContext, action, jobName);

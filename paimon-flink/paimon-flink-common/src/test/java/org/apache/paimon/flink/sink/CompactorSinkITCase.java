@@ -31,6 +31,7 @@ import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -68,6 +69,7 @@ import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
 
+import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -119,11 +121,16 @@ public class CompactorSinkITCase extends AbstractTestBase {
         StreamExecutionEnvironment env = streamExecutionEnvironmentBuilder().batchMode().build();
         CompactorSourceBuilder sourceBuilder =
                 new CompactorSourceBuilder(tablePath.toString(), table);
+        Predicate predicate =
+                createPartitionPredicate(
+                        getSpecifiedPartitions(),
+                        table.rowType(),
+                        table.coreOptions().partitionDefaultName());
         DataStreamSource<RowData> source =
                 sourceBuilder
                         .withEnv(env)
                         .withContinuousMode(false)
-                        .withPartitions(getSpecifiedPartitions())
+                        .withPartitionPredicate(predicate)
                         .build();
         new CompactorSinkBuilder(table).withInput(source).build();
         env.execute();
@@ -154,11 +161,16 @@ public class CompactorSinkITCase extends AbstractTestBase {
                 streamExecutionEnvironmentBuilder().streamingMode().build();
         CompactorSourceBuilder sourceBuilder =
                 new CompactorSourceBuilder(tablePath.toString(), table);
+        Predicate predicate =
+                createPartitionPredicate(
+                        getSpecifiedPartitions(),
+                        table.rowType(),
+                        table.coreOptions().partitionDefaultName());
         DataStreamSource<RowData> source =
                 sourceBuilder
                         .withEnv(env)
                         .withContinuousMode(false)
-                        .withPartitions(getSpecifiedPartitions())
+                        .withPartitionPredicate(predicate)
                         .build();
         Integer sinkParalellism = new Random().nextInt(100) + 1;
         new CompactorSinkBuilder(
