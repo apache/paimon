@@ -1246,6 +1246,36 @@ public abstract class HiveCatalogITCaseBase {
                 .containsExactlyInAnyOrder("dt=2020-01-02/hh=09", "dt=2020-01-03/hh=10");
     }
 
+    @Test
+    public void testExpiredPartitionsSyncToMetastore() throws Exception {
+        // Use flink to create a partitioned table and write data, hive read.
+        tEnv.executeSql("drop table if exists students").await();
+        tEnv.executeSql(
+                        "create table students\n"
+                                + "(id string\n"
+                                + ",dt string\n"
+                                + ",PRIMARY KEY(id,dt) NOT ENFORCED\n"
+                                + ") PARTITIONED BY (dt)\n"
+                                + "WITH (\n"
+                                + "'bucket' = '-1',\n"
+                                + "'file.format' = 'parquet',\n"
+                                + "'metastore.partitioned-table' = 'true'\n"
+                                + ");")
+                .await();
+
+        tEnv.executeSql("insert into students values('1', '2024-06-15')").await();
+        tEnv.executeSql("insert into students values('1', '9998-06-15')").await();
+        tEnv.executeSql("insert into students values('1', '9999-06-15')").await();
+
+        assertThat(hiveShell.executeQuery("show partitions students"))
+                .containsExactlyInAnyOrder("dt=2024-06-15", "dt=9998-06-15", "dt=9999-06-15");
+        tEnv.executeSql(
+                        "CALL sys.expire_partitions(`table` => 'test_db.students', expiration_time => '1 d', timestamp_formatter => 'yyyy-MM-dd')")
+                .await();
+        assertThat(hiveShell.executeQuery("show partitions students"))
+                .containsExactlyInAnyOrder("dt=9998-06-15", "dt=9999-06-15");
+    }
+
     /** Prepare to update a paimon table with a custom path in the paimon file system. */
     private void alterTableInFileSystem(TableEnvironment tEnv) throws Exception {
         tEnv.executeSql(

@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.FileStore;
+import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.TimeUtils;
@@ -32,6 +33,7 @@ import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 
 import java.time.Duration;
+import java.util.Optional;
 
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
@@ -83,7 +85,13 @@ public class ExpirePartitionsProcedure extends BaseProcedure {
                                     null,
                                     timestampFormatter,
                                     fileStore.newScan(),
-                                    fileStore.newCommit(""));
+                                    fileStore.newCommit(""),
+                                    Optional.ofNullable(
+                                                    fileStoreTable
+                                                            .catalogEnvironment()
+                                                            .metastoreClientFactory())
+                                            .map(MetastoreClient.Factory::create)
+                                            .orElse(null));
                     partitionExpire.expire(Long.MAX_VALUE);
                     InternalRow outputRow = newInternalRow(true);
                     return new InternalRow[] {outputRow};

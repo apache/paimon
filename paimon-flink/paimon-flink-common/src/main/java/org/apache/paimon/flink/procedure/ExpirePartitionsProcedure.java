@@ -20,6 +20,7 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.FileStore;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.TimeUtils;
@@ -30,6 +31,7 @@ import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 import java.time.Duration;
+import java.util.Optional;
 
 /** A procedure to expire partitions. */
 public class ExpirePartitionsProcedure extends ProcedureBase {
@@ -60,7 +62,13 @@ public class ExpirePartitionsProcedure extends ProcedureBase {
                         null,
                         timestampFormatter,
                         fileStore.newScan(),
-                        fileStore.newCommit(""));
+                        fileStore.newCommit(""),
+                        Optional.ofNullable(
+                                        fileStoreTable
+                                                .catalogEnvironment()
+                                                .metastoreClientFactory())
+                                .map(MetastoreClient.Factory::create)
+                                .orElse(null));
         partitionExpire.expire(Long.MAX_VALUE);
         return new String[] {};
     }
