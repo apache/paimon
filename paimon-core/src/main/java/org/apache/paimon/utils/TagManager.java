@@ -113,11 +113,12 @@ public class TagManager {
                     tagged.id() == snapshot.id(), "Tag name '%s' already exists.", tagName);
             try {
                 fileIO.overwriteFileUtf8(tagPath, content);
-            } catch (IOException ignored) {
-                LOG.info(
+            } catch (IOException e) {
+                throw new RuntimeException(
                         String.format(
                                 "Tag already exists. Failed to update tag metadata info for tag '%s' (path %s).",
-                                tagName, tagPath));
+                                tagName, tagPath),
+                        e);
             }
         } else {
             try {
