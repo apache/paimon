@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.spark.catalog.PaimonInputPartition
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.table.source.{ReadBuilder, Split}
 
@@ -28,13 +29,13 @@ import java.util.Objects
 
 /** A Spark [[Batch]] for paimon. */
 case class PaimonBatch(
-    splits: Array[Split],
+    inputPartitions: Array[PaimonInputPartition],
     readBuilder: ReadBuilder,
     metadataColumns: Seq[PaimonMetadataColumn] = Seq.empty)
   extends Batch {
 
   override def planInputPartitions(): Array[InputPartition] =
-    splits.map(new SparkInputPartition(_).asInstanceOf[InputPartition])
+    inputPartitions.map(_.asInstanceOf[InputPartition])
 
   override def createReaderFactory(): PartitionReaderFactory =
     PaimonPartitionReaderFactory(readBuilder, metadataColumns)
@@ -42,7 +43,7 @@ case class PaimonBatch(
   override def equals(obj: Any): Boolean = {
     obj match {
       case other: PaimonBatch =>
-        this.splits.sameElements(other.splits) &&
+        this.inputPartitions.sameElements(other.inputPartitions) &&
         readBuilder.equals(other.readBuilder)
 
       case _ => false
@@ -50,6 +51,6 @@ case class PaimonBatch(
   }
 
   override def hashCode(): Int = {
-    Objects.hashCode(splits.toSeq, readBuilder)
+    Objects.hashCode(inputPartitions.toSeq, readBuilder)
   }
 }

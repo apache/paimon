@@ -19,7 +19,8 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.data.{InternalRow => PaimonInternalRow}
-import org.apache.paimon.reader.{RecordReader, RecordReaderIterator}
+import org.apache.paimon.reader.RecordReader
+import org.apache.paimon.spark.catalog.PaimonInputPartition
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.table.source.{DataSplit, Split}
 
@@ -33,50 +34,88 @@ import scala.collection.JavaConverters._
 
 case class PaimonPartitionReader(
     readFunc: Split => RecordReader[PaimonInternalRow],
-    partition: SparkInputPartition,
+    partition: PaimonInputPartition,
     row: SparkInternalRow,
     metadataColumns: Seq[PaimonMetadataColumn]
 ) extends PartitionReader[InternalRow] {
 
-  private lazy val split: Split = partition.split
-
-  private lazy val iterator = {
-    val reader = readFunc(split)
-    PaimonRecordReaderIterator(reader, metadataColumns)
-  }
+  private val splits: Iterator[Split] = partition.splits.toIterator
+  private var currentRecordReader: PaimonRecordReaderIterator = readSplit()
+  private var advanced = false
+  private var currentRow: PaimonInternalRow = _
 
   override def next(): Boolean = {
-    if (iterator.hasNext) {
-      row.replace(iterator.next())
-      true
-    } else {
+    if (currentRecordReader == null) {
       false
+    } else {
+      advanceIfNeeded()
+      currentRow != null
     }
   }
 
   override def get(): InternalRow = {
-    row
+    if (!next) {
+      null
+    } else {
+      advanced = false
+      row.replace(currentRow)
+    }
+  }
+
+  private def advanceIfNeeded(): Unit = {
+    if (!advanced) {
+      advanced = true
+      var stop = false
+      while (!stop) {
+        if (currentRecordReader.hasNext) {
+          currentRow = currentRecordReader.next()
+        } else {
+          currentRow = null
+        }
+
+        if (currentRow != null) {
+          stop = true
+        } else {
+          currentRecordReader.close()
+          currentRecordReader = readSplit()
+          if (currentRecordReader == null) {
+            stop = true
+          }
+        }
+      }
+    }
+  }
+
+  private def readSplit(): PaimonRecordReaderIterator = {
+    if (splits.hasNext) {
+      val reader = readFunc(splits.next())
+      PaimonRecordReaderIterator(reader, metadataColumns)
+    } else {
+      null
+    }
   }
 
   override def currentMetricsValues(): Array[CustomTaskMetric] = {
-    val paimonMetricsValues: Array[CustomTaskMetric] = split match {
-      case dataSplit: DataSplit =>
-        val splitSize = dataSplit.dataFiles().asScala.map(_.fileSize).sum
-        Array(
-          PaimonNumSplitsTaskMetric(1L),
-          PaimonSplitSizeTaskMetric(splitSize),
-          PaimonAvgSplitSizeTaskMetric(splitSize)
-        )
-
-      case _ =>
-        Array.empty[CustomTaskMetric]
+    val dataSplits = partition.splits.collect { case ds: DataSplit => ds }
+    val numSplits = dataSplits.length
+    val paimonMetricsValues: Array[CustomTaskMetric] = if (dataSplits.nonEmpty) {
+      val splitSize = dataSplits.map(_.dataFiles().asScala.map(_.fileSize).sum).sum
+      Array(
+        PaimonNumSplitsTaskMetric(numSplits),
+        PaimonSplitSizeTaskMetric(splitSize),
+        PaimonAvgSplitSizeTaskMetric(splitSize / numSplits)
+      )
+    } else {
+      Array.empty[CustomTaskMetric]
     }
     super.currentMetricsValues() ++ paimonMetricsValues
   }
 
   override def close(): Unit = {
     try {
-      iterator.close()
+      if (currentRecordReader != null) {
+        currentRecordReader.close()
+      }
     } catch {
       case e: Exception =>
         throw new IOException(e)

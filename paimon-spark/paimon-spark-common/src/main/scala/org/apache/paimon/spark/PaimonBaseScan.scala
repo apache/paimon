@@ -20,6 +20,7 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.{stats, CoreOptions}
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
+import org.apache.paimon.spark.catalog.PaimonInputPartition
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
 import org.apache.paimon.spark.statistics.StatisticsHelper
@@ -64,7 +65,7 @@ abstract class PaimonBaseScan(
 
   protected var runtimeFilters: Array[Filter] = Array.empty
 
-  protected var splits: Array[Split] = _
+  protected var inputPartitions: Array[PaimonInputPartition] = _
 
   override val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
 
@@ -93,11 +94,11 @@ abstract class PaimonBaseScan(
     readBuilder.newScan().plan().splits().asScala.toArray
   }
 
-  def getSplits: Array[Split] = {
-    if (splits == null) {
-      splits = reshuffleSplits(getOriginSplits)
+  def getInputPartitions: Array[PaimonInputPartition] = {
+    if (inputPartitions == null) {
+      inputPartitions = getInputPartitions(getOriginSplits)
     }
-    splits
+    inputPartitions
   }
 
   override def readSchema(): StructType = {
@@ -106,7 +107,7 @@ abstract class PaimonBaseScan(
 
   override def toBatch: Batch = {
     val metadataColumns = metadataFields.map(field => PaimonMetadataColumn.get(field.name))
-    PaimonBatch(getSplits, readBuilder, metadataColumns)
+    PaimonBatch(getInputPartitions, readBuilder, metadataColumns)
   }
 
   override def toMicroBatchStream(checkpointLocation: String): MicroBatchStream = {

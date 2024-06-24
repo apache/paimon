@@ -60,7 +60,7 @@ class ScanHelperTest extends PaimonSparkTestBase {
       }
 
       val fakeScan = new FakeScan()
-      val reshuffled = fakeScan.reshuffleSplits(dataSplits.toArray)
+      val reshuffled = fakeScan.getInputPartitions(dataSplits.toArray)
       Assertions.assertTrue(reshuffled.length > 5)
     }
   }
