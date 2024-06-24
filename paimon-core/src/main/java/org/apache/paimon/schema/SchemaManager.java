@@ -204,6 +204,11 @@ public class SchemaManager implements Serializable {
                     SetOption setOption = (SetOption) change;
                     if (hasSnapshots) {
                         checkAlterTableOption(setOption.key());
+                        if (setOption.key().equals(CoreOptions.BUCKET.key())) {
+                            checkAlterBucket(
+                                    Integer.parseInt(newOptions.get(CoreOptions.BUCKET.key())),
+                                    Integer.parseInt(setOption.value()));
+                        }
                     }
                     newOptions.put(setOption.key(), setOption.value());
                 } else if (change instanceof RemoveOption) {
@@ -582,6 +587,18 @@ public class SchemaManager implements Serializable {
         if (CoreOptions.IMMUTABLE_OPTIONS.contains(key)) {
             throw new UnsupportedOperationException(
                     String.format("Change '%s' is not supported yet.", key));
+        }
+    }
+
+    public static void checkAlterBucket(int oldValue, int newValue) {
+        if (oldValue == newValue) {
+            return;
+        }
+        if (oldValue == -1) {
+            throw new UnsupportedOperationException("Cannot change bucket to -1.");
+        }
+        if (newValue == -1) {
+            throw new UnsupportedOperationException("Cannot change bucket when it is -1.");
         }
     }
 
