@@ -39,14 +39,14 @@ public class ReplaceBranchProcedure extends BaseProcedure {
 
     private static final ProcedureParameter[] PARAMETERS =
             new ProcedureParameter[] {
-                    ProcedureParameter.required("table", StringType),
-                    ProcedureParameter.required("branch", StringType)
+                ProcedureParameter.required("table", StringType),
+                ProcedureParameter.required("branch", StringType)
             };
 
     private static final StructType OUTPUT_TYPE =
             new StructType(
                     new StructField[] {
-                            new StructField("result", DataTypes.BooleanType, true, Metadata.empty())
+                        new StructField("result", DataTypes.BooleanType, true, Metadata.empty())
                     });
 
     protected ReplaceBranchProcedure(TableCatalog tableCatalog) {
