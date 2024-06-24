@@ -162,8 +162,12 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
         }
 
         if (null != collectedExceptions) {
-            compactFileWriter.abort();
-            changelogFileWriter.abort();
+            if (compactFileWriter != null) {
+                compactFileWriter.abort();
+            }
+            if (changelogFileWriter != null) {
+                changelogFileWriter.abort();
+            }
             throw collectedExceptions;
         }
 
