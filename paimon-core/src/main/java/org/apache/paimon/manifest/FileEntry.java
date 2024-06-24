@@ -176,6 +176,15 @@ public interface FileEntry {
         return result;
     }
 
+    static Future<List<ManifestEntry>> readManifestEntry(
+            ManifestFile manifestFile, ManifestFileMeta file) {
+        Future<List<ManifestEntry>> future =
+                CompletableFuture.supplyAsync(
+                        () -> manifestFile.read(file.fileName(), file.fileSize()),
+                        FileUtils.COMMON_IO_FORK_JOIN_POOL);
+        return future;
+    }
+
     static <T extends FileEntry> void assertNoDelete(Collection<T> entries) {
         for (T entry : entries) {
             Preconditions.checkState(
