@@ -50,7 +50,7 @@ public class FlinkCalciteClasses {
     private final SqlParserDelegate sqlParserDelegate;
     private final LexDelegate lexDelegate;
     private final ConfigDelegate configDelegate;
-    private final SqlIndentifierDelegate sqlIndentifierDelegate;
+    private final SqlIdentifierDelegate sqlIdentifierDelegate;
 
     static {
         boolean calciteFound = false;
@@ -83,7 +83,7 @@ public class FlinkCalciteClasses {
         sqlParserDelegate = new SqlParserDelegate();
         lexDelegate = new LexDelegate();
         configDelegate = new ConfigDelegate();
-        sqlIndentifierDelegate = new SqlIndentifierDelegate();
+        sqlIdentifierDelegate = new SqlIdentifierDelegate();
     }
 
     private static ClassLoader initCalciteClassLoader() throws Exception {
@@ -281,11 +281,11 @@ public class FlinkCalciteClasses {
     }
 
     /** Accessing org.apache.calcite.sql.SqlIdentifier by Reflection. */
-    public static class SqlIndentifierDelegate {
+    public static class SqlIdentifierDelegate {
         private static final String SQL_IDENTIFIER = "org.apache.calcite.sql.SqlIdentifier";
         private final Class<?> identifierClazz;
 
-        public SqlIndentifierDelegate() throws ClassNotFoundException {
+        public SqlIdentifierDelegate() throws ClassNotFoundException {
             this.identifierClazz = loadCalciteClass(SQL_IDENTIFIER);
         }
 
@@ -360,7 +360,7 @@ public class FlinkCalciteClasses {
         return configDelegate;
     }
 
-    public SqlIndentifierDelegate sqlIndentifierDelegate() {
-        return sqlIndentifierDelegate;
+    public SqlIdentifierDelegate sqlIndentifierDelegate() {
+        return sqlIdentifierDelegate;
     }
 }
