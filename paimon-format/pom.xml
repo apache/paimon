@@ -74,6 +74,10 @@ under the License.
                     <artifactId>avro</artifactId>
                 </exclusion>
                 <exclusion>
+                    <groupId>org.apache.orc</groupId>
+                    <artifactId>orc-core</artifactId>
+                </exclusion>
+                <exclusion>
                     <groupId>log4j</groupId>
                     <artifactId>log4j</artifactId>
                 </exclusion>
