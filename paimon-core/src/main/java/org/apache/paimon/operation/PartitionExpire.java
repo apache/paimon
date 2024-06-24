@@ -108,10 +108,10 @@ public class PartitionExpire {
             LOG.info("Expire Partition: " + partition);
         }
         if (expired.size() > 0) {
-            commit.dropPartitions(expired, commitIdentifier);
             if (metastoreClient != null) {
                 deleteMetastorePartitions(expired);
             }
+            commit.dropPartitions(expired, commitIdentifier);
         }
     }
 
