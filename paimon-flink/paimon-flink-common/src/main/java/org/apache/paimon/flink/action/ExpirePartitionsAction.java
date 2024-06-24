@@ -47,7 +47,7 @@ public class ExpirePartitionsAction extends TableActionBase {
         if (!(table instanceof FileStoreTable)) {
             throw new UnsupportedOperationException(
                     String.format(
-                            "Only FileStoreTable supports drop-partition action. The table type is '%s'.",
+                            "Only FileStoreTable supports expire_partitions action. The table type is '%s'.",
                             table.getClass().getName()));
         }
         this.expirationTime = expirationTime;
