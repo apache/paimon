@@ -29,8 +29,11 @@ import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
 import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
+import org.apache.flink.types.Row;
 
 import java.time.Duration;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /** A procedure to expire partitions. */
@@ -46,7 +49,7 @@ public class ExpirePartitionsProcedure extends ProcedureBase {
                 @ArgumentHint(name = "expiration_time", type = @DataTypeHint(value = "STRING")),
                 @ArgumentHint(name = "timestamp_formatter", type = @DataTypeHint("STRING"))
             })
-    public String[] call(
+    public @DataTypeHint("ROW< expired_partitions STRING>") Row[] call(
             ProcedureContext procedureContext,
             String tableId,
             String expirationTime,
@@ -69,7 +72,15 @@ public class ExpirePartitionsProcedure extends ProcedureBase {
                                                 .metastoreClientFactory())
                                 .map(MetastoreClient.Factory::create)
                                 .orElse(null));
-        partitionExpire.expire(Long.MAX_VALUE);
-        return new String[] {};
+        List<Map<String, String>> expired = partitionExpire.expire(Long.MAX_VALUE);
+        return expired == null || expired.isEmpty()
+                ? new Row[] {Row.of("No expired partitions.")}
+                : expired.stream()
+                        .map(
+                                x -> {
+                                    String r = x.toString();
+                                    return Row.of(r.substring(1, r.length() - 1));
+                                })
+                        .toArray(Row[]::new);
     }
 }

@@ -82,8 +82,8 @@ public class PartitionExpire {
         return this;
     }
 
-    public void expire(long commitIdentifier) {
-        expire(LocalDateTime.now(), commitIdentifier);
+    public List<Map<String, String>> expire(long commitIdentifier) {
+        return expire(LocalDateTime.now(), commitIdentifier);
     }
 
     @VisibleForTesting
@@ -92,20 +92,24 @@ public class PartitionExpire {
     }
 
     @VisibleForTesting
-    void expire(LocalDateTime now, long commitIdentifier) {
+    List<Map<String, String>> expire(LocalDateTime now, long commitIdentifier) {
         if (checkInterval.isZero() || now.isAfter(lastCheck.plus(checkInterval))) {
-            doExpire(now.minus(expirationTime), commitIdentifier);
+            List<Map<String, String>> expired =
+                    doExpire(now.minus(expirationTime), commitIdentifier);
             lastCheck = now;
+            return expired;
         }
+        return null;
     }
 
-    private void doExpire(LocalDateTime expireDateTime, long commitIdentifier) {
+    private List<Map<String, String>> doExpire(
+            LocalDateTime expireDateTime, long commitIdentifier) {
         List<Map<String, String>> expired = new ArrayList<>();
         for (BinaryRow partition : readPartitions(expireDateTime)) {
             Object[] array = toObjectArrayConverter.convert(partition);
             Map<String, String> partString = toPartitionString(array);
             expired.add(partString);
-            LOG.info("Expire Partition: " + partition);
+            LOG.info("Expire Partition: {}", partition);
         }
         if (expired.size() > 0) {
             if (metastoreClient != null) {
@@ -113,6 +117,7 @@ public class PartitionExpire {
             }
             commit.dropPartitions(expired, commitIdentifier);
         }
+        return expired;
     }
 
     private void deleteMetastorePartitions(List<Map<String, String>> partitions) {
