@@ -156,5 +156,16 @@ This section introduce all available spark procedures about paimon.
           CALL sys.merge_branch(table => 'test_db.T', branch => 'test_branch')
       </td>
     </tr>
+    <tr>
+      <td>replace_branch</td>
+      <td>
+         To replace main branch with specified branch. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>branch: name of the branch to be replaced.</li>
+      </td>
+      <td>
+          CALL sys.replace_branch(table => 'test_db.T', branch => 'test_branch')
+      </td>
+    </tr>
     </tbody>
 </table>
