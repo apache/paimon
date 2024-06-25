@@ -24,8 +24,8 @@ import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
-import com.ververica.cdc.connectors.mongodb.source.MongoDBSource;
-import com.ververica.cdc.connectors.mysql.source.MySqlSource;
+import org.apache.flink.cdc.connectors.mongodb.source.MongoDBSource;
+import org.apache.flink.cdc.connectors.mysql.source.MySqlSource;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.pulsar.source.PulsarSource;
 
