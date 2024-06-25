@@ -349,6 +349,26 @@ public class DataFileMeta {
                 fileSource);
     }
 
+    public DataFileMeta rename(String newFileName) {
+        return new DataFileMeta(
+                newFileName,
+                fileSize,
+                rowCount,
+                minKey,
+                maxKey,
+                keyStats,
+                valueStats,
+                minSequenceNumber,
+                maxSequenceNumber,
+                schemaId,
+                level,
+                extraFiles,
+                creationTime,
+                deleteRowCount,
+                embeddedIndex,
+                fileSource);
+    }
+
     public List<Path> collectFiles(DataFilePathFactory pathFactory) {
         List<Path> paths = new ArrayList<>();
         paths.add(pathFactory.toPath(fileName));

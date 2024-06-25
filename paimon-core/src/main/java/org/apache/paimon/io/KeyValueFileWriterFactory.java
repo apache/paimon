@@ -36,6 +36,7 @@ import org.apache.paimon.utils.StatsCollectorFactories;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -121,6 +122,21 @@ public class KeyValueFileWriterFactory {
 
     public void deleteFile(String filename, int level) {
         fileIO.deleteQuietly(formatContext.pathFactory(level).toPath(filename));
+    }
+
+    public void copyFile(String sourceFileName, String targetFileName, int level)
+            throws IOException {
+        Path sourcePath = formatContext.pathFactory(level).toPath(sourceFileName);
+        Path targetPath = formatContext.pathFactory(level).toPath(targetFileName);
+        fileIO.copyFile(sourcePath, targetPath);
+    }
+
+    public FileIO getFileIO() {
+        return fileIO;
+    }
+
+    public Path newChangelogPath(int level) {
+        return formatContext.pathFactory(level).newChangelogPath();
     }
 
     public static Builder builder(
