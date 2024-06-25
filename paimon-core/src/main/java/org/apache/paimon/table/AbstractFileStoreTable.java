@@ -251,12 +251,13 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     private void checkImmutability(Map<String, String> dynamicOptions) {
-        Map<String, String> options = tableSchema.options();
+        Map<String, String> oldOptions = tableSchema.options();
         // check option is not immutable
         dynamicOptions.forEach(
-                (k, v) -> {
-                    if (!Objects.equals(v, options.get(k))) {
-                        SchemaManager.checkAlterTableOption(k);
+                (k, newValue) -> {
+                    String oldValue = oldOptions.get(k);
+                    if (!Objects.equals(oldValue, newValue)) {
+                        SchemaManager.checkAlterTableOption(k, oldValue, newValue, true);
 
                         if (CoreOptions.BUCKET.key().equals(k)) {
                             throw new UnsupportedOperationException(
