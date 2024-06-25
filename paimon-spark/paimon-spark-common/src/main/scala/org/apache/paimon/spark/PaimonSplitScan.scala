@@ -45,3 +45,9 @@ case class PaimonSplitScan(
       metadataColumns)
   }
 }
+
+object PaimonSplitScan {
+  def apply(table: Table, dataSplits: Array[DataSplit]): PaimonSplitScan = {
+    new PaimonSplitScan(table, dataSplits)
+  }
+}

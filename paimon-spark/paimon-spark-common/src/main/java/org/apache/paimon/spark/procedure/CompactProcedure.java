@@ -22,14 +22,15 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.append.AppendOnlyCompactionTask;
 import org.apache.paimon.append.AppendOnlyTableCompactionCoordinator;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.spark.DynamicOverWrite$;
+import org.apache.paimon.spark.PaimonSplitScan;
 import org.apache.paimon.spark.SparkUtils;
+import org.apache.paimon.spark.catalyst.Compatibility;
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionUtils;
-import org.apache.paimon.spark.commands.WriteIntoPaimonTable;
+import org.apache.paimon.spark.commands.PaimonSparkWriter;
 import org.apache.paimon.spark.sort.TableSorter;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
@@ -42,6 +43,7 @@ import org.apache.paimon.table.sink.CompactionTaskSerializer;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ParameterUtils;
 import org.apache.paimon.utils.SerializationUtils;
@@ -55,14 +57,16 @@ import org.apache.spark.sql.PaimonUtils;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.catalyst.expressions.Expression;
-import org.apache.spark.sql.catalyst.plans.logical.Filter;
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -71,13 +75,21 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.stream.Collectors;
+
+import scala.collection.Seq;
+import scala.collection.mutable.ListBuffer;
 
 import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.spark.sql.types.DataTypes.IntegerType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /**
@@ -89,13 +101,16 @@ import static org.apache.spark.sql.types.DataTypes.StringType;
  */
 public class CompactProcedure extends BaseProcedure {
 
+    private static final Logger LOG = LoggerFactory.getLogger(CompactProcedure.class.getName());
+
     private static final ProcedureParameter[] PARAMETERS =
             new ProcedureParameter[] {
                 ProcedureParameter.required("table", StringType),
                 ProcedureParameter.optional("partitions", StringType),
                 ProcedureParameter.optional("order_strategy", StringType),
                 ProcedureParameter.optional("order_by", StringType),
-                ProcedureParameter.optional("where", StringType)
+                ProcedureParameter.optional("where", StringType),
+                ProcedureParameter.optional("max_order_threads", IntegerType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -128,6 +143,7 @@ public class CompactProcedure extends BaseProcedure {
                         ? Collections.emptyList()
                         : Arrays.asList(args.getString(3).split(","));
         String where = blank(args, 4) ? null : args.getString(4);
+        int maxOrderThreads = args.isNullAt(5) ? 15 : args.getInt(5);
         if (TableSorter.OrderType.NONE.name().equals(sortType) && !sortColumns.isEmpty()) {
             throw new IllegalArgumentException(
                     "order_strategy \"none\" cannot work with order_by columns.");
@@ -140,7 +156,12 @@ public class CompactProcedure extends BaseProcedure {
                 tableIdent,
                 table -> {
                     checkArgument(table instanceof FileStoreTable);
-                    LogicalPlan relation = createRelation(tableIdent);
+                    checkArgument(
+                            sortColumns.stream().noneMatch(table.partitionKeys()::contains),
+                            "order_by should not contain partition cols, because it is meaningless, your order_by cols are %s, and partition cols are %s",
+                            sortColumns,
+                            table.partitionKeys());
+                    DataSourceV2Relation relation = createRelation(tableIdent);
                     Expression condition = null;
                     if (!StringUtils.isBlank(finalWhere)) {
                         condition = ExpressionUtils.resolveFilter(spark(), relation, finalWhere);
@@ -160,7 +181,8 @@ public class CompactProcedure extends BaseProcedure {
                                             sortType,
                                             sortColumns,
                                             relation,
-                                            condition));
+                                            condition,
+                                            maxOrderThreads));
                     return new InternalRow[] {internalRow};
                 });
     }
@@ -178,19 +200,23 @@ public class CompactProcedure extends BaseProcedure {
             FileStoreTable table,
             String sortType,
             List<String> sortColumns,
-            LogicalPlan relation,
-            @Nullable Expression condition) {
+            DataSourceV2Relation relation,
+            @Nullable Expression condition,
+            int maxOrderThreads) {
         table = table.copy(Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "false"));
         BucketMode bucketMode = table.bucketMode();
         TableSorter.OrderType orderType = TableSorter.OrderType.of(sortType);
+        Predicate filter =
+                condition == null
+                        ? null
+                        : ExpressionUtils.convertConditionToPaimonPredicate(
+                                        condition,
+                                        ((LogicalPlan) relation).output(),
+                                        table.rowType(),
+                                        false)
+                                .getOrElse(null);
         if (orderType.equals(TableSorter.OrderType.NONE)) {
             JavaSparkContext javaSparkContext = new JavaSparkContext(spark().sparkContext());
-            Predicate filter =
-                    condition == null
-                            ? null
-                            : ExpressionUtils.convertConditionToPaimonPredicate(
-                                            condition, relation.output(), table.rowType(), false)
-                                    .getOrElse(null);
             switch (bucketMode) {
                 case HASH_FIXED:
                 case HASH_DYNAMIC:
@@ -207,7 +233,7 @@ public class CompactProcedure extends BaseProcedure {
             switch (bucketMode) {
                 case BUCKET_UNAWARE:
                     sortCompactUnAwareBucketTable(
-                            table, orderType, sortColumns, relation, condition);
+                            table, orderType, sortColumns, relation, filter, maxOrderThreads);
                     break;
                 default:
                     throw new UnsupportedOperationException(
@@ -360,17 +386,61 @@ public class CompactProcedure extends BaseProcedure {
             FileStoreTable table,
             TableSorter.OrderType orderType,
             List<String> sortColumns,
-            LogicalPlan relation,
-            @Nullable Expression condition) {
-        Dataset<Row> row =
-                PaimonUtils.createDataset(
-                        spark(), condition == null ? relation : new Filter(condition, relation));
-        new WriteIntoPaimonTable(
-                        table,
-                        DynamicOverWrite$.MODULE$,
-                        TableSorter.getSorter(table, orderType, sortColumns).sort(row),
-                        new Options())
-                .run(spark());
+            DataSourceV2Relation relation,
+            @Nullable Predicate filter,
+            int maxOrderThreads) {
+        SnapshotReader snapshotReader = table.newSnapshotReader();
+        if (filter != null) {
+            snapshotReader.withFilter(filter);
+        }
+        Map<BinaryRow, DataSplit[]> packedSplits = packForSort(snapshotReader.read().dataSplits());
+
+        PaimonSparkWriter writer = new PaimonSparkWriter(table);
+        // Use dynamic partition overwrite
+        writer.writeBuilder().withOverwrite();
+
+        ExecutorService executorService =
+                Executors.newFixedThreadPool(
+                        Math.min(maxOrderThreads, packedSplits.size()),
+                        new ExecutorThreadFactory(Thread.currentThread().getName() + "-compact"));
+        LinkedList<Future<Seq<CommitMessage>>> futures = new LinkedList<>();
+        TableSorter sorter = TableSorter.getSorter(table, orderType, sortColumns);
+
+        LOG.info("Start submit sort compact jobs, count: {}", packedSplits.size());
+        for (Map.Entry<BinaryRow, DataSplit[]> entry : packedSplits.entrySet()) {
+            Dataset<Row> dataset =
+                    PaimonUtils.createDataset(
+                            spark(),
+                            Compatibility.createDataSourceV2ScanRelation(
+                                    relation,
+                                    PaimonSplitScan.apply(table, entry.getValue()),
+                                    relation.output()));
+            futures.add(executorService.submit(() -> writer.write(sorter.sort(dataset))));
+        }
+
+        ListBuffer<CommitMessage> messages = new ListBuffer<>();
+        try {
+            for (Future<Seq<CommitMessage>> future : futures) {
+                messages.append(future.get());
+            }
+        } catch (Throwable e) {
+            throw new RuntimeException("Compact failed", e);
+        } finally {
+            executorService.shutdownNow();
+        }
+
+        writer.commit(messages.toSeq());
+    }
+
+    private Map<BinaryRow, DataSplit[]> packForSort(List<DataSplit> dataSplits) {
+        // Make a single partition as a compact group
+        return dataSplits.stream()
+                .collect(
+                        Collectors.groupingBy(
+                                DataSplit::partition,
+                                Collectors.collectingAndThen(
+                                        Collectors.toList(),
+                                        list -> list.toArray(new DataSplit[0]))));
     }
 
     @VisibleForTesting

@@ -50,7 +50,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
 
   private lazy val primaryKeyCols = tableSchema.trimmedPrimaryKeys().asScala
 
-  private lazy val serializer = new CommitMessageSerializer
+  @transient private lazy val serializer = new CommitMessageSerializer
 
   val writeBuilder: BatchWriteBuilder = table.newBatchWriteBuilder()
 
