@@ -113,6 +113,11 @@ CALL sys.merge_branch('default.T', 'branch1');
 
 Replacing main branch with custom branch will copy the snapshots, tags and schemas which should be copied from the main branch to target branch, and then the custom branch will be the new 'main' branch.
 
+Suppose there is a job read and write the specified branch, by replacing main branch with the created branch, we don't need to do
+anything with this job, for the new branch is totally complete now, and the 'main' branch is pointed to the new branch now.
+
+We cannot merge branch to main here because the new job will still read and write the specified branch which will be completely independent of main.
+
 {{< tabs "replace-branch" >}}
 
 {{< tab "Flink" >}}
