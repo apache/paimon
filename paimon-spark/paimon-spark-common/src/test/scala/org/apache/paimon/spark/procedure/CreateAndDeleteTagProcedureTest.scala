@@ -155,4 +155,87 @@ class CreateAndDeleteTagProcedureTest extends PaimonSparkTestBase with StreamTes
       }
     }
   }
+
+  test("Paimon Procedure: update tag") {
+    failAfter(streamingTimeout) {
+      withTempDir {
+        checkpointDir =>
+          // define a change-log table and test `forEachBatch` api
+          spark.sql(s"""
+                       |CREATE TABLE T (a INT, b STRING)
+                       |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
+                       |""".stripMargin)
+          val location = loadTable("T").location().toString
+
+          val inputData = MemoryStream[(Int, String)]
+          val stream = inputData
+            .toDS()
+            .toDF("a", "b")
+            .writeStream
+            .option("checkpointLocation", checkpointDir.getCanonicalPath)
+            .foreachBatch {
+              (batch: Dataset[Row], _: Long) =>
+                batch.write.format("paimon").mode("append").save(location)
+            }
+            .start()
+
+          val query = () => spark.sql("SELECT * FROM T ORDER BY a")
+
+          try {
+            // snapshot-1
+            inputData.addData((1, "a"))
+            stream.processAllAvailable()
+            checkAnswer(query(), Row(1, "a") :: Nil)
+
+            // snapshot-2
+            inputData.addData((2, "b"))
+            stream.processAllAvailable()
+            checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Nil)
+
+            // snapshot-3
+            inputData.addData((3, "c"))
+            stream.processAllAvailable()
+            checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Row(3, "c") :: Nil)
+
+            checkAnswer(
+              spark.sql(
+                "CALL paimon.sys.create_tag(" +
+                  "table => 'test.T', tag => 'test_tag', snapshot => 1)"),
+              Row(true) :: Nil)
+            checkAnswer(
+              spark.sql("SELECT tag_name FROM paimon.test.`T$tags`"),
+              Row("test_tag") :: Nil);
+
+            checkAnswer(
+              spark.sql(
+                "CALL paimon.sys.update_tag(" +
+                  "table => 'test.T', tag => 'test_tag', snapshot => 1, time_retained => '1 d')"),
+              Row(true) :: Nil)
+            checkAnswer(
+              spark.sql(
+                "SELECT tag_name,snapshot_id,time_retained FROM paimon.test.`T$tags` where tag_name = 'test_tag'"),
+              Row("test_tag", 1, "PT24H") :: Nil)
+
+            checkAnswer(
+              spark.sql(
+                "CALL paimon.sys.update_tag(" +
+                  "table => 'test.T', tag => 'test_tag', snapshot => 2, time_retained => '5 d')"),
+              Row(true) :: Nil)
+            checkAnswer(
+              spark.sql(
+                "SELECT tag_name,snapshot_id,time_retained FROM paimon.test.`T$tags` where tag_name = 'test_tag'"),
+              Row("test_tag", 2, "PT120H") :: Nil)
+
+            // assert throw exception tag not exist
+            assertThrows[RuntimeException] {
+              spark.sql(
+                "CALL paimon.sys.update_tag(" +
+                  "table => 'test.T', tag => 'new_tag', snapshot => 2, time_retained => '5 d')")
+            }
+          } finally {
+            stream.stop()
+          }
+      }
+    }
+  }
 }

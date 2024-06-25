@@ -169,6 +169,12 @@ public class PrivilegedFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public void updateTag(String tagName, long fromSnapshotId, Duration timeRetained) {
+        privilegeChecker.assertCanInsert(identifier);
+        wrapped.updateTag(tagName, fromSnapshotId, timeRetained);
+    }
+
+    @Override
     public void deleteTag(String tagName) {
         privilegeChecker.assertCanInsert(identifier);
         wrapped.deleteTag(tagName);

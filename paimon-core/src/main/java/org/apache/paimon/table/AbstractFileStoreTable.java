@@ -460,7 +460,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         }
         checkArgument(
                 snapshot != null,
-                "Cannot create tag because given snapshot #%s doesn't exist.",
+                "Cannot create or update tag because given snapshot #%s doesn't exist.",
                 fromSnapshotId);
         return snapshot;
     }
@@ -492,6 +492,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     private void createTag(String tagName, Snapshot fromSnapshot, @Nullable Duration timeRetained) {
         tagManager().createTag(fromSnapshot, tagName, timeRetained, store().createTagCallbacks());
+    }
+
+    @Override
+    public void updateTag(String tagName, long fromSnapshotId, @Nullable Duration timeRetained) {
+        tagManager().updateTag(tagName, createTagInternal(fromSnapshotId), timeRetained);
     }
 
     @Override

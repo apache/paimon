@@ -34,6 +34,7 @@ import org.apache.paimon.spark.procedure.RemoveOrphanFilesProcedure;
 import org.apache.paimon.spark.procedure.RepairProcedure;
 import org.apache.paimon.spark.procedure.ReplaceBranchProcedure;
 import org.apache.paimon.spark.procedure.RollbackProcedure;
+import org.apache.paimon.spark.procedure.UpdateTagProcedure;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
@@ -58,6 +59,7 @@ public class SparkProcedures {
                 ImmutableMap.builder();
         procedureBuilders.put("rollback", RollbackProcedure::builder);
         procedureBuilders.put("create_tag", CreateTagProcedure::builder);
+        procedureBuilders.put("update_tag", UpdateTagProcedure::builder);
         procedureBuilders.put("delete_tag", DeleteTagProcedure::builder);
         procedureBuilders.put("create_branch", CreateBranchProcedure::builder);
         procedureBuilders.put("delete_branch", DeleteBranchProcedure::builder);
