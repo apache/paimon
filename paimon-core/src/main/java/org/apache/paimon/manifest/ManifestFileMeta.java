@@ -43,7 +43,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.Supplier;
+import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
@@ -351,16 +351,32 @@ public class ManifestFileMeta {
             for (ManifestEntry entry : mergedEntries) {
                 writer.write(entry);
             }
+            mergedEntries.clear();
 
             // 2.3.2 merge base files
-            for (Supplier<List<ManifestEntry>> reader :
-                    FileEntry.readManifestEntries(manifestFile, base.subList(j, base.size()))) {
-                for (ManifestEntry entry : reader.get()) {
+            List<ManifestEntry> asyncManifestEntries = null;
+            for (; j < base.size(); j++) {
+                Future<List<ManifestEntry>> reader =
+                        FileEntry.readManifestEntry(manifestFile, base.get(j));
+                if (asyncManifestEntries != null) {
+                    for (ManifestEntry entry : asyncManifestEntries) {
+                        checkArgument(entry.kind() == FileKind.ADD);
+                        if (!deleteEntries.contains(entry.identifier())) {
+                            writer.write(entry);
+                        }
+                    }
+                }
+                asyncManifestEntries = reader.get();
+            }
+
+            if (asyncManifestEntries != null) {
+                for (ManifestEntry entry : asyncManifestEntries) {
                     checkArgument(entry.kind() == FileKind.ADD);
                     if (!deleteEntries.contains(entry.identifier())) {
                         writer.write(entry);
                     }
                 }
+                asyncManifestEntries.clear();
             }
 
             // 2.3.3 merge deltaMerged
