@@ -51,10 +51,13 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Supplier;
+
+import static org.apache.paimon.predicate.PredicateBuilder.excludePredicateWithFields;
 
 /** Factory to create {@link RecordReader}s for reading {@link KeyValue} files. */
 public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
@@ -375,6 +378,10 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                             ? filters
                             : SchemaEvolutionUtil.createDataFilters(
                                     tableSchema.fields(), dataSchema.fields(), filters);
+            // Skip pushing down partition filters to reader
+            List<Predicate> nonPartitionFilters =
+                    excludePredicateWithFields(
+                            dataFilters, new HashSet<>(dataSchema.partitionKeys()));
 
             Pair<int[], RowType> partitionPair = null;
             if (!dataSchema.partitionKeys().isEmpty()) {
@@ -397,7 +404,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                     partitionPair,
                     formatDiscover
                             .discover(formatIdentifier)
-                            .createReaderFactory(projectedRowType, dataFilters));
+                            .createReaderFactory(projectedRowType, nonPartitionFilters));
         }
     }
 }
