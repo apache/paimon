@@ -20,19 +20,17 @@ package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.ScanParallelExecutor;
 
-import java.util.ArrayList;
+import javax.annotation.Nullable;
+
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
-import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 /** Entry representing a file. */
 public interface FileEntry {
@@ -118,12 +116,10 @@ public interface FileEntry {
     static void mergeEntries(
             ManifestFile manifestFile,
             List<ManifestFileMeta> manifestFiles,
-            Map<Identifier, ManifestEntry> map) {
-        List<Supplier<List<ManifestEntry>>> manifestReadFutures =
-                readManifestEntries(manifestFile, manifestFiles);
-        for (Supplier<List<ManifestEntry>> taskResult : manifestReadFutures) {
-            mergeEntries(taskResult.get(), map);
-        }
+            Map<Identifier, ManifestEntry> map,
+            @Nullable Integer manifestReadParallelism) {
+        mergeEntries(
+                readManifestEntries(manifestFile, manifestFiles, manifestReadParallelism), map);
     }
 
     static <T extends FileEntry> void mergeEntries(Iterable<T> entries, Map<Identifier, T> map) {
@@ -156,33 +152,18 @@ public interface FileEntry {
         }
     }
 
-    static List<Supplier<List<ManifestEntry>>> readManifestEntries(
-            ManifestFile manifestFile, List<ManifestFileMeta> manifestFiles) {
-        List<Supplier<List<ManifestEntry>>> result = new ArrayList<>();
-        for (ManifestFileMeta file : manifestFiles) {
-            Future<List<ManifestEntry>> future =
-                    CompletableFuture.supplyAsync(
-                            () -> manifestFile.read(file.fileName(), file.fileSize()),
-                            FileUtils.COMMON_IO_FORK_JOIN_POOL);
-            result.add(
-                    () -> {
-                        try {
-                            return future.get();
-                        } catch (ExecutionException | InterruptedException e) {
-                            throw new RuntimeException("Failed to read manifest file.", e);
-                        }
-                    });
-        }
-        return result;
-    }
-
-    static Future<List<ManifestEntry>> readManifestEntry(
-            ManifestFile manifestFile, ManifestFileMeta file) {
-        Future<List<ManifestEntry>> future =
-                CompletableFuture.supplyAsync(
-                        () -> manifestFile.read(file.fileName(), file.fileSize()),
-                        FileUtils.COMMON_IO_FORK_JOIN_POOL);
-        return future;
+    static Iterable<ManifestEntry> readManifestEntries(
+            ManifestFile manifestFile,
+            List<ManifestFileMeta> manifestFiles,
+            @Nullable Integer manifestReadParallelism) {
+        return ScanParallelExecutor.parallelismBatchIterable(
+                files ->
+                        files.parallelStream()
+                                .flatMap(
+                                        m -> manifestFile.read(m.fileName(), m.fileSize()).stream())
+                                .collect(Collectors.toList()),
+                manifestFiles,
+                manifestReadParallelism);
     }
 
     static <T extends FileEntry> void assertNoDelete(Collection<T> entries) {

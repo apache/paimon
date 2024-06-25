@@ -119,6 +119,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final boolean dynamicPartitionOverwrite;
     @Nullable private final Comparator<InternalRow> keyComparator;
     private final String branchName;
+    @Nullable private final Integer manifestReadParallelism;
 
     @Nullable private Lock lock;
     private boolean ignoreEmptyCommit;
@@ -146,7 +147,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             boolean dynamicPartitionOverwrite,
             @Nullable Comparator<InternalRow> keyComparator,
             String branchName,
-            StatsFileHandler statsFileHandler) {
+            StatsFileHandler statsFileHandler,
+            @Nullable Integer manifestReadParallelism) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.commitUser = commitUser;
@@ -165,6 +167,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.dynamicPartitionOverwrite = dynamicPartitionOverwrite;
         this.keyComparator = keyComparator;
         this.branchName = branchName;
+        this.manifestReadParallelism = manifestReadParallelism;
 
         this.lock = null;
         this.ignoreEmptyCommit = true;
@@ -822,7 +825,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             manifestTargetSize.getBytes(),
                             manifestMergeMinCount,
                             manifestFullCompactionSize.getBytes(),
-                            partitionType));
+                            partitionType,
+                            manifestReadParallelism));
             previousChangesListName = manifestList.write(newMetas);
 
             // the added records subtract the deleted records from

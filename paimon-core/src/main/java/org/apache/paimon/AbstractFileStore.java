@@ -198,7 +198,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 partitionType.getFieldCount() > 0 && options.dynamicPartitionOverwrite(),
                 newKeyComparator(),
                 branchName,
-                newStatsFileHandler());
+                newStatsFileHandler(),
+                options.scanManifestParallelism());
     }
 
     @Override
