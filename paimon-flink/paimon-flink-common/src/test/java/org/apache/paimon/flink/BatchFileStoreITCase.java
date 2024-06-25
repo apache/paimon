@@ -19,7 +19,14 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.DateTimeUtils;
 
@@ -31,6 +38,7 @@ import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -433,7 +441,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testIgnoreDeleteCompatible() {
+    public void testIgnoreDeleteCompatible() throws Exception {
         sql(
                 "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING) "
                         + "WITH ('merge-engine' = 'deduplicate', 'write-only' = 'true')");
@@ -444,7 +452,18 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         assertThat(sql("SELECT * FROM ignore_delete")).isEmpty();
 
         // set ignore-delete and read
-        sql("ALTER TABLE ignore_delete set ('ignore-delete' = 'true')");
+        Map<String, String> newOptions = new HashMap<>();
+        newOptions.put(CoreOptions.IGNORE_DELETE.key(), "true");
+        SchemaUtils.forceCommit(
+                new SchemaManager(LocalFileIO.create(), new Path(path, "default.db/ignore_delete")),
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "pk", DataTypes.INT().notNull()),
+                                new DataField(1, "v", DataTypes.STRING())),
+                        Collections.emptyList(),
+                        Collections.singletonList("pk"),
+                        newOptions,
+                        null));
         assertThat(sql("SELECT * FROM ignore_delete")).containsExactlyInAnyOrder(Row.of(1, "A"));
     }
 

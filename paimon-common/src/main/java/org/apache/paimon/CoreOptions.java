@@ -310,6 +310,7 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MergeEngine.DEDUPLICATE)
                     .withDescription("Specify the merge engine for table with primary key.");
 
+    @Immutable
     public static final ConfigOption<Boolean> IGNORE_DELETE =
             key("ignore-delete")
                     .booleanType()
