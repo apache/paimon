@@ -57,10 +57,14 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
+import static org.apache.paimon.predicate.PredicateBuilder.containsFields;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 
 /** A {@link SplitRead} to read raw file directly from {@link DataSplit}. */
@@ -184,6 +188,15 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
 
         Pair<int[], RowType> partitionPair = null;
         if (!dataSchema.partitionKeys().isEmpty()) {
+            // Skip partition filters for reader
+            if (dataFilters != null && !dataFilters.isEmpty()) {
+                Set<String> partitionKeysSet = new HashSet<>(dataSchema.partitionKeys());
+                dataFilters =
+                        dataFilters.stream()
+                                .filter(f -> !containsFields(f, partitionKeysSet))
+                                .collect(Collectors.toList());
+            }
+
             Pair<int[], int[][]> partitionMapping =
                     PartitionUtils.constructPartitionMapping(dataSchema, dataProjection);
             // if partition fields are not selected, we just do nothing

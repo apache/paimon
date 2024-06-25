@@ -141,4 +141,23 @@ class MigrateTableProcedureTest extends PaimonHiveTestBase {
         .hasMessageContaining("Hive migrator only support unaware-bucket target table")
     }
   }
+
+  test(s"Paimon migrate table procedure: select migrate table with partition filter") {
+    withTable("hive_tbl") {
+      // create hive table
+      spark.sql(s"""
+                   |CREATE TABLE hive_tbl (id STRING, name STRING, pt INT)
+                   |USING parquet
+                   |PARTITIONED BY (pt)
+                   |""".stripMargin)
+
+      spark.sql(s"INSERT INTO hive_tbl VALUES ('1', 'a', 1), ('2', 'b', 2)")
+
+      spark.sql(s"""CALL sys.migrate_table(source_type => 'hive', table => '$hiveDbName.hive_tbl',
+                   |options => 'file.format=parquet')
+                   |""".stripMargin)
+
+      checkAnswer(spark.sql(s"SELECT * FROM hive_tbl WHERE pt = 1"), Row("1", "a", 1) :: Nil)
+    }
+  }
 }

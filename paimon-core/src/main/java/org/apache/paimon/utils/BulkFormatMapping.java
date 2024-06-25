@@ -33,7 +33,12 @@ import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+import static org.apache.paimon.predicate.PredicateBuilder.containsFields;
 
 /** Class with index mapping and bulk format. */
 public class BulkFormatMapping {
@@ -167,6 +172,15 @@ public class BulkFormatMapping {
 
             Pair<int[], RowType> partitionPair = null;
             if (!dataSchema.partitionKeys().isEmpty()) {
+                // Skip partition filters for reader
+                if (dataFilters != null && !dataFilters.isEmpty()) {
+                    Set<String> partitionKeysSet = new HashSet<>(dataSchema.partitionKeys());
+                    dataFilters =
+                            dataFilters.stream()
+                                    .filter(f -> !containsFields(f, partitionKeysSet))
+                                    .collect(Collectors.toList());
+                }
+
                 Pair<int[], int[][]> partitionMapping =
                         PartitionUtils.constructPartitionMapping(
                                 dataRecordType, dataSchema.partitionKeys(), dataProjection);
