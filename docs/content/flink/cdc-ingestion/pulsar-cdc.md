@@ -52,7 +52,7 @@ If a message in a pulsar topic is a change event captured from another database 
          <td>True</td>
         </tr>
         <tr>
-         <td><a href="https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/formats/maxwell/ >}}">Maxwell CDC</a></td>
+         <td><a href="https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/formats/maxwell/">Maxwell CDC</a></td>
         <td>True</td>
         </tr>
         <tr>
@@ -198,6 +198,8 @@ To use this feature through `flink run`, run the following shell command.
     [--including_tables <table-name|name-regular-expr>] \
     [--excluding_tables <table-name|name-regular-expr>] \
     [--type_mapping to-string] \
+    [--partition_keys <partition_keys>] \
+    [--primary_keys <primary-keys>] \
     [--pulsar_conf <pulsar-source-conf> [--pulsar_conf <pulsar-source-conf> ...]] \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
     [--table_conf <paimon-table-sink-conf> [--table_conf <paimon-table-sink-conf> ...]]

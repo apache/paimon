@@ -70,6 +70,18 @@ under the License.
         </td>
     </tr>
     <tr>
+        <td><h5>--partition_keys</h5></td>
+        <td>The partition keys for Paimon table. If there are multiple partition keys, connect them with comma, for example "dt,hh,mm".
+            If the keys are not in source table, the sink table won't set partition keys.</td>
+    </tr>
+    <tr>
+        <td><h5>--primary_keys</h5></td>
+        <td>The primary keys for Paimon table. If there are multiple primary keys, connect them with comma, for example "buyer_id,seller_id".
+            If the keys are not in source table, but the source table has primary keys, the sink table will use source table's primary keys.
+            Otherwise, the sink table won't set primary keys.</td>
+    </tr>
+    <tr>
+    <tr>
         <td><h5>--kafka_conf</h5></td>
         <td>The configuration for Flink Kafka sources. Each configuration should be specified in the format `key=value`. `properties.bootstrap.servers`, `topic/topic-pattern`, `properties.group.id`,  and `value.format` are required configurations, others are optional.See its <a href="https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/kafka/#connector-options">document</a> for a complete list of configurations.</td>
     </tr>

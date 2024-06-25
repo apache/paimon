@@ -42,7 +42,7 @@ import java.util.List;
  * <p>Validation is performed to ensure that the JSON records contain all necessary fields, and the
  * class also supports schema extraction for the Kafka topic.
  */
-public class MaxwellRecordParserAbstract extends AbstractJsonRecordParser {
+public class MaxwellRecordParser extends AbstractJsonRecordParser {
 
     private static final String FIELD_OLD = "old";
     private static final String FIELD_TYPE = "type";
@@ -50,9 +50,8 @@ public class MaxwellRecordParserAbstract extends AbstractJsonRecordParser {
     private static final String OP_UPDATE = "update";
     private static final String OP_DELETE = "delete";
 
-    public MaxwellRecordParserAbstract(
-            boolean caseSensitive, TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        super(caseSensitive, typeMapping, computedColumns);
+    public MaxwellRecordParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
+        super(typeMapping, computedColumns);
     }
 
     @Override

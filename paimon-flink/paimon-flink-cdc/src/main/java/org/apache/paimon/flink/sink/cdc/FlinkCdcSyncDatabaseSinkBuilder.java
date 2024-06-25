@@ -158,9 +158,12 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                 .process(new MultiTableUpdatedDataFieldsProcessFunction(catalogLoader))
                 .name("Schema Evolution");
 
+        DataStream<CdcMultiplexRecord> converted =
+                CaseSensitiveUtils.cdcMultiplexRecordConvert(catalogLoader, newlyAddedTableStream);
+
         DataStream<CdcMultiplexRecord> partitioned =
                 partition(
-                        newlyAddedTableStream,
+                        converted,
                         new CdcMultiplexRecordChannelComputer(catalogLoader),
                         parallelism);
 
@@ -186,6 +189,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         SingleOutputStreamOperator<Void> parsed =
                 input.forward()
                         .process(new CdcMultiTableParsingProcessFunction<>(parserFactory))
+                        .name("Side Output")
                         .setParallelism(input.getParallelism());
 
         for (FileStoreTable table : tables) {
@@ -198,7 +202,8 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                                     new UpdatedDataFieldsProcessFunction(
                                             new SchemaManager(table.fileIO(), table.location()),
                                             Identifier.create(database, table.name()),
-                                            catalogLoader));
+                                            catalogLoader))
+                            .name("Schema Evolution");
             schemaChangeProcessFunction.getTransformation().setParallelism(1);
             schemaChangeProcessFunction.getTransformation().setMaxParallelism(1);
 
@@ -208,16 +213,19 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                             CdcMultiTableParsingProcessFunction.createRecordOutputTag(
                                     table.name()));
 
+            DataStream<CdcRecord> converted =
+                    CaseSensitiveUtils.cdcRecordConvert(catalogLoader, parsedForTable);
+
             BucketMode bucketMode = table.bucketMode();
             switch (bucketMode) {
                 case HASH_FIXED:
-                    buildForFixedBucket(table, parsedForTable);
+                    buildForFixedBucket(table, converted);
                     break;
                 case HASH_DYNAMIC:
-                    new CdcDynamicBucketSink(table).build(parsedForTable, parallelism);
+                    new CdcDynamicBucketSink(table).build(converted, parallelism);
                     break;
                 case BUCKET_UNAWARE:
-                    buildForUnawareBucket(table, parsedForTable);
+                    buildForUnawareBucket(table, converted);
                     break;
                 case CROSS_PARTITION:
                 default:

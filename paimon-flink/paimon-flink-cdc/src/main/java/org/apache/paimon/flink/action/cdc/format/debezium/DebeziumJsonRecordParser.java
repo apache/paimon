@@ -82,9 +82,8 @@ public class DebeziumJsonRecordParser extends AbstractJsonRecordParser {
     private final Map<String, String> classNames = new HashMap<>();
     private final Map<String, Map<String, String>> parameters = new HashMap<>();
 
-    public DebeziumJsonRecordParser(
-            boolean caseSensitive, TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        super(caseSensitive, typeMapping, computedColumns);
+    public DebeziumJsonRecordParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
+        super(typeMapping, computedColumns);
     }
 
     @Override

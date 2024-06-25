@@ -28,7 +28,9 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.utils.CloseableIterator;
 
+import org.apache.flink.metrics.Counter;
 import org.apache.flink.runtime.metrics.MetricNames;
+import org.apache.flink.runtime.metrics.groups.InternalSourceReaderMetricGroup;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
@@ -52,6 +54,7 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
     private transient IOManager ioManager;
 
     private transient FileStoreSourceReaderMetrics sourceReaderMetrics;
+    private transient Counter numRecordsIn;
 
     public ReadOperator(ReadBuilder readBuilder) {
         this.readBuilder = readBuilder;
@@ -75,6 +78,10 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
                                 return System.currentTimeMillis() - eventTime;
                             }
                         });
+        this.numRecordsIn =
+                InternalSourceReaderMetricGroup.wrap(getMetricGroup())
+                        .getIOMetricGroup()
+                        .getNumRecordsInCounter();
 
         this.ioManager =
                 IOManager.create(
@@ -97,9 +104,18 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
                         .orElse(FileStoreSourceReaderMetrics.UNDEFINED);
         sourceReaderMetrics.recordSnapshotUpdate(eventTime);
 
+        boolean firstRecord = true;
         try (CloseableIterator<InternalRow> iterator =
                 read.createReader(split).toCloseableIterator()) {
             while (iterator.hasNext()) {
+                // each Split is already counted as one input record,
+                // so we don't need to count the first record
+                if (firstRecord) {
+                    firstRecord = false;
+                } else {
+                    numRecordsIn.inc();
+                }
+
                 reuseRow.replace(iterator.next());
                 output.collect(reuseRecord);
             }

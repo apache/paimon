@@ -52,7 +52,7 @@ If a message in a Kafka topic is a change event captured from another database u
          <td>True</td>
         </tr>
         <tr>
-         <td><a href="https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/formats/maxwell/ >}}">Maxwell CDC</a></td>
+         <td><a href="https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/formats/maxwell/">Maxwell CDC</a></td>
         <td>True</td>
         </tr>
         <tr>
@@ -199,14 +199,14 @@ To use this feature through `flink run`, run the following shell command.
     [--including_tables <table-name|name-regular-expr>] \
     [--excluding_tables <table-name|name-regular-expr>] \
     [--type_mapping to-string] \
+    [--partition_keys <partition_keys>] \
+    [--primary_keys <primary-keys>] \
     [--kafka_conf <kafka-source-conf> [--kafka_conf <kafka-source-conf> ...]] \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
     [--table_conf <paimon-table-sink-conf> [--table_conf <paimon-table-sink-conf> ...]]
 ```
 
 {{< generated/kafka_sync_database >}}
-
-Only tables with primary keys will be synchronized.
 
 This action will build a single combined sink for all tables. For each Kafka topic's table to be synchronized, if the
 corresponding Paimon table does not exist, this action will automatically create the table, and its schema will be derived

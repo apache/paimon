@@ -66,16 +66,27 @@ This section introduce all available spark procedures about paimon.
       <td>CALL sys.expire_snapshots(table => 'default.T', retain_max => 10)</td>
     </tr>
     <tr>
+      <td>expire_partitions</td>
+      <td>
+         To expire partitions. Argument:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>expiration_time: the expiration interval of a partition. A partition will be expired if it‘s lifetime is over this value. Partition time is extracted from the partition value.</li>
+            <li>timestamp_formatter: the formatter to format timestamp from string.</li>
+      </td>
+      <td>CALL sys.expire_partitions(table => 'default.T', expiration_time => '1 d', timestamp_formatter => 'yyyy-MM-dd')</td>
+    </tr>
+    <tr>
       <td>create_tag</td>
       <td>
          To create a tag based on given snapshot. Arguments:
             <li>table: the target table identifier. Cannot be empty.</li>
             <li>tag: name of the new tag. Cannot be empty.</li>
             <li>snapshot(Long):  id of the snapshot which the new tag is based on.</li>
+            <li>time_retained: The maximum time retained for newly created tags.</li>
       </td>
       <td>
-         -- based on snapshot 10 <br/>
-         CALL sys.create_tag(table => 'default.T', tag => 'my_tag', snapshot => 10) <br/>
+         -- based on snapshot 10 with 1d <br/>
+         CALL sys.create_tag(table => 'default.T', tag => 'my_tag', snapshot => 10, time_retained => '1 d') <br/>
          -- based on the latest snapshot <br/>
          CALL sys.create_tag(table => 'default.T', tag => 'my_tag')
       </td>
@@ -132,6 +143,28 @@ This section introduce all available spark procedures about paimon.
       </td>
       <td>
           CALL sys.repair('test_db.T')
+      </td>
+    </tr>
+    <tr>
+      <td>merge_branch</td>
+      <td>
+         To merge a branch to main branch. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>branch: name of the branch to be merged.</li>
+      </td>
+      <td>
+          CALL sys.merge_branch(table => 'test_db.T', branch => 'test_branch')
+      </td>
+    </tr>
+    <tr>
+      <td>replace_branch</td>
+      <td>
+         To replace main branch with specified branch. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>branch: name of the branch to be replaced.</li>
+      </td>
+      <td>
+          CALL sys.replace_branch(table => 'test_db.T', branch => 'test_branch')
       </td>
     </tr>
     </tbody>

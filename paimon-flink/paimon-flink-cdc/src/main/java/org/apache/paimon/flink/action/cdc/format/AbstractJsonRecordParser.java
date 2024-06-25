@@ -63,9 +63,8 @@ public abstract class AbstractJsonRecordParser extends AbstractRecordParser {
 
     protected JsonNode root;
 
-    public AbstractJsonRecordParser(
-            boolean caseSensitive, TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        super(caseSensitive, typeMapping, computedColumns);
+    public AbstractJsonRecordParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
+        super(typeMapping, computedColumns);
     }
 
     protected void setRoot(CdcSourceRecord record) {

@@ -57,7 +57,8 @@ public class FileStoreSourceReader
                         new FileStoreSourceSplitReader(
                                 tableRead, RecordLimiter.create(limit), metrics),
                 (element, output, state) ->
-                        FlinkRecordsWithSplitIds.emitRecord(element, output, state, metrics),
+                        FlinkRecordsWithSplitIds.emitRecord(
+                                readerContext, element, output, state, metrics),
                 readerContext.getConfiguration(),
                 readerContext);
         this.ioManager = ioManager;
@@ -77,7 +78,8 @@ public class FileStoreSourceReader
                         new FileStoreSourceSplitReader(
                                 tableRead, RecordLimiter.create(limit), metrics),
                 (element, output, state) ->
-                        FlinkRecordsWithSplitIds.emitRecord(element, output, state, metrics),
+                        FlinkRecordsWithSplitIds.emitRecord(
+                                readerContext, element, output, state, metrics),
                 readerContext.getConfiguration(),
                 readerContext);
         this.ioManager = ioManager;

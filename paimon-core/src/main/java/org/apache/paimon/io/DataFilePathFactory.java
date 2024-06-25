@@ -72,8 +72,27 @@ public class DataFilePathFactory {
         return uuid;
     }
 
-    public static Path toFileIndexPath(Path filePath) {
-        return new Path(filePath.getParent(), filePath.getName() + INDEX_PATH_SUFFIX);
+    public static Path dataFileToFileIndexPath(Path dataFilePath) {
+        return new Path(dataFilePath.getParent(), dataFilePath.getName() + INDEX_PATH_SUFFIX);
+    }
+
+    public static Path createNewFileIndexFilePath(Path filePath) {
+        String fileName = filePath.getName();
+        int dot = fileName.lastIndexOf(".");
+        int dash = fileName.lastIndexOf("-");
+
+        if (dash != -1) {
+            try {
+                int num = Integer.parseInt(fileName.substring(dash + 1, dot));
+                return new Path(
+                        filePath.getParent(),
+                        fileName.substring(0, dash + 1) + (num + 1) + INDEX_PATH_SUFFIX);
+            } catch (NumberFormatException ignore) {
+                // it is the first index file, has no number
+            }
+        }
+        return new Path(
+                filePath.getParent(), fileName.substring(0, dot) + "-" + 1 + INDEX_PATH_SUFFIX);
     }
 
     public static String formatIdentifier(String fileName) {

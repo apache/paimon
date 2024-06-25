@@ -72,9 +72,8 @@ public class DebeziumAvroRecordParser extends AbstractRecordParser {
     private GenericRecord keyRecord;
     private GenericRecord valueRecord;
 
-    public DebeziumAvroRecordParser(
-            boolean caseSensitive, TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        super(caseSensitive, typeMapping, computedColumns);
+    public DebeziumAvroRecordParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
+        super(typeMapping, computedColumns);
     }
 
     @Override

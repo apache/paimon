@@ -542,11 +542,17 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.INT()
+                            DataTypes.INT().notNull(),
+                            DataTypes.VARCHAR(10),
+                            DataTypes.INT(),
+                            DataTypes.VARCHAR(10)
                         },
-                        new String[] {"k1", "v0", "v1"});
+                        new String[] {"k1", "v0", "v1", "v2"});
         waitForResult(
-                Arrays.asList("+I[5, five, 50]", "+I[7, seven, 70]"),
+                Arrays.asList(
+                        "+I[5, five, 50, NULL]",
+                        "+I[7, seven, 70, NULL]",
+                        "+I[8, eight, 80, added]"),
                 table,
                 rowType,
                 Collections.singletonList("k1"));
@@ -577,5 +583,61 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                                         + "Invalid record is:\n"
                                         + "{databaseName=null, tableName=null, fields=[`k` STRING, `v0` STRING, `v1` STRING], "
                                         + "primaryKeys=[], cdcRecord=+I {v0=five, k=5, v1=50}}"));
+    }
+
+    @Test
+    @Timeout(60)
+    public void testSpecifyKeys() throws Exception {
+        final String topic = "specify-keys";
+        createTestTopic(topic, 1, 1);
+        writeRecordsToKafka(topic, "kafka/canal/database/specify-keys/canal-data-1.txt");
+
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
+        kafkaConfig.put(TOPIC.key(), topic);
+
+        KafkaSyncDatabaseAction action =
+                syncDatabaseActionBuilder(kafkaConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .withPartitionKeys("part")
+                        .withPrimaryKeys("k", "part")
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        waitingTables("t1", "t2");
+
+        FileStoreTable table1 = getFileStoreTable("t1");
+        assertThat(table1.partitionKeys()).containsExactly("part");
+        assertThat(table1.primaryKeys()).containsExactly("k", "part");
+
+        RowType rowType1 =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.VARCHAR(10),
+                        },
+                        new String[] {"k", "part", "v1"});
+        waitForResult(
+                Collections.singletonList("+I[1, 1, A]"),
+                table1,
+                rowType1,
+                Arrays.asList("k", "part"));
+
+        FileStoreTable table2 = getFileStoreTable("t2");
+        assertThat(table2.partitionKeys()).isEmpty();
+        assertThat(table2.primaryKeys()).containsExactly("k");
+
+        RowType rowType2 =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10),
+                        },
+                        new String[] {"k", "v1"});
+        waitForResult(
+                Collections.singletonList("+I[1, A]"),
+                table2,
+                rowType2,
+                Collections.singletonList("k"));
     }
 }

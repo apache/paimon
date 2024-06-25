@@ -37,7 +37,7 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.function.Function;
 
-import static org.apache.paimon.io.DataFilePathFactory.toFileIndexPath;
+import static org.apache.paimon.io.DataFilePathFactory.dataFileToFileIndexPath;
 
 /**
  * A {@link StatsCollectingSingleFileWriter} to write data files containing {@link InternalRow}.
@@ -48,7 +48,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
     private final long schemaId;
     private final LongCounter seqNumCounter;
     private final SimpleStatsConverter statsArraySerializer;
-    @Nullable private final FileIndexWriter fileIndexWriter;
+    @Nullable private final DataFileIndexWriter dataFileIndexWriter;
     private final FileSource fileSource;
 
     public RowDataFileWriter(
@@ -75,9 +75,9 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
         this.schemaId = schemaId;
         this.seqNumCounter = seqNumCounter;
         this.statsArraySerializer = new SimpleStatsConverter(writeSchema);
-        this.fileIndexWriter =
-                FileIndexWriter.create(
-                        fileIO, toFileIndexPath(path), writeSchema, fileIndexOptions);
+        this.dataFileIndexWriter =
+                DataFileIndexWriter.create(
+                        fileIO, dataFileToFileIndexPath(path), writeSchema, fileIndexOptions);
         this.fileSource = fileSource;
     }
 
@@ -85,16 +85,16 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
     public void write(InternalRow row) throws IOException {
         super.write(row);
         // add row to index if needed
-        if (fileIndexWriter != null) {
-            fileIndexWriter.write(row);
+        if (dataFileIndexWriter != null) {
+            dataFileIndexWriter.write(row);
         }
         seqNumCounter.add(1L);
     }
 
     @Override
     public void close() throws IOException {
-        if (fileIndexWriter != null) {
-            fileIndexWriter.close();
+        if (dataFileIndexWriter != null) {
+            dataFileIndexWriter.close();
         }
         super.close();
     }
@@ -102,8 +102,10 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
     @Override
     public DataFileMeta result() throws IOException {
         SimpleStats stats = statsArraySerializer.toBinary(fieldStats());
-        FileIndexWriter.FileIndexResult indexResult =
-                fileIndexWriter == null ? FileIndexWriter.EMPTY_RESULT : fileIndexWriter.result();
+        DataFileIndexWriter.FileIndexResult indexResult =
+                dataFileIndexWriter == null
+                        ? DataFileIndexWriter.EMPTY_RESULT
+                        : dataFileIndexWriter.result();
         return DataFileMeta.forAppend(
                 path.getName(),
                 fileIO.getFileSize(path),

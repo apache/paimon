@@ -67,8 +67,14 @@ public class CompactProcedureITCase extends CatalogITCaseBase {
         checkLatestSnapshot(table, 2, Snapshot.CommitKind.APPEND);
 
         tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
-        sql(
-                "CALL sys.compact(`table` => 'default.T', partitions => 'dt=20221208,hh=15;dt=20221209,hh=15')");
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        if (random.nextBoolean()) {
+            sql(
+                    "CALL sys.compact(`table` => 'default.T', partitions => 'dt=20221208,hh=15;dt=20221209,hh=15')");
+        } else {
+            sql(
+                    "CALL sys.compact(`table` => 'default.T', `where` => '(dt=20221208 and hh=15) or (dt=20221209 and hh=15)')");
+        }
 
         checkLatestSnapshot(table, 3, Snapshot.CommitKind.COMPACT);
 
@@ -113,11 +119,19 @@ public class CompactProcedureITCase extends CatalogITCaseBase {
         TableScan.Plan plan = scan.plan();
         assertThat(plan.splits()).isEmpty();
 
+        ThreadLocalRandom random = ThreadLocalRandom.current();
         // submit streaming compaction job
-        streamSqlIter(
-                        "CALL sys.compact(`table` => 'default.T', partitions => 'dt=20221208,hh=15;dt=20221209,hh=15', "
-                                + "options => 'scan.parallelism=1')")
-                .close();
+        if (random.nextBoolean()) {
+            streamSqlIter(
+                            "CALL sys.compact(`table` => 'default.T', partitions => 'dt=20221208,hh=15;dt=20221209,hh=15', "
+                                    + "options => 'scan.parallelism=1')")
+                    .close();
+        } else {
+            streamSqlIter(
+                            "CALL sys.compact(`table` => 'default.T', `where` => '(dt=20221208 and hh=15) or (dt=20221209 and hh=15)', "
+                                    + "options => 'scan.parallelism=1')")
+                    .close();
+        }
 
         // first full compaction
         assertThat(select.collect(2))

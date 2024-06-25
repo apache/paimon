@@ -60,7 +60,7 @@ public class MessageQueueSchemaUtils {
         int retryInterval = 1000;
 
         AbstractRecordParser recordParser =
-                dataFormat.createParser(true, typeMapping, Collections.emptyList());
+                dataFormat.createParser(typeMapping, Collections.emptyList());
 
         while (true) {
             Optional<Schema> schema =

@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.partition.PartitionTimeExtractor;
 import org.apache.paimon.types.RowType;
@@ -29,6 +30,8 @@ import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -50,6 +53,7 @@ public class PartitionExpire {
     private final PartitionTimeExtractor timeExtractor;
     private final FileStoreScan scan;
     private final FileStoreCommit commit;
+    private final MetastoreClient metastoreClient;
 
     private LocalDateTime lastCheck;
 
@@ -60,7 +64,8 @@ public class PartitionExpire {
             String timePattern,
             String timeFormatter,
             FileStoreScan scan,
-            FileStoreCommit commit) {
+            FileStoreCommit commit,
+            @Nullable MetastoreClient metastoreClient) {
         this.partitionKeys = partitionType.getFieldNames();
         this.toObjectArrayConverter = new RowDataToObjectArrayConverter(partitionType);
         this.expirationTime = expirationTime;
@@ -68,6 +73,7 @@ public class PartitionExpire {
         this.timeExtractor = new PartitionTimeExtractor(timePattern, timeFormatter);
         this.scan = scan;
         this.commit = commit;
+        this.metastoreClient = metastoreClient;
         this.lastCheck = LocalDateTime.now();
     }
 
@@ -87,7 +93,7 @@ public class PartitionExpire {
 
     @VisibleForTesting
     void expire(LocalDateTime now, long commitIdentifier) {
-        if (now.isAfter(lastCheck.plus(checkInterval))) {
+        if (checkInterval.isZero() || now.isAfter(lastCheck.plus(checkInterval))) {
             doExpire(now.minus(expirationTime), commitIdentifier);
             lastCheck = now;
         }
@@ -102,7 +108,23 @@ public class PartitionExpire {
             LOG.info("Expire Partition: " + partition);
         }
         if (expired.size() > 0) {
+            if (metastoreClient != null) {
+                deleteMetastorePartitions(expired);
+            }
             commit.dropPartitions(expired, commitIdentifier);
+        }
+    }
+
+    private void deleteMetastorePartitions(List<Map<String, String>> partitions) {
+        if (metastoreClient != null) {
+            partitions.forEach(
+                    partition -> {
+                        try {
+                            metastoreClient.deletePartition(new LinkedHashMap<>(partition));
+                        } catch (Exception e) {
+                            throw new RuntimeException(e);
+                        }
+                    });
         }
     }
 

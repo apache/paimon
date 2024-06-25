@@ -39,11 +39,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.fieldNameCaseConvert;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.listCaseConvert;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.recordKeyDuplicateErrMsg;
-
 /**
  * Provides a base implementation for parsing messages of various formats into {@link
  * RichCdcMultiplexRecord} objects.
@@ -59,13 +54,10 @@ public abstract class AbstractRecordParser
 
     protected static final String FIELD_TABLE = "table";
     protected static final String FIELD_DATABASE = "database";
-    protected final boolean caseSensitive;
     protected final TypeMapping typeMapping;
     protected final List<ComputedColumn> computedColumns;
 
-    public AbstractRecordParser(
-            boolean caseSensitive, TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        this.caseSensitive = caseSensitive;
+    public AbstractRecordParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
         this.typeMapping = typeMapping;
         this.computedColumns = computedColumns;
     }
@@ -135,15 +127,12 @@ public abstract class AbstractRecordParser
     /** Handle case sensitivity here. */
     protected RichCdcMultiplexRecord createRecord(
             RowKind rowKind, Map<String, String> data, List<DataField> paimonFields) {
-        String databaseName = getDatabaseName();
-        String tableName = getTableName();
-        paimonFields = fieldNameCaseConvert(paimonFields, caseSensitive, tableName);
-
-        data = mapKeyCaseConvert(data, caseSensitive, recordKeyDuplicateErrMsg(data));
-        List<String> primaryKeys = listCaseConvert(extractPrimaryKeys(), caseSensitive);
-
         return new RichCdcMultiplexRecord(
-                databaseName, tableName, paimonFields, primaryKeys, new CdcRecord(rowKind, data));
+                getDatabaseName(),
+                getTableName(),
+                paimonFields,
+                extractPrimaryKeys(),
+                new CdcRecord(rowKind, data));
     }
 
     @Nullable

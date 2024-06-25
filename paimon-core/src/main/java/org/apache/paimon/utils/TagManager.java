@@ -94,29 +94,35 @@ public class TagManager {
             List<TagCallback> callbacks) {
         checkArgument(!StringUtils.isBlank(tagName), "Tag name '%s' is blank.", tagName);
 
-        // skip create tag for the same snapshot of the same name.
-        if (tagExists(tagName)) {
-            Snapshot tagged = taggedSnapshot(tagName);
-            Preconditions.checkArgument(
-                    tagged.id() == snapshot.id(), "Tag name '%s' already exists.", tagName);
-        } else {
-            Path newTagPath = tagPath(tagName);
-            try {
-                fileIO.writeFileUtf8(
-                        newTagPath,
-                        timeRetained != null
-                                ? Tag.fromSnapshotAndTagTtl(
-                                                snapshot, timeRetained, LocalDateTime.now())
-                                        .toJson()
-                                : snapshot.toJson());
-            } catch (IOException e) {
-                throw new RuntimeException(
-                        String.format(
-                                "Exception occurs when committing tag '%s' (path %s). "
-                                        + "Cannot clean up because we can't determine the success.",
-                                tagName, newTagPath),
-                        e);
+        // When timeRetained is not defined, please do not write the tagCreatorTime field,
+        // as this will cause older versions (<= 0.7) of readers to be unable to read this
+        // tag.
+        // When timeRetained is defined, it is fine, because timeRetained is the new
+        // feature.
+        String content =
+                timeRetained != null
+                        ? Tag.fromSnapshotAndTagTtl(snapshot, timeRetained, LocalDateTime.now())
+                                .toJson()
+                        : snapshot.toJson();
+        Path tagPath = tagPath(tagName);
+
+        try {
+            if (tagExists(tagName)) {
+                Snapshot tagged = taggedSnapshot(tagName);
+                Preconditions.checkArgument(
+                        tagged.id() == snapshot.id(), "Tag name '%s' already exists.", tagName);
+                // update tag metadata into for the same snapshot of the same tag name.
+                fileIO.overwriteFileUtf8(tagPath, content);
+            } else {
+                fileIO.writeFileUtf8(tagPath, content);
             }
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Exception occurs when committing tag '%s' (path %s). "
+                                    + "Cannot clean up because we can't determine the success.",
+                            tagName, tagPath),
+                    e);
         }
 
         try {

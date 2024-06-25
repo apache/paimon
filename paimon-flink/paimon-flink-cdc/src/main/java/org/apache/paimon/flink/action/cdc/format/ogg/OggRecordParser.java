@@ -50,7 +50,7 @@ import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
  * providing a way to understand the structure of the incoming records and their corresponding field
  * types.
  */
-public class OggRecordParserAbstract extends AbstractJsonRecordParser {
+public class OggRecordParser extends AbstractJsonRecordParser {
 
     private static final String FIELD_BEFORE = "before";
     private static final String FIELD_TYPE = "op_type";
@@ -58,9 +58,8 @@ public class OggRecordParserAbstract extends AbstractJsonRecordParser {
     private static final String OP_INSERT = "I";
     private static final String OP_DELETE = "D";
 
-    public OggRecordParserAbstract(
-            boolean caseSensitive, TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        super(caseSensitive, typeMapping, computedColumns);
+    public OggRecordParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
+        super(typeMapping, computedColumns);
     }
 
     @Override

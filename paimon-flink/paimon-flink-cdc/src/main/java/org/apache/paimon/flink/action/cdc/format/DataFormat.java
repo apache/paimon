@@ -21,12 +21,12 @@ package org.apache.paimon.flink.action.cdc.format;
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
-import org.apache.paimon.flink.action.cdc.format.canal.CanalRecordParserAbstract;
+import org.apache.paimon.flink.action.cdc.format.canal.CanalRecordParser;
 import org.apache.paimon.flink.action.cdc.format.debezium.DebeziumAvroRecordParser;
 import org.apache.paimon.flink.action.cdc.format.debezium.DebeziumJsonRecordParser;
 import org.apache.paimon.flink.action.cdc.format.json.JsonRecordParser;
-import org.apache.paimon.flink.action.cdc.format.maxwell.MaxwellRecordParserAbstract;
-import org.apache.paimon.flink.action.cdc.format.ogg.OggRecordParserAbstract;
+import org.apache.paimon.flink.action.cdc.format.maxwell.MaxwellRecordParser;
+import org.apache.paimon.flink.action.cdc.format.ogg.OggRecordParser;
 import org.apache.paimon.flink.action.cdc.kafka.KafkaDebeziumAvroDeserializationSchema;
 import org.apache.paimon.flink.action.cdc.kafka.KafkaDebeziumJsonDeserializationSchema;
 import org.apache.paimon.flink.action.cdc.pulsar.PulsarDebeziumAvroDeserializationSchema;
@@ -48,15 +48,15 @@ import java.util.function.Function;
  */
 public enum DataFormat {
     CANAL_JSON(
-            CanalRecordParserAbstract::new,
+            CanalRecordParser::new,
             KafkaDebeziumJsonDeserializationSchema::new,
             CdcJsonDeserializationSchema::new),
     OGG_JSON(
-            OggRecordParserAbstract::new,
+            OggRecordParser::new,
             KafkaDebeziumJsonDeserializationSchema::new,
             CdcJsonDeserializationSchema::new),
     MAXWELL_JSON(
-            MaxwellRecordParserAbstract::new,
+            MaxwellRecordParser::new,
             KafkaDebeziumJsonDeserializationSchema::new,
             CdcJsonDeserializationSchema::new),
     DEBEZIUM_JSON(
@@ -95,13 +95,12 @@ public enum DataFormat {
      * Creates a new instance of {@link AbstractRecordParser} for this data format with the
      * specified configurations.
      *
-     * @param caseSensitive Indicates whether the parser should be case-sensitive.
      * @param computedColumns List of computed columns to be considered by the parser.
      * @return A new instance of {@link AbstractRecordParser}.
      */
     public AbstractRecordParser createParser(
-            boolean caseSensitive, TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        return parser.createParser(caseSensitive, typeMapping, computedColumns);
+            TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
+        return parser.createParser(typeMapping, computedColumns);
     }
 
     public KafkaDeserializationSchema<CdcSourceRecord> createKafkaDeserializer(

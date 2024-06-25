@@ -23,6 +23,8 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.utils.DateTimeUtils;
 
+import java.util.TimeZone;
+
 /**
  * {@link DataTypeRoot#TIMESTAMP_WITHOUT_TIME_ZONE}/{@link
  * DataTypeRoot#TIMESTAMP_WITH_LOCAL_TIME_ZONE} to {@link DataTypeRoot#DATE}.
@@ -46,7 +48,7 @@ class TimestampToDateCastRule extends AbstractCastRule<Timestamp, Number> {
             return value -> (int) (value.getMillisecond() / DateTimeUtils.MILLIS_PER_DAY);
         } else if (inputType.is(DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE)) {
             return value ->
-                    DateTimeUtils.timestampWithLocalZoneToDate(value, DateTimeUtils.LOCAL_TZ);
+                    DateTimeUtils.timestampWithLocalZoneToDate(value, TimeZone.getDefault());
         }
         return null;
     }

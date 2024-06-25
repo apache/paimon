@@ -41,6 +41,8 @@ import org.apache.paimon.utils.DecimalUtils;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.TimeZone;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -264,7 +266,7 @@ public class CastExecutorTest {
                 CastExecutors.resolve(new LocalZonedTimestampType(5), VarCharType.STRING_TYPE),
                 timestamp,
                 BinaryString.fromString(
-                        DateTimeUtils.formatTimestamp(timestamp, DateTimeUtils.LOCAL_TZ, 5)));
+                        DateTimeUtils.formatTimestamp(timestamp, TimeZone.getDefault(), 5)));
     }
 
     @Test
@@ -470,7 +472,7 @@ public class CastExecutorTest {
         compareCastResult(
                 CastExecutors.resolve(new VarCharType(25), new LocalZonedTimestampType(3)),
                 BinaryString.fromString(date),
-                DateTimeUtils.parseTimestampData(date, 3, DateTimeUtils.LOCAL_TZ));
+                DateTimeUtils.parseTimestampData(date, 3, TimeZone.getDefault()));
     }
 
     @Test
@@ -547,7 +549,7 @@ public class CastExecutorTest {
                 CastExecutors.resolve(new TimestampType(3), new LocalZonedTimestampType(3)),
                 timestamp,
                 DateTimeUtils.timestampToTimestampWithLocalZone(
-                        Timestamp.fromEpochMillis(mills), DateTimeUtils.LOCAL_TZ));
+                        Timestamp.fromEpochMillis(mills), TimeZone.getDefault()));
 
         // timestamp_ltz(5) to timestamp(2)
         compareCastResult(
@@ -555,20 +557,20 @@ public class CastExecutorTest {
                 timestamp,
                 DateTimeUtils.truncate(
                         DateTimeUtils.timestampWithLocalZoneToTimestamp(
-                                Timestamp.fromEpochMillis(mills), DateTimeUtils.LOCAL_TZ),
+                                Timestamp.fromEpochMillis(mills), TimeZone.getDefault()),
                         2));
 
         // timestamp_ltz to date
         compareCastResult(
                 CastExecutors.resolve(new LocalZonedTimestampType(5), new DateType()),
                 Timestamp.fromEpochMillis(mills),
-                DateTimeUtils.timestampWithLocalZoneToDate(timestamp, DateTimeUtils.LOCAL_TZ));
+                DateTimeUtils.timestampWithLocalZoneToDate(timestamp, TimeZone.getDefault()));
 
         // timestamp_ltz to time
         compareCastResult(
                 CastExecutors.resolve(new LocalZonedTimestampType(5), new TimeType(2)),
                 Timestamp.fromEpochMillis(mills),
-                DateTimeUtils.timestampWithLocalZoneToTime(timestamp, DateTimeUtils.LOCAL_TZ));
+                DateTimeUtils.timestampWithLocalZoneToTime(timestamp, TimeZone.getDefault()));
     }
 
     @Test
@@ -582,7 +584,7 @@ public class CastExecutorTest {
         compareCastResult(
                 CastExecutors.resolve(new DateType(), new LocalZonedTimestampType(5)),
                 DateTimeUtils.parseDate(date),
-                DateTimeUtils.parseTimestampData(date, 3, DateTimeUtils.LOCAL_TZ));
+                DateTimeUtils.parseTimestampData(date, 3, TimeZone.getDefault()));
     }
 
     @Test

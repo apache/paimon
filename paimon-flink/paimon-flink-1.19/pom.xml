@@ -34,7 +34,7 @@ under the License.
     <name>Paimon : Flink : 1.19</name>
 
     <properties>
-        <flink.version>1.19.0</flink.version>
+        <flink.version>1.19.1</flink.version>
     </properties>
 
     <dependencies>

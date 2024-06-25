@@ -28,6 +28,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import io.debezium.connector.AbstractSourceInfo;
 
 import java.io.Serializable;
+import java.util.TimeZone;
 
 /**
  * A functional interface for converting CDC metadata.
@@ -116,7 +117,7 @@ public interface CdcMetadataConverter extends Serializable {
             return DateTimeUtils.formatTimestamp(
                     Timestamp.fromEpochMillis(
                             source.get(AbstractSourceInfo.TIMESTAMP_KEY).asLong()),
-                    DateTimeUtils.LOCAL_TZ,
+                    TimeZone.getDefault(),
                     3);
         }
 

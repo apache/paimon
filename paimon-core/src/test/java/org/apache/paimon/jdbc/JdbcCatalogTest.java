@@ -22,12 +22,15 @@ import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.table.Table;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayOutputStream;
+import java.io.ObjectOutputStream;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
@@ -36,6 +39,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
 /** Tests for {@link JdbcCatalog}. */
 public class JdbcCatalogTest extends CatalogTestBase {
@@ -111,5 +115,20 @@ public class JdbcCatalogTest extends CatalogTestBase {
                                         false))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("Table name [NEW_TABLE] cannot contain upper case in the catalog.");
+    }
+
+    @Test
+    public void testSerializeTable() throws Exception {
+        catalog.createDatabase("test_db", false);
+        catalog.createTable(Identifier.create("test_db", "table"), DEFAULT_TABLE_SCHEMA, false);
+        Table table = catalog.getTable(new Identifier("test_db", "table"));
+        assertDoesNotThrow(
+                () -> {
+                    try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                            ObjectOutputStream oos = new ObjectOutputStream(baos)) {
+                        oos.writeObject(table);
+                        oos.flush();
+                    }
+                });
     }
 }
