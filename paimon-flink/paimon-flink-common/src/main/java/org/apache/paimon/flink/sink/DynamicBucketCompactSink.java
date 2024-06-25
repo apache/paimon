@@ -30,7 +30,8 @@ import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import javax.annotation.Nullable;
 
 import java.util.Map;
-import java.util.UUID;
+
+import static org.apache.paimon.CoreOptions.createCommitUser;
 
 /** This class is only used for generate compact sink topology for dynamic bucket table. */
 public class DynamicBucketCompactSink extends RowDynamicBucketSink {
@@ -42,7 +43,7 @@ public class DynamicBucketCompactSink extends RowDynamicBucketSink {
 
     @Override
     public DataStreamSink<?> build(DataStream<InternalRow> input, @Nullable Integer parallelism) {
-        String initialCommitUser = UUID.randomUUID().toString();
+        String initialCommitUser = createCommitUser(table.coreOptions().toConfiguration());
 
         // This input is sorted and compacted. So there is no shuffle here, we just assign bucket
         // for each record, and sink them to table.

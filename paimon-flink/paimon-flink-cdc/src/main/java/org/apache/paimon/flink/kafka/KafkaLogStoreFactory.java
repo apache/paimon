@@ -23,6 +23,7 @@ import org.apache.paimon.flink.factories.FlinkFactoryUtil.FlinkTableFactoryHelpe
 import org.apache.paimon.flink.log.LogStoreRegister;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.DateTimeUtils;
 
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.serialization.SerializationSchema;
@@ -41,11 +42,13 @@ import javax.annotation.Nullable;
 
 import java.util.List;
 import java.util.Properties;
+import java.util.TimeZone;
 
 import static org.apache.kafka.clients.consumer.ConsumerConfig.ISOLATION_LEVEL_CONFIG;
 import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.paimon.CoreOptions.LOG_CONSISTENCY;
 import static org.apache.paimon.CoreOptions.LogConsistency;
+import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP;
 import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP_MILLIS;
 import static org.apache.paimon.flink.factories.FlinkFactoryUtil.createFlinkTableFactoryHelper;
 import static org.apache.paimon.flink.kafka.KafkaLogOptions.TOPIC;
@@ -87,6 +90,14 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
                 LogStoreTableFactory.getValueDecodingFormat(helper)
                         .createRuntimeDecoder(sourceContext, physicalType);
         Options options = toOptions(helper.getOptions());
+        Long timestampMills = options.get(SCAN_TIMESTAMP_MILLIS);
+        String timestampString = options.get(SCAN_TIMESTAMP);
+
+        if (timestampMills == null && timestampString != null) {
+            timestampMills =
+                    DateTimeUtils.parseTimestampData(timestampString, 3, TimeZone.getDefault())
+                            .getMillisecond();
+        }
         return new KafkaLogSourceProvider(
                 topic(context),
                 toKafkaProperties(options),
@@ -98,7 +109,7 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
                 options.get(LOG_CONSISTENCY),
                 // TODO visit all options through CoreOptions
                 CoreOptions.startupMode(options),
-                options.get(SCAN_TIMESTAMP_MILLIS));
+                timestampMills);
     }
 
     @Override

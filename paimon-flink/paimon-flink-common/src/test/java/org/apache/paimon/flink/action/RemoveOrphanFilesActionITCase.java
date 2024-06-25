@@ -49,6 +49,7 @@ public class RemoveOrphanFilesActionITCase extends ActionITCaseBase {
                         rowType,
                         Collections.emptyList(),
                         Collections.singletonList("k"),
+                        Collections.emptyList(),
                         Collections.emptyMap());
 
         StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);

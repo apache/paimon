@@ -19,9 +19,7 @@
 package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.io.SplitsParallelReadUtil;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.options.ConfigOption;
@@ -31,11 +29,9 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.source.KeyValueTableRead;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
-import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FunctionWithIOException;
 import org.apache.paimon.utils.TypeUtils;
@@ -49,6 +45,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.IntUnaryOperator;
 import java.util.stream.IntStream;
 
@@ -72,11 +69,22 @@ public class LookupStreamingReader {
                     CoreOptions.SCAN_TAG_NAME,
                     CoreOptions.SCAN_VERSION);
 
-    public LookupStreamingReader(Table table, int[] projection, @Nullable Predicate predicate) {
+    public LookupStreamingReader(
+            Table table,
+            int[] projection,
+            @Nullable Predicate predicate,
+            Set<Integer> requireCachedBucketIds) {
         this.table = unsetTimeTravelOptions(table);
         this.projection = projection;
         this.readBuilder =
-                this.table.newReadBuilder().withProjection(projection).withFilter(predicate);
+                this.table
+                        .newReadBuilder()
+                        .withProjection(projection)
+                        .withFilter(predicate)
+                        .withBucketFilter(
+                                requireCachedBucketIds == null
+                                        ? null
+                                        : requireCachedBucketIds::contains);
         scan = readBuilder.newStreamScan();
 
         if (predicate != null) {
@@ -149,24 +157,8 @@ public class LookupStreamingReader {
         return reader;
     }
 
-    private FunctionWithIOException<Split, RecordReader<InternalRow>>
-            createReaderWithSequenceSupplier() {
-        return split -> {
-            TableRead read = readBuilder.newRead();
-            if (!(read instanceof KeyValueTableRead)) {
-                throw new IllegalArgumentException(
-                        "Only KeyValueTableRead supports sequence read, but it is: " + read);
-            }
-
-            KeyValueTableRead kvRead = (KeyValueTableRead) read;
-            JoinedRow reused = new JoinedRow();
-            return kvRead.kvReader(split)
-                    .transform(
-                            kv -> {
-                                reused.replace(kv.value(), GenericRow.of(kv.sequenceNumber()));
-                                reused.setRowKind(kv.valueKind());
-                                return reused;
-                            });
-        };
+    @Nullable
+    public Long nextSnapshotId() {
+        return scan.checkpoint();
     }
 }

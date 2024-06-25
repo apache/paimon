@@ -32,6 +32,7 @@ import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader.ReaderSupplier;
 import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
 import org.apache.paimon.mergetree.compact.SortMergeReader;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.sort.SortBuffer;
@@ -67,6 +68,7 @@ public class MergeSorter {
     private final int spillThreshold;
     private final int spillSortMaxNumFiles;
     private final String compression;
+    private final MemorySize maxDiskSize;
 
     private final MemorySegmentPool memoryPool;
 
@@ -86,10 +88,15 @@ public class MergeSorter {
         this.memoryPool =
                 new CachelessSegmentPool(options.sortSpillBufferSize(), options.pageSize());
         this.ioManager = ioManager;
+        this.maxDiskSize = options.writeBufferSpillDiskSize();
     }
 
     public MemorySegmentPool memoryPool() {
         return memoryPool;
+    }
+
+    public RowType valueType() {
+        return valueType;
     }
 
     public void setIOManager(IOManager ioManager) {
@@ -213,7 +220,8 @@ public class MergeSorter {
                             sortFields.toArray(),
                             memoryPool,
                             spillSortMaxNumFiles,
-                            compression);
+                            compression,
+                            maxDiskSize);
         }
 
         public boolean put(KeyValue keyValue) throws IOException {

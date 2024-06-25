@@ -43,7 +43,7 @@ public class MemorySegmentUtils {
 
     private static final int ADDRESS_BITS_PER_WORD = 3;
 
-    private static final int BIT_BYTE_INDEX_MASK = 7;
+    public static final int BIT_BYTE_INDEX_MASK = 7;
 
     private static final int MAX_BYTES_LENGTH = 1024 * 64;
 
@@ -455,7 +455,7 @@ public class MemorySegmentUtils {
      * @param bitIndex the bit index.
      * @return the byte index.
      */
-    private static int byteIndex(int bitIndex) {
+    public static int byteIndex(int bitIndex) {
         return bitIndex >>> ADDRESS_BITS_PER_WORD;
     }
 

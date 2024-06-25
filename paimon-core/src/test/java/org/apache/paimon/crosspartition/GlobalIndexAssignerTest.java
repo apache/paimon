@@ -243,4 +243,27 @@ public class GlobalIndexAssignerTest extends TableTestBase {
         output.clear();
         assigner.close();
     }
+
+    @Test
+    public void testBootstrapWithTTL() throws Exception {
+        // enableTtl is true
+        GlobalIndexAssigner assigner = createAssigner(MergeEngine.DEDUPLICATE, true);
+        List<List<Integer>> output = new ArrayList<>();
+        assigner.open(
+                0,
+                ioManager(),
+                2,
+                0,
+                (row, bucket) ->
+                        output.add(
+                                Arrays.asList(
+                                        row.getInt(0), row.getInt(1), row.getInt(2), bucket)));
+
+        // assigner.bootstrapKey can trigger the problem
+        assigner.bootstrapKey(GenericRow.of(1, 1, 1));
+        assigner.processInput(GenericRow.of(1, 1, 1));
+        assigner.endBoostrap(true);
+
+        assertThat(output).containsExactlyInAnyOrder(Arrays.asList(1, 1, 1, 1));
+    }
 }

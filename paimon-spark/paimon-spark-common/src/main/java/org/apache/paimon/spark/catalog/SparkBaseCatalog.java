@@ -20,6 +20,7 @@ package org.apache.paimon.spark.catalog;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.spark.SparkProcedures;
+import org.apache.paimon.spark.SparkSource;
 import org.apache.paimon.spark.analysis.NoSuchProcedureException;
 import org.apache.paimon.spark.procedure.Procedure;
 import org.apache.paimon.spark.procedure.ProcedureBuilder;
@@ -31,6 +32,14 @@ import org.apache.spark.sql.connector.catalog.TableCatalog;
 /** Spark base catalog. */
 public abstract class SparkBaseCatalog
         implements TableCatalog, SupportsNamespaces, ProcedureCatalog, WithPaimonCatalog {
+
+    protected String catalogName;
+
+    @Override
+    public String name() {
+        return catalogName;
+    }
+
     @Override
     public Procedure loadProcedure(Identifier identifier) throws NoSuchProcedureException {
         if (Catalog.SYSTEM_DATABASE_NAME.equals(identifier.namespace()[0])) {
@@ -40,5 +49,9 @@ public abstract class SparkBaseCatalog
             }
         }
         throw new NoSuchProcedureException(identifier);
+    }
+
+    public boolean usePaimon(String provider) {
+        return provider == null || SparkSource.NAME().equalsIgnoreCase(provider);
     }
 }

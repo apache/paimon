@@ -25,6 +25,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.IOManagerImpl;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.lookup.FullCacheLookupTable.TableBulkLoader;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -37,6 +38,9 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.TableTestBase;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -47,6 +51,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.testcontainers.shaded.com.google.common.collect.ImmutableList;
 
 import java.io.IOException;
@@ -60,6 +66,7 @@ import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeoutException;
 
 import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
@@ -114,8 +121,13 @@ public class LookupTableTest extends TableTestBase {
                         null,
                         null,
                         tempDir.toFile(),
-                        singletonList("f0"));
+                        singletonList("f0"),
+                        null);
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+        table.open();
+
+        // test re-open
+        table.close();
         table.open();
 
         // test bulk load error
@@ -171,8 +183,13 @@ public class LookupTableTest extends TableTestBase {
                         null,
                         null,
                         tempDir.toFile(),
-                        singletonList("f0"));
+                        singletonList("f0"),
+                        null);
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+        table.open();
+
+        // test re-open
+        table.close();
         table.open();
 
         List<Pair<byte[], byte[]>> records = new ArrayList<>();
@@ -206,6 +223,46 @@ public class LookupTableTest extends TableTestBase {
     }
 
     @Test
+    public void testPkTableWithSequenceFieldProjection() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.SEQUENCE_FIELD, "f2");
+        options.set(CoreOptions.BUCKET, 1);
+        FileStoreTable storeTable = createTable(singletonList("f0"), options);
+        FullCacheLookupTable.Context context =
+                new FullCacheLookupTable.Context(
+                        storeTable,
+                        new int[] {0, 1},
+                        null,
+                        null,
+                        tempDir.toFile(),
+                        singletonList("f0"),
+                        null);
+        table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+        table.open();
+
+        // first write
+        write(storeTable, GenericRow.of(1, 11, 111));
+        table.refresh();
+        List<InternalRow> result = table.get(row(1));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 1, 11);
+
+        // second write
+        write(storeTable, GenericRow.of(1, 22, 222));
+        table.refresh();
+        result = table.get(row(1));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 1, 22);
+
+        // not update
+        write(storeTable, GenericRow.of(1, 33, 111));
+        table.refresh();
+        result = table.get(row(1));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 1, 22);
+    }
+
+    @Test
     public void testPkTablePkFilter() throws Exception {
         FileStoreTable storeTable = createTable(singletonList("f0"), new Options());
         FullCacheLookupTable.Context context =
@@ -215,8 +272,13 @@ public class LookupTableTest extends TableTestBase {
                         null,
                         new PredicateBuilder(RowType.of(INT())).lessThan(0, 3),
                         tempDir.toFile(),
-                        singletonList("f0"));
+                        singletonList("f0"),
+                        null);
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+        table.open();
+
+        // test re-open
+        table.close();
         table.open();
 
         table.refresh(singletonList(row(1, 11, 111)).iterator());
@@ -246,8 +308,13 @@ public class LookupTableTest extends TableTestBase {
                         null,
                         new PredicateBuilder(RowType.of(INT(), INT())).lessThan(1, 22),
                         tempDir.toFile(),
-                        singletonList("f0"));
+                        singletonList("f0"),
+                        null);
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+        table.open();
+
+        // test re-open
+        table.close();
         table.open();
 
         table.refresh(singletonList(row(1, 11, 111)).iterator());
@@ -270,8 +337,13 @@ public class LookupTableTest extends TableTestBase {
                         null,
                         null,
                         tempDir.toFile(),
-                        singletonList("f1"));
+                        singletonList("f1"),
+                        null);
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+        table.open();
+
+        // test re-open
+        table.close();
         table.open();
 
         // test bulk load 100_000 records
@@ -315,8 +387,13 @@ public class LookupTableTest extends TableTestBase {
                         null,
                         null,
                         tempDir.toFile(),
-                        singletonList("f1"));
+                        singletonList("f1"),
+                        null);
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+        table.open();
+
+        // test re-open
+        table.close();
         table.open();
 
         List<Pair<byte[], byte[]>> records = new ArrayList<>();
@@ -363,8 +440,13 @@ public class LookupTableTest extends TableTestBase {
                         null,
                         new PredicateBuilder(RowType.of(INT())).lessThan(0, 3),
                         tempDir.toFile(),
-                        singletonList("f1"));
+                        singletonList("f1"),
+                        null);
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+        table.open();
+
+        // test re-open
+        table.close();
         table.open();
 
         table.refresh(singletonList(row(1, 11, 111)).iterator());
@@ -403,8 +485,13 @@ public class LookupTableTest extends TableTestBase {
                         null,
                         null,
                         tempDir.toFile(),
-                        singletonList("f1"));
+                        singletonList("f1"),
+                        null);
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+        table.open();
+
+        // test re-open
+        table.close();
         table.open();
 
         // test bulk load 100_000 records
@@ -446,8 +533,13 @@ public class LookupTableTest extends TableTestBase {
                         null,
                         new PredicateBuilder(RowType.of(INT(), INT(), INT())).lessThan(2, 222),
                         tempDir.toFile(),
-                        singletonList("f1"));
+                        singletonList("f1"),
+                        null);
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+        table.open();
+
+        // test re-open
+        table.close();
         table.open();
 
         table.refresh(singletonList(row(1, 11, 333)).iterator());
@@ -474,7 +566,8 @@ public class LookupTableTest extends TableTestBase {
                         dimTable,
                         new int[] {0, 1, 2},
                         tempDir.toFile(),
-                        ImmutableList.of("pk1", "pk2"));
+                        ImmutableList.of("pk1", "pk2"),
+                        null);
         table.open();
 
         List<InternalRow> result = table.get(row(1, -1));
@@ -506,8 +599,14 @@ public class LookupTableTest extends TableTestBase {
                         dimTable,
                         new int[] {2, 1},
                         tempDir.toFile(),
-                        ImmutableList.of("pk1", "pk2"));
+                        ImmutableList.of("pk1", "pk2"),
+                        null);
         table.open();
+
+        // test re-open
+        table.close();
+        table.open();
+
         List<InternalRow> result = table.get(row(1, -1));
         assertThat(result).hasSize(0);
 
@@ -532,7 +631,12 @@ public class LookupTableTest extends TableTestBase {
                         dimTable,
                         new int[] {2, 1},
                         tempDir.toFile(),
-                        ImmutableList.of("pk2", "pk1"));
+                        ImmutableList.of("pk2", "pk1"),
+                        null);
+        table.open();
+
+        // test re-open
+        table.close();
         table.open();
 
         List<InternalRow> result = table.get(row(-1, 1));
@@ -549,6 +653,73 @@ public class LookupTableTest extends TableTestBase {
         result = table.get(row(-2, 2));
         assertThat(result).hasSize(1);
         assertRow(result.get(0), 22, -2);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testPKLookupTableRefreshAsync(boolean refreshAsync) throws Exception {
+        Options options = new Options();
+        options.set(FlinkConnectorOptions.LOOKUP_REFRESH_ASYNC, refreshAsync);
+        FileStoreTable storeTable = createTable(singletonList("f0"), options);
+        FullCacheLookupTable.Context context =
+                new FullCacheLookupTable.Context(
+                        storeTable,
+                        new int[] {0, 1, 2},
+                        null,
+                        null,
+                        tempDir.toFile(),
+                        singletonList("f0"),
+                        null);
+        table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+        table.open();
+
+        // Batch insert 100_000 records into table store
+        BatchWriteBuilder writeBuilder = storeTable.newBatchWriteBuilder();
+        Set<Integer> insertKeys = new HashSet<>();
+        try (BatchTableWrite write = writeBuilder.newWrite()) {
+            for (int i = 1; i <= 100_000; i++) {
+                insertKeys.add(i);
+                write.write(row(i, 11 * i, 111 * i), 0);
+            }
+            try (BatchTableCommit commit = writeBuilder.newCommit()) {
+                commit.commit(write.prepareCommit());
+            }
+        }
+
+        // Refresh lookup table
+        table.refresh();
+        Set<Integer> batchKeys = new HashSet<>();
+        long start = System.currentTimeMillis();
+        while (batchKeys.size() < 100_000) {
+            Thread.sleep(10);
+            for (int i = 1; i <= 100_000; i++) {
+                List<InternalRow> result = table.get(row(i));
+                if (!result.isEmpty()) {
+                    assertThat(result).hasSize(1);
+                    assertRow(result.get(0), i, 11 * i, 111 * i);
+                    batchKeys.add(i);
+                }
+            }
+            if (System.currentTimeMillis() - start > 30_000) {
+                throw new TimeoutException();
+            }
+        }
+        assertThat(batchKeys).isEqualTo(insertKeys);
+
+        // Add 10 snapshots and refresh lookup table
+        for (int k = 0; k < 10; k++) {
+            try (BatchTableWrite write = writeBuilder.newWrite()) {
+                for (int i = 1; i <= 100; i++) {
+                    write.write(row(i, 11 * i, 111 * i), 0);
+                }
+                try (BatchTableCommit commit = writeBuilder.newCommit()) {
+                    commit.commit(write.prepareCommit());
+                }
+            }
+        }
+        table.refresh();
+
+        table.close();
     }
 
     private FileStoreTable createDimTable() throws Exception {

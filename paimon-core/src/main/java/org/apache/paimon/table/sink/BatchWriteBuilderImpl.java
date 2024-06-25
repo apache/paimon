@@ -18,13 +18,15 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
 import java.util.Map;
-import java.util.UUID;
+
+import static org.apache.paimon.CoreOptions.createCommitUser;
 
 /** Implementation for {@link WriteBuilder}. */
 public class BatchWriteBuilderImpl implements BatchWriteBuilder {
@@ -32,12 +34,13 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
     private static final long serialVersionUID = 1L;
 
     private final InnerTable table;
-    private final String commitUser = UUID.randomUUID().toString();
+    private final String commitUser;
 
     private Map<String, String> staticPartition;
 
     public BatchWriteBuilderImpl(InnerTable table) {
         this.table = table;
+        this.commitUser = createCommitUser(new Options(table.options()));
     }
 
     @Override

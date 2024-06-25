@@ -25,7 +25,11 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
+
+import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -33,6 +37,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Properties;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -341,5 +346,23 @@ public class HiveTableSchemaTest {
         properties.setProperty("columns.comments", "col1 comment\0col2 comment\0col3 comment");
         properties.setProperty("location", tempDir.toString());
         return properties;
+    }
+
+    @Test
+    public void testReadHiveSchemaFromProperties() throws Exception {
+        createSchema();
+        // cache the TableSchema to properties
+        Properties properties = new Properties();
+        properties.put(hive_metastoreConstants.META_TABLE_LOCATION, tempDir.toString());
+
+        HiveSchema hiveSchema = HiveSchema.extract(null, properties);
+
+        List<DataField> dataFields = hiveSchema.fields();
+        String dataFieldStr = JsonSerdeUtil.toJson(dataFields);
+
+        List<DataField> dataFieldsDeserialized =
+                JsonSerdeUtil.fromJson(dataFieldStr, new TypeReference<List<DataField>>() {});
+        HiveSchema newHiveSchema = new HiveSchema(new RowType(dataFieldsDeserialized));
+        assertThat(newHiveSchema).usingRecursiveComparison().isEqualTo(hiveSchema);
     }
 }

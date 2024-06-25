@@ -35,7 +35,7 @@ public interface TableScan {
     /** Plan splits, throws {@link EndOfScanException} if the scan is ended. */
     Plan plan();
 
-    /** Get partitions from simple manifest entries. */
+    /** List partitions. */
     List<BinaryRow> listPartitions();
 
     /**

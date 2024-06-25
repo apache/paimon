@@ -53,7 +53,7 @@ public class DynamicPartitionLoader implements Serializable {
     private Comparator<InternalRow> comparator;
 
     private LocalDateTime lastRefresh;
-    private BinaryRow partition;
+    @Nullable private BinaryRow partition;
 
     private DynamicPartitionLoader(Table table, Duration refreshInterval) {
         this.table = table;
@@ -63,8 +63,7 @@ public class DynamicPartitionLoader implements Serializable {
     public void open() {
         this.scan = table.newReadBuilder().newScan();
         RowType partitionType = table.rowType().project(table.partitionKeys());
-        this.comparator =
-                CodeGenUtils.newRecordComparator(partitionType.getFieldTypes(), "Partition");
+        this.comparator = CodeGenUtils.newRecordComparator(partitionType.getFieldTypes());
     }
 
     public void addJoinKeys(List<String> joinKeys) {

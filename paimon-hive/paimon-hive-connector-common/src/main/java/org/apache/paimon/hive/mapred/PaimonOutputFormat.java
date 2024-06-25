@@ -73,7 +73,8 @@ public class PaimonOutputFormat
     }
 
     private static PaimonRecordWriter writer(JobConf jobConf) {
-        TaskAttemptID taskAttemptID = TaskAttemptID.forName(jobConf.get(TASK_ATTEMPT_ID_KEY));
+        TaskAttemptID taskAttemptID = TezUtil.taskAttemptWrapper(jobConf);
+
         FileStoreTable table = createFileStoreTable(jobConf);
         // force write-only = true
         Map<String, String> newOptions =

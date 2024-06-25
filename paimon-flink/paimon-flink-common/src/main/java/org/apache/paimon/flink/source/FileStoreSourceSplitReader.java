@@ -181,7 +181,7 @@ public class FileStoreSourceSplitReader
         if (nextSplit.split() instanceof DataSplit) {
             long eventTime =
                     ((DataSplit) nextSplit.split())
-                            .getLatestFileCreationEpochMillis()
+                            .latestFileCreationEpochMillis()
                             .orElse(FileStoreSourceReaderMetrics.UNDEFINED);
             metrics.recordSnapshotUpdate(eventTime);
         }

@@ -31,20 +31,18 @@ import org.apache.flink.configuration.Configuration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.function.Function;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
 import static org.apache.paimon.flink.action.MultiTablesSinkMode.DIVIDED;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkState;
+import static org.apache.paimon.utils.StringUtils.caseSensitiveConversion;
 
 /** Common utils for CDC Action. */
 public class CdcActionCommonUtils {
@@ -100,68 +98,10 @@ public class CdcActionCommonUtils {
         return true;
     }
 
-    public static <T> LinkedHashMap<String, T> mapKeyCaseConvert(
-            LinkedHashMap<String, T> origin,
-            boolean caseSensitive,
-            Function<String, String> duplicateErrMsg) {
-        return mapKeyCaseConvert(origin, caseSensitive, duplicateErrMsg, LinkedHashMap::new);
-    }
-
-    public static <T> Map<String, T> mapKeyCaseConvert(
-            Map<String, T> origin,
-            boolean caseSensitive,
-            Function<String, String> duplicateErrMsg) {
-        return mapKeyCaseConvert(origin, caseSensitive, duplicateErrMsg, HashMap::new);
-    }
-
-    private static <T, M extends Map<String, T>> M mapKeyCaseConvert(
-            M origin,
-            boolean caseSensitive,
-            Function<String, String> duplicateErrMsg,
-            Supplier<M> mapSupplier) {
-        if (caseSensitive) {
-            return origin;
-        } else {
-            M newMap = mapSupplier.get();
-            for (Map.Entry<String, T> entry : origin.entrySet()) {
-                String key = entry.getKey();
-                checkArgument(!newMap.containsKey(key.toLowerCase()), duplicateErrMsg.apply(key));
-                newMap.put(key.toLowerCase(), entry.getValue());
-            }
-            return newMap;
-        }
-    }
-
-    public static Function<String, String> columnDuplicateErrMsg(String tableName) {
-        return column ->
-                String.format(
-                        "Failed to convert columns of table '%s' to case-insensitive form because duplicate column found: '%s'.",
-                        tableName, column);
-    }
-
-    public static Function<String, String> recordKeyDuplicateErrMsg(Map<String, String> record) {
-        return column ->
-                "Failed to convert record map to case-insensitive form because duplicate column found. Original record map is:\n"
-                        + record;
-    }
-
     public static List<String> listCaseConvert(List<String> origin, boolean caseSensitive) {
         return caseSensitive
                 ? origin
                 : origin.stream().map(String::toLowerCase).collect(Collectors.toList());
-    }
-
-    public static String columnCaseConvertAndDuplicateCheck(
-            String column,
-            Set<String> existedFields,
-            boolean caseSensitive,
-            Function<String, String> columnDuplicateErrMsg) {
-        if (caseSensitive) {
-            return column;
-        }
-        String columnLowerCase = column.toLowerCase();
-        checkArgument(existedFields.add(columnLowerCase), columnDuplicateErrMsg.apply(column));
-        return columnLowerCase;
     }
 
     public static Schema buildPaimonSchema(
@@ -173,6 +113,7 @@ public class CdcActionCommonUtils {
             Schema sourceSchema,
             CdcMetadataConverter[] metadataConverters,
             boolean caseSensitive,
+            boolean strictlyCheckSpecified,
             boolean requirePrimaryKeys) {
         Schema.Builder builder = Schema.newBuilder();
 
@@ -181,70 +122,132 @@ public class CdcActionCommonUtils {
         builder.options(sourceSchema.options());
 
         // fields
-        Set<String> existedFields = new HashSet<>();
-        Function<String, String> columnDuplicateErrMsg = columnDuplicateErrMsg(tableName);
+        List<String> allFieldNames = new ArrayList<>();
 
         for (DataField field : sourceSchema.fields()) {
-            String fieldName =
-                    columnCaseConvertAndDuplicateCheck(
-                            field.name(), existedFields, caseSensitive, columnDuplicateErrMsg);
+            String fieldName = caseSensitiveConversion(field.name(), caseSensitive);
+            allFieldNames.add(fieldName);
             builder.column(fieldName, field.type(), field.description());
         }
 
         for (ComputedColumn computedColumn : computedColumns) {
             String computedColumnName =
-                    columnCaseConvertAndDuplicateCheck(
-                            computedColumn.columnName(),
-                            existedFields,
-                            caseSensitive,
-                            columnDuplicateErrMsg);
+                    caseSensitiveConversion(computedColumn.columnName(), caseSensitive);
+            allFieldNames.add(computedColumnName);
             builder.column(computedColumnName, computedColumn.columnType());
         }
 
         for (CdcMetadataConverter metadataConverter : metadataConverters) {
             String metadataColumnName =
-                    columnCaseConvertAndDuplicateCheck(
-                            metadataConverter.columnName(),
-                            existedFields,
-                            caseSensitive,
-                            columnDuplicateErrMsg);
+                    caseSensitiveConversion(metadataConverter.columnName(), caseSensitive);
+            allFieldNames.add(metadataColumnName);
             builder.column(metadataColumnName, metadataConverter.dataType());
         }
 
+        checkDuplicateFields(tableName, allFieldNames);
+
         // primary keys
-        if (!specifiedPrimaryKeys.isEmpty()) {
-            Set<String> sourceColumns =
-                    sourceSchema.fields().stream().map(DataField::name).collect(Collectors.toSet());
-            sourceColumns.addAll(
-                    computedColumns.stream()
-                            .map(ComputedColumn::columnName)
-                            .collect(Collectors.toSet()));
-            for (String key : specifiedPrimaryKeys) {
-                checkArgument(
-                        sourceColumns.contains(key),
-                        "Specified primary key '%s' does not exist in source tables or computed columns %s.",
-                        key,
-                        sourceColumns);
-            }
-            builder.primaryKey(listCaseConvert(specifiedPrimaryKeys, caseSensitive));
-        } else if (!sourceSchema.primaryKeys().isEmpty()) {
-            builder.primaryKey(listCaseConvert(sourceSchema.primaryKeys(), caseSensitive));
-        } else if (requirePrimaryKeys) {
-            throw new IllegalArgumentException(
-                    "Primary keys are not specified. "
-                            + "Also, can't infer primary keys from source table schemas because "
-                            + "source tables have no primary keys or have different primary keys.");
-        }
+        specifiedPrimaryKeys = listCaseConvert(specifiedPrimaryKeys, caseSensitive);
+        List<String> sourceSchemaPrimaryKeys =
+                listCaseConvert(sourceSchema.primaryKeys(), caseSensitive);
+        setPrimaryKeys(
+                tableName,
+                builder,
+                specifiedPrimaryKeys,
+                sourceSchemaPrimaryKeys,
+                allFieldNames,
+                strictlyCheckSpecified,
+                requirePrimaryKeys);
 
         // partition keys
-        if (!specifiedPartitionKeys.isEmpty()) {
-            builder.partitionKeys(listCaseConvert(specifiedPartitionKeys, caseSensitive));
-        }
+        specifiedPartitionKeys = listCaseConvert(specifiedPartitionKeys, caseSensitive);
+        setPartitionKeys(
+                tableName, builder, specifiedPartitionKeys, allFieldNames, strictlyCheckSpecified);
 
         // comment
         builder.comment(sourceSchema.comment());
 
         return builder.build();
+    }
+
+    private static void setPrimaryKeys(
+            String tableName,
+            Schema.Builder builder,
+            List<String> specifiedPrimaryKeys,
+            List<String> sourceSchemaPrimaryKeys,
+            List<String> allFieldNames,
+            boolean strictlyCheckSpecified,
+            boolean requirePrimaryKeys) {
+        if (!specifiedPrimaryKeys.isEmpty()) {
+            if (allFieldNames.containsAll(specifiedPrimaryKeys)) {
+                builder.primaryKey(specifiedPrimaryKeys);
+                return;
+            }
+
+            String message =
+                    String.format(
+                            "For sink table %s, not all specified primary keys '%s' exist in source tables or computed columns '%s'.",
+                            tableName, specifiedPrimaryKeys, allFieldNames);
+            if (strictlyCheckSpecified) {
+                throw new IllegalArgumentException(message);
+            } else {
+                LOG.info(
+                        "{} In this case at database-sync, we will set primary keys from source tables if exist, otherwise, primary keys are not set.",
+                        message);
+            }
+        }
+
+        if (!sourceSchemaPrimaryKeys.isEmpty()) {
+            builder.primaryKey(sourceSchemaPrimaryKeys);
+            return;
+        }
+
+        if (requirePrimaryKeys) {
+            throw new IllegalArgumentException(
+                    "Failed to set specified primary keys for sink table "
+                            + tableName
+                            + ". Also, can't infer primary keys from source table schemas because "
+                            + "source tables have no primary keys or have different primary keys.");
+        }
+    }
+
+    private static void setPartitionKeys(
+            String tableName,
+            Schema.Builder builder,
+            List<String> specifiedPartitionKeys,
+            List<String> allFieldNames,
+            boolean strictlyCheckSpecified) {
+        if (!specifiedPartitionKeys.isEmpty()) {
+            if (allFieldNames.containsAll(specifiedPartitionKeys)) {
+                builder.partitionKeys(specifiedPartitionKeys);
+                return;
+            }
+
+            String message =
+                    String.format(
+                            "For sink table %s, not all specified partition keys '%s' exist in source tables or computed columns '%s'.",
+                            tableName, specifiedPartitionKeys, allFieldNames);
+            if (strictlyCheckSpecified) {
+                throw new IllegalArgumentException(message);
+            } else {
+                LOG.info("{} In this case at database-sync, partition keys are not set.", message);
+            }
+        }
+    }
+
+    public static void checkDuplicateFields(String tableName, List<String> fieldNames) {
+        List<String> duplicates =
+                fieldNames.stream()
+                        .filter(name -> Collections.frequency(fieldNames, name) > 1)
+                        .collect(Collectors.toList());
+        checkState(
+                duplicates.isEmpty(),
+                "Table %s contains duplicate columns: %s.\n"
+                        + "Possible causes are: "
+                        + "1. computed columns or metadata columns contain duplicate fields; "
+                        + "2. the catalog is case-insensitive and the table columns duplicate after they are all converted to lower-case.",
+                tableName,
+                duplicates);
     }
 
     public static String tableList(

@@ -19,6 +19,8 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManagerImpl;
@@ -40,6 +42,7 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.TraceableFileIO;
 
@@ -220,14 +223,97 @@ public class TableWriteTest {
 
         StreamTableScan scan = table.newStreamScan();
         TableRead read = table.newRead();
+        assertThat(streamingRead(scan, read, latestSnapshotId))
+                .hasSize(numPartitions * numRecordsPerPartition);
+    }
+
+    @Test
+    public void testUpgradeToMaxLevel() throws Exception {
+        Options conf = new Options();
+        conf.set(CoreOptions.BUCKET, 1);
+        conf.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.FULL_COMPACTION);
+
+        FileStoreTable table = createFileStoreTable(conf);
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 1, 10L));
+        write.write(GenericRow.of(1, 2, 20L));
+        write.write(GenericRow.ofKind(RowKind.DELETE, 1, 2, 20L));
+        commit.commit(0, write.prepareCommit(false, 0));
+
+        write.compact(partition(1), 0, true);
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        write.write(GenericRow.of(1, 2, 21L));
+        write.compact(partition(1), 0, true);
+        commit.commit(2, write.prepareCommit(true, 2));
+
+        write.close();
+        commit.close();
+
+        Map<String, String> readOptions = new HashMap<>();
+        readOptions.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1");
+        table = table.copy(readOptions);
+        long latestSnapshotId = table.snapshotManager().latestSnapshotId();
+
+        StreamTableScan scan = table.newStreamScan();
+        TableRead read = table.newRead();
+        assertThat(streamingRead(scan, read, latestSnapshotId)).hasSize(2);
+    }
+
+    @Test
+    public void testWaitAllSnapshotsOfSpecificIdentifier() throws Exception {
+        Options conf = new Options();
+        conf.set(CoreOptions.BUCKET, 1);
+
+        FileStoreTable table = createFileStoreTable(conf);
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 1, 10L));
+        write.write(GenericRow.of(1, 2, 20L));
+        commit.commit(0, write.prepareCommit(false, 0));
+
+        write.write(GenericRow.of(1, 2, 21L));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        // we use the same commitIdentifier to mimic a long pause between committing the APPEND
+        // snapshot and the COMPACT snapshot
+        write.compact(partition(1), 0, true);
+        List<CommitMessage> message1 = write.prepareCommit(true, 1);
+        // nothing is written, however message1 is not committed, so writer should be kept
+        List<CommitMessage> message2 = write.prepareCommit(false, 2);
+
+        write.write(GenericRow.of(1, 3, 30L));
+        write.compact(partition(1), 0, true);
+        commit.commit(1, message1);
+        commit.commit(2, message2);
+        commit.commit(3, write.prepareCommit(true, 3));
+
+        write.close();
+        commit.close();
+    }
+
+    private BinaryRow partition(int x) {
+        BinaryRow partition = new BinaryRow(1);
+        BinaryRowWriter writer = new BinaryRowWriter(partition);
+        writer.writeInt(0, x);
+        writer.complete();
+        return partition;
+    }
+
+    List<InternalRow> streamingRead(
+            StreamTableScan scan, TableRead read, long numStreamingSnapshots) throws Exception {
         List<InternalRow> actual = new ArrayList<>();
-        for (long i = 0; i <= latestSnapshotId; i++) {
+        for (long i = 0; i <= numStreamingSnapshots; i++) {
             RecordReader<InternalRow> reader = read.createReader(scan.plan().splits());
             reader.forEachRemaining(actual::add);
             reader.close();
         }
-
-        assertThat(actual).hasSize(numPartitions * numRecordsPerPartition);
+        return actual;
     }
 
     private FileStoreTable createFileStoreTable(Options conf) throws Exception {

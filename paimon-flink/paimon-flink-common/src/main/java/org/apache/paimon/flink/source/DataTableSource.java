@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.LogChangelogMode;
 import org.apache.paimon.CoreOptions.LogConsistency;
-import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.FlinkConnectorOptions.WatermarkEmitStrategy;
 import org.apache.paimon.flink.PaimonDataStreamScanProvider;
 import org.apache.paimon.flink.log.LogSourceProvider;
@@ -32,13 +31,9 @@ import org.apache.paimon.flink.lookup.LookupRuntimeProviderFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.Projection;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.source.LookupTableSource.LookupContext;
@@ -67,7 +62,6 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGN
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_UPDATE_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_EMIT_STRATEGY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_IDLE_TIMEOUT;
-import static org.apache.paimon.options.OptionsUtils.PAIMON_PREFIX;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /**
@@ -79,9 +73,6 @@ import static org.apache.paimon.utils.Preconditions.checkState;
  * LogSourceProvider}.
  */
 public class DataTableSource extends FlinkTableSource {
-    private static final String FLINK_INFER_SCAN_PARALLELISM =
-            String.format(
-                    "%s%s", PAIMON_PREFIX, FlinkConnectorOptions.INFER_SCAN_PARALLELISM.key());
 
     private final ObjectIdentifier tableIdentifier;
     private final boolean streaming;
@@ -89,8 +80,6 @@ public class DataTableSource extends FlinkTableSource {
     @Nullable private final LogStoreTableFactory logStoreTableFactory;
 
     @Nullable private WatermarkStrategy<RowData> watermarkStrategy;
-
-    private SplitStatistics splitStatistics;
 
     @Nullable private List<String> dynamicPartitionFilteringFields;
 
@@ -191,74 +180,33 @@ public class DataTableSource extends FlinkTableSource {
             }
             String watermarkAlignGroup = options.get(SCAN_WATERMARK_ALIGNMENT_GROUP);
             if (watermarkAlignGroup != null) {
-                try {
-                    watermarkStrategy =
-                            WatermarkAlignUtils.withWatermarkAlignment(
-                                    watermarkStrategy,
-                                    watermarkAlignGroup,
-                                    options.get(SCAN_WATERMARK_ALIGNMENT_MAX_DRIFT),
-                                    options.get(SCAN_WATERMARK_ALIGNMENT_UPDATE_INTERVAL));
-                } catch (NoSuchMethodError error) {
-                    throw new RuntimeException(
-                            "Flink 1.14 does not support watermark alignment, please check your Flink version.",
-                            error);
-                }
+                watermarkStrategy =
+                        WatermarkAlignUtils.withWatermarkAlignment(
+                                watermarkStrategy,
+                                watermarkAlignGroup,
+                                options.get(SCAN_WATERMARK_ALIGNMENT_MAX_DRIFT),
+                                options.get(SCAN_WATERMARK_ALIGNMENT_UPDATE_INTERVAL));
             }
         }
 
         FlinkSourceBuilder sourceBuilder =
-                new FlinkSourceBuilder(tableIdentifier, table)
-                        .withContinuousMode(streaming)
-                        .withLogSourceProvider(logSourceProvider)
-                        .withProjection(projectFields)
-                        .withPredicate(predicate)
-                        .withLimit(limit)
-                        .withWatermarkStrategy(watermarkStrategy)
-                        .withDynamicPartitionFilteringFields(dynamicPartitionFilteringFields);
+                new FlinkSourceBuilder(table)
+                        .sourceName(tableIdentifier.asSummaryString())
+                        .sourceBounded(!streaming)
+                        .logSourceProvider(logSourceProvider)
+                        .projection(projectFields)
+                        .predicate(predicate)
+                        .limit(limit)
+                        .watermarkStrategy(watermarkStrategy)
+                        .dynamicPartitionFilteringFields(dynamicPartitionFilteringFields);
 
         return new PaimonDataStreamScanProvider(
-                !streaming, env -> configureSource(sourceBuilder, env));
-    }
-
-    private DataStream<RowData> configureSource(
-            FlinkSourceBuilder sourceBuilder, StreamExecutionEnvironment env) {
-        Options options = Options.fromMap(this.table.options());
-        Configuration envConfig = (Configuration) env.getConfiguration();
-        if (envConfig.containsKey(FLINK_INFER_SCAN_PARALLELISM)) {
-            options.set(
-                    FlinkConnectorOptions.INFER_SCAN_PARALLELISM,
-                    Boolean.parseBoolean(envConfig.toMap().get(FLINK_INFER_SCAN_PARALLELISM)));
-        }
-        Integer parallelism = options.get(FlinkConnectorOptions.SCAN_PARALLELISM);
-        if (parallelism == null && options.get(FlinkConnectorOptions.INFER_SCAN_PARALLELISM)) {
-            if (streaming) {
-                parallelism = options.get(CoreOptions.BUCKET);
-            } else {
-                scanSplitsForInference();
-                parallelism = splitStatistics.splitNumber();
-                if (null != limit && limit > 0) {
-                    int limitCount =
-                            limit >= Integer.MAX_VALUE ? Integer.MAX_VALUE : limit.intValue();
-                    parallelism = Math.min(parallelism, limitCount);
-                }
-
-                parallelism = Math.max(1, parallelism);
-            }
-            parallelism =
-                    Math.min(
-                            parallelism,
-                            options.get(FlinkConnectorOptions.INFER_SCAN_MAX_PARALLELISM));
-        }
-
-        return sourceBuilder.withParallelism(parallelism).withEnv(env).build();
-    }
-
-    private void scanSplitsForInference() {
-        if (splitStatistics == null) {
-            List<Split> splits =
-                    table.newReadBuilder().withFilter(predicate).newScan().plan().splits();
-            splitStatistics = new SplitStatistics(splits);
-        }
+                !streaming,
+                env ->
+                        sourceBuilder
+                                .sourceParallelism(inferSourceParallelism(env))
+                                .env(env)
+                                .build());
     }
 
     @Override
@@ -340,25 +288,5 @@ public class DataTableSource extends FlinkTableSource {
     @Override
     public boolean isStreaming() {
         return streaming;
-    }
-
-    /** Split statistics for inferring row count and parallelism size. */
-    protected static class SplitStatistics {
-
-        private final int splitNumber;
-        private final long totalRowCount;
-
-        private SplitStatistics(List<Split> splits) {
-            this.splitNumber = splits.size();
-            this.totalRowCount = splits.stream().mapToLong(Split::rowCount).sum();
-        }
-
-        public int splitNumber() {
-            return splitNumber;
-        }
-
-        public long totalRowCount() {
-            return totalRowCount;
-        }
     }
 }

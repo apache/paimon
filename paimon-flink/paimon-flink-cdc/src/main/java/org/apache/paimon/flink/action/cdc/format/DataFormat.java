@@ -22,6 +22,7 @@ import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.format.canal.CanalRecordParser;
 import org.apache.paimon.flink.action.cdc.format.debezium.DebeziumRecordParser;
+import org.apache.paimon.flink.action.cdc.format.json.JsonRecordParser;
 import org.apache.paimon.flink.action.cdc.format.maxwell.MaxwellRecordParser;
 import org.apache.paimon.flink.action.cdc.format.ogg.OggRecordParser;
 
@@ -38,7 +39,8 @@ public enum DataFormat {
     CANAL_JSON(CanalRecordParser::new),
     OGG_JSON(OggRecordParser::new),
     MAXWELL_JSON(MaxwellRecordParser::new),
-    DEBEZIUM_JSON(DebeziumRecordParser::new);
+    DEBEZIUM_JSON(DebeziumRecordParser::new),
+    JSON(JsonRecordParser::new);
     // Add more data formats here if needed
 
     private final RecordParserFactory parser;
@@ -51,13 +53,12 @@ public enum DataFormat {
      * Creates a new instance of {@link RecordParser} for this data format with the specified
      * configurations.
      *
-     * @param caseSensitive Indicates whether the parser should be case-sensitive.
      * @param computedColumns List of computed columns to be considered by the parser.
      * @return A new instance of {@link RecordParser}.
      */
     public RecordParser createParser(
-            boolean caseSensitive, TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        return parser.createParser(caseSensitive, typeMapping, computedColumns);
+            TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
+        return parser.createParser(typeMapping, computedColumns);
     }
 
     public static DataFormat fromConfigString(String format) {

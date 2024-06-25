@@ -20,7 +20,6 @@ package org.apache.paimon.tests;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.DisabledIfSystemProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.Container;
@@ -36,7 +35,6 @@ import java.util.UUID;
  * <p>NOTE: This test runs a complete Hadoop cluster in Docker, which requires a lot of memory. If
  * you're running this test locally, make sure that the memory limit of your Docker is at least 8GB.
  */
-@DisabledIfSystemProperty(named = "test.flink.version", matches = "1.14.*")
 public class HiveE2eTest extends E2eReaderTestBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(HiveE2eTest.class);
@@ -67,7 +65,7 @@ public class HiveE2eTest extends E2eReaderTestBase {
                                 + "  'bucket' = '2'\n"
                                 + ");",
                         table);
-        runSql(createInsertSql(table), createCatalogSql("paimon", paimonPkPath), paimonPkDdl);
+        runBatchSql(createInsertSql(table), createCatalogSql("paimon", paimonPkPath), paimonPkDdl);
 
         String externalTablePkDdl =
                 String.format(
@@ -83,7 +81,7 @@ public class HiveE2eTest extends E2eReaderTestBase {
     public void testFlinkWriteAndHiveRead() throws Exception {
         final String warehouse = HDFS_ROOT + "/" + UUID.randomUUID() + ".warehouse";
         final String table = "t";
-        runSql(
+        runBatchSql(
                 String.join(
                         "\n",
                         createCatalogSql(
@@ -156,7 +154,7 @@ public class HiveE2eTest extends E2eReaderTestBase {
             }
         }
 
-        runSql(
+        runBatchSql(
                 "INSERT INTO t VALUES " + String.join(", ", values) + ";",
                 createCatalogSql(
                         "my_hive",
@@ -199,14 +197,5 @@ public class HiveE2eTest extends E2eReaderTestBase {
             throw new AssertionError("Failed when running hive sql.");
         }
         return execResult.getStdout();
-    }
-
-    private void runSql(String sql, String... ddls) throws Exception {
-        runSql(
-                "SET 'execution.runtime-mode' = 'batch';\n"
-                        + "SET 'table.dml-sync' = 'true';\n"
-                        + String.join("\n", ddls)
-                        + "\n"
-                        + sql);
     }
 }

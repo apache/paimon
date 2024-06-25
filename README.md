@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202-4EB1BA.svg)](https://www.apache.org/licenses/LICENSE-2.0.html)
 [![Get on Slack](https://img.shields.io/badge/slack-join-orange.svg)](https://the-asf.slack.com/archives/C053Q2NCW8G)
 
-Apache Paimon(incubating) is a lake format that enables building a Realtime Lakehouse Architecture with Flink and Spark 
+Apache Paimon is a lake format that enables building a Realtime Lakehouse Architecture with Flink and Spark 
 for both streaming and batch operations. Paimon innovatively combines lake format and LSM structure, bringing realtime 
 streaming updates into the lake architecture.
 
@@ -68,7 +68,7 @@ You can join the Paimon community on Slack. Paimon channel is in ASF Slack works
 
 ## Building
 
-JDK 8/11 is required for building the project.
+JDK 8/11 is required for building the project. Maven version >=3.3.1.
 
 - Run the `mvn clean install -DskipTests` command to build the project.
 - Run the `mvn spotless:apply` to format the project (both Java and Scala).

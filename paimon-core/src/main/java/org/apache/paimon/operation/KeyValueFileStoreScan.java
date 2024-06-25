@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
@@ -25,9 +26,10 @@ import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.stats.BinaryTableStats;
-import org.apache.paimon.stats.FieldStatsArraySerializer;
-import org.apache.paimon.stats.FieldStatsConverters;
+import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.stats.SimpleStatsConverter;
+import org.apache.paimon.stats.SimpleStatsConverters;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -35,45 +37,54 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
+
 /** {@link FileStoreScan} for {@link KeyValueFileStore}. */
 public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
-    private final FieldStatsConverters fieldKeyStatsConverters;
-    private final FieldStatsConverters fieldValueStatsConverters;
+    private final SimpleStatsConverters fieldKeyStatsConverters;
+    private final SimpleStatsConverters fieldValueStatsConverters;
 
     private Predicate keyFilter;
     private Predicate valueFilter;
+    private final boolean deletionVectorsEnabled;
+    private final MergeEngine mergeEngine;
 
     public KeyValueFileStoreScan(
             RowType partitionType,
             ScanBucketFilter bucketFilter,
             SnapshotManager snapshotManager,
             SchemaManager schemaManager,
-            long schemaId,
+            TableSchema schema,
             KeyValueFieldsExtractor keyValueFieldsExtractor,
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory,
             int numOfBuckets,
             boolean checkNumOfBuckets,
             Integer scanManifestParallelism,
-            String branchName) {
+            boolean deletionVectorsEnabled,
+            MergeEngine mergeEngine) {
         super(
                 partitionType,
                 bucketFilter,
                 snapshotManager,
                 schemaManager,
+                schema,
                 manifestFileFactory,
                 manifestListFactory,
                 numOfBuckets,
                 checkNumOfBuckets,
-                scanManifestParallelism,
-                branchName);
+                scanManifestParallelism);
         this.fieldKeyStatsConverters =
-                new FieldStatsConverters(
-                        sid -> keyValueFieldsExtractor.keyFields(scanTableSchema(sid)), schemaId);
+                new SimpleStatsConverters(
+                        sid -> keyValueFieldsExtractor.keyFields(scanTableSchema(sid)),
+                        schema.id());
         this.fieldValueStatsConverters =
-                new FieldStatsConverters(
-                        sid -> keyValueFieldsExtractor.valueFields(scanTableSchema(sid)), schemaId);
+                new SimpleStatsConverters(
+                        sid -> keyValueFieldsExtractor.valueFields(scanTableSchema(sid)),
+                        schema.id());
+        this.deletionVectorsEnabled = deletionVectorsEnabled;
+        this.mergeEngine = mergeEngine;
     }
 
     public KeyValueFileStoreScan withKeyFilter(Predicate predicate) {
@@ -90,14 +101,28 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     /** Note: Keep this thread-safe. */
     @Override
     protected boolean filterByStats(ManifestEntry entry) {
-        if (keyFilter == null) {
+        Predicate filter = null;
+        SimpleStatsConverter serializer = null;
+        SimpleStats stats = null;
+        if ((deletionVectorsEnabled || mergeEngine == FIRST_ROW)
+                && entry.level() > 0
+                && valueFilter != null) {
+            filter = valueFilter;
+            serializer = fieldValueStatsConverters.getOrCreate(entry.file().schemaId());
+            stats = entry.file().valueStats();
+        }
+
+        if (filter == null && keyFilter != null) {
+            filter = keyFilter;
+            serializer = fieldKeyStatsConverters.getOrCreate(entry.file().schemaId());
+            stats = entry.file().keyStats();
+        }
+
+        if (filter == null) {
             return true;
         }
 
-        FieldStatsArraySerializer serializer =
-                fieldKeyStatsConverters.getOrCreate(entry.file().schemaId());
-        BinaryTableStats stats = entry.file().keyStats();
-        return keyFilter.test(
+        return filter.test(
                 entry.file().rowCount(),
                 serializer.evolution(stats.minValues()),
                 serializer.evolution(stats.maxValues()),
@@ -138,9 +163,9 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     }
 
     private boolean filterByValueFilter(ManifestEntry entry) {
-        FieldStatsArraySerializer serializer =
+        SimpleStatsConverter serializer =
                 fieldValueStatsConverters.getOrCreate(entry.file().schemaId());
-        BinaryTableStats stats = entry.file().valueStats();
+        SimpleStats stats = entry.file().valueStats();
         return valueFilter.test(
                 entry.file().rowCount(),
                 serializer.evolution(stats.minValues()),

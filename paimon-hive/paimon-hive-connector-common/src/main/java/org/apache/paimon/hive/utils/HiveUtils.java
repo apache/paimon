@@ -47,6 +47,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.OptionsUtils.PAIMON_PREFIX;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
+import static org.apache.paimon.utils.HadoopUtils.HADOOP_LOAD_DEFAULT_CONFIG;
 
 /** Utils for create {@link FileStoreTable} and {@link Predicate}. */
 public class HiveUtils {
@@ -54,7 +55,13 @@ public class HiveUtils {
     public static FileStoreTable createFileStoreTable(JobConf jobConf) {
         Options options = extractCatalogConfig(jobConf);
         options.set(CoreOptions.PATH, LocationKeyExtractor.getPaimonLocation(jobConf));
-        CatalogContext catalogContext = CatalogContext.create(options, jobConf);
+
+        CatalogContext catalogContext;
+        if (options.get(HADOOP_LOAD_DEFAULT_CONFIG)) {
+            catalogContext = CatalogContext.create(options, jobConf);
+        } else {
+            catalogContext = CatalogContext.create(options);
+        }
         return FileStoreTableFactory.create(catalogContext);
     }
 

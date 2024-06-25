@@ -69,6 +69,7 @@ public final class TBPropertiesLocationHelper implements LocationHelper {
         }
         properties.put(LocationKeyExtractor.TBPROPERTIES_LOCATION_KEY, path.toString());
         database.setParameters(properties);
+        database.setLocationUri(null);
     }
 
     @Override

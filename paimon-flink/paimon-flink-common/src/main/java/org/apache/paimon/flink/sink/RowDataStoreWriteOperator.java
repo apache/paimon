@@ -23,6 +23,7 @@ import org.apache.paimon.flink.log.LogWriteCallback;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.SinkRecord;
 
+import org.apache.flink.api.common.functions.RichFunction;
 import org.apache.flink.api.common.functions.util.FunctionUtils;
 import org.apache.flink.api.common.state.CheckpointListener;
 import org.apache.flink.configuration.Configuration;
@@ -96,7 +97,12 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
 
         this.sinkContext = new SimpleContext(getProcessingTimeService());
         if (logSinkFunction != null) {
-            FunctionUtils.openFunction(logSinkFunction, new Configuration());
+            // to stay compatible with Flink 1.18-
+            if (logSinkFunction instanceof RichFunction) {
+                RichFunction richFunction = (RichFunction) logSinkFunction;
+                richFunction.open(new Configuration());
+            }
+
             logCallback = new LogWriteCallback();
             logSinkFunction.setWriteCallback(logCallback);
         }
@@ -124,7 +130,7 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
             throw new IOException(e);
         }
 
-        if (logSinkFunction != null) {
+        if (record != null && logSinkFunction != null) {
             // write to log store, need to preserve original pk (which includes partition fields)
             SinkRecord logRecord = write.toLogRecord(record);
             logSinkFunction.invoke(logRecord, sinkContext);

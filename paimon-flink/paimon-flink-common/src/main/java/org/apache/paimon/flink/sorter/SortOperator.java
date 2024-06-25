@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.MutableObjectIterator;
@@ -45,6 +46,7 @@ public class SortOperator extends TableStreamOperator<InternalRow>
     private final int spillSortMaxNumFiles;
     private final String spillCompression;
     private final int sinkParallelism;
+    private final MemorySize maxDiskSize;
 
     private transient BinaryExternalSortBuffer buffer;
     private transient IOManager ioManager;
@@ -56,7 +58,8 @@ public class SortOperator extends TableStreamOperator<InternalRow>
             int pageSize,
             int spillSortMaxNumFiles,
             String spillCompression,
-            int sinkParallelism) {
+            int sinkParallelism,
+            MemorySize maxDiskSize) {
         this.keyType = keyType;
         this.rowType = rowType;
         this.maxMemory = maxMemory;
@@ -65,6 +68,7 @@ public class SortOperator extends TableStreamOperator<InternalRow>
         this.spillSortMaxNumFiles = spillSortMaxNumFiles;
         this.spillCompression = spillCompression;
         this.sinkParallelism = sinkParallelism;
+        this.maxDiskSize = maxDiskSize;
     }
 
     @Override
@@ -94,7 +98,8 @@ public class SortOperator extends TableStreamOperator<InternalRow>
                         maxMemory,
                         pageSize,
                         spillSortMaxNumFiles,
-                        spillCompression);
+                        spillCompression,
+                        maxDiskSize);
     }
 
     @Override

@@ -53,7 +53,7 @@ public class MySqlComputedColumnE2ETest extends MySqlCdcE2eTestBase {
             statement.executeUpdate("INSERT INTO T VALUES (1, '2023-05-10 12:30:20')");
 
             String jobId =
-                    runSql(
+                    runBatchSql(
                             "INSERT INTO result1 SELECT * FROM ts_table;",
                             catalogDdl,
                             useCatalogCmd,

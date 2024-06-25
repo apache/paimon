@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.manifest.ManifestCommittable;
@@ -27,9 +26,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.metrics.groups.OperatorMetricGroup;
-
-import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -49,34 +45,31 @@ public class StoreMultiCommitter
         implements Committer<MultiTableCommittable, WrappedManifestCommittable> {
 
     private final Catalog catalog;
-    private final String commitUser;
-    @Nullable private final OperatorMetricGroup flinkMetricGroup;
+    private final Context context;
 
     // To make the commit behavior consistent with that of Committer,
     //    StoreMultiCommitter manages multiple committers which are
     //    referenced by table id.
     private final Map<Identifier, StoreCommitter> tableCommitters;
 
-    // compact job needs set "write-only" of a table to false
-    private final boolean isCompactJob;
+    // Currently, only compact_database job needs to ignore empty commit and set dynamic options
+    private final boolean ignoreEmptyCommit;
+    private final Map<String, String> dynamicOptions;
 
-    public StoreMultiCommitter(
-            Catalog.Loader catalogLoader,
-            String commitUser,
-            @Nullable OperatorMetricGroup flinkMetricGroup) {
-        this(catalogLoader, commitUser, flinkMetricGroup, false);
+    public StoreMultiCommitter(Catalog.Loader catalogLoader, Context context) {
+        this(catalogLoader, context, false, Collections.emptyMap());
     }
 
     public StoreMultiCommitter(
             Catalog.Loader catalogLoader,
-            String commitUser,
-            @Nullable OperatorMetricGroup flinkMetricGroup,
-            boolean isCompactJob) {
+            Context context,
+            boolean ignoreEmptyCommit,
+            Map<String, String> dynamicOptions) {
         this.catalog = catalogLoader.load();
-        this.commitUser = commitUser;
-        this.flinkMetricGroup = flinkMetricGroup;
+        this.context = context;
+        this.ignoreEmptyCommit = ignoreEmptyCommit;
+        this.dynamicOptions = dynamicOptions;
         this.tableCommitters = new HashMap<>();
-        this.isCompactJob = isCompactJob;
     }
 
     @Override
@@ -191,13 +184,7 @@ public class StoreMultiCommitter
         if (committer == null) {
             FileStoreTable table;
             try {
-                table = (FileStoreTable) catalog.getTable(tableId);
-                if (isCompactJob) {
-                    table =
-                            table.copy(
-                                    Collections.singletonMap(
-                                            CoreOptions.WRITE_ONLY.key(), "false"));
-                }
+                table = (FileStoreTable) catalog.getTable(tableId).copy(dynamicOptions);
             } catch (Catalog.TableNotExistException e) {
                 throw new RuntimeException(
                         String.format(
@@ -206,8 +193,10 @@ public class StoreMultiCommitter
             }
             committer =
                     new StoreCommitter(
-                            table.newCommit(commitUser).ignoreEmptyCommit(isCompactJob),
-                            flinkMetricGroup);
+                            table,
+                            table.newCommit(context.commitUser())
+                                    .ignoreEmptyCommit(ignoreEmptyCommit),
+                            context);
             tableCommitters.put(tableId, committer);
         }
 

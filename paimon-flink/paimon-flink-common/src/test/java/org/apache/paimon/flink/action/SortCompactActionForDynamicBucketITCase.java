@@ -169,27 +169,15 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
     }
 
     private void zorder(List<String> columns) throws Exception {
-        if (RANDOM.nextBoolean()) {
-            createAction("zorder", columns).run();
-        } else {
-            callProcedure("zorder", columns);
-        }
+        createAction("zorder", columns).run();
     }
 
     private void hilbert(List<String> columns) throws Exception {
-        if (RANDOM.nextBoolean()) {
-            createAction("hilbert", columns).run();
-        } else {
-            callProcedure("hilbert", columns);
-        }
+        createAction("hilbert", columns).run();
     }
 
     private void order(List<String> columns) throws Exception {
-        if (RANDOM.nextBoolean()) {
-            createAction("order", columns).run();
-        } else {
-            callProcedure("order", columns);
-        }
+        createAction("order", columns).run();
     }
 
     private SortCompactAction createAction(String orderStrategy, List<String> columns) {
@@ -206,15 +194,6 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
                 orderStrategy,
                 "--order_by",
                 String.join(",", columns));
-    }
-
-    private void callProcedure(String orderStrategy, List<String> orderByColumns) {
-        callProcedure(
-                String.format(
-                        "CALL sys.compact('%s.%s', 'ALL', '%s', '%s')",
-                        database, tableName, orderStrategy, String.join(",", orderByColumns)),
-                false,
-                true);
     }
 
     // schema with all the basic types.

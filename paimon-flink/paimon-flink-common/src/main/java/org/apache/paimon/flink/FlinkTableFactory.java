@@ -28,7 +28,6 @@ import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.factories.DynamicTableFactory;
-import org.apache.flink.table.factories.FactoryUtil;
 
 import static org.apache.paimon.CoreOptions.AUTO_CREATE;
 import static org.apache.paimon.flink.FlinkCatalogFactory.IDENTIFIER;
@@ -43,32 +42,12 @@ public class FlinkTableFactory extends AbstractFlinkTableFactory {
 
     @Override
     public DynamicTableSource createDynamicTableSource(Context context) {
-        if (isFlinkTable(context)) {
-            // only Flink 1.14 temporary table will come here
-            return FactoryUtil.createTableSource(
-                    null,
-                    context.getObjectIdentifier(),
-                    context.getCatalogTable(),
-                    context.getConfiguration(),
-                    context.getClassLoader(),
-                    context.isTemporary());
-        }
         createTableIfNeeded(context);
         return super.createDynamicTableSource(context);
     }
 
     @Override
     public DynamicTableSink createDynamicTableSink(Context context) {
-        if (isFlinkTable(context)) {
-            // only Flink 1.14 temporary table will come here
-            return FactoryUtil.createTableSink(
-                    null,
-                    context.getObjectIdentifier(),
-                    context.getCatalogTable(),
-                    context.getConfiguration(),
-                    context.getClassLoader(),
-                    context.isTemporary());
-        }
         createTableIfNeeded(context);
         return super.createDynamicTableSink(context);
     }
@@ -79,9 +58,12 @@ public class FlinkTableFactory extends AbstractFlinkTableFactory {
         if (options.get(AUTO_CREATE)) {
             try {
                 Path tablePath = CoreOptions.path(table.getOptions());
+                String branch = CoreOptions.branch(table.getOptions());
                 SchemaManager schemaManager =
                         new SchemaManager(
-                                FileIO.get(tablePath, createCatalogContext(context)), tablePath);
+                                FileIO.get(tablePath, createCatalogContext(context)),
+                                tablePath,
+                                branch);
                 if (!schemaManager.latest().isPresent()) {
                     schemaManager.createTable(FlinkCatalog.fromCatalogTable(table));
                 }
@@ -89,10 +71,5 @@ public class FlinkTableFactory extends AbstractFlinkTableFactory {
                 throw new RuntimeException(e);
             }
         }
-    }
-
-    private boolean isFlinkTable(Context context) {
-        String identifier = context.getCatalogTable().getOptions().get(FactoryUtil.CONNECTOR.key());
-        return identifier != null && !IDENTIFIER.equals(identifier);
     }
 }

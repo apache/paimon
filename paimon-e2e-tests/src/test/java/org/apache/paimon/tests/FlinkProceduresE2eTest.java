@@ -84,23 +84,26 @@ public class FlinkProceduresE2eTest extends E2eTestBase {
                         + ");";
 
         // insert data into paimon
-        runSql(
-                "SET 'execution.checkpointing.interval' = '1s';\n"
-                        + "INSERT INTO ts_table SELECT * FROM test_source;",
+        runStreamingSql(
+                "INSERT INTO ts_table SELECT * FROM test_source;",
                 catalogDdl,
                 useCatalogCmd,
                 tableDdl,
                 testDataSourceDdl);
 
         // execute compact procedure
-        runSql(
-                "SET 'execution.checkpointing.interval' = '1s';\n"
-                        + "CALL sys.compact('default.ts_table', 'dt=20221205;dt=20221206');",
-                catalogDdl,
-                useCatalogCmd);
+        String callStatement;
+        if (System.getProperty("test.flink.main.version").compareTo("1.18") == 0) {
+            callStatement = "CALL sys.compact('default.ts_table', 'dt=20221205;dt=20221206');";
+        } else {
+            callStatement =
+                    "CALL sys.compact(\\`table\\` => 'default.ts_table', partitions => 'dt=20221205;dt=20221206');";
+        }
+
+        runStreamingSql(callStatement, catalogDdl, useCatalogCmd);
 
         // read all data from paimon
-        runSql(
+        runStreamingSql(
                 "INSERT INTO result1 SELECT * FROM ts_table;",
                 catalogDdl,
                 useCatalogCmd,
@@ -115,9 +118,5 @@ public class FlinkProceduresE2eTest extends E2eTestBase {
 
         // check that second part of test data are compacted
         checkResult("20221205, 1, 101", "20221206, 1, 101");
-    }
-
-    private void runSql(String sql, String... ddls) throws Exception {
-        runSql(String.join("\n", ddls) + "\n" + sql);
     }
 }

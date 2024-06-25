@@ -20,8 +20,10 @@ package org.apache.paimon.data.columnar;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.PartitionInfo;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.reader.RecordWithPositionIterator;
+import org.apache.paimon.reader.VectorizedRecordIterator;
 import org.apache.paimon.utils.RecyclableIterator;
 import org.apache.paimon.utils.VectorMappingUtils;
 
@@ -32,38 +34,36 @@ import javax.annotation.Nullable;
  * {@link ColumnarRow#setRowId}.
  */
 public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
-        implements RecordWithPositionIterator<InternalRow> {
+        implements FileRecordIterator<InternalRow>, VectorizedRecordIterator {
 
-    private final ColumnarRow rowData;
+    private final Path filePath;
+    private final ColumnarRow row;
     private final Runnable recycler;
 
     private int num;
     private int nextPos;
-    private long nextGlobalPos;
+    private long nextFilePos;
 
-    public ColumnarRowIterator(ColumnarRow rowData, @Nullable Runnable recycler) {
+    public ColumnarRowIterator(Path filePath, ColumnarRow row, @Nullable Runnable recycler) {
         super(recycler);
-        this.rowData = rowData;
+        this.filePath = filePath;
+        this.row = row;
         this.recycler = recycler;
     }
 
-    /**
-     * Reset the number of rows in the vectorized batch, the start position in this batch and the
-     * global position.
-     */
-    public void reset(int num, long nextGlobalPos) {
-        this.num = num;
+    public void reset(long nextFilePos) {
+        this.num = row.batch().getNumRows();
         this.nextPos = 0;
-        this.nextGlobalPos = nextGlobalPos;
+        this.nextFilePos = nextFilePos;
     }
 
     @Nullable
     @Override
     public InternalRow next() {
         if (nextPos < num) {
-            rowData.setRowId(nextPos++);
-            nextGlobalPos++;
-            return rowData;
+            row.setRowId(nextPos++);
+            nextFilePos++;
+            return row;
         } else {
             return null;
         }
@@ -71,19 +71,25 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
 
     @Override
     public long returnedPosition() {
-        return nextGlobalPos - 1;
+        return nextFilePos - 1;
+    }
+
+    @Override
+    public Path filePath() {
+        return this.filePath;
     }
 
     public ColumnarRowIterator copy(ColumnVector[] vectors) {
-        ColumnarRowIterator newIterator = new ColumnarRowIterator(rowData.copy(vectors), recycler);
-        newIterator.reset(num, nextGlobalPos);
+        ColumnarRowIterator newIterator =
+                new ColumnarRowIterator(filePath, row.copy(vectors), recycler);
+        newIterator.reset(nextFilePos);
         return newIterator;
     }
 
     public ColumnarRowIterator mapping(
             @Nullable PartitionInfo partitionInfo, @Nullable int[] indexMapping) {
         if (partitionInfo != null || indexMapping != null) {
-            VectorizedColumnBatch vectorizedColumnBatch = rowData.vectorizedColumnBatch();
+            VectorizedColumnBatch vectorizedColumnBatch = row.batch();
             ColumnVector[] vectors = vectorizedColumnBatch.columns;
             if (partitionInfo != null) {
                 vectors = VectorMappingUtils.createPartitionMappedVectors(partitionInfo, vectors);
@@ -94,5 +100,10 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
             return copy(vectors);
         }
         return this;
+    }
+
+    @Override
+    public VectorizedColumnBatch batch() {
+        return row.batch();
     }
 }

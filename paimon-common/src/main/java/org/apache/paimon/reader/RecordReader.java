@@ -149,11 +149,11 @@ public interface RecordReader<T> extends Closeable {
      */
     default void forEachRemainingWithPosition(BiConsumer<Long, ? super T> action)
             throws IOException {
-        RecordWithPositionIterator<T> batch;
+        FileRecordIterator<T> batch;
         T record;
 
         try {
-            while ((batch = (RecordWithPositionIterator<T>) readBatch()) != null) {
+            while ((batch = (FileRecordIterator<T>) readBatch()) != null) {
                 while ((record = batch.next()) != null) {
                     action.accept(batch.returnedPosition(), record);
                 }

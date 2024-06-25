@@ -20,12 +20,15 @@ package org.apache.paimon.flink.action.cdc;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.cdc.watermark.CdcWatermarkStrategy;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -41,6 +44,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.TagCreationMode.WATERMARK;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_GROUP;
@@ -127,7 +132,7 @@ public abstract class SynchronizationActionBase extends ActionBase {
         return syncJobHandler.provideSource();
     }
 
-    private DataStreamSource<String> buildDataStreamSource(Object source) {
+    private DataStreamSource<CdcSourceRecord> buildDataStreamSource(Object source) {
         if (source instanceof Source) {
             boolean isAutomaticWatermarkCreationEnabled =
                     tableConfig.containsKey(CoreOptions.TAG_AUTOMATIC_CREATION.key())
@@ -138,7 +143,7 @@ public abstract class SynchronizationActionBase extends ActionBase {
             Options options = Options.fromMap(tableConfig);
             Duration idleTimeout = options.get(SCAN_WATERMARK_IDLE_TIMEOUT);
             String watermarkAlignGroup = options.get(SCAN_WATERMARK_ALIGNMENT_GROUP);
-            WatermarkStrategy<String> watermarkStrategy =
+            WatermarkStrategy<CdcSourceRecord> watermarkStrategy =
                     isAutomaticWatermarkCreationEnabled
                             ? watermarkAlignGroup != null
                                     ? new CdcWatermarkStrategy(createExtractor(source))
@@ -153,18 +158,18 @@ public abstract class SynchronizationActionBase extends ActionBase {
                 watermarkStrategy = watermarkStrategy.withIdleness(idleTimeout);
             }
             return env.fromSource(
-                    (Source<String, ?, ?>) source,
+                    (Source<CdcSourceRecord, ?, ?>) source,
                     watermarkStrategy,
                     syncJobHandler.provideSourceName());
         }
         if (source instanceof SourceFunction) {
             return env.addSource(
-                    (SourceFunction<String>) source, syncJobHandler.provideSourceName());
+                    (SourceFunction<CdcSourceRecord>) source, syncJobHandler.provideSourceName());
         }
         throw new UnsupportedOperationException("Unrecognized source type");
     }
 
-    protected abstract FlatMapFunction<String, RichCdcMultiplexRecord> recordParse();
+    protected abstract FlatMapFunction<CdcSourceRecord, RichCdcMultiplexRecord> recordParse();
 
     protected abstract EventParser.Factory<RichCdcMultiplexRecord> buildEventParserFactory();
 
@@ -172,10 +177,37 @@ public abstract class SynchronizationActionBase extends ActionBase {
             DataStream<RichCdcMultiplexRecord> input,
             EventParser.Factory<RichCdcMultiplexRecord> parserFactory);
 
-    protected FileStoreTable copyOptionsWithoutBucket(FileStoreTable table) {
-        Map<String, String> toCopy = new HashMap<>(tableConfig);
-        toCopy.remove(CoreOptions.BUCKET.key());
-        return table.copy(toCopy);
+    protected FileStoreTable alterTableOptions(Identifier identifier, FileStoreTable table) {
+        // doesn't support altering bucket here
+        Map<String, String> dynamicOptions = new HashMap<>(tableConfig);
+        dynamicOptions.remove(CoreOptions.BUCKET.key());
+
+        // remove immutable options and options with equal values
+        Map<String, String> oldOptions = table.options();
+        Set<String> immutableOptionKeys = CoreOptions.getImmutableOptionKeys();
+        dynamicOptions
+                .entrySet()
+                .removeIf(
+                        entry ->
+                                immutableOptionKeys.contains(entry.getKey())
+                                        || Objects.equals(
+                                                oldOptions.get(entry.getKey()), entry.getValue()));
+
+        // alter the table dynamic options
+        List<SchemaChange> optionChanges =
+                dynamicOptions.entrySet().stream()
+                        .map(entry -> SchemaChange.setOption(entry.getKey(), entry.getValue()))
+                        .collect(Collectors.toList());
+
+        try {
+            catalog.alterTable(identifier, optionChanges, false);
+        } catch (Catalog.TableNotExistException
+                | Catalog.ColumnAlreadyExistException
+                | Catalog.ColumnNotExistException e) {
+            throw new RuntimeException("This is unexpected.", e);
+        }
+
+        return table.copy(dynamicOptions);
     }
 
     @Override

@@ -18,11 +18,14 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.Changelog;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.SnapshotDeletion;
+import org.apache.paimon.options.ExpireConfig;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -46,10 +49,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
     private final TagManager tagManager;
     private final boolean cleanEmptyDirectories;
 
-    private int retainMax = Integer.MAX_VALUE;
-    private int retainMin = 1;
-    private long olderThanMills = 0;
-    private int maxDeletes = Integer.MAX_VALUE;
+    private ExpireConfig expireConfig;
 
     public ExpireSnapshotsImpl(
             SnapshotManager snapshotManager,
@@ -62,34 +62,24 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         this.snapshotDeletion = snapshotDeletion;
         this.tagManager = tagManager;
         this.cleanEmptyDirectories = cleanEmptyDirectories;
+        this.expireConfig = ExpireConfig.builder().build();
     }
 
     @Override
-    public ExpireSnapshotsImpl retainMax(int retainMax) {
-        this.retainMax = retainMax;
-        return this;
-    }
-
-    @Override
-    public ExpireSnapshotsImpl retainMin(int retainMin) {
-        this.retainMin = retainMin;
-        return this;
-    }
-
-    @Override
-    public ExpireSnapshotsImpl olderThanMills(long olderThanMills) {
-        this.olderThanMills = olderThanMills;
-        return this;
-    }
-
-    @Override
-    public ExpireSnapshotsImpl maxDeletes(int maxDeletes) {
-        this.maxDeletes = maxDeletes;
+    public ExpireSnapshots config(ExpireConfig expireConfig) {
+        this.expireConfig = expireConfig;
         return this;
     }
 
     @Override
     public int expire() {
+        snapshotDeletion.setChangelogDecoupled(expireConfig.isChangelogDecoupled());
+        int retainMax = expireConfig.getSnapshotRetainMax();
+        int retainMin = expireConfig.getSnapshotRetainMin();
+        int maxDeletes = expireConfig.getSnapshotMaxDeletes();
+        long olderThanMills =
+                System.currentTimeMillis() - expireConfig.getSnapshotTimeRetain().toMillis();
+
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         if (latestSnapshotId == null) {
             // no snapshot, nothing to expire
@@ -100,6 +90,9 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         if (earliest == null) {
             return 0;
         }
+
+        Preconditions.checkArgument(
+                retainMax >= retainMin, "retainMax must greater than retainMin.");
 
         // the min snapshot to retain from 'snapshot.num-retained.max'
         // (the maximum number of snapshots to retain)
@@ -137,7 +130,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             // write the hint file in order to see the earliest snapshot directly next time
             // should avoid duplicate writes when the file exists
             if (snapshotManager.readHint(SnapshotManager.EARLIEST) == null) {
-                writeEarliestHint(endExclusiveId);
+                writeEarliestHint(earliestId);
             }
 
             // fast exit
@@ -187,13 +180,15 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         }
 
         // delete changelog files
-        for (long id = beginInclusiveId; id < endExclusiveId; id++) {
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Ready to delete changelog files from snapshot #" + id);
-            }
-            Snapshot snapshot = snapshotManager.snapshot(id);
-            if (snapshot.changelogManifestList() != null) {
-                snapshotDeletion.deleteAddedDataFiles(snapshot.changelogManifestList());
+        if (!expireConfig.isChangelogDecoupled()) {
+            for (long id = beginInclusiveId; id < endExclusiveId; id++) {
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("Ready to delete changelog files from snapshot #" + id);
+                }
+                Snapshot snapshot = snapshotManager.snapshot(id);
+                if (snapshot.changelogManifestList() != null) {
+                    snapshotDeletion.deleteAddedDataFiles(snapshot.changelogManifestList());
+                }
             }
         }
 
@@ -216,13 +211,23 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
 
             Snapshot snapshot = snapshotManager.snapshot(id);
             snapshotDeletion.cleanUnusedManifests(snapshot, skippingSet);
-
-            // delete snapshot last
+            if (expireConfig.isChangelogDecoupled()) {
+                commitChangelog(new Changelog(snapshot));
+            }
             snapshotManager.fileIO().deleteQuietly(snapshotManager.snapshotPath(id));
         }
 
         writeEarliestHint(endExclusiveId);
         return (int) (endExclusiveId - beginInclusiveId);
+    }
+
+    private void commitChangelog(Changelog changelog) {
+        try {
+            snapshotManager.commitChangelog(changelog, changelog.id());
+            snapshotManager.commitLongLivedChangelogLatestHint(changelog.id());
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     private void writeEarliestHint(long earliest) {

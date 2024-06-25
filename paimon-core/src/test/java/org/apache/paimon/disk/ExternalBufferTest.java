@@ -18,11 +18,13 @@
 
 package org.apache.paimon.disk;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.serializer.BinaryRowSerializer;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
+import org.apache.paimon.options.MemorySize;
 
 import org.apache.commons.math3.random.RandomDataGenerator;
 import org.junit.jupiter.api.BeforeEach;
@@ -56,10 +58,16 @@ public class ExternalBufferTest {
     }
 
     private ExternalBuffer newBuffer() {
+        return newBuffer(MemorySize.MAX_VALUE);
+    }
+
+    private ExternalBuffer newBuffer(MemorySize maxDiskSize) {
         return new ExternalBuffer(
                 ioManager,
                 new HeapMemorySegmentPool(2 * DEFAULT_PAGE_SIZE, DEFAULT_PAGE_SIZE),
-                this.serializer);
+                this.serializer,
+                maxDiskSize,
+                CoreOptions.SPILL_COMPRESSION.defaultValue());
     }
 
     @Test
@@ -88,6 +96,24 @@ public class ExternalBufferTest {
         assertThat(number).isEqualTo(buffer.size());
         assertBuffer(expected, buffer);
         assertThat(buffer.getSpillChannels().size()).isGreaterThan(0);
+
+        // repeat read
+        assertBuffer(expected, buffer);
+        buffer.newIterator();
+        assertBuffer(expected, buffer);
+        buffer.reset();
+    }
+
+    @Test
+    public void testSpillMaxDiskSize() throws Exception {
+        ExternalBuffer buffer = newBuffer(MemorySize.ofKibiBytes(1));
+
+        int number = 5000; // 16 * 5000
+        List<Long> expected = insertMulti(buffer, number);
+        assertThat(number).isEqualTo(buffer.size());
+        assertBuffer(expected, buffer);
+        assertThat(buffer.getSpillChannels().size()).isGreaterThan(0);
+        assertThat(buffer.flushMemory()).isFalse();
 
         // repeat read
         assertBuffer(expected, buffer);
@@ -154,7 +180,9 @@ public class ExternalBufferTest {
                 new ExternalBuffer(
                         ioManager,
                         new HeapMemorySegmentPool(3 * DEFAULT_PAGE_SIZE, DEFAULT_PAGE_SIZE),
-                        new BinaryRowSerializer(1));
+                        new BinaryRowSerializer(1),
+                        MemorySize.MAX_VALUE,
+                        CoreOptions.SPILL_COMPRESSION.defaultValue());
         assertThatThrownBy(() -> writeHuge(buffer)).isInstanceOf(IOException.class);
         buffer.reset();
     }

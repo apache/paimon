@@ -19,14 +19,20 @@
 package org.apache.paimon.spark;
 
 import org.apache.paimon.spark.procedure.CompactProcedure;
+import org.apache.paimon.spark.procedure.CreateBranchProcedure;
 import org.apache.paimon.spark.procedure.CreateTagProcedure;
+import org.apache.paimon.spark.procedure.DeleteBranchProcedure;
 import org.apache.paimon.spark.procedure.DeleteTagProcedure;
+import org.apache.paimon.spark.procedure.ExpirePartitionsProcedure;
 import org.apache.paimon.spark.procedure.ExpireSnapshotsProcedure;
+import org.apache.paimon.spark.procedure.MergeBranchProcedure;
 import org.apache.paimon.spark.procedure.MigrateFileProcedure;
 import org.apache.paimon.spark.procedure.MigrateTableProcedure;
 import org.apache.paimon.spark.procedure.Procedure;
 import org.apache.paimon.spark.procedure.ProcedureBuilder;
 import org.apache.paimon.spark.procedure.RemoveOrphanFilesProcedure;
+import org.apache.paimon.spark.procedure.RepairProcedure;
+import org.apache.paimon.spark.procedure.ReplaceBranchProcedure;
 import org.apache.paimon.spark.procedure.RollbackProcedure;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
@@ -53,11 +59,17 @@ public class SparkProcedures {
         procedureBuilders.put("rollback", RollbackProcedure::builder);
         procedureBuilders.put("create_tag", CreateTagProcedure::builder);
         procedureBuilders.put("delete_tag", DeleteTagProcedure::builder);
+        procedureBuilders.put("create_branch", CreateBranchProcedure::builder);
+        procedureBuilders.put("delete_branch", DeleteBranchProcedure::builder);
         procedureBuilders.put("compact", CompactProcedure::builder);
         procedureBuilders.put("migrate_table", MigrateTableProcedure::builder);
         procedureBuilders.put("migrate_file", MigrateFileProcedure::builder);
         procedureBuilders.put("remove_orphan_files", RemoveOrphanFilesProcedure::builder);
         procedureBuilders.put("expire_snapshots", ExpireSnapshotsProcedure::builder);
+        procedureBuilders.put("expire_partitions", ExpirePartitionsProcedure::builder);
+        procedureBuilders.put("repair", RepairProcedure::builder);
+        procedureBuilders.put("merge_branch", MergeBranchProcedure::builder);
+        procedureBuilders.put("replace_branch", ReplaceBranchProcedure::builder);
         return procedureBuilders.build();
     }
 }

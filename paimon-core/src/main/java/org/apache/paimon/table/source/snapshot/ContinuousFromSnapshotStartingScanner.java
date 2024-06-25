@@ -27,19 +27,37 @@ import org.apache.paimon.utils.SnapshotManager;
  */
 public class ContinuousFromSnapshotStartingScanner extends AbstractStartingScanner {
 
-    public ContinuousFromSnapshotStartingScanner(SnapshotManager snapshotManager, long snapshotId) {
+    private final boolean changelogDecoupled;
+
+    public ContinuousFromSnapshotStartingScanner(
+            SnapshotManager snapshotManager, long snapshotId, boolean changelogDecoupled) {
         super(snapshotManager);
         this.startingSnapshotId = snapshotId;
+        this.changelogDecoupled = changelogDecoupled;
     }
 
     @Override
     public Result scan(SnapshotReader snapshotReader) {
-        Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
-        if (earliestSnapshotId == null) {
+        Long earliestId = getEarliestId();
+        if (earliestId == null) {
             return new NoSnapshot();
         }
         // We should return the specified snapshot as next snapshot to indicate to scan delta data
         // from it. If the snapshotId < earliestSnapshotId, start from the earliest.
-        return new NextSnapshot(Math.max(startingSnapshotId, earliestSnapshotId));
+        return new NextSnapshot(Math.max(startingSnapshotId, earliestId));
+    }
+
+    private Long getEarliestId() {
+        Long earliestId;
+        if (changelogDecoupled) {
+            Long earliestChangelogId = snapshotManager.earliestLongLivedChangelogId();
+            earliestId =
+                    earliestChangelogId == null
+                            ? snapshotManager.earliestSnapshotId()
+                            : earliestChangelogId;
+        } else {
+            earliestId = snapshotManager.earliestSnapshotId();
+        }
+        return earliestId;
     }
 }

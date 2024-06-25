@@ -53,6 +53,9 @@ public interface RecordWriter<T> {
     /** Get all data files maintained by this writer. */
     Collection<DataFileMeta> dataFiles();
 
+    /** Get max sequence number of records written by this writer. */
+    long maxSequenceNumber();
+
     /**
      * Prepare for a commit.
      *

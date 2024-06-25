@@ -20,6 +20,7 @@ package org.apache.paimon.jdbc;
 
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.options.Options;
 
 /** Options for jdbc catalog. */
 public final class JdbcCatalogOptions {
@@ -27,8 +28,19 @@ public final class JdbcCatalogOptions {
     public static final ConfigOption<String> CATALOG_KEY =
             ConfigOptions.key("catalog-key")
                     .stringType()
-                    .defaultValue(null)
+                    .defaultValue("jdbc")
                     .withDescription("Custom jdbc catalog store key.");
 
+    public static final ConfigOption<Integer> LOCK_KEY_MAX_LENGTH =
+            ConfigOptions.key("lock-key-max-length")
+                    .intType()
+                    .defaultValue(255)
+                    .withDescription(
+                            "Set the maximum length of the lock key. The 'lock-key' is composed of concatenating three fields : 'catalog-key', 'database', and 'table'.");
+
     private JdbcCatalogOptions() {}
+
+    static Integer lockKeyMaxLength(Options options) {
+        return options.get(LOCK_KEY_MAX_LENGTH);
+    }
 }

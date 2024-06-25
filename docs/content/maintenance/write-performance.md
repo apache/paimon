@@ -1,6 +1,6 @@
 ---
 title: "Write Performance"
-weight: 1
+weight: 2
 type: docs
 aliases:
 - /maintenance/write-performance.html
@@ -79,13 +79,14 @@ You can use the following strategies for your table:
 ```shell
 num-sorted-run.stop-trigger = 2147483647
 sort-spill-threshold = 10
+changelog-producer.lookup-wait = false
 ```
 
 This configuration will generate more files during peak write periods and gradually merge into optimal read
 performance during low write periods.
 
 In the case of `'changelog-producer' = 'lookup'`, by default, the lookup will be completed at checkpointing, which
-will block the checkpoint. If you want an asynchronous lookup, you can use `'changelog-producer.lookup-wait' = 'false'`.
+will block the checkpoint. So if you want an asynchronous lookup, you should also set `'changelog-producer.lookup-wait' = 'false'`.
 
 ### Number of Sorted Runs to Pause Writing
 
@@ -110,7 +111,7 @@ the threshold.
       <td>No</td>
       <td style="word-wrap: break-word;">(none)</td>
       <td>Integer</td>
-      <td>The number of sorted runs that trigger the stopping of writes, the default value is 'num-sorted-run.compaction-trigger' + 1.</td>
+      <td>The number of sorted runs that trigger the stopping of writes, the default value is 'num-sorted-run.compaction-trigger' + 3.</td>
     </tr>
     </tbody>
 </table>
@@ -143,9 +144,9 @@ Its value depends on your memory size.
 
 ### Number of Sorted Runs to Trigger Compaction
 
-Paimon uses [LSM tree]({{< ref "concepts/primary-key-table/overview#lsm-trees" >}}) which supports a large number of updates. LSM organizes files in several [sorted runs]({{< ref "concepts/primary-key-table/overview#sorted-runs" >}}). When querying records from an LSM tree, all sorted runs must be combined to produce a complete view of all records.
+Paimon uses [LSM tree]({{< ref "primary-key-table/overview#lsm-trees" >}}) which supports a large number of updates. LSM organizes files in several [sorted runs]({{< ref "primary-key-table/overview#sorted-runs" >}}). When querying records from an LSM tree, all sorted runs must be combined to produce a complete view of all records.
 
-One can easily see that too many sorted runs will result in poor query performance. To keep the number of sorted runs in a reasonable range, Paimon writers will automatically perform [compactions]({{< ref "concepts/primary-key-table/overview#compaction" >}}). The following table property determines the minimum number of sorted runs to trigger a compaction.
+One can easily see that too many sorted runs will result in poor query performance. To keep the number of sorted runs in a reasonable range, Paimon writers will automatically perform [compactions]({{< ref "primary-key-table/overview#compaction" >}}). The following table property determines the minimum number of sorted runs to trigger a compaction.
 
 <table class="table table-bordered">
     <thead>
@@ -210,11 +211,9 @@ layers to be in Avro format.
 
 ## File Compression
 
-By default, Paimon uses high-performance compression algorithms such as LZ4 and SNAPPY, but their compression rates
-are not so good. If you want to reduce the write/read performance, you can modify the compression algorithm:
+By default, Paimon uses zstd with level 1, you can modify the compression algorithm:
 
-1. `'file.compression'`: Default file compression format. If you need a higher compression rate, I recommend using `'ZSTD'`.
-2. `'file.compression.per.level'`: Define different compression policies for different level. For example `'0:lz4,1:zstd'`.
+`'file.compression.zstd-level'`: Default zstd level is 1. For higher compression rates, it can be configured to 9, but the read and write speed will significantly decrease.
 
 ## Stability
 
@@ -248,6 +247,10 @@ There are three main places in Paimon writer that takes up memory:
 If your Flink job does not rely on state, please avoid using managed memory, which you can control with the following Flink parameter:
 ```shell
 taskmanager.memory.managed.size=1m
+```
+Or you can use Flink managed memory for your write buffer to avoid OOM, set table property:
+```shell
+sink.use-managed-memory-allocator=true
 ```
 
 ## Commit Memory

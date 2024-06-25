@@ -31,7 +31,7 @@ under the License.
     <artifactId>paimon-parent</artifactId>
     <groupId>org.apache.paimon</groupId>
     <name>Paimon : </name>
-    <version>0.8-SNAPSHOT</version>
+    <version>0.9-SNAPSHOT</version>
     <packaging>pom</packaging>
 
     <url>https://paimon.apache.org</url>
@@ -46,9 +46,9 @@ under the License.
     </licenses>
 
     <scm>
-        <url>https://github.com/apache/incubator-paimon</url>
-        <connection>git@github.com:apache/incubator-paimon.git</connection>
-        <developerConnection>scm:git:https://gitbox.apache.org/repos/asf/incubator-paimon.git</developerConnection>
+        <url>https://github.com/apache/paimon</url>
+        <connection>git@github.com:apache/paimon.git</connection>
+        <developerConnection>scm:git:https://gitbox.apache.org/repos/asf/paimon.git</developerConnection>
     </scm>
 
     <modules>
@@ -71,13 +71,13 @@ under the License.
     </modules>
 
     <properties>
-        <project.build.outputTimestamp>2024-01-26T02:00:20Z</project.build.outputTimestamp>
+        <project.build.outputTimestamp>2024-05-07T06:19:41Z</project.build.outputTimestamp>
         <paimon.shade.version>0.6.0-incubating</paimon.shade.version>
         <paimon.shade.jackson.version>2.14.2</paimon.shade.jackson.version>
         <paimon.shade.guava.version>30.1.1-jre</paimon.shade.guava.version>
         <paimon.shade.caffeine.version>2.9.3</paimon.shade.caffeine.version>
         <paimon.shade.netty.version>4.1.100.Final</paimon.shade.netty.version>
-        <antlr4.version>4.8</antlr4.version>
+        <antlr4.version>4.9.3</antlr4.version>
         <hadoop.version>2.8.5</hadoop.version>
         <scala.version>2.12.15</scala.version>
         <scala.binary.version>2.12</scala.binary.version>
@@ -96,13 +96,13 @@ under the License.
         <flink.forkCount>1C</flink.forkCount>
         <flink.reuseForks>true</flink.reuseForks>
         <testcontainers.version>1.19.1</testcontainers.version>
-        <awaitility.version>4.2.0</awaitility.version>
 
         <!-- Can be set to any value to reproduce a specific build. -->
         <test.randomization.seed/>
         <test.unit.pattern>**/*Test.*</test.unit.pattern>
-        <test.flink.main.version>1.18</test.flink.main.version>
-        <test.flink.version>1.18.1</test.flink.version>
+        <test.flink.main.version>1.19</test.flink.main.version>
+        <test.flink.version>1.19.1</test.flink.version>
+        <!-- TODO upgrade after connector releases x-1.19 version -->
         <test.flink.connector.kafka.version>3.0.1-1.18</test.flink.connector.kafka.version>
 
         <janino.version>3.0.11</janino.version>
@@ -110,11 +110,10 @@ under the License.
         <jaxb.api.version>2.3.1</jaxb.api.version>
         <findbugs.version>1.3.9</findbugs.version>
         <json-smart.version>2.4.9</json-smart.version>
-        <avro.version>1.11.1</avro.version>
+        <avro.version>1.11.3</avro.version>
         <kafka.version>3.2.3</kafka.version>
         <scala-maven-plugin.version>3.2.2</scala-maven-plugin.version>
         <scalatest-maven-plugin.version>2.1.0</scalatest-maven-plugin.version>
-        <antlr4-maven-plugin.version>4.8</antlr4-maven-plugin.version>
         <jsoup.version>1.15.3</jsoup.version>
         <CodeCacheSize>128m</CodeCacheSize>
         <extraJavaTestArgs>
@@ -189,13 +188,6 @@ under the License.
             <!-- API bridge between log4j 1 and 2 -->
             <groupId>org.apache.logging.log4j</groupId>
             <artifactId>log4j-1.2-api</artifactId>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.awaitility</groupId>
-            <artifactId>awaitility</artifactId>
-            <version>${awaitility.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -500,6 +492,10 @@ under the License.
                         <junit.jupiter.extensions.autodetection.enabled>true</junit.jupiter.extensions.autodetection.enabled>
                     </systemPropertyVariables>
                     <argLine>-Xms256m -Xmx2048m -Dmvn.forkNumber=${surefire.forkNumber} -XX:+UseG1GC</argLine>
+                    <!-- By removing all default exclusions the nested classes get executed too -->
+                    <excludes>
+                        <exclude/>
+                    </excludes>
                 </configuration>
                 <executions>
                     <!--execute all the unit tests-->
@@ -710,7 +706,7 @@ under the License.
                                 <!-- The ApacheNoticeResourceTransformer collects and aggregates NOTICE files -->
                                 <transformer
                                         implementation="org.apache.maven.plugins.shade.resource.ApacheNoticeResourceTransformer">
-                                    <projectName>Apache Paimon (incubating)</projectName>
+                                    <projectName>Apache Paimon</projectName>
                                     <inceptionYear>${project.inceptionYear}</inceptionYear>
                                     <encoding>UTF-8</encoding>
                                 </transformer>
@@ -739,7 +735,7 @@ under the License.
             <plugin>
                 <groupId>org.commonjava.maven.plugins</groupId>
                 <artifactId>directory-maven-plugin</artifactId>
-                <version>0.1</version>
+                <version>1.0</version>
                 <executions>
                     <execution>
                         <id>directories</id>
@@ -830,18 +826,19 @@ under the License.
                             </importOrder>
 
                             <licenseHeader>
-                                <file>copyright.txt</file>
+                                <!-- replace it with ${project.rootDirectory} after maven 4.0.0, see MNG-7038 -->
+                                <file>${maven.multiModuleProjectDirectory}/copyright.txt</file>
                                 <delimiter>${spotless.delimiter}</delimiter>
                             </licenseHeader>
                         </java>
                         <scala>
                             <scalafmt>
                                 <version>3.4.3</version>
-                                <file>.scalafmt.conf</file>
+                                <file>${maven.multiModuleProjectDirectory}/.scalafmt.conf</file>
                             </scalafmt>
 
                             <licenseHeader>
-                                <file>copyright.txt</file>
+                                <file>${maven.multiModuleProjectDirectory}/copyright.txt</file>
                                 <delimiter>${spotless.delimiter}</delimiter>
                             </licenseHeader>
                         </scala>
@@ -948,24 +945,6 @@ under the License.
                             <version>${project.version}</version>
                         </dependency>
                     </dependencies>
-                </plugin>
-
-                <plugin>
-                    <groupId>org.apache.maven.plugins</groupId>
-                    <artifactId>maven-remote-resources-plugin</artifactId>
-                    <version>1.7.0</version>
-                    <executions>
-                        <execution>
-                            <goals>
-                                <goal>process</goal>
-                            </goals>
-                            <configuration>
-                                <resourceBundles>
-                                    <resourceBundle>org.apache.apache.resources:apache-incubator-disclaimer-resource-bundle:1.5</resourceBundle>
-                                </resourceBundles>
-                            </configuration>
-                        </execution>
-                    </executions>
                 </plugin>
             </plugins>
         </pluginManagement>

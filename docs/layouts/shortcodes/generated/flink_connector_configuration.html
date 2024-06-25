@@ -27,10 +27,10 @@ under the License.
     </thead>
     <tbody>
         <tr>
-            <td><h5>changelog-producer.lookup-wait</h5></td>
-            <td style="word-wrap: break-word;">true</td>
-            <td>Boolean</td>
-            <td>When changelog-producer is set to LOOKUP, commit will wait for changelog generation by lookup.</td>
+            <td><h5>end-input.watermark</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Long</td>
+            <td>Optional endInput watermark used in case of batch mode or bounded stream.</td>
         </tr>
         <tr>
             <td><h5>lookup.async</h5></td>
@@ -67,6 +67,42 @@ under the License.
             <td style="word-wrap: break-word;">1 h</td>
             <td>Duration</td>
             <td>Specific dynamic partition refresh interval for lookup, scan all partitions and obtain corresponding partition.</td>
+        </tr>
+        <tr>
+            <td><h5>lookup.refresh.async</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to refresh lookup table in an async thread.</td>
+        </tr>
+        <tr>
+            <td><h5>lookup.refresh.async.pending-snapshot-count</h5></td>
+            <td style="word-wrap: break-word;">5</td>
+            <td>Integer</td>
+            <td>If the pending snapshot count exceeds the threshold, lookup operator will refresh the table in sync.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.end-input-to-done</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether mark the done status to indicate that the data is ready when end input.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.idle-time-to-done</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>Set a time duration when a partition has no new data after this time duration, mark the done status to indicate that the data is ready.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.mark-done-action</h5></td>
+            <td style="word-wrap: break-word;">"success-file"</td>
+            <td>String</td>
+            <td>Action to mark a partition done is to notify the downstream application that the partition has finished writing, the partition is ready to be read.<br />1. 'success-file': add '_success' file to directory.<br />2. 'done-partition': add 'xxx.done' partition to metastore.<br />Both can be configured at the same time: 'done-partition,success-file'.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.time-interval</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>You can specify time interval for partition, for example, daily partition is '1 d', hourly partition is '1 h'.</td>
         </tr>
         <tr>
             <td><h5>scan.infer-parallelism</h5></td>
@@ -141,6 +177,30 @@ under the License.
             <td>If no records flow in a partition of a stream for that amount of time, then that partition is considered "idle" and will not hold back the progress of watermarks in downstream operators.</td>
         </tr>
         <tr>
+            <td><h5>sink.clustering.by-columns</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specifies the column name(s) used for comparison during range partitioning, in the format 'columnName1,columnName2'. If not set or set to an empty string, it indicates that the range partitioning feature is not enabled. This option will be effective only for bucket unaware table without primary keys and batch execution mode.</td>
+        </tr>
+        <tr>
+            <td><h5>sink.clustering.sample-factor</h5></td>
+            <td style="word-wrap: break-word;">100</td>
+            <td>Integer</td>
+            <td>Specifies the sample factor. Let S represent the total number of samples, F represent the sample factor, and P represent the sink parallelism, then S=F×P. The minimum allowed sample factor is 20.</td>
+        </tr>
+        <tr>
+            <td><h5>sink.clustering.sort-in-cluster</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Indicates whether to further sort data belonged to each sink task after range partitioning.</td>
+        </tr>
+        <tr>
+            <td><h5>sink.clustering.strategy</h5></td>
+            <td style="word-wrap: break-word;">"auto"</td>
+            <td>String</td>
+            <td>Specifies the comparison algorithm used for range partitioning, including 'zorder', 'hilbert', and 'order', corresponding to the z-order curve algorithm, hilbert curve algorithm, and basic type comparison algorithm, respectively. When not configured, it will automatically determine the algorithm based on the number of columns in 'sink.clustering.by-columns'. 'order' is used for 1 column, 'zorder' for less than 5 columns, and 'hilbert' for 5 or more columns.</td>
+        </tr>
+        <tr>
             <td><h5>sink.committer-cpu</h5></td>
             <td style="word-wrap: break-word;">1.0</td>
             <td>Double</td>
@@ -151,6 +211,12 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>MemorySize</td>
             <td>Sink committer memory to control heap memory of global committer.</td>
+        </tr>
+        <tr>
+            <td><h5>sink.committer-operator-chaining</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Allow sink committer and writer operator to be chained together</td>
         </tr>
         <tr>
             <td><h5>sink.cross-partition.managed-memory</h5></td>

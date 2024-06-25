@@ -250,15 +250,25 @@ public class TraceableFileIO implements FileIO {
     }
 
     public static List<SeekableInputStream> openInputStreams(Predicate<Path> filter) {
-        return OPEN_INPUT_STREAMS.stream()
-                .filter(s -> filter.test(s.file))
-                .collect(Collectors.toList());
+        LOCK.lock();
+        try {
+            return OPEN_INPUT_STREAMS.stream()
+                    .filter(s -> filter.test(s.file))
+                    .collect(Collectors.toList());
+        } finally {
+            LOCK.unlock();
+        }
     }
 
     public static List<PositionOutputStream> openOutputStreams(Predicate<Path> filter) {
-        return OPEN_OUTPUT_STREAMS.stream()
-                .filter(s -> filter.test(s.file))
-                .collect(Collectors.toList());
+        LOCK.lock();
+        try {
+            return OPEN_OUTPUT_STREAMS.stream()
+                    .filter(s -> filter.test(s.file))
+                    .collect(Collectors.toList());
+        } finally {
+            LOCK.unlock();
+        }
     }
 
     /** Loader for {@link TraceableFileIO}. */

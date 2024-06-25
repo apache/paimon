@@ -19,6 +19,7 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -45,14 +46,22 @@ public interface Catalog extends AutoCloseable {
     String SYSTEM_TABLE_SPLITTER = "$";
     String SYSTEM_DATABASE_NAME = "sys";
 
+    /** Warehouse root path containing all database directories in this catalog. */
+    String warehouse();
+
+    /** Catalog options. */
+    Map<String, String> options();
+
+    FileIO fileIO();
+
     /**
      * Get lock factory from catalog. Lock is used to support multiple concurrent writes on the
      * object store.
      */
-    Optional<CatalogLock.LockFactory> lockFactory();
+    Optional<CatalogLockFactory> lockFactory();
 
     /** Get lock context for lock factory to create a lock. */
-    default Optional<CatalogLock.LockContext> lockContext() {
+    default Optional<CatalogLockContext> lockContext() {
         return Optional.empty();
     }
 
@@ -247,6 +256,18 @@ public interface Catalog extends AutoCloseable {
     /** Return a boolean that indicates whether this catalog is case-sensitive. */
     default boolean caseSensitive() {
         return true;
+    }
+
+    default void repairCatalog() {
+        throw new UnsupportedOperationException();
+    }
+
+    default void repairDatabase(String databaseName) {
+        throw new UnsupportedOperationException();
+    }
+
+    default void repairTable(Identifier identifier) throws TableNotExistException {
+        throw new UnsupportedOperationException();
     }
 
     /** Exception for trying to drop on a database that is not empty. */

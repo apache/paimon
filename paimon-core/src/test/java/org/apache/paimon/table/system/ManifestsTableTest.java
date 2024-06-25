@@ -35,7 +35,6 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -45,6 +44,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import static org.apache.paimon.utils.FileStorePathFactoryTest.createNonPartFactory;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unit tests for {@link ManifestsTable}. */
@@ -82,7 +82,8 @@ public class ManifestsTableTest extends TableTestBase {
                         FileFormat.fromIdentifier(
                                 CoreOptions.MANIFEST_FORMAT.defaultValue().toString(),
                                 new Options()),
-                        new FileStorePathFactory(tablePath),
+                        "zstd",
+                        createNonPartFactory(tablePath),
                         null);
         manifestList = factory.create();
 

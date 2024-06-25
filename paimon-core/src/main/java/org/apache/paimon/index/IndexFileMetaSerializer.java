@@ -28,7 +28,6 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import java.util.LinkedHashMap;
-import java.util.Map;
 
 /** A {@link VersionedObjectSerializer} for {@link IndexFileMeta}. */
 public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
@@ -60,7 +59,7 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
     }
 
     public static InternalArray dvRangesToRowArrayData(
-            Map<String, Pair<Integer, Integer>> dvRanges) {
+            LinkedHashMap<String, Pair<Integer, Integer>> dvRanges) {
         return new GenericArray(
                 dvRanges.entrySet().stream()
                         .map(
@@ -72,9 +71,10 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
                         .toArray(GenericRow[]::new));
     }
 
-    public static Map<String, Pair<Integer, Integer>> rowArrayDataToDvRanges(
+    public static LinkedHashMap<String, Pair<Integer, Integer>> rowArrayDataToDvRanges(
             InternalArray arrayData) {
-        Map<String, Pair<Integer, Integer>> dvRanges = new LinkedHashMap<>(arrayData.size());
+        LinkedHashMap<String, Pair<Integer, Integer>> dvRanges =
+                new LinkedHashMap<>(arrayData.size());
         for (int i = 0; i < arrayData.size(); i++) {
             InternalRow row = arrayData.getRow(i, 3);
             dvRanges.put(row.getString(0).toString(), Pair.of(row.getInt(1), row.getInt(2)));

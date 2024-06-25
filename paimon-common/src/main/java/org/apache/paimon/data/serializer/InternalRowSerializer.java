@@ -23,8 +23,10 @@ import org.apache.paimon.data.AbstractPagedOutputView;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryWriter;
+import org.apache.paimon.data.BinaryWriter.ValueSetter;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalRow.FieldGetter;
 import org.apache.paimon.data.NestedRow;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
@@ -33,16 +35,17 @@ import org.apache.paimon.types.RowType;
 
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.stream.IntStream;
 
 /** Serializer for {@link InternalRow}. */
 public class InternalRowSerializer extends AbstractRowDataSerializer<InternalRow> {
+
     private static final long serialVersionUID = 1L;
 
     private final BinaryRowSerializer binarySerializer;
     private final DataType[] types;
     private final Serializer[] fieldSerializers;
-    private final InternalRow.FieldGetter[] fieldGetters;
+    private final FieldGetter[] fieldGetters;
+    private final ValueSetter[] valueSetters;
 
     private transient BinaryRow reuseRow;
     private transient BinaryRowWriter reuseWriter;
@@ -65,10 +68,14 @@ public class InternalRowSerializer extends AbstractRowDataSerializer<InternalRow
         this.types = types;
         this.fieldSerializers = fieldSerializers;
         this.binarySerializer = new BinaryRowSerializer(types.length);
-        this.fieldGetters =
-                IntStream.range(0, types.length)
-                        .mapToObj(i -> InternalRow.createFieldGetter(types[i], i))
-                        .toArray(InternalRow.FieldGetter[]::new);
+        this.fieldGetters = new FieldGetter[types.length];
+        this.valueSetters = new ValueSetter[types.length];
+        for (int i = 0; i < types.length; i++) {
+            DataType type = types[i];
+            fieldGetters[i] = InternalRow.createFieldGetter(type, i);
+            // pass serializer to avoid infinite loop
+            valueSetters[i] = BinaryWriter.createValueSetter(type, fieldSerializers[i]);
+        }
     }
 
     @Override
@@ -149,15 +156,11 @@ public class InternalRowSerializer extends AbstractRowDataSerializer<InternalRow
         reuseWriter.reset();
         reuseWriter.writeRowKind(row.getRowKind());
         for (int i = 0; i < types.length; i++) {
-            if (row.isNullAt(i)) {
+            Object field = fieldGetters[i].getFieldOrNull(row);
+            if (field == null) {
                 reuseWriter.setNullAt(i);
             } else {
-                BinaryWriter.write(
-                        reuseWriter,
-                        i,
-                        fieldGetters[i].getFieldOrNull(row),
-                        types[i],
-                        fieldSerializers[i]);
+                valueSetters[i].setValue(reuseWriter, i, field);
             }
         }
         reuseWriter.complete();

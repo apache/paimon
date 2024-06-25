@@ -38,6 +38,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
+import java.util.TimeZone;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.types.DataTypeChecks.getNestedTypes;
@@ -147,7 +148,7 @@ public class TypeUtils {
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 LocalZonedTimestampType localZonedTimestampType = (LocalZonedTimestampType) type;
                 return BinaryStringUtils.toTimestamp(
-                        str, localZonedTimestampType.getPrecision(), DateTimeUtils.LOCAL_TZ);
+                        str, localZonedTimestampType.getPrecision(), TimeZone.getDefault());
             case ARRAY:
                 ArrayType arrayType = (ArrayType) type;
                 DataType elementType = arrayType.getElementType();

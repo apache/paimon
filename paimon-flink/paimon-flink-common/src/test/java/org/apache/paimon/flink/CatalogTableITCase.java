@@ -63,9 +63,37 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("INSERT INTO T VALUES (3, 4)");
 
         List<Row> result = sql("SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots");
-
-        // check correctness and sequence snapshots.
         assertThat(result).containsExactly(Row.of(1L, 0L, "APPEND"), Row.of(2L, 0L, "APPEND"));
+
+        result =
+                sql(
+                        "SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots WHERE schema_id = 0");
+        assertThat(result).containsExactly(Row.of(1L, 0L, "APPEND"), Row.of(2L, 0L, "APPEND"));
+
+        result =
+                sql(
+                        "SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots WHERE snapshot_id = 2");
+        assertThat(result).containsExactly(Row.of(2L, 0L, "APPEND"));
+
+        result =
+                sql(
+                        "SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots WHERE snapshot_id > 1");
+        assertThat(result).containsExactly(Row.of(2L, 0L, "APPEND"));
+
+        result =
+                sql(
+                        "SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots WHERE snapshot_id < 2");
+        assertThat(result).containsExactly(Row.of(1L, 0L, "APPEND"));
+
+        result =
+                sql(
+                        "SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots WHERE snapshot_id >= 1");
+        assertThat(result).contains(Row.of(1L, 0L, "APPEND"), Row.of(2L, 0L, "APPEND"));
+
+        result =
+                sql(
+                        "SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots WHERE snapshot_id <= 2");
+        assertThat(result).contains(Row.of(1L, 0L, "APPEND"), Row.of(2L, 0L, "APPEND"));
     }
 
     @Test
@@ -438,16 +466,19 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("INSERT INTO PartitionTable select 2,2,'b','2020-01-02','11'");
         sql("INSERT INTO PartitionTable select 3,3,'c','2020-01-03','11'");
         List<Row> result = sql("SHOW PARTITIONS PartitionTable");
-        assertThat(result.toString())
-                .isEqualTo(
-                        "[+I[dt=2020-01-01/hh=10], +I[dt=2020-01-02/hh=11], +I[dt=2020-01-03/hh=11]]");
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of("dt=2020-01-01/hh=10"),
+                        Row.of("dt=2020-01-02/hh=11"),
+                        Row.of("dt=2020-01-03/hh=11"));
 
         result = sql("SHOW PARTITIONS PartitionTable partition (hh='11')");
-        assertThat(result.toString())
-                .isEqualTo("[+I[dt=2020-01-02/hh=11], +I[dt=2020-01-03/hh=11]]");
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of("dt=2020-01-02/hh=11"), Row.of("dt=2020-01-03/hh=11"));
 
         result = sql("SHOW PARTITIONS PartitionTable partition (dt='2020-01-02', hh='11')");
-        assertThat(result.toString()).isEqualTo("[+I[dt=2020-01-02/hh=11]]");
+        assertThat(result).containsExactlyInAnyOrder(Row.of("dt=2020-01-02/hh=11"));
     }
 
     @Test
@@ -482,21 +513,28 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                 .isEqualTo("[+I[OK]]");
 
         List<Row> result = sql("SHOW PARTITIONS PartitionTable");
-        assertThat(result.toString())
-                .isEqualTo(
-                        "[+I[dt=2020-01-01/hh=10], +I[dt=2020-01-02/hh=11], +I[dt=2020-01-03/hh=11], +I[dt=2020-01-04/hh=14], +I[dt=2020-01-05/hh=15]]");
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of("dt=2020-01-01/hh=10"),
+                        Row.of("dt=2020-01-02/hh=11"),
+                        Row.of("dt=2020-01-03/hh=11"),
+                        Row.of("dt=2020-01-04/hh=14"),
+                        Row.of("dt=2020-01-05/hh=15"));
 
         // drop a partition
         sql("ALTER TABLE PartitionTable DROP PARTITION (`dt` = '2020-01-01', `hh` = '10')");
         result = sql("SHOW PARTITIONS PartitionTable");
-        assertThat(result.toString())
-                .isEqualTo(
-                        "[+I[dt=2020-01-02/hh=11], +I[dt=2020-01-03/hh=11], +I[dt=2020-01-04/hh=14], +I[dt=2020-01-05/hh=15]]");
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of("dt=2020-01-02/hh=11"),
+                        Row.of("dt=2020-01-03/hh=11"),
+                        Row.of("dt=2020-01-04/hh=14"),
+                        Row.of("dt=2020-01-05/hh=15"));
 
         // drop two partitions
         sql("ALTER TABLE PartitionTable DROP PARTITION (dt ='2020-01-04'), PARTITION (hh='11')");
         result = sql("SHOW PARTITIONS PartitionTable");
-        assertThat(result.toString()).isEqualTo("[+I[dt=2020-01-05/hh=15]]");
+        assertThat(result).containsExactly(Row.of("dt=2020-01-05/hh=15"));
     }
 
     @Test
@@ -689,7 +727,9 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         paimonTable("T").createTag("tag1", 1);
         paimonTable("T").createTag("tag2", 2);
 
-        List<Row> result = sql("SELECT tag_name, snapshot_id, schema_id, record_count FROM T$tags");
+        List<Row> result =
+                sql(
+                        "SELECT tag_name, snapshot_id, schema_id, record_count FROM T$tags ORDER BY tag_name");
 
         assertThat(result).containsExactly(Row.of("tag1", 1L, 0L, 1L), Row.of("tag2", 2L, 0L, 2L));
     }
@@ -714,34 +754,58 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
     @Test
     public void testPartitionsTable() {
-        sql(
-                "CREATE TABLE T_WITH_KEY (a INT, p INT, b BIGINT, c STRING, PRIMARY KEY (a, p) NOT ENFORCED) "
-                        + "PARTITIONED BY (p)");
-        assertFilesTable("T_WITH_KEY");
+        String table = "PARTITIONS_TABLE";
+        sql("CREATE TABLE %s (a INT, p INT, b BIGINT, c STRING) " + "PARTITIONED BY (p)", table);
 
-        sql(
-                "CREATE TABLE T_APPEND_ONLY (a INT, p INT, b BIGINT, c STRING) "
-                        + "PARTITIONED BY (p)");
-        assertPartitionsTable("T_APPEND_ONLY");
-    }
+        // assert empty
+        assertThat(sql("SELECT * FROM %s$partitions", table)).isEmpty();
 
-    private void assertPartitionsTable(String tableName) {
-        assertThat(sql(String.format("SELECT * FROM %s$partitions", tableName))).isEmpty();
-        sql(String.format("INSERT INTO %s VALUES (3, 1, 4, 'S2'), (1, 2, 2, 'S1')", tableName));
-        sql(String.format("INSERT INTO %s VALUES (3, 1, 4, 'S3'), (1, 2, 2, 'S4')", tableName));
-        List<Row> rows1 = sql(String.format("SELECT * FROM %s$partitions", tableName));
-        for (Row row : rows1) {
-            assertThat((String) row.getField(0)).containsAnyOf("[1]", "[2]");
-            assertThat((long) row.getField(2)).isGreaterThan(0L); // check file size
-        }
+        // assert new partitions
+        sql("INSERT INTO %s VALUES (3, 1, 4, 'S2'), (1, 2, 2, 'S1'), (1, 2, 2, 'S1')", table);
+        sql("INSERT INTO %s VALUES (3, 1, 4, 'S3'), (1, 2, 2, 'S4')", table);
+        List<Row> result =
+                sql("SELECT `partition`, record_count, file_count FROM %s$partitions", table);
+        assertThat(result).containsExactlyInAnyOrder(Row.of("[1]", 2L, 2L), Row.of("[2]", 3L, 2L));
 
-        sql(String.format("INSERT INTO %s VALUES (3, 4, 4, 'S3'), (1, 3, 2, 'S4')", tableName));
-        sql(String.format("INSERT INTO %s VALUES (3, 1, 4, 'S3'), (1, 2, 2, 'S4')", tableName));
+        // assert new files in partition
+        sql("INSERT INTO %s VALUES (3, 4, 4, 'S3'), (1, 3, 2, 'S4')", table);
+        sql("INSERT INTO %s VALUES (3, 1, 4, 'S3'), (1, 2, 2, 'S4')", table);
+        result =
+                sql(
+                        String.format(
+                                "SELECT `partition`, record_count, file_count FROM %s$partitions",
+                                table));
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of("[1]", 3L, 3L),
+                        Row.of("[2]", 4L, 3L),
+                        Row.of("[3]", 1L, 1L),
+                        Row.of("[4]", 1L, 1L));
 
-        List<Row> rows2 = sql(String.format("SELECT * FROM %s$partitions", tableName));
-        for (Row row : rows2) {
-            assertThat((String) row.getField(0)).containsAnyOf("[1]", "[2]", "[3]", "[4]");
-        }
+        // assert delete partitions
+        sql("ALTER TABLE %s DROP PARTITION (p = 2)", table);
+        result =
+                sql(
+                        String.format(
+                                "SELECT `partition`, record_count, file_count FROM %s$partitions",
+                                table));
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of("[1]", 3L, 3L), Row.of("[3]", 1L, 1L), Row.of("[4]", 1L, 1L));
+
+        // add new file to p 2
+        sql("INSERT INTO %s VALUES (1, 2, 2, 'S1')", table);
+        result =
+                sql(
+                        String.format(
+                                "SELECT `partition`, record_count, file_count FROM %s$partitions",
+                                table));
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of("[1]", 3L, 3L),
+                        Row.of("[2]", 1L, 1L),
+                        Row.of("[3]", 1L, 1L),
+                        Row.of("[4]", 1L, 1L));
     }
 
     @Test

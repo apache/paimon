@@ -29,8 +29,8 @@ import org.apache.paimon.utils.Pair;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 
 import static org.apache.paimon.utils.SerializationUtils.newStringType;
@@ -43,8 +43,11 @@ public class IndexFileMeta {
     private final long fileSize;
     private final long rowCount;
 
-    /** Metadata only used by {@link DeletionVectorsIndexFile}. */
-    private final @Nullable Map<String, Pair<Integer, Integer>> deletionVectorsRanges;
+    /**
+     * Metadata only used by {@link DeletionVectorsIndexFile}, use LinkedHashMap to ensure that the
+     * order of DeletionVectorRanges and the written DeletionVectors is consistent.
+     */
+    private final @Nullable LinkedHashMap<String, Pair<Integer, Integer>> deletionVectorsRanges;
 
     public IndexFileMeta(String indexType, String fileName, long fileSize, long rowCount) {
         this(indexType, fileName, fileSize, rowCount, null);
@@ -55,7 +58,7 @@ public class IndexFileMeta {
             String fileName,
             long fileSize,
             long rowCount,
-            @Nullable Map<String, Pair<Integer, Integer>> deletionVectorsRanges) {
+            @Nullable LinkedHashMap<String, Pair<Integer, Integer>> deletionVectorsRanges) {
         this.indexType = indexType;
         this.fileName = fileName;
         this.fileSize = fileSize;
@@ -79,7 +82,7 @@ public class IndexFileMeta {
         return rowCount;
     }
 
-    public @Nullable Map<String, Pair<Integer, Integer>> deletionVectorsRanges() {
+    public @Nullable LinkedHashMap<String, Pair<Integer, Integer>> deletionVectorsRanges() {
         return deletionVectorsRanges;
     }
 

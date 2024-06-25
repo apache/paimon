@@ -37,22 +37,17 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
-import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.runtime.io.disk.iomanager.IOManagerAsync;
 import org.apache.flink.runtime.state.StateInitializationContextImpl;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.operators.SimpleOperatorFactory;
 import org.apache.flink.streaming.api.operators.collect.utils.MockOperatorStateStore;
 import org.apache.flink.streaming.api.transformations.OneInputTransformation;
-import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -138,62 +133,5 @@ public class FlinkSinkTest {
                 tableSchema,
                 options,
                 new CatalogEnvironment(Lock.emptyFactory(), null, null));
-    }
-
-    private OneInputStreamOperatorTestHarness<InternalRow, Committable> createTestHarness(
-            OneInputStreamOperator<InternalRow, Committable> operator) throws Exception {
-        TypeSerializer<Committable> serializer =
-                new CommittableTypeInfo().createSerializer(new ExecutionConfig());
-        OneInputStreamOperatorTestHarness<InternalRow, Committable> harness =
-                new OneInputStreamOperatorTestHarness<>(operator);
-        harness.setup(serializer);
-        return harness;
-    }
-
-    private OneInputStreamOperatorTestHarness<Tuple2<InternalRow, Integer>, Committable>
-            createDynamicBucketTestHarness(
-                    OneInputStreamOperator<Tuple2<InternalRow, Integer>, Committable> operator)
-                    throws Exception {
-        TypeSerializer<Committable> serializer =
-                new CommittableTypeInfo().createSerializer(new ExecutionConfig());
-        OneInputStreamOperatorTestHarness<Tuple2<InternalRow, Integer>, Committable> harness =
-                new OneInputStreamOperatorTestHarness<>(operator);
-        harness.setup(serializer);
-        return harness;
-    }
-
-    protected RowDataStoreWriteOperator createWriteOperator(FileStoreTable table) {
-        return new RowDataStoreWriteOperator(
-                table,
-                null,
-                (t, commitUser, state, ioManager, memoryPool, metricGroup) ->
-                        new StoreSinkWriteImpl(
-                                t,
-                                commitUser,
-                                state,
-                                ioManager,
-                                false,
-                                false,
-                                true,
-                                memoryPool,
-                                metricGroup),
-                "test");
-    }
-
-    protected DynamicBucketRowWriteOperator createDynamicBucketWriteOperator(FileStoreTable table) {
-        return new DynamicBucketRowWriteOperator(
-                table,
-                (t, commitUser, state, ioManager, memoryPool, metricGroup) ->
-                        new StoreSinkWriteImpl(
-                                t,
-                                commitUser,
-                                state,
-                                ioManager,
-                                false,
-                                false,
-                                true,
-                                memoryPool,
-                                metricGroup),
-                "test");
     }
 }

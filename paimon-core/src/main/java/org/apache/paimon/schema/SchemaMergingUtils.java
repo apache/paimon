@@ -130,6 +130,7 @@ public class SchemaMergingUtils {
                     updateFields.stream()
                             .filter(field -> !baseFieldMap.containsKey(field.name()))
                             .map(field -> assignIdForNewField(field, highestFieldId))
+                            .map(field -> field.copy(true))
                             .collect(Collectors.toList());
 
             updatedFields.addAll(newFields);

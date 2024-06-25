@@ -68,7 +68,7 @@ public class SparkRow implements InternalRow, Serializable {
 
     @Override
     public int getFieldCount() {
-        return row.size();
+        return type.getFieldCount();
     }
 
     @Override

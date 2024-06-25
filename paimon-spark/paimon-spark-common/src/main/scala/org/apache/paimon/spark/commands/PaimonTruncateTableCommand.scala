@@ -32,7 +32,7 @@ import scala.collection.JavaConverters._
 
 case class PaimonTruncateTableCommand(v2Table: SparkTable, partitionSpec: TablePartitionSpec)
   extends PaimonLeafRunnableCommand
-  with PaimonCommand {
+  with WithFileStoreTable {
 
   override def table: FileStoreTable = v2Table.getTable.asInstanceOf[FileStoreTable]
 
@@ -40,7 +40,7 @@ case class PaimonTruncateTableCommand(v2Table: SparkTable, partitionSpec: TableP
     val commit = table.store.newCommit(UUID.randomUUID.toString)
 
     if (partitionSpec.isEmpty) {
-      commit.purgeTable(BatchWriteBuilder.COMMIT_IDENTIFIER)
+      commit.truncateTable(BatchWriteBuilder.COMMIT_IDENTIFIER)
     } else {
       commit.dropPartitions(
         Collections.singletonList(partitionSpec.asJava),

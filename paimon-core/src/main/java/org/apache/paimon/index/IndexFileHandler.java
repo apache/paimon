@@ -21,11 +21,14 @@ package org.apache.paimon.index;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.DeletionVector;
+import org.apache.paimon.deletionvectors.DeletionVectorIndexFileMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
+import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.utils.IntIterator;
-import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.PathFactory;
 import org.apache.paimon.utils.SnapshotManager;
 
 import java.io.IOException;
@@ -38,40 +41,61 @@ import java.util.Optional;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Handle index files. */
 public class IndexFileHandler {
 
     private final SnapshotManager snapshotManager;
+    private final PathFactory pathFactory;
     private final IndexManifestFile indexManifestFile;
     private final HashIndexFile hashIndex;
     private final DeletionVectorsIndexFile deletionVectorsIndex;
 
     public IndexFileHandler(
             SnapshotManager snapshotManager,
+            PathFactory pathFactory,
             IndexManifestFile indexManifestFile,
             HashIndexFile hashIndex,
             DeletionVectorsIndexFile deletionVectorsIndex) {
         this.snapshotManager = snapshotManager;
+        this.pathFactory = pathFactory;
         this.indexManifestFile = indexManifestFile;
         this.hashIndex = hashIndex;
         this.deletionVectorsIndex = deletionVectorsIndex;
     }
 
-    public Optional<IndexFileMeta> scan(
-            long snapshotId, String indexType, BinaryRow partition, int bucket) {
-        List<IndexManifestEntry> entries = scan(snapshotId, indexType, partition);
-        List<IndexManifestEntry> result = new ArrayList<>();
-        for (IndexManifestEntry file : entries) {
-            if (file.bucket() == bucket) {
-                result.add(file);
-            }
+    public DeletionVectorsIndexFile deletionVectorsIndex() {
+        return this.deletionVectorsIndex;
+    }
+
+    public List<IndexManifestEntry> scan() {
+        Snapshot snapshot = snapshotManager.latestSnapshot();
+        if (snapshot == null || snapshot.indexManifest() == null) {
+            return Collections.emptyList();
         }
+        return indexManifestFile.read(snapshot.indexManifest());
+    }
+
+    public Optional<IndexFileMeta> scanHashIndex(long snapshotId, BinaryRow partition, int bucket) {
+        List<IndexFileMeta> result = scan(snapshotId, HASH_INDEX, partition, bucket);
         if (result.size() > 1) {
             throw new IllegalArgumentException(
-                    "Find multiple index files for one bucket: " + result);
+                    "Find multiple hash index files for one bucket: " + result);
         }
-        return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0).indexFile());
+        return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
+    }
+
+    public List<IndexFileMeta> scan(
+            long snapshotId, String indexType, BinaryRow partition, int bucket) {
+        List<IndexManifestEntry> entries = scan(snapshotId, indexType, partition);
+        List<IndexFileMeta> result = new ArrayList<>();
+        for (IndexManifestEntry file : entries) {
+            if (file.bucket() == bucket) {
+                result.add(file.indexFile());
+            }
+        }
+        return result;
     }
 
     public List<IndexManifestEntry> scan(String indexType, BinaryRow partition) {
@@ -100,6 +124,10 @@ public class IndexFileHandler {
         }
 
         return result;
+    }
+
+    public Path filePath(IndexFileMeta file) {
+        return pathFactory.toPath(file.fileName());
     }
 
     public List<Integer> readHashIndexList(IndexFileMeta file) {
@@ -145,52 +173,49 @@ public class IndexFileHandler {
         return indexManifestFile.readWithIOException(indexManifest);
     }
 
+    private IndexFile indexFile(IndexFileMeta file) {
+        switch (file.indexType()) {
+            case HASH_INDEX:
+                return hashIndex;
+            case DELETION_VECTORS_INDEX:
+                return deletionVectorsIndex;
+            default:
+                throw new IllegalArgumentException("Unknown index type: " + file.indexType());
+        }
+    }
+
     public boolean existsIndexFile(IndexManifestEntry file) {
-        return hashIndex.exists(file.indexFile().fileName());
+        return indexFile(file.indexFile()).exists(file.indexFile().fileName());
     }
 
     public void deleteIndexFile(IndexManifestEntry file) {
-        hashIndex.delete(file.indexFile().fileName());
+        deleteIndexFile(file.indexFile());
+    }
+
+    public void deleteIndexFile(IndexFileMeta file) {
+        indexFile(file).delete(file.fileName());
     }
 
     public void deleteManifest(String indexManifest) {
         indexManifestFile.delete(indexManifest);
     }
 
-    public Map<String, DeletionVector> readAllDeletionVectors(IndexFileMeta fileMeta) {
-        if (!fileMeta.indexType().equals(DELETION_VECTORS_INDEX)) {
-            throw new IllegalArgumentException(
-                    "Input file is not deletion vectors index " + fileMeta.indexType());
-        }
-        Map<String, Pair<Integer, Integer>> deleteIndexRange = fileMeta.deletionVectorsRanges();
-        if (deleteIndexRange == null || deleteIndexRange.isEmpty()) {
-            return Collections.emptyMap();
-        }
-        return deletionVectorsIndex.readAllDeletionVectors(fileMeta.fileName(), deleteIndexRange);
+    public DeletionVectorIndexFileMaintainer createDVIndexFileMaintainer(
+            Map<String, DeletionFile> dataFileToDeletionFiles) {
+        return new DeletionVectorIndexFileMaintainer(this, dataFileToDeletionFiles);
     }
 
-    public Optional<DeletionVector> readDeletionVector(IndexFileMeta fileMeta, String fileName) {
-        if (!fileMeta.indexType().equals(DELETION_VECTORS_INDEX)) {
-            throw new IllegalArgumentException(
-                    "Input file is not deletion vectors index " + fileMeta.indexType());
+    public Map<String, DeletionVector> readAllDeletionVectors(List<IndexFileMeta> fileMetas) {
+        for (IndexFileMeta indexFile : fileMetas) {
+            checkArgument(
+                    indexFile.indexType().equals(DELETION_VECTORS_INDEX),
+                    "Input file is not deletion vectors index " + indexFile.indexType());
         }
-        Map<String, Pair<Integer, Integer>> deleteIndexRange = fileMeta.deletionVectorsRanges();
-        if (deleteIndexRange == null || !deleteIndexRange.containsKey(fileName)) {
-            return Optional.empty();
-        }
-        return Optional.of(
-                deletionVectorsIndex.readDeletionVector(
-                        fileMeta.fileName(), deleteIndexRange.get(fileName)));
+        return deletionVectorsIndex.readAllDeletionVectors(fileMetas);
     }
 
-    public IndexFileMeta writeDeletionVectorsIndex(Map<String, DeletionVector> deletionVectors) {
-        Pair<String, Map<String, Pair<Integer, Integer>>> pair =
-                deletionVectorsIndex.write(deletionVectors);
-        return new IndexFileMeta(
-                DELETION_VECTORS_INDEX,
-                pair.getLeft(),
-                deletionVectorsIndex.fileSize(pair.getLeft()),
-                deletionVectors.size(),
-                pair.getRight());
+    public List<IndexFileMeta> writeDeletionVectorsIndex(
+            Map<String, DeletionVector> deletionVectors) {
+        return deletionVectorsIndex.write(deletionVectors);
     }
 }

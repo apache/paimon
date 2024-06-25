@@ -482,6 +482,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
                         new String[] {"a", "b", "c"}),
                 Collections.emptyList(),
                 Collections.singletonList("a"),
+                Collections.emptyList(),
                 new HashMap<>());
 
         PostgresSyncTableAction action =
@@ -508,7 +509,9 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
                 .satisfies(
                         anyCauseMatches(
                                 IllegalArgumentException.class,
-                                "Specified primary key 'pk' does not exist in source tables or computed columns [pt, _id, v1]."));
+                                "For sink table "
+                                        + tableName
+                                        + ", not all specified primary keys '[pk]' exist in source tables or computed columns '[pt, _id, v1]'."));
     }
 
     @Test
@@ -524,8 +527,9 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
                 .satisfies(
                         anyCauseMatches(
                                 IllegalArgumentException.class,
-                                "Primary keys are not specified. "
-                                        + "Also, can't infer primary keys from source table schemas because "
+                                "Failed to set specified primary keys for sink table "
+                                        + tableName
+                                        + ". Also, can't infer primary keys from source table schemas because "
                                         + "source tables have no primary keys or have different primary keys."));
     }
 
@@ -722,8 +726,8 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
                         .build();
         runActionWithDefaultEnv(action2);
 
-        Map<String, String> dynamicOptions = action2.fileStoreTable().options();
-        assertThat(dynamicOptions).containsAllEntriesOf(tableConfig);
+        FileStoreTable table = getFileStoreTable();
+        assertThat(table.options()).containsAllEntriesOf(tableConfig);
     }
 
     @Test

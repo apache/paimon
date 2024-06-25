@@ -28,9 +28,15 @@ under the License.
     <tbody>
         <tr>
             <td><h5>catalog-key</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
+            <td style="word-wrap: break-word;">"jdbc"</td>
             <td>String</td>
             <td>Custom jdbc catalog store key.</td>
+        </tr>
+        <tr>
+            <td><h5>lock-key-max-length</h5></td>
+            <td style="word-wrap: break-word;">255</td>
+            <td>Integer</td>
+            <td>Set the maximum length of the lock key. The 'lock-key' is composed of concatenating three fields : 'catalog-key', 'database', and 'table'.</td>
         </tr>
     </tbody>
 </table>

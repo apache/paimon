@@ -22,13 +22,12 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.RowType;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.parquet.column.ParquetProperties;
 import org.apache.parquet.hadoop.ParquetOutputFormat;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.io.OutputFile;
-
-import javax.annotation.Nullable;
 
 import java.io.IOException;
 
@@ -36,31 +35,31 @@ import java.io.IOException;
 public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
 
     private final RowType rowType;
-    private final Options conf;
+    private final Configuration conf;
 
-    public RowDataParquetBuilder(RowType rowType, Options conf) {
+    public RowDataParquetBuilder(RowType rowType, Options options) {
         this.rowType = rowType;
-        this.conf = conf;
+        this.conf = new Configuration(false);
+        options.toMap().forEach(conf::set);
     }
 
     @Override
     public ParquetWriter<InternalRow> createWriter(OutputFile out, String compression)
             throws IOException {
-
         return new ParquetRowDataBuilder(out, rowType)
+                .withConf(conf)
                 .withCompressionCodec(CompressionCodecName.fromConf(getCompression(compression)))
                 .withRowGroupSize(
                         conf.getLong(
                                 ParquetOutputFormat.BLOCK_SIZE, ParquetWriter.DEFAULT_BLOCK_SIZE))
                 .withPageSize(
-                        conf.getInteger(
-                                ParquetOutputFormat.PAGE_SIZE, ParquetWriter.DEFAULT_PAGE_SIZE))
+                        conf.getInt(ParquetOutputFormat.PAGE_SIZE, ParquetWriter.DEFAULT_PAGE_SIZE))
                 .withDictionaryPageSize(
-                        conf.getInteger(
+                        conf.getInt(
                                 ParquetOutputFormat.DICTIONARY_PAGE_SIZE,
                                 ParquetProperties.DEFAULT_DICTIONARY_PAGE_SIZE))
                 .withMaxPaddingSize(
-                        conf.getInteger(
+                        conf.getInt(
                                 ParquetOutputFormat.MAX_PADDING_BYTES,
                                 ParquetWriter.MAX_PADDING_SIZE_DEFAULT))
                 .withDictionaryEncoding(
@@ -70,21 +69,13 @@ public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
                 .withValidation(conf.getBoolean(ParquetOutputFormat.VALIDATION, false))
                 .withWriterVersion(
                         ParquetProperties.WriterVersion.fromString(
-                                conf.getString(
+                                conf.get(
                                         ParquetOutputFormat.WRITER_VERSION,
                                         ParquetProperties.DEFAULT_WRITER_VERSION.toString())))
                 .build();
     }
 
-    public String getCompression(@Nullable String compression) {
-        String compressName;
-        if (null != compression) {
-            compressName = compression;
-        } else {
-            compressName =
-                    conf.getString(
-                            ParquetOutputFormat.COMPRESSION, CompressionCodecName.SNAPPY.name());
-        }
-        return compressName;
+    public String getCompression(String compression) {
+        return conf.get("parquet.compression", compression);
     }
 }

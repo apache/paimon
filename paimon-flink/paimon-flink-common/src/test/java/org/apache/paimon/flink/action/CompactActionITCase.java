@@ -33,11 +33,15 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommonTestUtils;
 import org.apache.paimon.utils.SnapshotManager;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
+
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -63,6 +67,7 @@ public class CompactActionITCase extends CompactActionITCaseBase {
                 prepareTable(
                         Arrays.asList("dt", "hh"),
                         Arrays.asList("dt", "hh", "k"),
+                        Collections.emptyList(),
                         Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "true"));
 
         writeData(
@@ -77,11 +82,7 @@ public class CompactActionITCase extends CompactActionITCaseBase {
 
         checkLatestSnapshot(table, 2, Snapshot.CommitKind.APPEND);
 
-        if (ThreadLocalRandom.current().nextBoolean()) {
-            runAction(false);
-        } else {
-            callProcedure(false);
-        }
+        runAction(false);
 
         checkLatestSnapshot(table, 3, Snapshot.CommitKind.COMPACT);
 
@@ -111,7 +112,10 @@ public class CompactActionITCase extends CompactActionITCaseBase {
 
         FileStoreTable table =
                 prepareTable(
-                        Arrays.asList("dt", "hh"), Arrays.asList("dt", "hh", "k"), tableOptions);
+                        Arrays.asList("dt", "hh"),
+                        Arrays.asList("dt", "hh", "k"),
+                        Collections.emptyList(),
+                        tableOptions);
 
         // base records
         writeData(
@@ -126,11 +130,7 @@ public class CompactActionITCase extends CompactActionITCaseBase {
         TableScan.Plan plan = scan.plan();
         assertThat(plan.splits()).isEmpty();
 
-        if (ThreadLocalRandom.current().nextBoolean()) {
-            runAction(true);
-        } else {
-            callProcedure(true);
-        }
+        runAction(true);
 
         // first full compaction
         validateResult(
@@ -178,7 +178,11 @@ public class CompactActionITCase extends CompactActionITCaseBase {
         tableOptions.put(CoreOptions.COMPACTION_MAX_FILE_NUM.key(), "2");
 
         FileStoreTable table =
-                prepareTable(Collections.singletonList("k"), Collections.emptyList(), tableOptions);
+                prepareTable(
+                        Collections.singletonList("k"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        tableOptions);
 
         // base records
         writeData(
@@ -193,11 +197,8 @@ public class CompactActionITCase extends CompactActionITCaseBase {
 
         checkLatestSnapshot(table, 2, Snapshot.CommitKind.APPEND);
 
-        if (ThreadLocalRandom.current().nextBoolean()) {
-            runAction(true);
-        } else {
-            callProcedure(true);
-        }
+        // repairing that the ut don't specify the real parition of table
+        runActionForUnawareTable(true);
 
         // first compaction, snapshot will be 3
         checkFileAndRowSize(table, 3L, 30_000L, 1, 6);
@@ -219,7 +220,11 @@ public class CompactActionITCase extends CompactActionITCaseBase {
         tableOptions.put(CoreOptions.COMPACTION_MAX_FILE_NUM.key(), "2");
 
         FileStoreTable table =
-                prepareTable(Collections.singletonList("k"), Collections.emptyList(), tableOptions);
+                prepareTable(
+                        Collections.singletonList("k"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        tableOptions);
 
         // base records
         writeData(
@@ -234,11 +239,8 @@ public class CompactActionITCase extends CompactActionITCaseBase {
 
         checkLatestSnapshot(table, 2, Snapshot.CommitKind.APPEND);
 
-        if (ThreadLocalRandom.current().nextBoolean()) {
-            runAction(false);
-        } else {
-            callProcedure(false);
-        }
+        // repairing that the ut don't specify the real parition of table
+        runActionForUnawareTable(false);
 
         // first compaction, snapshot will be 3.
         checkFileAndRowSize(table, 3L, 0L, 1, 6);
@@ -247,7 +249,10 @@ public class CompactActionITCase extends CompactActionITCaseBase {
     @Test
     public void testTableConf() throws Exception {
         prepareTable(
-                Arrays.asList("dt", "hh"), Arrays.asList("dt", "hh", "k"), Collections.emptyMap());
+                Arrays.asList("dt", "hh"),
+                Arrays.asList("dt", "hh", "k"),
+                Collections.emptyList(),
+                Collections.emptyMap());
 
         CompactAction compactAction =
                 createAction(
@@ -266,11 +271,37 @@ public class CompactActionITCase extends CompactActionITCaseBase {
                 .isEqualTo("6");
     }
 
+    @Test
+    public void testSpecifyNonPartitionField() throws Exception {
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+        tableOptions.put(CoreOptions.BUCKET.key(), "-1");
+
+        //  compaction specify a non-partion field
+        prepareTable(
+                Collections.singletonList("v"),
+                Arrays.asList(),
+                Collections.emptyList(),
+                tableOptions);
+
+        // base records
+        writeData(
+                rowData(1, 100, 15, BinaryString.fromString("20221208")),
+                rowData(1, 100, 16, BinaryString.fromString("20221208")),
+                rowData(1, 100, 15, BinaryString.fromString("20221209")));
+
+        Assertions.assertThatThrownBy(() -> runAction(false))
+                .hasMessage("Only parition key can be specialized in compaction action.");
+    }
+
     private FileStoreTable prepareTable(
-            List<String> partitionKeys, List<String> primaryKeys, Map<String, String> tableOptions)
+            List<String> partitionKeys,
+            List<String> primaryKeys,
+            List<String> bucketKey,
+            Map<String, String> tableOptions)
             throws Exception {
         FileStoreTable table =
-                createFileStoreTable(ROW_TYPE, partitionKeys, primaryKeys, tableOptions);
+                createFileStoreTable(ROW_TYPE, partitionKeys, primaryKeys, bucketKey, tableOptions);
 
         StreamWriteBuilder streamWriteBuilder =
                 table.newStreamWriteBuilder().withCommitUser(commitUser);
@@ -289,36 +320,59 @@ public class CompactActionITCase extends CompactActionITCaseBase {
     }
 
     private void runAction(boolean isStreaming) throws Exception {
-        StreamExecutionEnvironment env = buildDefaultEnv(isStreaming);
+        runAction(isStreaming, false);
+    }
 
-        CompactAction action =
-                createAction(
-                        CompactAction.class,
+    private void runActionForUnawareTable(boolean isStreaming) throws Exception {
+        runAction(isStreaming, true);
+    }
+
+    private void runAction(boolean isStreaming, boolean unawareBucket) throws Exception {
+        StreamExecutionEnvironment env;
+        if (isStreaming) {
+            env = streamExecutionEnvironmentBuilder().streamingMode().build();
+        } else {
+            env = streamExecutionEnvironmentBuilder().batchMode().build();
+        }
+
+        ArrayList<String> baseArgs =
+                Lists.newArrayList(
                         "compact",
                         "--warehouse",
                         warehouse,
                         "--database",
                         database,
                         "--table",
-                        tableName,
-                        "--partition",
-                        "dt=20221208,hh=15",
-                        "--partition",
-                        "dt=20221209,hh=15");
+                        tableName);
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        if (unawareBucket) {
+            if (true) {
+                baseArgs.addAll(Lists.newArrayList("--where", "k=1"));
+            } else {
+                baseArgs.addAll(Lists.newArrayList("--partition", "k=1"));
+            }
+        } else {
+            if (random.nextBoolean()) {
+                baseArgs.addAll(
+                        Lists.newArrayList(
+                                "--where", "(dt=20221208 and hh=15) or (dt=20221209 and hh=15)"));
+            } else {
+                baseArgs.addAll(
+                        Lists.newArrayList(
+                                "--partition",
+                                "dt=20221208,hh=15",
+                                "--partition",
+                                "dt=20221209,hh=15"));
+            }
+        }
+
+        CompactAction action = createAction(CompactAction.class, baseArgs.toArray(new String[0]));
+
         action.withStreamExecutionEnvironment(env).build();
         if (isStreaming) {
             env.executeAsync();
         } else {
             env.execute();
         }
-    }
-
-    private void callProcedure(boolean isStreaming) {
-        callProcedure(
-                String.format(
-                        "CALL sys.compact('%s.%s', '%s')",
-                        database, tableName, "dt=20221208,hh=15;dt=20221209,hh=15"),
-                isStreaming,
-                !isStreaming);
     }
 }

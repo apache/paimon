@@ -35,9 +35,11 @@ import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.CommonTestUtils;
 import org.apache.paimon.utils.SnapshotManager;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
+
+import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -55,13 +57,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
+import static org.apache.paimon.utils.CommonTestUtils.waitUtil;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link CompactDatabaseAction}. */
 public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
 
     private static final String[] DATABASE_NAMES = new String[] {"db1", "db2"};
-    private static final String[] TABLE_NAMES = new String[] {"t1", "t2"};
+    private static final String[] TABLE_NAMES = new String[] {"t1", "t2", "t3_unaware_bucket"};
     private static final String[] New_DATABASE_NAMES = new String[] {"db3", "db4"};
     private static final String[] New_TABLE_NAMES = new String[] {"t3", "t4"};
     private static final RowType ROW_TYPE =
@@ -88,24 +91,122 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
     }
 
     @ParameterizedTest(name = "mode = {0}")
+    @ValueSource(strings = {"combined", "divided"})
+    @Timeout(6000)
+    public void testStreamCompactForUnawareTable(String mode) throws Exception {
+
+        // step0. create tables
+        Map<Identifier, FileStoreTable> tableToCompaction = new HashMap<>();
+        for (String dbName : DATABASE_NAMES) {
+            for (String tableName : TABLE_NAMES) {
+                Map<String, String> option = new HashMap<>();
+                option.put(CoreOptions.WRITE_ONLY.key(), "true");
+                List<String> keys;
+                if (tableName.endsWith("unaware_bucket")) {
+                    option.put("bucket", "-1");
+                    option.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+                    option.put(CoreOptions.COMPACTION_MAX_FILE_NUM.key(), "2");
+                    keys = Lists.newArrayList();
+                    FileStoreTable table =
+                            createTable(dbName, tableName, Arrays.asList("dt", "hh"), keys, option);
+                    tableToCompaction.put(Identifier.create(dbName, tableName), table);
+                }
+            }
+        }
+
+        // step1. run streaming compaction task for tables
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            StreamExecutionEnvironment env =
+                    streamExecutionEnvironmentBuilder().streamingMode().build();
+            createAction(
+                            CompactDatabaseAction.class,
+                            "compact_database",
+                            "--warehouse",
+                            warehouse,
+                            "--mode",
+                            mode)
+                    .withStreamExecutionEnvironment(env)
+                    .build();
+            env.executeAsync();
+        } else {
+            callProcedure(String.format("CALL sys.compact_database('', '%s')", mode), true, false);
+        }
+
+        // step3. write datas to table wait for compaction
+        for (Map.Entry<Identifier, FileStoreTable> identifierFileStoreTableEntry :
+                tableToCompaction.entrySet()) {
+            FileStoreTable table = identifierFileStoreTableEntry.getValue();
+            SnapshotManager snapshotManager = table.snapshotManager();
+            StreamWriteBuilder streamWriteBuilder =
+                    table.newStreamWriteBuilder().withCommitUser(commitUser);
+            write = streamWriteBuilder.newWrite();
+            commit = streamWriteBuilder.newCommit();
+
+            writeData(
+                    rowData(1, 100, 15, BinaryString.fromString("20221208")),
+                    rowData(1, 100, 16, BinaryString.fromString("20221208")),
+                    rowData(1, 100, 15, BinaryString.fromString("20221209")));
+
+            writeData(
+                    rowData(2, 100, 15, BinaryString.fromString("20221208")),
+                    rowData(2, 100, 16, BinaryString.fromString("20221208")),
+                    rowData(2, 100, 15, BinaryString.fromString("20221209")));
+
+            Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
+            assertThat(snapshot.id()).isEqualTo(2);
+            assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
+            write.close();
+            commit.close();
+        }
+
+        for (Map.Entry<Identifier, FileStoreTable> identifierFileStoreTableEntry :
+                tableToCompaction.entrySet()) {
+            FileStoreTable table = identifierFileStoreTableEntry.getValue();
+            SnapshotManager snapshotManager = table.snapshotManager();
+            while (true) {
+                if (snapshotManager.latestSnapshotId() == 2) {
+                    Thread.sleep(1000);
+                } else {
+                    validateResult(
+                            table,
+                            ROW_TYPE,
+                            table.newReadBuilder().newStreamScan(),
+                            Arrays.asList(
+                                    "+I[1, 100, 15, 20221208]",
+                                    "+I[1, 100, 15, 20221209]",
+                                    "+I[1, 100, 16, 20221208]",
+                                    "+I[2, 100, 15, 20221208]",
+                                    "+I[2, 100, 15, 20221209]",
+                                    "+I[2, 100, 16, 20221208]"),
+                            60_000);
+                    break;
+                }
+            }
+        }
+    }
+
+    @ParameterizedTest(name = "mode = {0}")
     @ValueSource(strings = {"divided", "combined"})
     @Timeout(60)
     public void testBatchCompact(String mode) throws Exception {
-        Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.WRITE_ONLY.key(), "true");
-        options.put("bucket", "1");
-
         List<FileStoreTable> tables = new ArrayList<>();
 
         for (String dbName : DATABASE_NAMES) {
             for (String tableName : TABLE_NAMES) {
+                Map<String, String> option = new HashMap<>();
+                option.put(CoreOptions.WRITE_ONLY.key(), "true");
+                List<String> keys;
+                if (tableName.endsWith("unaware_bucket")) {
+                    option.put("bucket", "-1");
+                    option.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+                    option.put(CoreOptions.COMPACTION_MAX_FILE_NUM.key(), "2");
+                    keys = Lists.newArrayList();
+                } else {
+                    option.put("bucket", "1");
+                    keys = Arrays.asList("dt", "hh", "k");
+                }
                 FileStoreTable table =
-                        createTable(
-                                dbName,
-                                tableName,
-                                Arrays.asList("dt", "hh"),
-                                Arrays.asList("dt", "hh", "k"),
-                                options);
+                        createTable(dbName, tableName, Arrays.asList("dt", "hh"), keys, option);
                 tables.add(table);
                 SnapshotManager snapshotManager = table.snapshotManager();
                 StreamWriteBuilder streamWriteBuilder =
@@ -132,7 +233,8 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         }
 
         if (ThreadLocalRandom.current().nextBoolean()) {
-            StreamExecutionEnvironment env = buildDefaultEnv(false);
+            StreamExecutionEnvironment env =
+                    streamExecutionEnvironmentBuilder().batchMode().build();
             createAction(
                             CompactDatabaseAction.class,
                             "compact_database",
@@ -236,7 +338,8 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                                 "--table_conf",
                                 CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key() + "=1s");
             }
-            StreamExecutionEnvironment env = buildDefaultEnv(true);
+            StreamExecutionEnvironment env =
+                    streamExecutionEnvironmentBuilder().streamingMode().build();
             action.withStreamExecutionEnvironment(env).build();
             env.executeAsync();
         } else {
@@ -290,12 +393,12 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                     60_000);
 
             // assert dedicated compact job will expire snapshots
-            CommonTestUtils.waitUtil(
+            waitUtil(
                     () ->
                             snapshotManager.latestSnapshotId() - 2
                                     == snapshotManager.earliestSnapshotId(),
-                    Duration.ofSeconds(60_000),
-                    Duration.ofSeconds(100),
+                    Duration.ofSeconds(60),
+                    Duration.ofMillis(100),
                     String.format(
                             "Cannot validate snapshot expiration in %s milliseconds.", 60_000));
             write.close();
@@ -383,12 +486,12 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                         60_000);
 
                 // assert dedicated compact job will expire snapshots
-                CommonTestUtils.waitUtil(
+                waitUtil(
                         () ->
                                 snapshotManager.latestSnapshotId() - 2
                                         == snapshotManager.earliestSnapshotId(),
-                        Duration.ofSeconds(60_000),
-                        Duration.ofSeconds(100),
+                        Duration.ofSeconds(60),
+                        Duration.ofMillis(100),
                         String.format(
                                 "Cannot validate snapshot expiration in %s milliseconds.", 60_000));
                 write.close();
@@ -512,7 +615,8 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                 args.add(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key() + "=1s");
             }
 
-            StreamExecutionEnvironment env = buildDefaultEnv(false);
+            StreamExecutionEnvironment env =
+                    streamExecutionEnvironmentBuilder().batchMode().build();
             createAction(CompactDatabaseAction.class, args)
                     .withStreamExecutionEnvironment(env)
                     .build();
@@ -614,7 +718,8 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         }
 
         if (ThreadLocalRandom.current().nextBoolean()) {
-            StreamExecutionEnvironment env = buildDefaultEnv(true);
+            StreamExecutionEnvironment env =
+                    streamExecutionEnvironmentBuilder().streamingMode().build();
             createAction(CompactDatabaseAction.class, "compact_database", "--warehouse", warehouse)
                     .withStreamExecutionEnvironment(env)
                     .build();
@@ -687,7 +792,8 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         }
 
         if (ThreadLocalRandom.current().nextBoolean()) {
-            StreamExecutionEnvironment env = buildDefaultEnv(false);
+            StreamExecutionEnvironment env =
+                    streamExecutionEnvironmentBuilder().batchMode().build();
             createAction(CompactDatabaseAction.class, "compact_database", "--warehouse", warehouse)
                     .withStreamExecutionEnvironment(env)
                     .build();
@@ -700,6 +806,71 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
             // first compaction, snapshot will be 3.
             checkFileAndRowSize(table, 3L, 0L, 1, 6);
         }
+    }
+
+    @Test
+    public void testCombinedModeWithDynamicOptions() throws Exception {
+        // create table and commit data
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.WRITE_ONLY.key(), "true");
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "1000");
+        FileStoreTable table =
+                createTable(
+                        "test_db",
+                        "t",
+                        Arrays.asList("dt", "hh"),
+                        Arrays.asList("dt", "hh", "k"),
+                        options);
+
+        StreamWriteBuilder streamWriteBuilder =
+                table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = streamWriteBuilder.newWrite();
+        commit = streamWriteBuilder.newCommit();
+
+        for (int i = 0; i < 10; i++) {
+            writeData(rowData(1, i, 15, BinaryString.fromString("20221208")));
+        }
+        SnapshotManager snapshotManager = table.snapshotManager();
+        assertThat(snapshotManager.latestSnapshotId()).isEqualTo(10);
+
+        // if CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key() use default value, the cost
+        // time in combined mode will be over 1 min
+        CompactDatabaseAction action =
+                createAction(
+                        CompactDatabaseAction.class,
+                        "compact_database",
+                        "--warehouse",
+                        warehouse,
+                        "--mode",
+                        "combined",
+                        "--table_conf",
+                        CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key() + "=1s",
+                        // test dynamic options will be copied in commit
+                        "--table_conf",
+                        CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key() + "=3",
+                        "--table_conf",
+                        CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key() + "=3");
+
+        StreamExecutionEnvironment env =
+                streamExecutionEnvironmentBuilder().streamingMode().build();
+        action.withStreamExecutionEnvironment(env).build();
+        JobClient jobClient = env.executeAsync();
+
+        waitUtil(
+                () -> snapshotManager.latestSnapshotId() == 11L,
+                Duration.ofSeconds(60),
+                Duration.ofMillis(500));
+        jobClient.cancel();
+
+        assertThat(snapshotManager.latestSnapshot().commitKind())
+                .isEqualTo(Snapshot.CommitKind.COMPACT);
+
+        waitUtil(
+                () -> snapshotManager.earliestSnapshotId() == 9L,
+                Duration.ofSeconds(60),
+                Duration.ofMillis(200),
+                "Failed to wait snapshot expiration success");
     }
 
     private void writeData(

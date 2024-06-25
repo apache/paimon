@@ -23,6 +23,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.format.FlushingFileFormat;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
@@ -32,6 +33,7 @@ import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.hash.HashLookupStoreFactory;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
@@ -63,6 +65,7 @@ import java.util.UUID;
 import static org.apache.paimon.CoreOptions.TARGET_FILE_SIZE;
 import static org.apache.paimon.KeyValue.UNKNOWN_SEQUENCE;
 import static org.apache.paimon.io.DataFileTestUtils.row;
+import static org.apache.paimon.utils.FileStorePathFactoryTest.createNonPartFactory;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test {@link LookupLevels}. */
@@ -284,7 +287,7 @@ public class LookupLevelsTest {
 
     private DataFileMeta newFile(int level, KeyValue... records) throws IOException {
         RollingFileWriter<KeyValue, DataFileMeta> writer =
-                createWriterFactory().createRollingMergeTreeFileWriter(level);
+                createWriterFactory().createRollingMergeTreeFileWriter(level, FileSource.APPEND);
         for (KeyValue kv : records) {
             writer.write(kv);
         }
@@ -296,7 +299,7 @@ public class LookupLevelsTest {
         Path path = new Path(tempDir.toUri().toString());
         String identifier = "avro";
         Map<String, FileStorePathFactory> pathFactoryMap = new HashMap<>();
-        pathFactoryMap.put(identifier, new FileStorePathFactory(path));
+        pathFactoryMap.put(identifier, createNonPartFactory(path));
         return KeyValueFileWriterFactory.builder(
                         FileIOFinder.find(path),
                         0,
@@ -314,11 +317,11 @@ public class LookupLevelsTest {
                 KeyValueFileReaderFactory.builder(
                         FileIOFinder.find(path),
                         createSchemaManager(path),
-                        0,
+                        createSchemaManager(path).schema(0),
                         keyType,
                         rowType,
                         ignore -> new FlushingFileFormat("avro"),
-                        new FileStorePathFactory(path),
+                        createNonPartFactory(path),
                         new KeyValueFieldsExtractor() {
                             @Override
                             public List<DataField> keyFields(TableSchema schema) {
@@ -331,7 +334,7 @@ public class LookupLevelsTest {
                             }
                         },
                         new CoreOptions(new HashMap<>()));
-        return builder.build(BinaryRow.EMPTY_ROW, 0);
+        return builder.build(BinaryRow.EMPTY_ROW, 0, DeletionVector.emptyFactory());
     }
 
     private SchemaManager createSchemaManager(Path path) {

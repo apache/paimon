@@ -36,7 +36,6 @@ import org.apache.flink.table.data.RowData;
 
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.List;
 
 /**
  * This is a table sorter which will sort the records by the z-order of specified columns. It works
@@ -49,12 +48,15 @@ public class ZorderSorter extends TableSorter {
     private static final RowType KEY_TYPE =
             new RowType(Collections.singletonList(new DataField(0, "Z_INDEX", DataTypes.BYTES())));
 
+    private final TableSortInfo sortInfo;
+
     public ZorderSorter(
             StreamExecutionEnvironment batchTEnv,
             DataStream<RowData> origin,
             FileStoreTable table,
-            List<String> zOrderColNames) {
-        super(batchTEnv, origin, table, zOrderColNames);
+            TableSortInfo sortInfo) {
+        super(batchTEnv, origin, table, sortInfo.getSortColumns());
+        this.sortInfo = sortInfo;
     }
 
     @Override
@@ -102,6 +104,7 @@ public class ZorderSorter extends TableSorter {
                         return Arrays.copyOf(zorder, zorder.length);
                     }
                 },
-                GenericRow::of);
+                GenericRow::of,
+                sortInfo);
     }
 }

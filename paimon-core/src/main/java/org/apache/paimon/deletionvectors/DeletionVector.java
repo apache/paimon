@@ -18,9 +18,19 @@
 
 package org.apache.paimon.deletionvectors;
 
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.table.source.DeletionFile;
+
+import javax.annotation.Nullable;
+
 import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
+import java.util.List;
+import java.util.Optional;
 
 /**
  * The DeletionVector can efficiently record the positions of rows that are deleted in a file, which
@@ -34,6 +44,13 @@ public interface DeletionVector {
      * @param position The position of the row to be marked as deleted.
      */
     void delete(long position);
+
+    /**
+     * merge another {@link DeletionVector} to this current one.
+     *
+     * @param deletionVector the other {@link DeletionVector}
+     */
+    void merge(DeletionVector deletionVector);
 
     /**
      * Marks the row at the specified position as deleted.
@@ -65,6 +82,9 @@ public interface DeletionVector {
      */
     boolean isEmpty();
 
+    /** @return the number of distinct integers added to the DeletionVector. */
+    long getCardinality();
+
     /**
      * Serializes the deletion vector to a byte array for storage or transmission.
      *
@@ -90,5 +110,57 @@ public interface DeletionVector {
         } catch (IOException e) {
             throw new RuntimeException("Unable to deserialize deletion vector", e);
         }
+    }
+
+    static DeletionVector read(FileIO fileIO, DeletionFile deletionFile) throws IOException {
+        Path path = new Path(deletionFile.path());
+        try (SeekableInputStream input = fileIO.newInputStream(path)) {
+            input.seek(deletionFile.offset());
+            DataInputStream dis = new DataInputStream(input);
+            int actualLength = dis.readInt();
+            if (actualLength != deletionFile.length()) {
+                throw new RuntimeException(
+                        "Size not match, actual size: "
+                                + actualLength
+                                + ", expert size: "
+                                + deletionFile.length()
+                                + ", file path: "
+                                + path);
+            }
+            int magicNum = dis.readInt();
+            if (magicNum == BitmapDeletionVector.MAGIC_NUMBER) {
+                return BitmapDeletionVector.deserializeFromDataInput(dis);
+            } else {
+                throw new RuntimeException("Invalid magic number: " + magicNum);
+            }
+        }
+    }
+
+    static Factory emptyFactory() {
+        return fileName -> Optional.empty();
+    }
+
+    static Factory factory(@Nullable DeletionVectorsMaintainer dvMaintainer) {
+        if (dvMaintainer == null) {
+            return emptyFactory();
+        }
+        return dvMaintainer::deletionVectorOf;
+    }
+
+    static Factory factory(
+            FileIO fileIO, List<DataFileMeta> files, @Nullable List<DeletionFile> deletionFiles) {
+        DeletionFile.Factory factory = DeletionFile.factory(files, deletionFiles);
+        return fileName -> {
+            Optional<DeletionFile> deletionFile = factory.create(fileName);
+            if (deletionFile.isPresent()) {
+                return Optional.of(DeletionVector.read(fileIO, deletionFile.get()));
+            }
+            return Optional.empty();
+        };
+    }
+
+    /** Interface to create {@link DeletionVector}. */
+    interface Factory {
+        Optional<DeletionVector> create(String fileName) throws IOException;
     }
 }

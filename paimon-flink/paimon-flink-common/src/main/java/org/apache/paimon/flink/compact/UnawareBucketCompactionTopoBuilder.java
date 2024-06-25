@@ -24,7 +24,7 @@ import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.UnawareBucketCompactionSink;
 import org.apache.paimon.flink.source.BucketUnawareCompactSource;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -34,9 +34,6 @@ import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.streaming.runtime.partitioner.RebalancePartitioner;
 
 import javax.annotation.Nullable;
-
-import java.util.List;
-import java.util.Map;
 
 /**
  * Build for unaware-bucket table flink compaction job.
@@ -52,8 +49,10 @@ public class UnawareBucketCompactionTopoBuilder {
     private final transient StreamExecutionEnvironment env;
     private final String tableIdentifier;
     private final FileStoreTable table;
-    @Nullable private List<Map<String, String>> specifiedPartitions = null;
+
     private boolean isContinuous = false;
+
+    @Nullable private Predicate partitionPredicate;
 
     public UnawareBucketCompactionTopoBuilder(
             StreamExecutionEnvironment env, String tableIdentifier, FileStoreTable table) {
@@ -66,8 +65,8 @@ public class UnawareBucketCompactionTopoBuilder {
         this.isContinuous = isContinuous;
     }
 
-    public void withPartitions(List<Map<String, String>> partitions) {
-        this.specifiedPartitions = partitions;
+    public void withPartitionPredicate(Predicate predicate) {
+        this.partitionPredicate = predicate;
     }
 
     public void build() {
@@ -92,12 +91,7 @@ public class UnawareBucketCompactionTopoBuilder {
         long scanInterval = table.coreOptions().continuousDiscoveryInterval().toMillis();
         BucketUnawareCompactSource source =
                 new BucketUnawareCompactSource(
-                        table,
-                        isContinuous,
-                        scanInterval,
-                        specifiedPartitions != null
-                                ? PredicateBuilder.partitions(specifiedPartitions, table.rowType())
-                                : null);
+                        table, isContinuous, scanInterval, partitionPredicate);
 
         return BucketUnawareCompactSource.buildSource(env, source, isContinuous, tableIdentifier);
     }

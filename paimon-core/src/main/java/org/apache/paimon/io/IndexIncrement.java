@@ -20,6 +20,8 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.index.IndexFileMeta;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
@@ -28,16 +30,29 @@ public class IndexIncrement {
 
     private final List<IndexFileMeta> newIndexFiles;
 
+    private final List<IndexFileMeta> deletedIndexFiles;
+
     public IndexIncrement(List<IndexFileMeta> newIndexFiles) {
         this.newIndexFiles = newIndexFiles;
+        this.deletedIndexFiles = Collections.emptyList();
+    }
+
+    public IndexIncrement(
+            List<IndexFileMeta> newIndexFiles, List<IndexFileMeta> deletedIndexFiles) {
+        this.newIndexFiles = newIndexFiles;
+        this.deletedIndexFiles = deletedIndexFiles;
     }
 
     public List<IndexFileMeta> newIndexFiles() {
         return newIndexFiles;
     }
 
+    public List<IndexFileMeta> deletedIndexFiles() {
+        return deletedIndexFiles;
+    }
+
     public boolean isEmpty() {
-        return newIndexFiles.isEmpty();
+        return newIndexFiles.isEmpty() && deletedIndexFiles.isEmpty();
     }
 
     @Override
@@ -49,16 +64,24 @@ public class IndexIncrement {
             return false;
         }
         IndexIncrement that = (IndexIncrement) o;
-        return Objects.equals(newIndexFiles, that.newIndexFiles);
+        return Objects.equals(newIndexFiles, that.newIndexFiles)
+                && Objects.equals(deletedIndexFiles, that.deletedIndexFiles);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(newIndexFiles);
+        List<IndexFileMeta> all = new ArrayList<>(newIndexFiles);
+        all.addAll(deletedIndexFiles);
+        return Objects.hash(all);
     }
 
     @Override
     public String toString() {
-        return "IndexIncrement{" + "newIndexFiles=" + newIndexFiles + '}';
+        return "IndexIncrement{"
+                + "newIndexFiles="
+                + newIndexFiles
+                + ",deletedIndexFiles="
+                + deletedIndexFiles
+                + "}";
     }
 }

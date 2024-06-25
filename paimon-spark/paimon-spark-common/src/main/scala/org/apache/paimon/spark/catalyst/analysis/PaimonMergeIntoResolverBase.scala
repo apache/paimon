@@ -23,7 +23,7 @@ import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
 import org.apache.spark.sql.catalyst.expressions.Expression
-import org.apache.spark.sql.catalyst.plans.logical.{Assignment, DeleteAction, InsertAction, InsertStarAction, LogicalPlan, MergeAction, MergeIntoTable, UpdateAction, UpdateStarAction}
+import org.apache.spark.sql.catalyst.plans.logical.{Assignment, DeleteAction, InsertAction, InsertStarAction, LogicalPlan, MergeAction, MergeIntoTable, Project, UpdateAction, UpdateStarAction}
 
 trait PaimonMergeIntoResolverBase extends ExpressionHelper {
 
@@ -36,8 +36,9 @@ trait PaimonMergeIntoResolverBase extends ExpressionHelper {
     val condition = merge.mergeCondition
     val matched = merge.matchedActions
     val notMatched = merge.notMatchedActions
+    val fakeSource = Project(source.output, source)
 
-    val resolve: (Expression, LogicalPlan) => Expression = resolveExpression(spark) _
+    val resolve: (Expression, LogicalPlan) => Expression = resolveExpression(spark)
 
     def resolveMergeAction(action: MergeAction): MergeAction = {
       action match {
@@ -49,7 +50,7 @@ trait PaimonMergeIntoResolverBase extends ExpressionHelper {
           val resolvedAssignments = assignments.map {
             assignment =>
               assignment.copy(
-                key = resolve(assignment.key, merge),
+                key = resolve(assignment.key, target),
                 value = resolve(assignment.value, merge))
           }
           UpdateAction(resolvedCond, resolvedAssignments)
@@ -60,18 +61,19 @@ trait PaimonMergeIntoResolverBase extends ExpressionHelper {
           }
           UpdateAction(resolvedCond, resolvedAssignments)
         case InsertAction(condition, assignments) =>
-          val resolvedCond = condition.map(resolve(_, source))
+          val resolvedCond = condition.map(resolve(_, fakeSource))
           val resolvedAssignments = assignments.map {
             assignment =>
               assignment.copy(
-                key = resolve(assignment.key, source),
-                value = resolve(assignment.value, source))
+                key = resolve(assignment.key, fakeSource),
+                value = resolve(assignment.value, fakeSource))
           }
           InsertAction(resolvedCond, resolvedAssignments)
         case InsertStarAction(condition) =>
-          val resolvedCond = condition.map(resolve(_, source))
+          val resolvedCond = condition.map(resolve(_, fakeSource))
           val resolvedAssignments = target.output.map {
-            attr => Assignment(attr, resolve(UnresolvedAttribute.quotedString(attr.name), source))
+            attr =>
+              Assignment(attr, resolve(UnresolvedAttribute.quotedString(attr.name), fakeSource))
           }
           InsertAction(resolvedCond, resolvedAssignments)
         case _ =>

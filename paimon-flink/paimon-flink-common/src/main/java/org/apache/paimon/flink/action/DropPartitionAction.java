@@ -24,7 +24,8 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
+
+import static org.apache.paimon.CoreOptions.createCommitUser;
 
 /** Table drop partition action for Flink. */
 public class DropPartitionAction extends TableActionBase {
@@ -49,7 +50,11 @@ public class DropPartitionAction extends TableActionBase {
         this.partitions = partitions;
 
         FileStoreTable fileStoreTable = (FileStoreTable) table;
-        this.commit = fileStoreTable.store().newCommit(UUID.randomUUID().toString());
+        this.commit =
+                fileStoreTable
+                        .store()
+                        .newCommit(
+                                createCommitUser(fileStoreTable.coreOptions().toConfiguration()));
     }
 
     @Override

@@ -22,6 +22,7 @@ import org.apache.paimon.data.serializer.VersionedSerializer;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageLegacyV2Serializer;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
 
 import java.io.ByteArrayOutputStream;
@@ -33,9 +34,11 @@ import java.util.Map;
 /** {@link VersionedSerializer} for {@link ManifestCommittable}. */
 public class ManifestCommittableSerializer implements VersionedSerializer<ManifestCommittable> {
 
-    private static final int CURRENT_VERSION = 2;
+    private static final int CURRENT_VERSION = 3;
 
     private final CommitMessageSerializer commitMessageSerializer;
+
+    private CommitMessageLegacyV2Serializer legacyV2CommitMessageSerializer;
 
     public ManifestCommittableSerializer() {
         this.commitMessageSerializer = new CommitMessageSerializer();
@@ -75,14 +78,13 @@ public class ManifestCommittableSerializer implements VersionedSerializer<Manife
 
     @Override
     public ManifestCommittable deserialize(int version, byte[] serialized) throws IOException {
-        if (version != CURRENT_VERSION) {
+        if (version > CURRENT_VERSION) {
             throw new UnsupportedOperationException(
-                    "Expecting ManifestCommittable version to be "
+                    "Expecting ManifestCommittableSerializer version to be smaller or equal than "
                             + CURRENT_VERSION
                             + ", but found "
                             + version
-                            + ".\nManifestCommittable is not a compatible data structure. "
-                            + "Please restart the job afresh (do not recover from savepoint).");
+                            + ".");
         }
 
         DataInputDeserializer view = new DataInputDeserializer(serialized);
@@ -90,8 +92,30 @@ public class ManifestCommittableSerializer implements VersionedSerializer<Manife
         Long watermark = view.readBoolean() ? null : view.readLong();
         Map<Integer, Long> offsets = deserializeOffsets(view);
         int fileCommittableSerializerVersion = view.readInt();
-        List<CommitMessage> fileCommittables =
-                commitMessageSerializer.deserializeList(fileCommittableSerializerVersion, view);
+        List<CommitMessage> fileCommittables;
+        try {
+            fileCommittables =
+                    commitMessageSerializer.deserializeList(fileCommittableSerializerVersion, view);
+        } catch (Exception e) {
+            if (fileCommittableSerializerVersion != 2) {
+                throw e;
+            }
+
+            // rebuild view
+            view = new DataInputDeserializer(serialized);
+            view.readLong();
+            if (!view.readBoolean()) {
+                view.readLong();
+            }
+            deserializeOffsets(view);
+            view.readInt();
+
+            if (legacyV2CommitMessageSerializer == null) {
+                legacyV2CommitMessageSerializer = new CommitMessageLegacyV2Serializer();
+            }
+            fileCommittables = legacyV2CommitMessageSerializer.deserializeList(view);
+        }
+
         return new ManifestCommittable(identifier, watermark, offsets, fileCommittables);
     }
 

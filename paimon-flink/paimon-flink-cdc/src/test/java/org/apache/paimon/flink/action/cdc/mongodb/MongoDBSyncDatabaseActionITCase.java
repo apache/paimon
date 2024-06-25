@@ -258,6 +258,7 @@ public class MongoDBSyncDatabaseActionITCase extends MongoDBActionITCaseBase {
                         new String[] {"_id", "name", "description", "weight"}),
                 Collections.emptyList(),
                 Collections.singletonList("_id"),
+                Collections.emptyList(),
                 Collections.emptyMap());
 
         // try synchronization

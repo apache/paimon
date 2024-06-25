@@ -26,7 +26,7 @@ import org.apache.paimon.data.columnar.IntColumnVector;
 import org.apache.paimon.data.columnar.LongColumnVector;
 import org.apache.paimon.format.parquet.ParquetSchemaConverter;
 
-import org.apache.parquet.Preconditions;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Parquet write decimal as int32 and int64 and binary, this class wrap the real vector to provide
@@ -49,7 +49,7 @@ public class ParquetDecimalVector implements DecimalColumnVector {
             return Decimal.fromUnscaledLong(
                     ((LongColumnVector) vector).getLong(i), precision, scale);
         } else {
-            Preconditions.checkArgument(
+            checkArgument(
                     vector instanceof BytesColumnVector,
                     "Reading decimal type occur unsupported vector type: %s",
                     vector.getClass());

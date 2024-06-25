@@ -21,7 +21,6 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.operation.DefaultValueAssigner;
-import org.apache.paimon.operation.FileStoreRead;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateProjectionConverter;
 import org.apache.paimon.reader.RecordReader;
@@ -34,15 +33,13 @@ import java.util.Optional;
 /** A {@link InnerTableRead} for data table. */
 public abstract class AbstractDataTableRead<T> implements InnerTableRead {
 
-    private final FileStoreRead<T> fileStoreRead;
     private final DefaultValueAssigner defaultValueAssigner;
 
     private int[][] projection;
     private boolean executeFilter = false;
     private Predicate predicate;
 
-    public AbstractDataTableRead(FileStoreRead<T> fileStoreRead, TableSchema schema) {
-        this.fileStoreRead = fileStoreRead;
+    public AbstractDataTableRead(TableSchema schema) {
         this.defaultValueAssigner = schema == null ? null : DefaultValueAssigner.create(schema);
     }
 
@@ -61,9 +58,10 @@ public abstract class AbstractDataTableRead<T> implements InnerTableRead {
         if (defaultValueAssigner != null) {
             predicate = defaultValueAssigner.handlePredicate(predicate);
         }
-        fileStoreRead.withFilter(predicate);
-        return this;
+        return innerWithFilter(predicate);
     }
+
+    protected abstract InnerTableRead innerWithFilter(Predicate predicate);
 
     @Override
     public TableRead executeFilter() {

@@ -27,6 +27,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.mergetree.SortBufferWriteBuffer;
 import org.apache.paimon.mergetree.compact.MergeFunction;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.PrimaryKeyTableUtils;
@@ -56,7 +57,8 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
 
     private static final long serialVersionUID = 1L;
 
-    TableSchema schema;
+    private final TableSchema schema;
+    private final boolean ignoreDelete;
 
     private transient Projection keyProjection;
     private transient RecordComparator keyComparator;
@@ -75,6 +77,7 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
                 schema.primaryKeys().size() > 0,
                 "LocalMergeOperator currently only support tables with primary keys");
         this.schema = schema;
+        this.ignoreDelete = CoreOptions.fromMap(schema.options()).ignoreDelete();
         setChainingStrategy(ChainingStrategy.ALWAYS);
     }
 
@@ -120,6 +123,7 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
                         new HeapMemorySegmentPool(
                                 options.localMergeBufferSize(), options.pageSize()),
                         false,
+                        MemorySize.MAX_VALUE,
                         options.localSortMaxNumFileHandles(),
                         options.spillCompression(),
                         null);
@@ -133,8 +137,11 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
         recordCount++;
         InternalRow row = record.getValue();
 
-        RowKind rowKind =
-                rowKindGenerator == null ? row.getRowKind() : rowKindGenerator.generate(row);
+        RowKind rowKind = RowKindGenerator.getRowKind(rowKindGenerator, row);
+        if (ignoreDelete && rowKind.isRetract()) {
+            return;
+        }
+
         // row kind must be INSERT when it is divided into key and value
         row.setRowKind(RowKind.INSERT);
 

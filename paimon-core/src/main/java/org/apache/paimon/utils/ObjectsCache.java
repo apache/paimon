@@ -27,11 +27,13 @@ import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentSource;
 
+import javax.annotation.Nullable;
+
 import java.io.EOFException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.Function;
+import java.util.function.BiFunction;
 
 /** Cache records to {@link SegmentsCache} by compacted serializer. */
 public class ObjectsCache<K, V> {
@@ -39,21 +41,25 @@ public class ObjectsCache<K, V> {
     private final SegmentsCache<K> cache;
     private final ObjectSerializer<V> serializer;
     private final InternalRowSerializer rowSerializer;
-    private final Function<K, CloseableIterator<InternalRow>> reader;
+    private final BiFunction<K, Long, CloseableIterator<InternalRow>> reader;
 
     public ObjectsCache(
             SegmentsCache<K> cache,
             ObjectSerializer<V> serializer,
-            Function<K, CloseableIterator<InternalRow>> reader) {
+            BiFunction<K, Long, CloseableIterator<InternalRow>> reader) {
         this.cache = cache;
         this.serializer = serializer;
         this.rowSerializer = new InternalRowSerializer(serializer.fieldTypes());
         this.reader = reader;
     }
 
-    public List<V> read(K key, Filter<InternalRow> loadFilter, Filter<InternalRow> readFilter)
+    public List<V> read(
+            K key,
+            @Nullable Long fileSize,
+            Filter<InternalRow> loadFilter,
+            Filter<InternalRow> readFilter)
             throws IOException {
-        Segments segments = cache.getSegments(key, k -> readSegments(k, loadFilter));
+        Segments segments = cache.getSegments(key, k -> readSegments(k, fileSize, loadFilter));
         List<V> entries = new ArrayList<>();
         RandomAccessInputView view =
                 new RandomAccessInputView(
@@ -71,8 +77,8 @@ public class ObjectsCache<K, V> {
         }
     }
 
-    private Segments readSegments(K key, Filter<InternalRow> loadFilter) {
-        try (CloseableIterator<InternalRow> iterator = reader.apply(key)) {
+    private Segments readSegments(K key, @Nullable Long fileSize, Filter<InternalRow> loadFilter) {
+        try (CloseableIterator<InternalRow> iterator = reader.apply(key, fileSize)) {
             ArrayList<MemorySegment> segments = new ArrayList<>();
             MemorySegmentSource segmentSource =
                     () -> MemorySegment.allocateHeapMemory(cache.pageSize());

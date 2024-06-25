@@ -20,6 +20,8 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.catalog.CatalogLock;
+import org.apache.paimon.catalog.CatalogLockContext;
+import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
 
 import javax.annotation.Nullable;
@@ -44,12 +46,12 @@ public interface Lock extends AutoCloseable {
     }
 
     static Factory factory(
-            @Nullable CatalogLock.LockFactory lockFactory,
-            @Nullable CatalogLock.LockContext lockContext,
+            @Nullable CatalogLockFactory lockFactory,
+            @Nullable CatalogLockContext lockContext,
             Identifier tablePath) {
         return lockFactory == null
                 ? new EmptyFactory()
-                : new CatalogLockFactory(lockFactory, lockContext, tablePath);
+                : new LockFactory(lockFactory, lockContext, tablePath);
     }
 
     static Factory emptyFactory() {
@@ -57,17 +59,17 @@ public interface Lock extends AutoCloseable {
     }
 
     /** A {@link Factory} creating lock from catalog. */
-    class CatalogLockFactory implements Factory {
+    class LockFactory implements Factory {
 
         private static final long serialVersionUID = 1L;
 
-        private final CatalogLock.LockFactory lockFactory;
-        private final CatalogLock.LockContext lockContext;
+        private final CatalogLockFactory lockFactory;
+        private final CatalogLockContext lockContext;
         private final Identifier tablePath;
 
-        public CatalogLockFactory(
-                CatalogLock.LockFactory lockFactory,
-                CatalogLock.LockContext lockContext,
+        public LockFactory(
+                CatalogLockFactory lockFactory,
+                CatalogLockContext lockContext,
                 Identifier tablePath) {
             this.lockFactory = lockFactory;
             this.lockContext = lockContext;
@@ -76,7 +78,7 @@ public interface Lock extends AutoCloseable {
 
         @Override
         public Lock create() {
-            return fromCatalog(lockFactory.create(lockContext), tablePath);
+            return fromCatalog(lockFactory.createLock(lockContext), tablePath);
         }
     }
 

@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink.cdc;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogUtils;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.FileIO;
@@ -28,20 +29,21 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.TraceableFileIO;
 
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
@@ -64,23 +66,20 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
 
     @TempDir java.nio.file.Path tempDir;
 
-    @Disabled
     @Test
     @Timeout(120)
     public void testRandomCdcEvents() throws Exception {
         innerTestRandomCdcEvents(() -> ThreadLocalRandom.current().nextInt(5) + 1, false);
     }
 
-    @Disabled
     @Test
-    @Timeout(180)
+    @Timeout(120)
     public void testRandomCdcEventsDynamicBucket() throws Exception {
         innerTestRandomCdcEvents(() -> -1, false);
     }
 
-    @Disabled
     @Test
-    @Timeout(180)
+    @Timeout(120)
     public void testRandomCdcEventsUnawareBucket() throws Exception {
         innerTestRandomCdcEvents(() -> -1, true);
     }
@@ -148,12 +147,12 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
         }
 
         List<TestCdcEvent> events = mergeTestTableEvents(testTables);
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.getCheckpointConfig().setCheckpointInterval(100);
-        if (!enableFailure) {
-            env.setRestartStrategy(RestartStrategies.noRestart());
-        }
+        StreamExecutionEnvironment env =
+                streamExecutionEnvironmentBuilder()
+                        .streamingMode()
+                        .checkpointIntervalMs(100)
+                        .allowRestart(enableFailure)
+                        .build();
 
         TestCdcSourceFunction sourceFunction = new TestCdcSourceFunction(events);
         DataStreamSource<TestCdcEvent> source = env.addSource(sourceFunction);
@@ -177,17 +176,21 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
 
         // enable failure when running jobs if needed
         FailingFileIO.reset(failingName, 2, 10000);
-        if (unawareBucketMode) {
-            // there's a compact operator which won't terminate
-            env.executeAsync();
-        } else {
-            env.execute();
-        }
+        env.execute();
 
         // no failure when checking results
         FailingFileIO.reset(failingName, 0, 1);
-        for (int i = 0; i < fileStoreTables.size(); i++) {
-            testTables.get(i).assertResult(fileStoreTables.get(i));
+        for (int i = 0; i < numTables; i++) {
+            FileStoreTable table = fileStoreTables.get(i).copyWithLatestSchema();
+            SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+            TableSchema schema = schemaManager.latest().get();
+
+            ReadBuilder readBuilder = table.newReadBuilder();
+            TableScan.Plan plan = readBuilder.newScan().plan();
+            try (RecordReaderIterator<InternalRow> it =
+                    new RecordReaderIterator<>(readBuilder.newRead().createReader(plan))) {
+                testTables.get(i).assertResult(schema, it);
+            }
         }
     }
 
@@ -204,6 +207,10 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
         conf.set(CoreOptions.DYNAMIC_BUCKET_TARGET_ROW_NUM, 100L);
         conf.set(CoreOptions.WRITE_BUFFER_SIZE, new MemorySize(4096 * 3));
         conf.set(CoreOptions.PAGE_SIZE, new MemorySize(4096));
+        // disable compaction for unaware bucket mode to avoid instability
+        if (primaryKeys.isEmpty() && numBucket == -1) {
+            conf.set(CoreOptions.WRITE_ONLY, true);
+        }
 
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(

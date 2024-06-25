@@ -32,6 +32,8 @@ public class CompactActionFactory implements ActionFactory {
     private static final String ORDER_STRATEGY = "order_strategy";
     private static final String ORDER_BY = "order_by";
 
+    private static final String WHERE = "where";
+
     @Override
     public String identifier() {
         return IDENTIFIER;
@@ -67,6 +69,8 @@ public class CompactActionFactory implements ActionFactory {
         if (params.has(PARTITION)) {
             List<Map<String, String>> partitions = getPartitions(params);
             action.withPartitions(partitions);
+        } else if (params.has(WHERE)) {
+            action.withWhereSql(params.get(WHERE));
         }
 
         return Optional.of(action);

@@ -177,7 +177,8 @@ public class SparkReadITCase extends SparkReadTestBase {
         spark.sql("CREATE TABLE testCreateTableAs AS SELECT * FROM testCreateTable");
         List<Row> result = spark.sql("SELECT * FROM testCreateTableAs").collectAsList();
 
-        assertThat(result.stream().map(Row::toString)).containsExactlyInAnyOrder("[1,a,b]");
+        assertThat(result.stream().map(Row::toString))
+                .containsExactlyInAnyOrder("[1,a,b         ]");
 
         // partitioned table
         spark.sql(
@@ -224,11 +225,13 @@ public class SparkReadITCase extends SparkReadTestBase {
                                         + "  'file.format' = 'parquet',\n"
                                         + "  'path' = '%s')\n"
                                         + "]]",
-                                showCreateString("testTableAs", "a BIGINT", "b STRING", "c STRING"),
+                                showCreateString(
+                                        "testTableAs", "a BIGINT", "b VARCHAR(10)", "c CHAR(10)"),
                                 new Path(warehousePath, "default.db/testTableAs")));
         List<Row> resultProp = spark.sql("SELECT * FROM testTableAs").collectAsList();
 
-        assertThat(resultProp.stream().map(Row::toString)).containsExactlyInAnyOrder("[1,a,b]");
+        assertThat(resultProp.stream().map(Row::toString))
+                .containsExactlyInAnyOrder("[1,a,b         ]");
 
         // primary key
         spark.sql(
@@ -246,7 +249,8 @@ public class SparkReadITCase extends SparkReadTestBase {
                 .isEqualTo(
                         String.format(
                                 "[[%sTBLPROPERTIES (\n  'path' = '%s',\n  'primary-key' = 'a')\n]]",
-                                showCreateString("t_pk_as", "a BIGINT", "b STRING", "c STRING"),
+                                showCreateString(
+                                        "t_pk_as", "a BIGINT NOT NULL", "b STRING", "c STRING"),
                                 new Path(warehousePath, "default.db/t_pk_as")));
         List<Row> resultPk = spark.sql("SELECT * FROM t_pk_as").collectAsList();
 
@@ -280,8 +284,8 @@ public class SparkReadITCase extends SparkReadTestBase {
                                         "user_id BIGINT",
                                         "item_id BIGINT",
                                         "behavior STRING",
-                                        "dt STRING",
-                                        "hh STRING"),
+                                        "dt STRING NOT NULL",
+                                        "hh STRING NOT NULL"),
                                 new Path(warehousePath, "default.db/t_all_as")));
         List<Row> resultAll = spark.sql("SELECT * FROM t_all_as").collectAsList();
         assertThat(resultAll.stream().map(Row::toString))
@@ -369,7 +373,10 @@ public class SparkReadITCase extends SparkReadTestBase {
                                         + "  'k1' = 'v1',\n"
                                         + "  'path' = '%s',\n"
                                         + "  'primary-key' = 'a,b')\n]]",
-                                showCreateString("tbl", "a INT COMMENT 'a comment'", "b STRING"),
+                                showCreateString(
+                                        "tbl",
+                                        "a INT NOT NULL COMMENT 'a comment'",
+                                        "b STRING NOT NULL"),
                                 new Path(warehousePath, "default.db/tbl")));
     }
 

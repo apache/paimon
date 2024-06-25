@@ -20,18 +20,19 @@ package org.apache.paimon.jdbc;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.AbstractCatalog;
-import org.apache.paimon.catalog.CatalogLock;
+import org.apache.paimon.catalog.CatalogLockContext;
+import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.utils.Preconditions;
-import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
@@ -56,7 +57,6 @@ import static org.apache.paimon.jdbc.JdbcCatalogLock.checkMaxSleep;
 import static org.apache.paimon.jdbc.JdbcUtils.execute;
 import static org.apache.paimon.jdbc.JdbcUtils.insertProperties;
 import static org.apache.paimon.jdbc.JdbcUtils.updateTable;
-import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 
 /* This file is based on source code from the Iceberg Project (http://iceberg.apache.org/), licensed by the Apache
  * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
@@ -72,24 +72,20 @@ public class JdbcCatalog extends AbstractCatalog {
 
     private final JdbcClientPool connections;
     private final String catalogKey;
-    private final Map<String, String> options;
+    private final Options options;
     private final String warehouse;
 
-    protected JdbcCatalog(
-            FileIO fileIO, String catalogKey, Map<String, String> config, String warehouse) {
-        super(fileIO);
-        this.catalogKey = StringUtils.isBlank(catalogKey) ? "jdbc" : catalogKey;
-        this.options = config;
+    protected JdbcCatalog(FileIO fileIO, String catalogKey, Options options, String warehouse) {
+        super(fileIO, options);
+        this.catalogKey = catalogKey;
+        this.options = options;
         this.warehouse = warehouse;
         Preconditions.checkNotNull(options, "Invalid catalog properties: null");
         this.connections =
                 new JdbcClientPool(
-                        Integer.parseInt(
-                                config.getOrDefault(
-                                        CatalogOptions.CLIENT_POOL_SIZE.key(),
-                                        CatalogOptions.CLIENT_POOL_SIZE.defaultValue().toString())),
+                        options.get(CatalogOptions.CLIENT_POOL_SIZE),
                         options.get(CatalogOptions.URI.key()),
-                        options);
+                        options.toMap());
         try {
             initializeCatalogTablesIfNeed();
         } catch (SQLException e) {
@@ -136,7 +132,7 @@ public class JdbcCatalog extends AbstractCatalog {
 
         // if lock enabled, Check and create distributed lock table.
         if (lockEnabled()) {
-            JdbcUtils.createDistributedLockTable(connections);
+            JdbcUtils.createDistributedLockTable(connections, options);
         }
     }
 
@@ -348,15 +344,13 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     @Override
-    public Optional<CatalogLock.LockFactory> lockFactory() {
-        return lockEnabled()
-                ? Optional.of(JdbcCatalogLock.createFactory(connections, catalogKey, options))
-                : Optional.empty();
+    public Optional<CatalogLockFactory> defaultLockFactory() {
+        return Optional.of(new JdbcCatalogLockFactory());
     }
 
-    private boolean lockEnabled() {
-        return Boolean.parseBoolean(
-                options.getOrDefault(LOCK_ENABLED.key(), LOCK_ENABLED.defaultValue().toString()));
+    @Override
+    public Optional<CatalogLockContext> lockContext() {
+        return Optional.of(new JdbcCatalogLockContext(catalogKey, options));
     }
 
     private Lock lock(Identifier identifier) {
@@ -365,7 +359,10 @@ public class JdbcCatalog extends AbstractCatalog {
         }
         JdbcCatalogLock lock =
                 new JdbcCatalogLock(
-                        connections, catalogKey, checkMaxSleep(options), acquireTimeout(options));
+                        connections,
+                        catalogKey,
+                        checkMaxSleep(options.toMap()),
+                        acquireTimeout(options.toMap()));
         return Lock.fromCatalog(lock, identifier);
     }
 

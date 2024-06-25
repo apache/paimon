@@ -21,6 +21,7 @@ package org.apache.paimon.flink.lookup;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.lookup.PrimaryKeyPartialLookupTable.LocalQueryExecutor;
 import org.apache.paimon.flink.lookup.PrimaryKeyPartialLookupTable.QueryExecutor;
@@ -45,6 +46,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.net.InetSocketAddress;
 import java.nio.file.Path;
@@ -78,17 +81,31 @@ public class FileStoreLookupFunctionTest {
         tablePath = new org.apache.paimon.fs.Path(tempDir.toString());
     }
 
-    private void createLookupFunction() throws Exception {
-        createLookupFunction(true, false);
+    private void createLookupFunction(boolean refreshAsync) throws Exception {
+        createLookupFunction(true, false, refreshAsync);
     }
 
-    private void createLookupFunction(boolean isPartition, boolean joinEqualPk) throws Exception {
+    private void createLookupFunction(
+            boolean isPartition, boolean joinEqualPk, boolean refreshAsync) throws Exception {
+        createLookupFunction(isPartition, joinEqualPk, false, refreshAsync);
+    }
+
+    private void createLookupFunction(
+            boolean isPartition,
+            boolean joinEqualPk,
+            boolean dynamicPartition,
+            boolean refreshAsync)
+            throws Exception {
         SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
         Options conf = new Options();
+        conf.set(FlinkConnectorOptions.LOOKUP_REFRESH_ASYNC, refreshAsync);
         conf.set(CoreOptions.BUCKET, 2);
         conf.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 3);
         conf.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 2);
         conf.set(RocksDBOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL, Duration.ofSeconds(1));
+        if (dynamicPartition) {
+            conf.set(FlinkConnectorOptions.LOOKUP_DYNAMIC_PARTITION, "max_pt()");
+        }
 
         RowType rowType =
                 RowType.of(
@@ -123,18 +140,20 @@ public class FileStoreLookupFunctionTest {
         }
     }
 
-    @Test
-    public void testDefaultLocalPartial() throws Exception {
-        createLookupFunction(false, true);
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testDefaultLocalPartial(boolean refreshAsync) throws Exception {
+        createLookupFunction(false, true, refreshAsync);
         assertThat(lookupFunction.lookupTable()).isInstanceOf(PrimaryKeyPartialLookupTable.class);
         QueryExecutor queryExecutor =
                 ((PrimaryKeyPartialLookupTable) lookupFunction.lookupTable()).queryExecutor();
         assertThat(queryExecutor).isInstanceOf(LocalQueryExecutor.class);
     }
 
-    @Test
-    public void testDefaultRemotePartial() throws Exception {
-        createLookupFunction(false, true);
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testDefaultRemotePartial(boolean refreshAsync) throws Exception {
+        createLookupFunction(false, true, refreshAsync);
         ServiceManager serviceManager = new ServiceManager(fileIO, tablePath);
         serviceManager.resetService(
                 PRIMARY_KEY_LOOKUP, new InetSocketAddress[] {new InetSocketAddress(1)});
@@ -145,9 +164,10 @@ public class FileStoreLookupFunctionTest {
         assertThat(queryExecutor).isInstanceOf(RemoteQueryExecutor.class);
     }
 
-    @Test
-    public void testLookupScanLeak() throws Exception {
-        createLookupFunction();
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testLookupScanLeak(boolean refreshAsync) throws Exception {
+        createLookupFunction(refreshAsync);
         commit(writeCommit(1));
         lookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
         assertThat(
@@ -165,9 +185,10 @@ public class FileStoreLookupFunctionTest {
                 .isEqualTo(0);
     }
 
-    @Test
-    public void testLookupExpiredSnapshot() throws Exception {
-        createLookupFunction();
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testLookupExpiredSnapshot(boolean refreshAsync) throws Exception {
+        createLookupFunction(refreshAsync);
         commit(writeCommit(1));
         lookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
 
@@ -176,6 +197,26 @@ public class FileStoreLookupFunctionTest {
         commit(writeCommit(4));
         commit(writeCommit(5));
         lookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
+    }
+
+    @Test
+    public void testLookupDynamicPartition() throws Exception {
+        createLookupFunction(true, false, true);
+        commit(writeCommit(1));
+        lookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
+        assertThat(
+                        TraceableFileIO.openInputStreams(
+                                        s -> s.toString().contains(tempDir.toString()))
+                                .size())
+                .isEqualTo(0);
+
+        commit(writeCommit(10));
+        lookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
+        assertThat(
+                        TraceableFileIO.openInputStreams(
+                                        s -> s.toString().contains(tempDir.toString()))
+                                .size())
+                .isEqualTo(0);
     }
 
     private void commit(List<CommitMessage> messages) throws Exception {

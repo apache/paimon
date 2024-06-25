@@ -67,7 +67,7 @@ public class HiveSchema {
     private static final Logger LOG = LoggerFactory.getLogger(HiveSchema.class);
     private final RowType rowType;
 
-    private HiveSchema(RowType rowType) {
+    HiveSchema(RowType rowType) {
         this.rowType = rowType;
     }
 

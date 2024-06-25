@@ -29,7 +29,6 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 /** Commit operation which provides commit and overwrite. */
 public interface FileStoreCommit {
@@ -39,23 +38,17 @@ public interface FileStoreCommit {
 
     FileStoreCommit ignoreEmptyCommit(boolean ignoreEmptyCommit);
 
-    /** Find out which manifest committable need to be retried when recovering from the failure. */
-    default List<ManifestCommittable> filterCommitted(List<ManifestCommittable> committableList) {
-        Set<Long> identifiers =
-                filterCommitted(
-                        committableList.stream()
-                                .map(ManifestCommittable::identifier)
-                                .collect(Collectors.toSet()));
-        return committableList.stream()
-                .filter(m -> identifiers.contains(m.identifier()))
-                .collect(Collectors.toList());
-    }
-
     /** Find out which commit identifier need to be retried when recovering from the failure. */
     Set<Long> filterCommitted(Set<Long> commitIdentifiers);
 
     /** Commit from manifest committable. */
     void commit(ManifestCommittable committable, Map<String, String> properties);
+
+    /** Commit from manifest committable with checkAppendFiles. */
+    void commit(
+            ManifestCommittable committable,
+            Map<String, String> properties,
+            boolean checkAppendFiles);
 
     /**
      * Overwrite from manifest committable and partition.
@@ -78,7 +71,7 @@ public interface FileStoreCommit {
      */
     void dropPartitions(List<Map<String, String>> partitions, long commitIdentifier);
 
-    void purgeTable(long commitIdentifier);
+    void truncateTable(long commitIdentifier);
 
     /** Abort an unsuccessful commit. The data files will be deleted. */
     void abort(List<CommitMessage> commitMessages);

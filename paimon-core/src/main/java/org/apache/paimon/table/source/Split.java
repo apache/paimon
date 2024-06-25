@@ -42,4 +42,23 @@ public interface Split extends Serializable {
     default Optional<List<RawFile>> convertToRawFiles() {
         return Optional.empty();
     }
+
+    /**
+     * Return the deletion file of the data file, indicating which row in the data file was deleted.
+     *
+     * <p>If there is no corresponding deletion file, the element will be null.
+     */
+    default Optional<List<DeletionFile>> deletionFiles() {
+        return Optional.empty();
+    }
+
+    /**
+     * * Return the index file of the data file, for example, bloom-filter index. All the type of
+     * indexes and columns will be stored in one single index file.
+     *
+     * <p>If there is no corresponding index file, the element will be null.
+     */
+    default Optional<List<IndexFile>> indexFiles() {
+        return Optional.empty();
+    }
 }

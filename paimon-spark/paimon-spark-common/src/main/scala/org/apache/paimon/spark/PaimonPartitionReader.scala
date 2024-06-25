@@ -20,6 +20,7 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.data.{InternalRow => PaimonInternalRow}
 import org.apache.paimon.reader.{RecordReader, RecordReaderIterator}
+import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.table.source.{DataSplit, Split}
 
 import org.apache.spark.sql.catalyst.InternalRow
@@ -33,14 +34,15 @@ import scala.collection.JavaConverters._
 case class PaimonPartitionReader(
     readFunc: Split => RecordReader[PaimonInternalRow],
     partition: SparkInputPartition,
-    row: SparkInternalRow
+    row: SparkInternalRow,
+    metadataColumns: Seq[PaimonMetadataColumn]
 ) extends PartitionReader[InternalRow] {
 
   private lazy val split: Split = partition.split
 
   private lazy val iterator = {
     val reader = readFunc(split)
-    new RecordReaderIterator[PaimonInternalRow](reader)
+    PaimonRecordReaderIterator(reader, metadataColumns)
   }
 
   override def next(): Boolean = {

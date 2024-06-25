@@ -75,6 +75,10 @@ public abstract class FormatReadWriteTest {
 
     protected abstract FileFormat fileFormat();
 
+    protected boolean supportNestedNested() {
+        return true;
+    }
+
     @Test
     public void testSimpleTypes() throws IOException {
         RowType rowType = DataTypes.ROW(DataTypes.INT().notNull(), DataTypes.BIGINT());
@@ -87,7 +91,7 @@ public abstract class FormatReadWriteTest {
         FileFormat format = fileFormat();
 
         PositionOutputStream out = fileIO.newOutputStream(file, false);
-        FormatWriter writer = format.createWriterFactory(rowType).create(out, null);
+        FormatWriter writer = format.createWriterFactory(rowType).create(out, "zstd");
         writer.addElement(GenericRow.of(1, 1L));
         writer.addElement(GenericRow.of(2, 2L));
         writer.addElement(GenericRow.of(3, null));
@@ -96,7 +100,9 @@ public abstract class FormatReadWriteTest {
         out.close();
 
         RecordReader<InternalRow> reader =
-                format.createReaderFactory(rowType).createReader(fileIO, file);
+                format.createReaderFactory(rowType)
+                        .createReader(
+                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)));
         List<InternalRow> result = new ArrayList<>();
         reader.forEachRemaining(row -> result.add(serializer.copy(row)));
 
@@ -116,14 +122,16 @@ public abstract class FormatReadWriteTest {
         FileFormat format = fileFormat();
 
         PositionOutputStream out = fileIO.newOutputStream(file, false);
-        FormatWriter writer = format.createWriterFactory(rowType).create(out, null);
+        FormatWriter writer = format.createWriterFactory(rowType).create(out, "zstd");
         writer.addElement(expected);
         writer.flush();
         writer.finish();
         out.close();
 
         RecordReader<InternalRow> reader =
-                format.createReaderFactory(rowType).createReader(fileIO, file);
+                format.createReaderFactory(rowType)
+                        .createReader(
+                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)));
         List<InternalRow> result = new ArrayList<>();
         reader.forEachRemaining(result::add);
         assertThat(result.size()).isEqualTo(1);
@@ -156,7 +164,7 @@ public abstract class FormatReadWriteTest {
                         .field("decimal2", DataTypes.DECIMAL(38, 2))
                         .field("decimal3", DataTypes.DECIMAL(10, 1));
 
-        if (formatType.equals("avro") || formatType.equals("orc")) {
+        if (supportNestedNested()) {
             builder.field(
                     "rowArray",
                     DataTypes.ARRAY(
@@ -211,7 +219,7 @@ public abstract class FormatReadWriteTest {
                         Decimal.fromBigDecimal(new BigDecimal("12312455.22"), 38, 2),
                         Decimal.fromBigDecimal(new BigDecimal("12455.1"), 10, 1));
 
-        if (formatType.equals("avro") || formatType.equals("orc")) {
+        if (supportNestedNested()) {
             values = new ArrayList<>(values);
             values.add(
                     new GenericArray(

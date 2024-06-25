@@ -49,8 +49,7 @@ public class MessageQueueSchemaUtils {
         int retry = 0;
         int retryInterval = 1000;
 
-        RecordParser recordParser =
-                dataFormat.createParser(true, typeMapping, Collections.emptyList());
+        RecordParser recordParser = dataFormat.createParser(typeMapping, Collections.emptyList());
 
         while (true) {
             Optional<Schema> schema =
@@ -89,7 +88,7 @@ public class MessageQueueSchemaUtils {
     /** Wrap the consumer for different message queues. */
     public interface ConsumerWrapper extends AutoCloseable {
 
-        List<String> getRecords(int pollTimeOutMills);
+        List<CdcSourceRecord> getRecords(int pollTimeOutMills);
 
         String topic();
     }

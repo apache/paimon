@@ -43,7 +43,7 @@ import java.util.Set;
 import java.util.function.Predicate;
 
 /** Delete tag files. */
-public class TagDeletion extends FileDeletionBase {
+public class TagDeletion extends FileDeletionBase<Snapshot> {
 
     private static final Logger LOG = LoggerFactory.getLogger(TagDeletion.class);
 
@@ -85,7 +85,7 @@ public class TagDeletion extends FileDeletionBase {
     @Override
     public void cleanUnusedManifests(Snapshot taggedSnapshot, Set<String> skippingSet) {
         // doesn't clean changelog files because they are handled by SnapshotDeletion
-        cleanUnusedManifests(taggedSnapshot, skippingSet, false);
+        cleanUnusedManifests(taggedSnapshot, skippingSet, true, false);
     }
 
     public Predicate<ManifestEntry> dataFileSkipper(Snapshot fromSnapshot) throws Exception {

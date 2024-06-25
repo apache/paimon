@@ -1,0 +1,47 @@
+{{/*
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+*/}}
+{{ $ref := ref . "maintenance/configurations.md" }}
+<table class="configuration table table-bordered">
+    <thead>
+    <tr>
+        <th class="text-left" style="width: 15%">Function</th>
+        <th class="text-left" style="width: 85%">Description</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+        <td><h5>substring(column,beginInclusive)</h5></td>
+        <td>Get column.substring(beginInclusive). Output is a STRING.</td>
+    </tr>
+    <tr>
+        <td><h5>substring(column,beginInclusive,endExclusive)</h5></td>
+        <td>Get column.substring(beginInclusive,endExclusive). Output is a STRING.</td>
+    </tr>
+    <tr>
+        <td><h5>truncate(column,width)</h5></td>
+        <td>truncate column by width. Output type is same with column.If the column is a STRING, truncate(column,width) will truncate the string to width characters, namely `value.substring(0, width)`.
+             If the column is an INT or LONG, truncate(column,width) will truncate the number with the algorithm `v - (((v % W) + W) % W)`. The `redundant` compute part is to keep the result always positive.
+             If the column is a DECIMAL, truncate(column,width) will truncate the decimal with the algorithm: let `scaled_W = decimal(W, scale(v))`, then return `v - (v % scaled_W)`.</td>
+    </tr>
+    <tr>
+        <td><h5>cast(value,dataType)</h5></td>
+        <td>Get a constant value. The output is an atomic type, such as STRING, INT, BOOLEAN, etc.</td>
+    </tr>
+    </tbody>
+</table>

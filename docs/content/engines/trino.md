@@ -1,6 +1,6 @@
 ---
 title: "Trino"
-weight: 6
+weight: 5
 type: docs
 aliases:
 - /engines/trino.html
@@ -30,7 +30,13 @@ This documentation is a guide for using Paimon in Trino.
 
 ## Version
 
-Paimon currently supports Trino 358 and above.
+Paimon currently supports Trino 420 and above.
+
+## Filesystem
+
+From version 0.8, paimon share trino filesystem for all actions, which means, you should 
+config trino filesystem before using trino-paimon. You can find information about how to config
+filesystems for trino on trino official website.
 
 ## Preparing Paimon Jar File
 
@@ -43,38 +49,17 @@ https://paimon.apache.org/docs/master/project/download/
 
 {{< unstable >}}
 
-| Version    | Package                                                                                                                                       |
-|------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
-| [358, 368) | [paimon-trino-358-{{< version >}}-plugin.tar.gz](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-358/{{< version >}}/) |
-| [368, 369) | [paimon-trino-368-{{< version >}}-plugin.tar.gz](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-368/{{< version >}}/) |
-| [369, 370) | [paimon-trino-369-{{< version >}}-plugin.tar.gz](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-369/{{< version >}}/) |
-| [370, 388) | [paimon-trino-370-{{< version >}}-plugin.tar.gz](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-370/{{< version >}}/) |
-| [388, 393) | [paimon-trino-388-{{< version >}}-plugin.tar.gz](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-388/{{< version >}}/) |
-| [393, 422] | [paimon-trino-393-{{< version >}}-plugin.tar.gz](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-393/{{< version >}}/) |
-| [422, latest] | [paimon-trino-422-{{< version >}}-plugin.tar.gz](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-422/{{< version >}}/) |
+| Version       | Package                                                                                                                                       |
+|---------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
+| [420, 426]    | [paimon-trino-420-{{< version >}}-plugin.tar.gz](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-420/{{< version >}}/) |
+| [427, latest] | [paimon-trino-427-{{< version >}}-plugin.tar.gz](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-427/{{< version >}}/) |
 
 {{< /unstable >}}
 
 You can also manually build a bundled jar from the source code. However, there are a few preliminary steps that need to be taken before compiling:
 
 - To build from the source code, [clone the git repository]({{< trino_github_repo >}}).
-- Install JDK11 and JDK17 locally, and configure JDK11 as a global environment variable;
-- Configure the toolchains.xml file in ${{ MAVEN_HOME }}, the content is as follows.
-
-```
- <toolchains>
-    <toolchain>
-        <type>jdk</type>
-        <provides>
-            <version>17</version>
-            <vendor>adopt</vendor>
-        </provides>
-        <configuration>
-            <jdkHome>${{ JAVA_HOME }}</jdkHome>
-        </configuration>
-    </toolchain>
- </toolchains>          
-```
+- Install JDK17 locally, and configure JDK17 as a global environment variable;
 
 Then,you can build bundled jar with the following command:
 
@@ -111,7 +96,7 @@ Let Paimon use a secure temporary directory.
 ```bash
 tar -zxf paimon-trino-<trino-version>-{{< version >}}-plugin.tar.gz -C ${TRINO_HOME}/plugin
 ```
-the variable `trino-version` is module name, must be one of 358, 368, 369, 370, 388, 393, 422.
+the variable `trino-version` is module name, must be one of 420, 427.
 > NOTE: For JDK 17, when Deploying Trino, should add jvm options: `--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED`
 
 ### Configure
@@ -127,6 +112,15 @@ If you are using HDFS, choose one of the following ways to configure your HDFS:
 - set environment variable HADOOP_HOME.
 - set environment variable HADOOP_CONF_DIR.
 - configure `hadoop-conf-dir` in the properties.
+
+If you are using a hadoop filesystem, you can still use trino-hdfs and trino-hive to config it.
+For example, if you use oss as a storage, you can write in `paimon.properties` according to [Trino Reference](https://trino.io/docs/current/connector/hive.html#hdfs-configuration):
+
+```
+hive.config.resources=/path/to/core-site.xml
+```
+
+Then, config core-site.xml according to [Jindo Reference](https://github.com/aliyun/alibabacloud-jindodata/blob/master/docs/user/4.x/4.6.x/4.6.12/oss/presto/jindosdk_on_presto.md)
 
 ## Kerberos
 
@@ -194,7 +188,7 @@ SELECT * FROM paimon.test_db.orders
 ## Query with Time Traveling
 {{< tabs "time-travel-example" >}}
 
-{{< tab "version >=368" >}}
+{{< tab "version >=420" >}}
 
 ```sql
 -- read the snapshot from specified timestamp
@@ -206,15 +200,6 @@ SELECT * FROM t FOR VERSION AS OF 1;
 
 {{< /tab >}}
 
-{{< tab "version < 368" >}}
-
-```sql
--- read the snapshot from specified timestamp with a long value in unix milliseconds
-SET SESSION paimon.scan_timestamp_millis=1679486589444;
-SELECT * FROM t;
-```
-
-{{< /tab >}}
 
 {{< /tabs >}}
 

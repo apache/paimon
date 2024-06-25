@@ -30,6 +30,9 @@ import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -1518,74 +1521,137 @@ public class PreAggregationITCase {
             checkOneRecord(result.get(2), 3, "car", "watch");
         }
 
-        @Test
-        public void testRetractWithAggregation() throws Exception {
-            sql(
-                    "CREATE TABLE test_collect("
-                            + "  id INT PRIMARY KEY NOT ENFORCED,"
-                            + "  f0 ARRAY<STRING>"
-                            + ") WITH ("
-                            + "  'merge-engine' = 'aggregation',"
-                            + "  'fields.f0.aggregate-function' = 'collect'"
-                            + ")");
-
-            innerTestRetract(false);
+        private static List<Arguments> retractArguments() {
+            return Arrays.asList(
+                    Arguments.arguments("lookup", "aggregation"),
+                    Arguments.arguments("lookup", "partial-update"),
+                    Arguments.arguments("full-compaction", "aggregation"),
+                    Arguments.arguments("full-compaction", "partial-update"));
         }
 
-        @Test
-        public void testRetractWithPartialUpdate() throws Exception {
+        @ParameterizedTest(name = "changelog-producer = {0}, merge-engine = {1}")
+        @MethodSource("retractArguments")
+        public void testRetract(String changelogProducer, String mergeEngine) throws Exception {
+            String sequenceGroup = "";
+            if (mergeEngine.equals("partial-update")) {
+                sequenceGroup = ", 'fields.f1.sequence-group' = 'f0'";
+            }
             sql(
                     "CREATE TABLE test_collect("
                             + "  id INT PRIMARY KEY NOT ENFORCED,"
                             + "  f0 ARRAY<STRING>,"
                             + "  f1 INT"
                             + ") WITH ("
-                            + "  'merge-engine' = 'partial-update',"
-                            + "  'fields.f0.aggregate-function' = 'collect',"
-                            + "  'fields.f1.sequence-group' = 'f0'"
-                            + ")");
+                            + "  'changelog-producer' = '%s',"
+                            + "  'merge-engine' = '%s',"
+                            + "  'fields.f0.aggregate-function' = 'collect'"
+                            + "  %s"
+                            + ")",
+                    changelogProducer, mergeEngine, sequenceGroup);
 
-            innerTestRetract(true);
-        }
+            BlockingIterator<Row, Row> select = streamSqlBlockIter("SELECT * FROM test_collect");
 
-        private void innerTestRetract(boolean partialUpdate) throws Exception {
-            String temporaryTable =
-                    "CREATE TEMPORARY TABLE INPUT ("
+            String temporaryTableTemplate =
+                    "CREATE TEMPORARY TABLE %s ("
                             + "  id INT PRIMARY KEY NOT ENFORCED,"
-                            + "  f0 ARRAY<STRING>"
-                            + "  %s) WITH (\n"
-                            + "  'connector' = 'values',\n"
-                            + "  'data-id' = '%s',\n"
-                            + "  'bounded' = 'true',\n"
-                            + "  'changelog-mode' = 'I,UA,UB'\n"
+                            + "  f0 ARRAY<STRING>,"
+                            + "  f1 INT"
+                            + ") WITH ("
+                            + "  'connector' = 'values',"
+                            + "  'data-id' = '%s',"
+                            + "  'bounded' = 'true',"
+                            + "  'changelog-mode' = '%s'"
                             + ")";
 
-            String f1;
-            List<Row> inputRecords;
-            if (partialUpdate) {
-                f1 = ", f1 INT";
-                inputRecords =
-                        Arrays.asList(
-                                Row.ofKind(RowKind.INSERT, 1, new String[] {"A", "B"}, 10),
-                                Row.ofKind(RowKind.UPDATE_BEFORE, 1, new String[] {"A", "B"}, 10),
-                                Row.ofKind(RowKind.UPDATE_AFTER, 1, new String[] {"C", "D"}, 20));
-            } else {
-                f1 = "";
-                inputRecords =
-                        Arrays.asList(
-                                Row.ofKind(RowKind.INSERT, 1, new String[] {"A", "B"}),
-                                Row.ofKind(RowKind.UPDATE_BEFORE, 1, new String[] {"A", "B"}),
-                                Row.ofKind(RowKind.UPDATE_AFTER, 1, new String[] {"C", "D"}));
-            }
-            streamSqlIter(temporaryTable, f1, TestValuesTableFactory.registerData(inputRecords))
-                    .close();
+            // 1 only exists single key record
+            sql("INSERT INTO test_collect VALUES (1, ARRAY['A', 'B'], 1)");
+            List<Row> result = select.collect(1);
+            checkOneRecord(result.get(0), 1, "A", "B");
 
-            sEnv.executeSql("INSERT INTO test_collect SELECT * FROM INPUT").await();
+            // 1.1 UB + UA (CANNOT handle)
+            List<Row> inputRecords =
+                    Arrays.asList(
+                            Row.ofKind(RowKind.UPDATE_BEFORE, 1, new String[] {"A", "B"}, 2),
+                            Row.ofKind(RowKind.UPDATE_AFTER, 1, new String[] {"C", "D"}, 3));
+            sEnv.executeSql(
+                            String.format(
+                                    temporaryTableTemplate,
+                                    "INPUT11",
+                                    TestValuesTableFactory.registerData(inputRecords),
+                                    "UB,UA"))
+                    .await();
+            sEnv.executeSql("INSERT INTO test_collect SELECT * FROM INPUT11").await();
 
-            List<Row> result = sql("SELECT * FROM test_collect");
-            assertThat(result.size()).isEqualTo(1);
-            // if not retracted, the result would be ['A', 'B', 'C', 'D']
-            checkOneRecord(result.get(0), 1, "C", "D");
+            result = select.collect(2);
+            assertThat(result.get(0).getKind()).isEqualTo(RowKind.UPDATE_BEFORE);
+            checkOneRecord(result.get(0), 1, "A", "B");
+            assertThat(result.get(1).getKind()).isEqualTo(RowKind.UPDATE_AFTER);
+            checkOneRecord(result.get(1), 1, "A", "B", "C", "D");
+
+            // 1.2 -D
+            inputRecords =
+                    Collections.singletonList(
+                            Row.ofKind(RowKind.DELETE, 1, new String[] {"C", "D"}, 4));
+            sEnv.executeSql(
+                            String.format(
+                                    temporaryTableTemplate,
+                                    "INPUT12",
+                                    TestValuesTableFactory.registerData(inputRecords),
+                                    "D"))
+                    .await();
+            sEnv.executeSql("INSERT INTO test_collect SELECT * FROM INPUT12").await();
+
+            result = select.collect(2);
+            assertThat(result.get(0).getKind()).isEqualTo(RowKind.UPDATE_BEFORE);
+            checkOneRecord(result.get(0), 1, "A", "B", "C", "D");
+            assertThat(result.get(1).getKind()).isEqualTo(RowKind.UPDATE_AFTER);
+            checkOneRecord(result.get(1), 1, "A", "B");
+
+            // 2 exists multiple key records
+            sql("INSERT INTO test_collect VALUES (2, ARRAY['A', 'B'], 5), (3, ARRAY['A', 'B'], 6)");
+            result = select.collect(2);
+            checkOneRecord(result.get(0), 2, "A", "B");
+            checkOneRecord(result.get(1), 3, "A", "B");
+
+            // 2.1 UB + UA (CANNOT handle)
+            inputRecords =
+                    Arrays.asList(
+                            Row.ofKind(RowKind.UPDATE_BEFORE, 2, new String[] {"A", "B"}, 7),
+                            Row.ofKind(RowKind.UPDATE_AFTER, 2, new String[] {"C", "D"}, 8));
+            sEnv.executeSql(
+                            String.format(
+                                    temporaryTableTemplate,
+                                    "INPUT21",
+                                    TestValuesTableFactory.registerData(inputRecords),
+                                    "UB,UA"))
+                    .await();
+            sEnv.executeSql("INSERT INTO test_collect SELECT * FROM INPUT21").await();
+
+            result = select.collect(2);
+            assertThat(result.get(0).getKind()).isEqualTo(RowKind.UPDATE_BEFORE);
+            checkOneRecord(result.get(0), 2, "A", "B");
+            assertThat(result.get(1).getKind()).isEqualTo(RowKind.UPDATE_AFTER);
+            checkOneRecord(result.get(1), 2, "A", "B", "C", "D");
+
+            // 2.2 -D
+            inputRecords =
+                    Collections.singletonList(Row.ofKind(RowKind.DELETE, 3, new String[] {"A"}, 9));
+            sEnv.executeSql(
+                            String.format(
+                                    temporaryTableTemplate,
+                                    "INPUT22",
+                                    TestValuesTableFactory.registerData(inputRecords),
+                                    "D"))
+                    .await();
+            sEnv.executeSql("INSERT INTO test_collect SELECT * FROM INPUT22").await();
+
+            result = select.collect(2);
+            assertThat(result.get(0).getKind()).isEqualTo(RowKind.UPDATE_BEFORE);
+            checkOneRecord(result.get(0), 3, "A", "B");
+            assertThat(result.get(1).getKind()).isEqualTo(RowKind.UPDATE_AFTER);
+            checkOneRecord(result.get(1), 3, "B");
+
+            select.close();
         }
 
         private void checkOneRecord(Row row, int id, String... elements) {
@@ -1654,6 +1720,94 @@ public class PreAggregationITCase {
                 assertThat((Map<Object, Object>) row.getField(1))
                         .containsExactlyInAnyOrderEntriesOf(map);
             }
+        }
+    }
+
+    /** ITCase for last non-null value aggregate function. */
+    public static class FieldsDefaultAggregationITCase extends CatalogITCaseBase {
+        @Override
+        protected int defaultParallelism() {
+            // set parallelism to 1 so that the order of input data is determined
+            return 1;
+        }
+
+        @Override
+        protected List<String> ddl() {
+            return Collections.singletonList(
+                    "CREATE TABLE IF NOT EXISTS test_default_agg_func ("
+                            + "j INT, k INT, "
+                            + "a INT, "
+                            + "b INT, "
+                            + "i DATE,"
+                            + "PRIMARY KEY (j,k) NOT ENFORCED)"
+                            + " WITH ('merge-engine'='aggregation', "
+                            + "'fields.default-aggregate-function'='first_non_null_value', "
+                            + "'fields.i.aggregate-function'='last_non_null_value'"
+                            + ");");
+        }
+
+        @Test
+        public void testMergeInMemory() {
+            // VALUES does not guarantee order, but order is important for last value aggregations.
+            // So we need to sort the input data.
+            batchSql(
+                    "CREATE TABLE myTable AS "
+                            + "SELECT b, c, d, e, f FROM "
+                            + "(VALUES "
+                            + "  (1, 1, 2, CAST(NULL AS INT), 4, CAST('2020-01-01' AS DATE)),"
+                            + "  (2, 1, 2, 2, CAST(NULL as INT), CAST('2020-01-02' AS DATE)),"
+                            + "  (3, 1, 2, 3, 5, CAST(NULL AS DATE))"
+                            + ") AS V(a, b, c, d, e, f) "
+                            + "ORDER BY a");
+            batchSql("INSERT INTO test_default_agg_func SELECT * FROM myTable");
+            List<Row> result = batchSql("SELECT * FROM test_default_agg_func");
+            assertThat(result)
+                    .containsExactlyInAnyOrder(Row.of(1, 2, 2, 4, LocalDate.of(2020, 1, 2)));
+        }
+
+        @Test
+        public void testMergeRead() {
+            batchSql(
+                    "INSERT INTO test_default_agg_func VALUES (1, 2, CAST(NULL AS INT), 3, CAST('2020-01-01' AS DATE))");
+            batchSql(
+                    "INSERT INTO test_default_agg_func VALUES (1, 2, 2, CAST(NULL AS INT), CAST('2020-01-02' AS DATE))");
+            batchSql("INSERT INTO test_default_agg_func VALUES (1, 2, 3, 5, CAST(NULL AS DATE))");
+
+            List<Row> result = batchSql("SELECT * FROM test_default_agg_func");
+            assertThat(result)
+                    .containsExactlyInAnyOrder(Row.of(1, 2, 2, 3, LocalDate.of(2020, 1, 2)));
+        }
+
+        @Test
+        public void testMergeCompaction() {
+            // Wait compaction
+            batchSql("ALTER TABLE test_default_agg_func SET ('commit.force-compact'='true')");
+
+            // key 1 2
+            batchSql(
+                    "INSERT INTO test_default_agg_func VALUES (1, 2, CAST(NULL AS INT), 3, CAST('2020-01-01' AS DATE))");
+            batchSql(
+                    "INSERT INTO test_default_agg_func VALUES (1, 2, 2, CAST(NULL AS INT), CAST('2020-01-02' AS DATE))");
+            batchSql("INSERT INTO test_default_agg_func VALUES (1, 2, 3, 5, CAST(NULL AS DATE))");
+
+            // key 1 3
+            batchSql(
+                    "INSERT INTO test_default_agg_func VALUES (1, 3, 3, 4, CAST('2020-01-01' AS DATE))");
+            batchSql("INSERT INTO test_default_agg_func VALUES (1, 3, 2, 6, CAST(NULL AS DATE))");
+            batchSql(
+                    "INSERT INTO test_default_agg_func VALUES (1, 3, CAST(NULL AS INT), CAST(NULL AS INT), CAST('2022-01-02' AS DATE))");
+
+            assertThat(batchSql("SELECT * FROM test_default_agg_func"))
+                    .containsExactlyInAnyOrder(
+                            Row.of(1, 2, 2, 3, LocalDate.of(2020, 1, 2)),
+                            Row.of(1, 3, 3, 4, LocalDate.of(2022, 1, 2)));
+        }
+
+        @Test
+        public void testStreamingRead() {
+            assertThatThrownBy(
+                    () -> sEnv.from("test_default_agg_func").execute().print(),
+                    "Pre-aggregate continuous reading is not supported");
         }
     }
 }

@@ -30,6 +30,7 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.Path;
+import org.apache.orc.CompressionKind;
 import org.apache.orc.OrcConf;
 import org.apache.orc.OrcFile;
 import org.apache.orc.impl.PhysicalFsWriter;
@@ -42,6 +43,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
 
+import static org.apache.paimon.format.OrcOptions.ORC_WRITE_BATCH_SIZE;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
@@ -103,11 +105,11 @@ public class OrcWriterFactory implements FormatWriterFactory {
 
     @Override
     public FormatWriter create(PositionOutputStream out, String compression) throws IOException {
-        if (null != compression) {
-            writerProperties.setProperty(OrcConf.COMPRESS.getAttribute(), compression);
+        OrcFile.WriterOptions opts = getWriterOptions();
+        if (!writerProperties.containsKey(OrcConf.COMPRESS.getAttribute())) {
+            opts.compress(CompressionKind.valueOf(compression.toUpperCase()));
         }
 
-        OrcFile.WriterOptions opts = getWriterOptions();
         opts.physicalWriter(
                 new PhysicalFsWriter(
                         new FSDataOutputStream(out, null) {
@@ -128,7 +130,7 @@ public class OrcWriterFactory implements FormatWriterFactory {
                 vectorizer,
                 new WriterImpl(null, unusedPath, opts),
                 out,
-                coreOptions.orcWriteBatch());
+                coreOptions.toConfiguration().get(ORC_WRITE_BATCH_SIZE));
     }
 
     @VisibleForTesting

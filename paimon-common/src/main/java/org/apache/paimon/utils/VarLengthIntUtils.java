@@ -29,6 +29,9 @@ import java.io.IOException;
 /** Utils for encoding int/long to var length bytes. */
 public final class VarLengthIntUtils {
 
+    public static final int MAX_VAR_LONG_SIZE = 9;
+    public static final int MAX_VAR_INT_SIZE = 5;
+
     /** @return bytes length. */
     public static int encodeLong(DataOutput os, long value) throws IOException {
 

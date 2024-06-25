@@ -26,7 +26,7 @@ under the License.
 
 # Overview
 
-Apache Paimon(incubating)'s Architecture:
+Apache Paimon's Architecture:
 
 {{< img src="/img/architecture.png">}}
 

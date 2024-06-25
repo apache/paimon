@@ -404,9 +404,16 @@ public class ParquetRowDataWriter {
 
         @Override
         public void write(InternalRow row, int ordinal) {
-            recordConsumer.startGroup();
+            writeMapData(row.getMap(ordinal));
+        }
 
-            InternalMap mapData = row.getMap(ordinal);
+        @Override
+        public void write(InternalArray arrayData, int ordinal) {
+            writeMapData(arrayData.getMap(ordinal));
+        }
+
+        private void writeMapData(InternalMap mapData) {
+            recordConsumer.startGroup();
 
             if (mapData != null && mapData.size() > 0) {
                 recordConsumer.startField(repeatedGroupName, 0);
@@ -435,9 +442,6 @@ public class ParquetRowDataWriter {
             }
             recordConsumer.endGroup();
         }
-
-        @Override
-        public void write(InternalArray arrayData, int ordinal) {}
     }
 
     /** It writes an array type field to parquet. */
@@ -461,8 +465,16 @@ public class ParquetRowDataWriter {
 
         @Override
         public void write(InternalRow row, int ordinal) {
+            writeArrayData(row.getArray(ordinal));
+        }
+
+        @Override
+        public void write(InternalArray arrayData, int ordinal) {
+            writeArrayData(arrayData.getArray(ordinal));
+        }
+
+        private void writeArrayData(InternalArray arrayData) {
             recordConsumer.startGroup();
-            InternalArray arrayData = row.getArray(ordinal);
             int listLength = arrayData.size();
 
             if (listLength > 0) {
@@ -481,9 +493,6 @@ public class ParquetRowDataWriter {
             }
             recordConsumer.endGroup();
         }
-
-        @Override
-        public void write(InternalArray arrayData, int ordinal) {}
     }
 
     /** It writes a row type field to parquet. */
@@ -522,7 +531,12 @@ public class ParquetRowDataWriter {
         }
 
         @Override
-        public void write(InternalArray arrayData, int ordinal) {}
+        public void write(InternalArray arrayData, int ordinal) {
+            recordConsumer.startGroup();
+            InternalRow rowData = arrayData.getRow(ordinal, fieldWriters.length);
+            write(rowData);
+            recordConsumer.endGroup();
+        }
     }
 
     private Binary timestampToInt96(Timestamp timestamp) {

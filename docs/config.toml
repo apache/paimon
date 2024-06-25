@@ -34,23 +34,23 @@ pygmentsUseClasses = true
   # we change the version for the complete docs when forking of a release branch
   # etc.
   # The full version string as referenced in Maven (e.g. 1.2.1)
-  Version = "0.8-SNAPSHOT"
+  Version = "0.9-SNAPSHOT"
 
   # For stable releases, leave the bugfix version out (e.g. 1.2). For snapshot
   # release this should be the same as the regular version
-  VersionTitle = "0.8-SNAPSHOT"
+  VersionTitle = "0.9-SNAPSHOT"
 
   # The branch for this version of Apache Paimon
   Branch = "master"
 
   # The github repository for Apache Paimon
-  Repo = "//github.com/apache/incubator-paimon"
+  Repo = "//github.com/apache/paimon"
 
-  GithubRepo = "https://github.com/apache/incubator-paimon.git"
+  GithubRepo = "https://github.com/apache/paimon.git"
 
-  TrinoGithubRepo = "https://github.com/apache/incubator-paimon-trino.git"
+  TrinoGithubRepo = "https://github.com/apache/paimon-trino.git"
 
-  PrestoGithubRepo = "https://github.com/apache/incubator-paimon-presto.git"
+  PrestoGithubRepo = "https://github.com/apache/paimon-presto.git"
 
   # This suffix is appended to the Scala-dependent Maven artifact names
   ScalaVersion = "_2.12"
@@ -64,12 +64,15 @@ pygmentsUseClasses = true
     ["JavaDocs", "//paimon.apache.org/docs/master/api/java/"],
   ]
 
-  StableDocs = "https://paimon.apache.org/docs/0.7"
+  StableDocs = "https://paimon.apache.org/docs/0.8"
 
   PreviousDocs = [
     ["master", "https://paimon.apache.org/docs/master"],
-    ["stable", "https://paimon.apache.org/docs/0.7"],
+    ["stable", "https://paimon.apache.org/docs/0.8"],
+    ["0.8", "https://paimon.apache.org/docs/0.8"],
     ["0.7", "https://paimon.apache.org/docs/0.7"],
+    ["0.6", "https://paimon.apache.org/docs/0.6"],
+    ["0.5", "https://paimon.apache.org/docs/0.5"]
   ]
 
   BookSection = '/'

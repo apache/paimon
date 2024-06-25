@@ -64,9 +64,6 @@ public class DateTimeUtils {
     /** The UTC time zone. */
     public static final TimeZone UTC_ZONE = TimeZone.getTimeZone("UTC");
 
-    /** The local time zone. */
-    public static final TimeZone LOCAL_TZ = TimeZone.getDefault();
-
     private static final DateTimeFormatter DEFAULT_TIMESTAMP_FORMATTER =
             new DateTimeFormatterBuilder()
                     .appendPattern("yyyy-[MM][M]-[dd][d]")
@@ -83,7 +80,7 @@ public class DateTimeUtils {
     public static java.sql.Date toSQLDate(int v) {
         // note that, in this case, can't handle Daylight Saving Time
         final long t = v * MILLIS_PER_DAY;
-        return new java.sql.Date(t - LOCAL_TZ.getOffset(t));
+        return new java.sql.Date(t - TimeZone.getDefault().getOffset(t));
     }
 
     /**
@@ -92,7 +89,7 @@ public class DateTimeUtils {
      */
     public static java.sql.Time toSQLTime(int v) {
         // note that, in this case, can't handle Daylight Saving Time
-        return new java.sql.Time(v - LOCAL_TZ.getOffset(v));
+        return new java.sql.Time(v - TimeZone.getDefault().getOffset(v));
     }
 
     /**
@@ -100,7 +97,7 @@ public class DateTimeUtils {
      * internal representation (int).
      */
     public static int toInternal(java.sql.Date date) {
-        long ts = date.getTime() + LOCAL_TZ.getOffset(date.getTime());
+        long ts = date.getTime() + TimeZone.getDefault().getOffset(date.getTime());
         return (int) (ts / MILLIS_PER_DAY);
     }
 
@@ -111,12 +108,12 @@ public class DateTimeUtils {
      * <p>Converse of {@link #toSQLTime(int)}.
      */
     public static int toInternal(java.sql.Time time) {
-        long ts = time.getTime() + LOCAL_TZ.getOffset(time.getTime());
+        long ts = time.getTime() + TimeZone.getDefault().getOffset(time.getTime());
         return (int) (ts % MILLIS_PER_DAY);
     }
 
     public static Timestamp toInternal(long millis, int nanos) {
-        return Timestamp.fromEpochMillis(millis + LOCAL_TZ.getOffset(millis), nanos);
+        return Timestamp.fromEpochMillis(millis + TimeZone.getDefault().getOffset(millis), nanos);
     }
 
     public static int toInternal(LocalDate date) {

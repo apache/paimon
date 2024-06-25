@@ -20,8 +20,6 @@ package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.KeyValue;
 
-import javax.annotation.Nullable;
-
 /**
  * Merge function to merge multiple {@link KeyValue}s.
  *
@@ -44,7 +42,6 @@ public interface MergeFunction<T> {
     /** Add the given {@link KeyValue} to the merge function. */
     void add(KeyValue kv);
 
-    /** Get current merged value. Return null if this merged result should be skipped. */
-    @Nullable
+    /** Get current merged value. */
     T getResult();
 }

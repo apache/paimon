@@ -24,6 +24,7 @@ import org.apache.paimon.CoreOptions.StreamingReadMode;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.Projection;
 import org.apache.paimon.flink.log.LogSourceProvider;
+import org.apache.paimon.flink.sink.FlinkSink;
 import org.apache.paimon.flink.source.align.AlignedContinuousFileStoreSource;
 import org.apache.paimon.flink.source.operator.MonitorFunction;
 import org.apache.paimon.flink.utils.TableScanUtils;
@@ -35,6 +36,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.ReadBuilder;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.Source;
@@ -45,33 +47,38 @@ import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.CheckpointConfig;
 import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.util.DataFormatConverters;
+import org.apache.flink.table.runtime.typeutils.ExternalTypeInfo;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
+import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.types.Row;
 
 import javax.annotation.Nullable;
 
 import java.util.List;
 import java.util.Optional;
 
+import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
 import static org.apache.paimon.CoreOptions.StreamingReadMode.FILE;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /**
- * Source builder to build a Flink {@link StaticFileStoreSource} or {@link
- * ContinuousFileStoreSource}. This is for normal read/write jobs.
+ * DataStream API for building Flink Source.
+ *
+ * @since 0.8
  */
 public class FlinkSourceBuilder {
 
-    private final ObjectIdentifier tableIdentifier;
     private final Table table;
     private final Options conf;
 
-    private boolean isContinuous = false;
+    private String sourceName;
+    private Boolean sourceBounded;
     private StreamExecutionEnvironment env;
     @Nullable private int[][] projectedFields;
     @Nullable private Predicate predicate;
@@ -81,54 +88,61 @@ public class FlinkSourceBuilder {
     @Nullable private WatermarkStrategy<RowData> watermarkStrategy;
     @Nullable private DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo;
 
-    public FlinkSourceBuilder(ObjectIdentifier tableIdentifier, Table table) {
-        this.tableIdentifier = tableIdentifier;
+    public FlinkSourceBuilder(Table table) {
         this.table = table;
+        this.sourceName = table.name();
         this.conf = Options.fromMap(table.options());
     }
 
-    public FlinkSourceBuilder withContinuousMode(boolean isContinuous) {
-        this.isContinuous = isContinuous;
-        return this;
-    }
-
-    public FlinkSourceBuilder withEnv(StreamExecutionEnvironment env) {
+    public FlinkSourceBuilder env(StreamExecutionEnvironment env) {
         this.env = env;
+        if (sourceBounded == null) {
+            sourceBounded = !FlinkSink.isStreaming(env);
+        }
         return this;
     }
 
-    public FlinkSourceBuilder withProjection(int[][] projectedFields) {
+    public FlinkSourceBuilder sourceName(String name) {
+        this.sourceName = name;
+        return this;
+    }
+
+    public FlinkSourceBuilder sourceBounded(boolean bounded) {
+        this.sourceBounded = bounded;
+        return this;
+    }
+
+    public FlinkSourceBuilder projection(int[] projectedFields) {
+        return projection(Projection.of(projectedFields).toNestedIndexes());
+    }
+
+    public FlinkSourceBuilder projection(int[][] projectedFields) {
         this.projectedFields = projectedFields;
         return this;
     }
 
-    public FlinkSourceBuilder withPredicate(Predicate predicate) {
+    public FlinkSourceBuilder predicate(Predicate predicate) {
         this.predicate = predicate;
         return this;
     }
 
-    public FlinkSourceBuilder withLimit(@Nullable Long limit) {
+    public FlinkSourceBuilder limit(@Nullable Long limit) {
         this.limit = limit;
         return this;
     }
 
-    public FlinkSourceBuilder withLogSourceProvider(LogSourceProvider logSourceProvider) {
-        this.logSourceProvider = logSourceProvider;
-        return this;
-    }
-
-    public FlinkSourceBuilder withParallelism(@Nullable Integer parallelism) {
+    public FlinkSourceBuilder sourceParallelism(@Nullable Integer parallelism) {
         this.parallelism = parallelism;
         return this;
     }
 
-    public FlinkSourceBuilder withWatermarkStrategy(
+    public FlinkSourceBuilder watermarkStrategy(
             @Nullable WatermarkStrategy<RowData> watermarkStrategy) {
         this.watermarkStrategy = watermarkStrategy;
         return this;
     }
 
-    public FlinkSourceBuilder withDynamicPartitionFilteringFields(
+    public FlinkSourceBuilder dynamicPartitionFilteringFields(
             List<String> dynamicPartitionFilteringFields) {
         if (dynamicPartitionFilteringFields != null && !dynamicPartitionFilteringFields.isEmpty()) {
             checkState(
@@ -141,6 +155,12 @@ public class FlinkSourceBuilder {
                             ((FileStoreTable) table).schema().logicalPartitionType(),
                             dynamicPartitionFilteringFields);
         }
+        return this;
+    }
+
+    @Deprecated
+    FlinkSourceBuilder logSourceProvider(LogSourceProvider logSourceProvider) {
+        this.logSourceProvider = logSourceProvider;
         return this;
     }
 
@@ -172,7 +192,7 @@ public class FlinkSourceBuilder {
                         limit,
                         table instanceof FileStoreTable
                                 ? ((FileStoreTable) table).bucketMode()
-                                : BucketMode.FIXED));
+                                : BucketMode.HASH_FIXED));
     }
 
     private DataStream<RowData> buildAlignedContinuousFileSource() {
@@ -184,7 +204,7 @@ public class FlinkSourceBuilder {
                         limit,
                         table instanceof FileStoreTable
                                 ? ((FileStoreTable) table).bucketMode()
-                                : BucketMode.FIXED));
+                                : BucketMode.HASH_FIXED));
     }
 
     private DataStream<RowData> toDataStream(Source<RowData, ?, ?> source) {
@@ -194,7 +214,7 @@ public class FlinkSourceBuilder {
                         watermarkStrategy == null
                                 ? WatermarkStrategy.noWatermarks()
                                 : watermarkStrategy,
-                        tableIdentifier.asSummaryString(),
+                        sourceName,
                         produceTypeInfo());
         if (parallelism != null) {
             dataStream.setParallelism(parallelism);
@@ -212,44 +232,59 @@ public class FlinkSourceBuilder {
         return InternalTypeInfo.of(produceType);
     }
 
+    /** Build source {@link DataStream} with {@link RowData}. */
+    public DataStream<Row> buildForRow() {
+        DataType rowType = fromLogicalToDataType(toLogicalType(table.rowType()));
+        DataType[] fieldDataTypes = rowType.getChildren().toArray(new DataType[0]);
+
+        DataFormatConverters.RowConverter converter =
+                new DataFormatConverters.RowConverter(fieldDataTypes);
+        DataStream<RowData> source = build();
+        return source.map((MapFunction<RowData, Row>) converter::toExternal)
+                .setParallelism(source.getParallelism())
+                .returns(ExternalTypeInfo.of(rowType));
+    }
+
+    /** Build source {@link DataStream} with {@link RowData}. */
     public DataStream<RowData> build() {
         if (env == null) {
             throw new IllegalArgumentException("StreamExecutionEnvironment should not be null.");
         }
 
-        if (isContinuous) {
-            TableScanUtils.streamingReadingValidate(table);
+        if (sourceBounded) {
+            return buildStaticFileSource();
+        }
 
-            // TODO visit all options through CoreOptions
-            StartupMode startupMode = CoreOptions.startupMode(conf);
-            StreamingReadMode streamingReadMode = CoreOptions.streamReadType(conf);
+        TableScanUtils.streamingReadingValidate(table);
 
-            if (logSourceProvider != null && streamingReadMode != FILE) {
-                if (startupMode != StartupMode.LATEST_FULL) {
-                    return toDataStream(logSourceProvider.createSource(null));
-                } else {
-                    return toDataStream(
-                            HybridSource.<RowData, StaticFileStoreSplitEnumerator>builder(
-                                            LogHybridSourceFactory.buildHybridFirstSource(
-                                                    table, projectedFields, predicate))
-                                    .addSource(
-                                            new LogHybridSourceFactory(logSourceProvider),
-                                            Boundedness.CONTINUOUS_UNBOUNDED)
-                                    .build());
-                }
+        // TODO visit all options through CoreOptions
+        StartupMode startupMode = CoreOptions.startupMode(conf);
+        StreamingReadMode streamingReadMode = CoreOptions.streamReadType(conf);
+
+        if (logSourceProvider != null && streamingReadMode != FILE) {
+            logSourceProvider.preCreateSource();
+            if (startupMode != StartupMode.LATEST_FULL) {
+                return toDataStream(logSourceProvider.createSource(null));
             } else {
-                if (conf.get(FlinkConnectorOptions.SOURCE_CHECKPOINT_ALIGN_ENABLED)) {
-                    return buildAlignedContinuousFileSource();
-                } else if (conf.contains(CoreOptions.CONSUMER_ID)
-                        && conf.get(CoreOptions.CONSUMER_CONSISTENCY_MODE)
-                                == CoreOptions.ConsumerMode.EXACTLY_ONCE) {
-                    return buildContinuousStreamOperator();
-                } else {
-                    return buildContinuousFileSource();
-                }
+                return toDataStream(
+                        HybridSource.<RowData, StaticFileStoreSplitEnumerator>builder(
+                                        LogHybridSourceFactory.buildHybridFirstSource(
+                                                table, projectedFields, predicate))
+                                .addSource(
+                                        new LogHybridSourceFactory(logSourceProvider),
+                                        Boundedness.CONTINUOUS_UNBOUNDED)
+                                .build());
             }
         } else {
-            return buildStaticFileSource();
+            if (conf.get(FlinkConnectorOptions.SOURCE_CHECKPOINT_ALIGN_ENABLED)) {
+                return buildAlignedContinuousFileSource();
+            } else if (conf.contains(CoreOptions.CONSUMER_ID)
+                    && conf.get(CoreOptions.CONSUMER_CONSISTENCY_MODE)
+                            == CoreOptions.ConsumerMode.EXACTLY_ONCE) {
+                return buildContinuousStreamOperator();
+            } else {
+                return buildContinuousFileSource();
+            }
         }
     }
 
@@ -262,7 +297,7 @@ public class FlinkSourceBuilder {
         dataStream =
                 MonitorFunction.buildSource(
                         env,
-                        tableIdentifier.asSummaryString(),
+                        sourceName,
                         produceTypeInfo(),
                         createReadBuilder(),
                         conf.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL).toMillis(),
@@ -276,7 +311,7 @@ public class FlinkSourceBuilder {
         return dataStream;
     }
 
-    public void assertStreamingConfigurationForAlignMode(StreamExecutionEnvironment env) {
+    private void assertStreamingConfigurationForAlignMode(StreamExecutionEnvironment env) {
         CheckpointConfig checkpointConfig = env.getCheckpointConfig();
         checkArgument(
                 checkpointConfig.isCheckpointingEnabled(),

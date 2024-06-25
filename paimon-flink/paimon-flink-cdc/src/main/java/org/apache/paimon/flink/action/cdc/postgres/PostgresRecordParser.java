@@ -19,14 +19,17 @@
 package org.apache.paimon.flink.action.cdc.postgres;
 
 import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
+import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mysql.format.DebeziumEvent;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
@@ -61,17 +64,10 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.function.Function;
 
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnCaseConvertAndDuplicateCheck;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.recordKeyDuplicateErrMsg;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
 import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.decimalLogicalName;
@@ -81,13 +77,13 @@ import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
  * A parser for PostgreSQL Debezium JSON strings, converting them into a list of {@link
  * RichCdcMultiplexRecord}s.
  */
-public class PostgresRecordParser implements FlatMapFunction<String, RichCdcMultiplexRecord> {
+public class PostgresRecordParser
+        implements FlatMapFunction<CdcSourceRecord, RichCdcMultiplexRecord> {
 
     private static final Logger LOG = LoggerFactory.getLogger(PostgresRecordParser.class);
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ZoneId serverTimeZone;
-    private final boolean caseSensitive;
     private final List<ComputedColumn> computedColumns;
     private final TypeMapping typeMapping;
 
@@ -100,24 +96,9 @@ public class PostgresRecordParser implements FlatMapFunction<String, RichCdcMult
 
     public PostgresRecordParser(
             Configuration postgresConfig,
-            boolean caseSensitive,
-            TypeMapping typeMapping,
-            CdcMetadataConverter[] metadataConverters) {
-        this(
-                postgresConfig,
-                caseSensitive,
-                Collections.emptyList(),
-                typeMapping,
-                metadataConverters);
-    }
-
-    public PostgresRecordParser(
-            Configuration postgresConfig,
-            boolean caseSensitive,
             List<ComputedColumn> computedColumns,
             TypeMapping typeMapping,
             CdcMetadataConverter[] metadataConverters) {
-        this.caseSensitive = caseSensitive;
         this.computedColumns = computedColumns;
         this.typeMapping = typeMapping;
         this.metadataConverters = metadataConverters;
@@ -132,8 +113,9 @@ public class PostgresRecordParser implements FlatMapFunction<String, RichCdcMult
     }
 
     @Override
-    public void flatMap(String rawEvent, Collector<RichCdcMultiplexRecord> out) throws Exception {
-        root = objectMapper.readValue(rawEvent, DebeziumEvent.class);
+    public void flatMap(CdcSourceRecord rawEvent, Collector<RichCdcMultiplexRecord> out)
+            throws Exception {
+        root = objectMapper.readValue((String) rawEvent.getValue(), DebeziumEvent.class);
 
         currentTable = root.payload().source().get(AbstractSourceInfo.TABLE_NAME_KEY).asText();
         databaseName = root.payload().source().get(AbstractSourceInfo.DATABASE_NAME_KEY).asText();
@@ -141,7 +123,7 @@ public class PostgresRecordParser implements FlatMapFunction<String, RichCdcMult
         extractRecords().forEach(out::collect);
     }
 
-    private LinkedHashMap<String, DataType> extractFieldTypes(DebeziumEvent.Field schema) {
+    private List<DataField> extractFields(DebeziumEvent.Field schema) {
         Map<String, DebeziumEvent.Field> afterFields = schema.afterFields();
         Preconditions.checkArgument(
                 !afterFields.isEmpty(),
@@ -149,27 +131,21 @@ public class PostgresRecordParser implements FlatMapFunction<String, RichCdcMult
                         + "Please make sure that `includeSchema` is true "
                         + "in the JsonDebeziumDeserializationSchema you created");
 
-        LinkedHashMap<String, DataType> fieldTypes = new LinkedHashMap<>(afterFields.size());
-        Set<String> existedFields = new HashSet<>();
-        Function<String, String> columnDuplicateErrMsg = columnDuplicateErrMsg(currentTable);
+        RowType.Builder rowType = RowType.builder();
         afterFields.forEach(
                 (key, value) -> {
-                    String columnName =
-                            columnCaseConvertAndDuplicateCheck(
-                                    key, existedFields, caseSensitive, columnDuplicateErrMsg);
-
                     DataType dataType = extractFieldType(value);
                     dataType =
                             dataType.copy(
                                     typeMapping.containsMode(TO_NULLABLE) || value.optional());
 
-                    fieldTypes.put(columnName, dataType);
+                    rowType.field(key, dataType);
                 });
-        return fieldTypes;
+        return rowType.build().getFields();
     }
 
     /**
-     * Extract field types from json records, see <a
+     * Extract fields from json records, see <a
      * href="https://debezium.io/documentation/reference/stable/connectors/postgresql.html#postgresql-data-types">postgresql-data-types</a>.
      */
     private DataType extractFieldType(DebeziumEvent.Field field) {
@@ -236,19 +212,17 @@ public class PostgresRecordParser implements FlatMapFunction<String, RichCdcMult
 
         Map<String, String> before = extractRow(root.payload().before());
         if (!before.isEmpty()) {
-            before = mapKeyCaseConvert(before, caseSensitive, recordKeyDuplicateErrMsg(before));
             records.add(createRecord(RowKind.DELETE, before));
         }
 
         Map<String, String> after = extractRow(root.payload().after());
         if (!after.isEmpty()) {
-            after = mapKeyCaseConvert(after, caseSensitive, recordKeyDuplicateErrMsg(after));
-            LinkedHashMap<String, DataType> fieldTypes = extractFieldTypes(root.schema());
+            List<DataField> fields = extractFields(root.schema());
             records.add(
                     new RichCdcMultiplexRecord(
                             databaseName,
                             currentTable,
-                            fieldTypes,
+                            fields,
                             Collections.emptyList(),
                             new CdcRecord(RowKind.INSERT, after)));
         }
@@ -395,7 +369,7 @@ public class PostgresRecordParser implements FlatMapFunction<String, RichCdcMult
         return new RichCdcMultiplexRecord(
                 databaseName,
                 currentTable,
-                new LinkedHashMap<>(0),
+                Collections.emptyList(),
                 Collections.emptyList(),
                 new CdcRecord(rowKind, data));
     }

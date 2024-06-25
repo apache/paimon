@@ -108,16 +108,22 @@ public class GlobalFullCompactionSinkWrite extends StoreSinkWriteImpl {
     }
 
     @Override
+    @Nullable
     public SinkRecord write(InternalRow rowData) throws Exception {
         SinkRecord sinkRecord = super.write(rowData);
-        touchBucket(sinkRecord.partition(), sinkRecord.bucket());
+        if (sinkRecord != null) {
+            touchBucket(sinkRecord.partition(), sinkRecord.bucket());
+        }
         return sinkRecord;
     }
 
     @Override
+    @Nullable
     public SinkRecord write(InternalRow rowData, int bucket) throws Exception {
         SinkRecord sinkRecord = super.write(rowData, bucket);
-        touchBucket(sinkRecord.partition(), bucket);
+        if (sinkRecord != null) {
+            touchBucket(sinkRecord.partition(), bucket);
+        }
         return sinkRecord;
     }
 

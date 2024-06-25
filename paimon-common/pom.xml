@@ -25,7 +25,7 @@ under the License.
     <parent>
         <artifactId>paimon-parent</artifactId>
         <groupId>org.apache.paimon</groupId>
-        <version>0.8-SNAPSHOT</version>
+        <version>0.9-SNAPSHOT</version>
     </parent>
 
     <artifactId>paimon-common</artifactId>
@@ -133,6 +133,24 @@ under the License.
             <groupId>it.unimi.dsi</groupId>
             <artifactId>fastutil</artifactId>
             <version>8.5.12</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.roaringbitmap</groupId>
+            <artifactId>RoaringBitmap</artifactId>
+            <version>1.0.5</version>
+        </dependency>
+
+        <dependency>
+            <groupId>net.openhft</groupId>
+            <artifactId>zero-allocation-hashing</artifactId>
+            <version>0.16</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.github.davidmoten</groupId>
+            <artifactId>hilbert-curve</artifactId>
+            <version>0.2.2</version>
         </dependency>
 
         <!-- Test -->
@@ -266,6 +284,10 @@ under the License.
                                     <include>org.antlr:antlr4-runtime</include>
                                     <include>org.codehaus.janino:*</include>
                                     <include>it.unimi.dsi:fastutil</include>
+                                    <include>org.roaringbitmap:RoaringBitmap</include>
+                                    <include>net.openhft:zero-allocation-hashing</include>
+                                    <include>com.github.davidmoten:hilbert-curve</include>
+                                    <include>com.github.davidmoten:guava-mini</include>
                                 </includes>
                             </artifactSet>
                             <filters>
@@ -300,6 +322,22 @@ under the License.
                                 <relocation>
                                     <pattern>io.airlift</pattern>
                                     <shadedPattern>org.apache.paimon.shade.io.airlift</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.roaringbitmap</pattern>
+                                    <shadedPattern>org.apache.paimon.shade.org.roaringbitmap</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>net.openhft.hashing</pattern>
+                                    <shadedPattern>org.apache.paimon.shade.net.openhft.hashing</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.davidmoten.hilbert</pattern>
+                                    <shadedPattern>org.apache.paimon.shade.org.davidmoten.hilbert</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>com.github.davidmoten.guavamini</pattern>
+                                    <shadedPattern>org.apache.paimon.shade.com.github.davidmoten.guavamini</shadedPattern>
                                 </relocation>
                             </relocations>
                             <minimizeJar>true</minimizeJar>

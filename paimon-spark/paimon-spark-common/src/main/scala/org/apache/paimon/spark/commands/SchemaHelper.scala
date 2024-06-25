@@ -18,7 +18,6 @@
 
 package org.apache.paimon.spark.commands
 
-import org.apache.paimon.schema.{SchemaMergingUtils, TableSchema}
 import org.apache.paimon.spark.SparkTypeUtils
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.types.RowType
@@ -34,8 +33,6 @@ private[spark] trait SchemaHelper extends WithFileStoreTable {
   protected var newTable: Option[FileStoreTable] = None
 
   override def table: FileStoreTable = newTable.getOrElse(originTable)
-
-  def tableSchema: TableSchema = table.schema
 
   def mergeAndCommitSchema(dataSchema: StructType, allowExplicitCast: Boolean): Unit = {
     val dataRowType = SparkTypeUtils.toPaimonType(dataSchema).asInstanceOf[RowType]

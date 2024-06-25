@@ -22,9 +22,9 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.stats.BinaryTableStats;
-import org.apache.paimon.stats.FieldStatsArraySerializer;
-import org.apache.paimon.stats.FieldStatsConverters;
+import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.stats.SimpleStatsConverter;
+import org.apache.paimon.stats.SimpleStatsConverters;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataField;
 
@@ -78,11 +78,11 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
                             .containsAll(filesName);
 
                     Function<Long, List<DataField>> schemaFields = id -> schemas.get(id).fields();
-                    FieldStatsConverters converters =
-                            new FieldStatsConverters(schemaFields, table.schema().id());
+                    SimpleStatsConverters converters =
+                            new SimpleStatsConverters(schemaFields, table.schema().id());
                     for (DataFileMeta fileMeta : fileMetaList) {
-                        BinaryTableStats stats = getTableValueStats(fileMeta);
-                        FieldStatsArraySerializer serializer =
+                        SimpleStats stats = getTableValueStats(fileMeta);
+                        SimpleStatsConverter serializer =
                                 converters.getOrCreate(fileMeta.schemaId());
                         InternalRow min = serializer.evolution(stats.minValues());
                         InternalRow max = serializer.evolution(stats.maxValues());
@@ -184,13 +184,13 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
                     assertThat(filterAllSplits).isEqualTo(allSplits);
 
                     Function<Long, List<DataField>> schemaFields = id -> schemas.get(id).fields();
-                    FieldStatsConverters converters =
-                            new FieldStatsConverters(schemaFields, table.schema().id());
+                    SimpleStatsConverters converters =
+                            new SimpleStatsConverters(schemaFields, table.schema().id());
                     Set<String> filterFileNames = new HashSet<>();
                     for (DataSplit dataSplit : filterAllSplits) {
                         for (DataFileMeta dataFileMeta : dataSplit.dataFiles()) {
-                            BinaryTableStats stats = getTableValueStats(dataFileMeta);
-                            FieldStatsArraySerializer serializer =
+                            SimpleStats stats = getTableValueStats(dataFileMeta);
+                            SimpleStatsConverter serializer =
                                     converters.getOrCreate(dataFileMeta.schemaId());
                             InternalRow min = serializer.evolution(stats.minValues());
                             InternalRow max = serializer.evolution(stats.maxValues());
@@ -263,12 +263,12 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
 
                     Set<String> filterFileNames = new HashSet<>();
                     Function<Long, List<DataField>> schemaFields = id -> schemas.get(id).fields();
-                    FieldStatsConverters converters =
-                            new FieldStatsConverters(schemaFields, table.schema().id());
+                    SimpleStatsConverters converters =
+                            new SimpleStatsConverters(schemaFields, table.schema().id());
                     for (DataSplit dataSplit : allSplits) {
                         for (DataFileMeta dataFileMeta : dataSplit.dataFiles()) {
-                            BinaryTableStats stats = getTableValueStats(dataFileMeta);
-                            FieldStatsArraySerializer serializer =
+                            SimpleStats stats = getTableValueStats(dataFileMeta);
+                            SimpleStatsConverter serializer =
                                     converters.getOrCreate(dataFileMeta.schemaId());
                             InternalRow min = serializer.evolution(stats.minValues());
                             InternalRow max = serializer.evolution(stats.maxValues());
@@ -335,7 +335,7 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
                 this::createFileStoreTable);
     }
 
-    protected abstract BinaryTableStats getTableValueStats(DataFileMeta fileMeta);
+    protected abstract SimpleStats getTableValueStats(DataFileMeta fileMeta);
 
     protected static void checkFilterRowCount(
             FileStoreTable table, int index, int value, long expectedRowCount) {

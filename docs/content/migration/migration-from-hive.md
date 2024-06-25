@@ -28,7 +28,7 @@ under the License.
 
 Apache Hive supports ORC, Parquet file formats that could be migrated to Paimon. 
 When migrating data to a paimon table, the origin table will be permanently disappeared. So please back up your data if you
-still need the original table. The migrated table will be [unaware-bucket append table]({{< ref "concepts/append-table/append-scalable-table" >}}).
+still need the original table. The migrated table will be [append table]({{< ref "append-table/append-table" >}}).
 
 Now, we can use paimon hive catalog with Migrate Table Procedure and Migrate File Procedure to totally migrate a table from hive to paimon.
 At the same time, you can use paimon hive catalog with Migrate Database Procedure to fully synchronize all tables in the database to paimon.

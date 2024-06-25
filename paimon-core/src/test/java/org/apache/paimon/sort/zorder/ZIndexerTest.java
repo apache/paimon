@@ -34,6 +34,8 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Random;
 
+import static org.apache.paimon.utils.RandomUtil.randomString;
+
 /** Tests for {@link ZIndexer}. */
 public class ZIndexerTest {
 
@@ -134,15 +136,5 @@ public class ZIndexerTest {
                 Assertions.assertThat(zOrder[j]).isEqualTo(expectedZOrder[j]);
             }
         }
-    }
-
-    public static String randomString(int length) {
-        byte[] buffer = new byte[length];
-
-        for (int i = 0; i < length; i += 1) {
-            buffer[i] = (byte) ('a' + RANDOM.nextInt(26));
-        }
-
-        return new String(buffer);
     }
 }

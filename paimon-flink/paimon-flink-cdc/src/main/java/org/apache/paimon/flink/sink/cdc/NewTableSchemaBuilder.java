@@ -20,66 +20,56 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.types.DataType;
 
 import java.io.Serializable;
-import java.util.HashSet;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
-import java.util.function.Function;
 
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnCaseConvertAndDuplicateCheck;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.listCaseConvert;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.buildPaimonSchema;
 
 /** Build schema for new table found in database synchronization. */
 public class NewTableSchemaBuilder implements Serializable {
 
     private final Map<String, String> tableConfig;
     private final boolean caseSensitive;
+    private final List<String> partitionKeys;
+    private final List<String> primaryKeys;
     private final CdcMetadataConverter[] metadataConverters;
 
     public NewTableSchemaBuilder(
             Map<String, String> tableConfig,
             boolean caseSensitive,
+            List<String> partitionKeys,
+            List<String> primaryKeys,
             CdcMetadataConverter[] metadataConverters) {
         this.tableConfig = tableConfig;
         this.caseSensitive = caseSensitive;
         this.metadataConverters = metadataConverters;
+        this.partitionKeys = partitionKeys;
+        this.primaryKeys = primaryKeys;
     }
 
     public Optional<Schema> build(RichCdcMultiplexRecord record) {
-        Schema.Builder builder = Schema.newBuilder();
-        builder.options(tableConfig);
-
-        String tableName = record.tableName();
-        tableName = tableName == null ? "UNKNOWN" : tableName;
-
-        // fields
-        Set<String> existedFields = new HashSet<>();
-        Function<String, String> columnDuplicateErrMsg = columnDuplicateErrMsg(tableName);
-
-        for (Map.Entry<String, DataType> entry : record.fieldTypes().entrySet()) {
-            String fieldName =
-                    columnCaseConvertAndDuplicateCheck(
-                            entry.getKey(), existedFields, caseSensitive, columnDuplicateErrMsg);
-
-            builder.column(fieldName, entry.getValue());
-        }
-
-        for (CdcMetadataConverter metadataConverter : metadataConverters) {
-            String metadataColumnName =
-                    columnCaseConvertAndDuplicateCheck(
-                            metadataConverter.columnName(),
-                            existedFields,
-                            caseSensitive,
-                            columnDuplicateErrMsg);
-            builder.column(metadataColumnName, metadataConverter.dataType());
-        }
-
-        builder.primaryKey(listCaseConvert(record.primaryKeys(), caseSensitive));
-
-        return Optional.of(builder.build());
+        Schema sourceSchema =
+                new Schema(
+                        record.fields(),
+                        Collections.emptyList(),
+                        record.primaryKeys(),
+                        Collections.emptyMap(),
+                        null);
+        return Optional.of(
+                buildPaimonSchema(
+                        record.tableName(),
+                        partitionKeys,
+                        primaryKeys,
+                        Collections.emptyList(),
+                        tableConfig,
+                        sourceSchema,
+                        metadataConverters,
+                        caseSensitive,
+                        false,
+                        true));
     }
 }

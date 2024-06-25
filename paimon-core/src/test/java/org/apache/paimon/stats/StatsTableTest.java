@@ -18,8 +18,8 @@
 
 package org.apache.paimon.stats;
 
-import org.apache.paimon.AbstractFileStore;
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.FileStore;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.io.DataFileMeta;
@@ -67,21 +67,22 @@ public class StatsTableTest extends TableTestBase {
                 GenericRow.of(2, 1, 1));
 
         FileStoreTable storeTable = (FileStoreTable) table;
-        AbstractFileStore<?> store = (AbstractFileStore<?>) storeTable.store();
+        FileStore<?> store = storeTable.store();
         String manifestListFile = storeTable.snapshotManager().latestSnapshot().deltaManifestList();
 
         ManifestList manifestList = store.manifestListFactory().create();
         ManifestFileMeta manifest = manifestList.read(manifestListFile).get(0);
 
         // should have partition stats
-        BinaryTableStats partitionStats = manifest.partitionStats();
+        SimpleStats partitionStats = manifest.partitionStats();
         assertThat(partitionStats.minValues().getInt(0)).isEqualTo(1);
         assertThat(partitionStats.maxValues().getInt(0)).isEqualTo(2);
 
         // should not have record stats because of NONE mode
         ManifestFile manifestFile = store.manifestFileFactory().create();
-        DataFileMeta file = manifestFile.read(manifest.fileName()).get(0).file();
-        BinaryTableStats recordStats = file.valueStats();
+        DataFileMeta file =
+                manifestFile.read(manifest.fileName(), manifest.fileSize()).get(0).file();
+        SimpleStats recordStats = file.valueStats();
         assertThat(recordStats.minValues().isNullAt(0)).isTrue();
         assertThat(recordStats.minValues().isNullAt(1)).isTrue();
         assertThat(recordStats.minValues().isNullAt(2)).isTrue();

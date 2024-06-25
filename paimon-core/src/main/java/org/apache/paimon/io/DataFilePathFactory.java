@@ -34,16 +34,16 @@ public class DataFilePathFactory {
 
     public static final String CHANGELOG_FILE_PREFIX = "changelog-";
 
-    public static final String BUCKET_PATH_PREFIX = "bucket-";
+    public static final String INDEX_PATH_SUFFIX = ".index";
 
-    private final Path bucketDir;
+    private final Path parent;
     private final String uuid;
 
     private final AtomicInteger pathCount;
     private final String formatIdentifier;
 
-    public DataFilePathFactory(Path root, String partition, int bucket, String formatIdentifier) {
-        this.bucketDir = bucketPath(root, partition, bucket);
+    public DataFilePathFactory(Path parent, String formatIdentifier) {
+        this.parent = parent;
         this.uuid = UUID.randomUUID().toString();
 
         this.pathCount = new AtomicInteger(0);
@@ -60,11 +60,11 @@ public class DataFilePathFactory {
 
     private Path newPath(String prefix) {
         String name = prefix + uuid + "-" + pathCount.getAndIncrement() + "." + formatIdentifier;
-        return new Path(bucketDir, name);
+        return new Path(parent, name);
     }
 
     public Path toPath(String fileName) {
-        return new Path(bucketDir + "/" + fileName);
+        return new Path(parent + "/" + fileName);
     }
 
     @VisibleForTesting
@@ -72,8 +72,27 @@ public class DataFilePathFactory {
         return uuid;
     }
 
-    public static Path bucketPath(Path tablePath, String partition, int bucket) {
-        return new Path(tablePath + "/" + partition + "/" + BUCKET_PATH_PREFIX + bucket);
+    public static Path dataFileToFileIndexPath(Path dataFilePath) {
+        return new Path(dataFilePath.getParent(), dataFilePath.getName() + INDEX_PATH_SUFFIX);
+    }
+
+    public static Path createNewFileIndexFilePath(Path filePath) {
+        String fileName = filePath.getName();
+        int dot = fileName.lastIndexOf(".");
+        int dash = fileName.lastIndexOf("-");
+
+        if (dash != -1) {
+            try {
+                int num = Integer.parseInt(fileName.substring(dash + 1, dot));
+                return new Path(
+                        filePath.getParent(),
+                        fileName.substring(0, dash + 1) + (num + 1) + INDEX_PATH_SUFFIX);
+            } catch (NumberFormatException ignore) {
+                // it is the first index file, has no number
+            }
+        }
+        return new Path(
+                filePath.getParent(), fileName.substring(0, dot) + "-" + 1 + INDEX_PATH_SUFFIX);
     }
 
     public static String formatIdentifier(String fileName) {

@@ -18,7 +18,6 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
@@ -46,6 +45,7 @@ public class ObjectsFile<T> {
     protected final ObjectSerializer<T> serializer;
     protected final FormatReaderFactory readerFactory;
     protected final FormatWriterFactory writerFactory;
+    protected final String compression;
     protected final PathFactory pathFactory;
 
     @Nullable private final ObjectsCache<String, T> cache;
@@ -55,15 +55,21 @@ public class ObjectsFile<T> {
             ObjectSerializer<T> serializer,
             FormatReaderFactory readerFactory,
             FormatWriterFactory writerFactory,
+            String compression,
             PathFactory pathFactory,
             @Nullable SegmentsCache<String> cache) {
         this.fileIO = fileIO;
         this.serializer = serializer;
         this.readerFactory = readerFactory;
         this.writerFactory = writerFactory;
+        this.compression = compression;
         this.pathFactory = pathFactory;
         this.cache =
                 cache == null ? null : new ObjectsCache<>(cache, serializer, this::createIterator);
+    }
+
+    public FileIO fileIO() {
+        return fileIO;
     }
 
     public long fileSize(String fileName) {
@@ -75,11 +81,20 @@ public class ObjectsFile<T> {
     }
 
     public List<T> read(String fileName) {
-        return read(fileName, Filter.alwaysTrue(), Filter.alwaysTrue());
+        return read(fileName, null);
+    }
+
+    public List<T> read(String fileName, @Nullable Long fileSize) {
+        return read(fileName, fileSize, Filter.alwaysTrue(), Filter.alwaysTrue());
     }
 
     public List<T> readWithIOException(String fileName) throws IOException {
-        return readWithIOException(fileName, Filter.alwaysTrue(), Filter.alwaysTrue());
+        return readWithIOException(fileName, null);
+    }
+
+    public List<T> readWithIOException(String fileName, @Nullable Long fileSize)
+            throws IOException {
+        return readWithIOException(fileName, fileSize, Filter.alwaysTrue(), Filter.alwaysTrue());
     }
 
     public boolean exists(String fileName) {
@@ -91,23 +106,29 @@ public class ObjectsFile<T> {
     }
 
     public List<T> read(
-            String fileName, Filter<InternalRow> loadFilter, Filter<InternalRow> readFilter) {
+            String fileName,
+            @Nullable Long fileSize,
+            Filter<InternalRow> loadFilter,
+            Filter<InternalRow> readFilter) {
         try {
-            return readWithIOException(fileName, loadFilter, readFilter);
+            return readWithIOException(fileName, fileSize, loadFilter, readFilter);
         } catch (IOException e) {
             throw new RuntimeException("Failed to read manifest list " + fileName, e);
         }
     }
 
-    public List<T> readWithIOException(
-            String fileName, Filter<InternalRow> loadFilter, Filter<InternalRow> readFilter)
+    private List<T> readWithIOException(
+            String fileName,
+            @Nullable Long fileSize,
+            Filter<InternalRow> loadFilter,
+            Filter<InternalRow> readFilter)
             throws IOException {
         if (cache != null) {
-            return cache.read(fileName, loadFilter, readFilter);
+            return cache.read(fileName, fileSize, loadFilter, readFilter);
         }
 
         RecordReader<InternalRow> reader =
-                createFormatReader(fileIO, readerFactory, pathFactory.toPath(fileName));
+                createFormatReader(fileIO, readerFactory, pathFactory.toPath(fileName), fileSize);
         if (readFilter != Filter.ALWAYS_TRUE) {
             reader = reader.filter(readFilter);
         }
@@ -124,8 +145,7 @@ public class ObjectsFile<T> {
         Path path = pathFactory.newPath();
         try {
             try (PositionOutputStream out = fileIO.newOutputStream(path, false)) {
-                FormatWriter writer =
-                        writerFactory.create(out, CoreOptions.FILE_COMPRESSION.defaultValue());
+                FormatWriter writer = writerFactory.create(out, compression);
                 try {
                     while (records.hasNext()) {
                         writer.addElement(serializer.toRow(records.next()));
@@ -143,9 +163,10 @@ public class ObjectsFile<T> {
         }
     }
 
-    private CloseableIterator<InternalRow> createIterator(String fileName) {
+    private CloseableIterator<InternalRow> createIterator(
+            String fileName, @Nullable Long fileSize) {
         try {
-            return createFormatReader(fileIO, readerFactory, pathFactory.toPath(fileName))
+            return createFormatReader(fileIO, readerFactory, pathFactory.toPath(fileName), fileSize)
                     .toCloseableIterator();
         } catch (IOException e) {
             throw new RuntimeException(e);

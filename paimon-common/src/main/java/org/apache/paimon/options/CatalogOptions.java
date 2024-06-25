@@ -40,7 +40,7 @@ public class CatalogOptions {
                     .stringType()
                     .defaultValue("filesystem")
                     .withDescription(
-                            "Metastore of paimon catalog, supports filesystem、hive and jdbc.");
+                            "Metastore of paimon catalog, supports filesystem, hive and jdbc.");
 
     public static final ConfigOption<String> URI =
             ConfigOptions.key("uri")
@@ -59,6 +59,12 @@ public class CatalogOptions {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription("Enable Catalog Lock.");
+
+    public static final ConfigOption<String> LOCK_TYPE =
+            ConfigOptions.key("lock.type")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("The Lock Type for Catalog, such as 'hive', 'zookeeper'.");
 
     public static final ConfigOption<Duration> LOCK_CHECK_MAX_SLEEP =
             key("lock-check-max-sleep")

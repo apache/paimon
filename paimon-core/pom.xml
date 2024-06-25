@@ -25,7 +25,7 @@ under the License.
     <parent>
         <artifactId>paimon-parent</artifactId>
         <groupId>org.apache.paimon</groupId>
-        <version>0.8-SNAPSHOT</version>
+        <version>0.9-SNAPSHOT</version>
     </parent>
 
     <artifactId>paimon-core</artifactId>
@@ -33,7 +33,6 @@ under the License.
 
     <properties>
         <frocksdbjni.version>6.20.3-ververica-2.0</frocksdbjni.version>
-        <RoaringBitmap.version>1.0.1</RoaringBitmap.version>
     </properties>
 
     <dependencies>
@@ -62,12 +61,6 @@ under the License.
             <artifactId>frocksdbjni</artifactId>
             <version>${frocksdbjni.version}</version>
             <scope>provided</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.roaringbitmap</groupId>
-            <artifactId>RoaringBitmap</artifactId>
-            <version>${RoaringBitmap.version}</version>
         </dependency>
 
         <!-- test dependencies -->
@@ -188,12 +181,6 @@ under the License.
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-math3</artifactId>
             <version>3.6.1</version>
-        </dependency>
-
-        <dependency>
-            <groupId>com.github.davidmoten</groupId>
-            <artifactId>hilbert-curve</artifactId>
-            <version>0.2.2</version>
         </dependency>
 
         <dependency>

@@ -111,8 +111,8 @@ public class PartitionIndex {
             long targetBucketRowNumber,
             IntPredicate loadFilter,
             IntPredicate bucketFilter) {
-        Int2ShortHashMap map = new Int2ShortHashMap();
         List<IndexManifestEntry> files = indexFileHandler.scan(HASH_INDEX, partition);
+        Int2ShortHashMap.Builder mapBuilder = Int2ShortHashMap.builder();
         Map<Integer, Long> buckets = new HashMap<>();
         for (IndexManifestEntry file : files) {
             try (IntIterator iterator = indexFileHandler.readHashIndex(file.indexFile())) {
@@ -120,7 +120,7 @@ public class PartitionIndex {
                     try {
                         int hash = iterator.next();
                         if (loadFilter.test(hash)) {
-                            map.put(hash, (short) file.bucket());
+                            mapBuilder.put(hash, (short) file.bucket());
                         }
                         if (bucketFilter.test(file.bucket())) {
                             buckets.compute(
@@ -135,6 +135,6 @@ public class PartitionIndex {
                 throw new UncheckedIOException(e);
             }
         }
-        return new PartitionIndex(map, buckets, targetBucketRowNumber);
+        return new PartitionIndex(mapBuilder.build(), buckets, targetBucketRowNumber);
     }
 }

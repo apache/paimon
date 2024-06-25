@@ -18,33 +18,33 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.paimon.codegen.CodeGenUtils;
-import org.apache.paimon.codegen.GeneratedClass;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 
 import java.util.Comparator;
+import java.util.List;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
+
+import static org.apache.paimon.codegen.CodeGenUtils.newRecordComparator;
 
 /** A {@link Supplier} that returns the comparator for the file store key. */
 public class KeyComparatorSupplier implements SerializableSupplier<Comparator<InternalRow>> {
 
     private static final long serialVersionUID = 1L;
 
-    private final GeneratedClass<RecordComparator> genRecordComparator;
+    private final List<DataType> inputTypes;
+    private final int[] sortFields;
 
     public KeyComparatorSupplier(RowType keyType) {
-        genRecordComparator =
-                CodeGenUtils.generateRecordComparator(
-                        keyType.getFieldTypes(),
-                        IntStream.range(0, keyType.getFieldCount()).toArray(),
-                        "KeyComparator");
+        this.inputTypes = keyType.getFieldTypes();
+        this.sortFields = IntStream.range(0, keyType.getFieldCount()).toArray();
     }
 
     @Override
     public RecordComparator get() {
-        return genRecordComparator.newInstance(KeyComparatorSupplier.class.getClassLoader());
+        return newRecordComparator(inputTypes, sortFields);
     }
 }

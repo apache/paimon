@@ -97,6 +97,10 @@ public final class DataField implements Serializable {
         return new DataField(id, name, type.copy(), description);
     }
 
+    public DataField copy(boolean isNullable) {
+        return new DataField(id, name, type.copy(isNullable), description);
+    }
+
     public String asSQLString() {
         return formatString(type.asSQLString());
     }

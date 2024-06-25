@@ -46,7 +46,7 @@ public class NoPartitionManifestFileMetaTest extends ManifestFileMetaTestBase {
         addDeltaManifests(input, false);
 
         List<ManifestFileMeta> merged =
-                ManifestFileMeta.merge(input, manifestFile, 500, 3, 200, getPartitionType());
+                ManifestFileMeta.merge(input, manifestFile, 500, 3, 200, getPartitionType(), null);
         assertEquivalentEntries(input, merged);
 
         // the first one is not deleted, it should not be merged

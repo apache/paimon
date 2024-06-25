@@ -20,6 +20,7 @@ package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.Action;
+import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.SyncJobHandler;
 import org.apache.paimon.flink.action.cdc.SyncTableActionBase;
 import org.apache.paimon.flink.action.cdc.schema.JdbcSchemasInfo;
@@ -99,12 +100,12 @@ public class MySqlSyncTableAction extends SyncTableActionBase {
     }
 
     @Override
-    protected MySqlSource<String> buildSource() {
+    protected MySqlSource<CdcSourceRecord> buildSource() {
         String tableList =
-                mySqlSchemasInfo.pkTables().stream()
-                        .map(JdbcSchemasInfo.JdbcSchemaInfo::identifier)
-                        .map(i -> i.getDatabaseName() + "\\." + i.getObjectName())
-                        .collect(Collectors.joining("|"));
+                String.format(
+                        "(%s)\\.(%s)",
+                        cdcSourceConfig.get(MySqlSourceOptions.DATABASE_NAME),
+                        cdcSourceConfig.get(MySqlSourceOptions.TABLE_NAME));
         return MySqlActionUtils.buildMySqlSource(cdcSourceConfig, tableList, typeMapping);
     }
 

@@ -209,6 +209,8 @@ Apache Software Foundation License 2.0
 --------------------------------------
 
 paimon-common/src/main/java/org/apache/paimon/fs/Path.java
+paimon-common/src/main/java/org/apache/paimon/fs/FileRange.java
+paimon-common/src/main/java/org/apache/paimon/fs/VectoredReadUtils.java
 from http://hadoop.apache.org/ version 2.10.2
 
 paimon-common/src/main/java/org/apache/paimon/lookup/hash/HashLookupStoreWriter.java
@@ -242,6 +244,7 @@ paimon-core/src/main/java/org/apache/paimon/jdbc/JdbcCatalog.java
 paimon-core/src/main/java/org/apache/paimon/utils/ZOrderByteUtils.java
 paimon-core/src/test/java/org/apache/paimon/utils/TestZOrderByteUtil.java
 paimon-hive/paimon-hive-common/src/test/java/org/apache/paimon/hive/TestHiveMetastore.java
+paimon-hive/paimon-hive-connector-common/src/main/java/org/apache/paimon/hive/mapred/TezUtil.java
 paimon-spark/paimon-spark-common/src/main/antlr4/org.apache.spark.sql.catalyst.parser.extensions/PaimonSqlExtensions.g4
 paimon-spark/paimon-spark-common/src/main/java/org/apache/paimon/spark/SparkGenericCatalog.java
 paimon-spark/paimon-spark-common/src/main/scala/org/apache/spark/sql/catalyst/analysis/CoerceArguments.scala
@@ -253,6 +256,19 @@ from http://iceberg.apache.org/ version 1.3.0
 
 paimon-hive/paimon-hive-common/src/test/resources/hive-schema-3.1.0.derby.sql
 from https://hive.apache.org/ version 3.1.0
+
+paimon-format/src/main/java/org/apache/orc/impl/PhysicalFsWriter.java
+paimon-format/src/main/java/org/apache/orc/impl/WriterImpl.java
+paimon-format/src/main/java/org/apache/orc/impl/ZstdCodec.java
+paimon-format/src/main/java/org/apache/orc/impl/RecordReaderUtils.java
+paimon-format/src/main/java/org/apache/orc/CompressionKind.java
+paimon-format/src/main/java/org/apache/orc/OrcConf.java
+paimon-format/src/main/java/org/apache/orc/OrcFile.java
+from https://orc.apache.org/ version 2.0
+
+paimon-format/src/main/java/org/apache/parquet/hadoop/ParquetFileReader.java
+paimon-format/src/main/java/org/apache/parquet/hadoop/ParquetWriter.java
+from https://parquet.apache.org/ version 1.14.0
 
 MIT License
 -----------

@@ -19,8 +19,8 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
@@ -63,7 +63,7 @@ public class ManifestFileTest {
         checkRollingFiles(meta, actualMetas, manifestFile.suggestedFileSize());
         List<ManifestEntry> actualEntries =
                 actualMetas.stream()
-                        .flatMap(m -> manifestFile.read(m.fileName()).stream())
+                        .flatMap(m -> manifestFile.read(m.fileName(), m.fileSize()).stream())
                         .collect(Collectors.toList());
         assertThat(actualEntries).isEqualTo(entries);
     }
@@ -108,6 +108,7 @@ public class ManifestFileTest {
                         new SchemaManager(fileIO, path),
                         DEFAULT_PART_TYPE,
                         avro,
+                        "zstd",
                         pathFactory,
                         suggestedFileSize,
                         null)
@@ -130,7 +131,7 @@ public class ManifestFileTest {
                 .isEqualTo(expected.numDeletedFiles());
 
         // check stats
-        FieldStats[] fieldStats =
+        SimpleColStats[] fieldStats =
                 convertWithoutSchemaEvolution(expected.partitionStats(), DEFAULT_PART_TYPE);
         for (int i = 0; i < fieldStats.length; i++) {
             int idx = i;

@@ -36,7 +36,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
 import org.apache.flink.api.common.JobStatus;
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.AfterEach;
@@ -66,10 +65,12 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
 
     @BeforeEach
     public void setEnv() {
-        env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
+        env =
+                streamExecutionEnvironmentBuilder()
+                        .streamingMode()
+                        .parallelism(2)
+                        .checkpointIntervalMs(1000)
+                        .build();
     }
 
     @AfterEach
@@ -360,6 +361,8 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
         @Nullable private String excludingTables;
         @Nullable private String mode;
         private final List<String> typeMappingModes = new ArrayList<>();
+        private final List<String> partitionKeys = new ArrayList<>();
+        private final List<String> primaryKeys = new ArrayList<>();
         private final List<String> metadataColumn = new ArrayList<>();
 
         public SyncDatabaseActionBuilder(Class<T> clazz, Map<String, String> sourceConfig) {
@@ -417,6 +420,16 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
             return this;
         }
 
+        public SyncDatabaseActionBuilder<T> withPartitionKeys(String... partitionKeys) {
+            this.partitionKeys.addAll(Arrays.asList(partitionKeys));
+            return this;
+        }
+
+        public SyncDatabaseActionBuilder<T> withPrimaryKeys(String... primaryKeys) {
+            this.primaryKeys.addAll(Arrays.asList(primaryKeys));
+            return this;
+        }
+
         public SyncDatabaseActionBuilder<T> withMetadataColumn(List<String> metadataColumn) {
             this.metadataColumn.addAll(metadataColumn);
             return this;
@@ -445,6 +458,8 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
             args.addAll(nullableToArgs("--mode", mode));
 
             args.addAll(listToArgs("--type-mapping", typeMappingModes));
+            args.addAll(listToArgs("--partition-keys", partitionKeys));
+            args.addAll(listToArgs("--primary-keys", primaryKeys));
             args.addAll(listToArgs("--metadata-column", metadataColumn));
 
             return createAction(clazz, args);

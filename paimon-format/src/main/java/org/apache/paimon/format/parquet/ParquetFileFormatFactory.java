@@ -19,15 +19,10 @@
 package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.format.FileFormatFactory;
-import org.apache.paimon.options.Options;
-
-import org.apache.parquet.hadoop.ParquetOutputFormat;
-import org.apache.parquet.hadoop.metadata.CompressionCodecName;
-
-import java.util.Properties;
 
 /** Factory to create {@link ParquetFileFormat}. */
 public class ParquetFileFormatFactory implements FileFormatFactory {
+
     public static final String IDENTIFIER = "parquet";
 
     @Override
@@ -37,23 +32,6 @@ public class ParquetFileFormatFactory implements FileFormatFactory {
 
     @Override
     public ParquetFileFormat create(FormatContext formatContext) {
-        return new ParquetFileFormat(
-                new FormatContext(
-                        supplyDefaultOptions(formatContext.formatOptions()),
-                        formatContext.readBatchSize()));
-    }
-
-    private Options supplyDefaultOptions(Options options) {
-        String compression =
-                ParquetOutputFormat.COMPRESSION.replaceFirst(String.format("^%s.", IDENTIFIER), "");
-        if (!options.containsKey(compression)) {
-            Properties properties = new Properties();
-            options.addAllToProperties(properties);
-            properties.setProperty(compression, CompressionCodecName.SNAPPY.name());
-            Options newOptions = new Options();
-            properties.forEach((k, v) -> newOptions.setString(k.toString(), v.toString()));
-            return newOptions;
-        }
-        return options;
+        return new ParquetFileFormat(formatContext);
     }
 }

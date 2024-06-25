@@ -65,7 +65,8 @@ public class SchemaEvolutionUtil {
      * </ul>
      *
      * <p>We can get the index mapping [0, -1, 1], in which 0 is the index of table field 1->c in
-     * data fields, 1 is the index of 6->b in data fields and 1 is the index of 3->a in data fields.
+     * data fields, -1 is the index of 6->b in data fields and 1 is the index of 3->a in data
+     * fields.
      *
      * <p>/// TODO should support nest index mapping when nest schema evolution is supported.
      *

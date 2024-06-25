@@ -20,7 +20,7 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.statistics.FieldStatsCollector;
+import org.apache.paimon.statistics.SimpleColStatsCollector;
 
 import java.util.List;
 
@@ -28,13 +28,14 @@ import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.CoreOptions.STATS_MODE_SUFFIX;
 import static org.apache.paimon.options.ConfigOptions.key;
 
-/** The stats utils to create {@link FieldStatsCollector.Factory}s. */
+/** The stats utils to create {@link SimpleColStatsCollector.Factory}s. */
 public class StatsCollectorFactories {
 
-    public static FieldStatsCollector.Factory[] createStatsFactories(
+    public static SimpleColStatsCollector.Factory[] createStatsFactories(
             CoreOptions options, List<String> fields) {
         Options cfg = options.toConfiguration();
-        FieldStatsCollector.Factory[] modes = new FieldStatsCollector.Factory[fields.size()];
+        SimpleColStatsCollector.Factory[] modes =
+                new SimpleColStatsCollector.Factory[fields.size()];
         for (int i = 0; i < fields.size(); i++) {
             String fieldMode =
                     cfg.get(
@@ -44,9 +45,9 @@ public class StatsCollectorFactories {
                                     .stringType()
                                     .noDefaultValue());
             if (fieldMode != null) {
-                modes[i] = FieldStatsCollector.from(fieldMode);
+                modes[i] = SimpleColStatsCollector.from(fieldMode);
             } else {
-                modes[i] = FieldStatsCollector.from(cfg.get(CoreOptions.METADATA_STATS_MODE));
+                modes[i] = SimpleColStatsCollector.from(cfg.get(CoreOptions.METADATA_STATS_MODE));
             }
         }
         return modes;

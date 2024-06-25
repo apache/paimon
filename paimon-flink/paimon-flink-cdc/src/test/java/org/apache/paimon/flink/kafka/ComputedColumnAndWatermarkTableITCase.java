@@ -78,6 +78,7 @@ public class ComputedColumnAndWatermarkTableITCase extends KafkaTableTestBase {
                                 "rate BIGINT",
                                 "capital_currency AS UPPER(currency)"),
                         Collections.emptyList(),
+                        Collections.singletonList("currency"),
                         Collections.emptyList());
 
         insertIntoFromTable(temporaryTable, table);
@@ -100,6 +101,7 @@ public class ComputedColumnAndWatermarkTableITCase extends KafkaTableTestBase {
                                 "rate BIGINT",
                                 "capital_currency AS LOWER(currency)"),
                         Collections.singletonList("currency"),
+                        Collections.emptyList(),
                         Collections.emptyList());
 
         insertIntoFromTable(temporaryTable, table);
@@ -148,6 +150,7 @@ public class ComputedColumnAndWatermarkTableITCase extends KafkaTableTestBase {
                                 "hh STRING",
                                 "dth AS dt || ' ' || hh"),
                         Arrays.asList("currency", "dt", "hh"),
+                        Collections.emptyList(),
                         Arrays.asList("dt", "hh"));
 
         insertIntoFromTable(temporaryTable, table);
@@ -166,6 +169,7 @@ public class ComputedColumnAndWatermarkTableITCase extends KafkaTableTestBase {
                                 "hh STRING",
                                 "ptime AS PROCTIME()"),
                         Collections.singletonList("currency"),
+                        Collections.emptyList(),
                         Collections.emptyList());
 
         insertIntoFromTable(temporaryTable, table);
@@ -210,6 +214,7 @@ public class ComputedColumnAndWatermarkTableITCase extends KafkaTableTestBase {
                                 "ts TIMESTAMP(3)",
                                 "WATERMARK FOR ts AS ts - INTERVAL '3' YEAR"),
                         Collections.emptyList(),
+                        Collections.singletonList("currency"),
                         Collections.emptyList());
 
         insertIntoFromTable(temporaryTable, table);

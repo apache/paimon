@@ -21,11 +21,13 @@ package org.apache.paimon.io;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.statistics.FieldStatsCollector;
+import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
@@ -35,13 +37,12 @@ import org.apache.paimon.utils.StatsCollectorFactories;
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
 import java.io.IOException;
 import java.util.HashMap;
 
-import static org.apache.paimon.CoreOptions.FileFormatType;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link RollingFileWriter}. */
@@ -69,9 +70,7 @@ public class RollingFileWriterTest {
                                         LocalFileIO.create(),
                                         fileFormat.createWriterFactory(SCHEMA),
                                         new DataFilePathFactory(
-                                                        new Path(tempDir.toString()),
-                                                        "",
-                                                        0,
+                                                        new Path(tempDir + "/bucket-0"),
                                                         CoreOptions.FILE_FORMAT
                                                                 .defaultValue()
                                                                 .toString())
@@ -80,7 +79,7 @@ public class RollingFileWriterTest {
                                         fileFormat
                                                 .createStatsExtractor(
                                                         SCHEMA,
-                                                        FieldStatsCollector
+                                                        SimpleColStatsCollector
                                                                 .createFullStatsFactories(
                                                                         SCHEMA.getFieldCount()))
                                                 .orElse(null),
@@ -89,16 +88,20 @@ public class RollingFileWriterTest {
                                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                                         StatsCollectorFactories.createStatsFactories(
                                                 new CoreOptions(new HashMap<>()),
-                                                SCHEMA.getFieldNames())),
+                                                SCHEMA.getFieldNames()),
+                                        new FileIndexOptions(),
+                                        FileSource.APPEND),
                         TARGET_FILE_SIZE);
     }
 
     @ParameterizedTest
-    @EnumSource(FileFormatType.class)
-    public void testRolling(FileFormatType formatType) throws IOException {
-        initialize(formatType.toString());
+    @ValueSource(strings = {"orc", "avro", "parquet"})
+    public void testRolling(String formatType) throws IOException {
+        initialize(formatType);
         int checkInterval =
-                formatType == FileFormatType.ORC ? VectorizedRowBatch.DEFAULT_SIZE : 1000;
+                formatType.equals(CoreOptions.FILE_FORMAT_ORC)
+                        ? VectorizedRowBatch.DEFAULT_SIZE
+                        : 1000;
         for (int i = 0; i < 3000; i++) {
             rollingFileWriter.write(GenericRow.of(i));
             if (i < checkInterval) {

@@ -22,7 +22,6 @@ import org.apache.paimon.flink.util.AbstractTestBase;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
-import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.types.Row;
@@ -44,7 +43,7 @@ public class MappingTableITCase extends AbstractTestBase {
 
     @BeforeEach
     public void before() throws IOException {
-        tEnv = TableEnvironment.create(EnvironmentSettings.newInstance().inBatchMode().build());
+        tEnv = tableEnvironmentBuilder().batchMode().build();
         path = getTempDirPath();
     }
 

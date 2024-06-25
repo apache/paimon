@@ -49,19 +49,13 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         List<String> topics = Arrays.asList(topic1, topic2);
         topics.forEach(topic -> createTestTopic(topic, 1, 1));
 
-        // ---------- Write the data into Kafka -------------------
-
         for (int i = 0; i < fileCount; i++) {
-            try {
-                writeRecordsToKafka(
-                        topics.get(i),
-                        readLines(
-                                String.format(
-                                        "kafka/%s/database/schemaevolution/topic%s/%s-data-1.txt",
-                                        format, i, format)));
-            } catch (Exception e) {
-                throw new Exception(String.format("Failed to write %s data to Kafka.", format), e);
-            }
+            writeRecordsToKafka(
+                    topics.get(i),
+                    "kafka/%s/database/schemaevolution/topic%s/%s-data-1.txt",
+                    format,
+                    i,
+                    format);
         }
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
@@ -83,19 +77,13 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         List<String> topics = Collections.singletonList(topic);
         topics.forEach(t -> createTestTopic(t, 1, 1));
 
-        // ---------- Write the maxwell json into Kafka -------------------
-
         for (int i = 0; i < fileCount; i++) {
-            try {
-                writeRecordsToKafka(
-                        topics.get(0),
-                        readLines(
-                                String.format(
-                                        "kafka/%s/database/schemaevolution/topic%s/%s-data-1.txt",
-                                        format, i, format)));
-            } catch (Exception e) {
-                throw new Exception(String.format("Failed to write %s data to Kafka.", format), e);
-            }
+            writeRecordsToKafka(
+                    topics.get(0),
+                    "kafka/%s/database/schemaevolution/topic%s/%s-data-1.txt",
+                    format,
+                    i,
+                    format);
         }
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
@@ -150,16 +138,12 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         waitForResult(expected2, table2, rowType2, getPrimaryKey(format));
 
         for (int i = 0; i < fileCount; i++) {
-            try {
-                writeRecordsToKafka(
-                        writeOne ? topics.get(0) : topics.get(i),
-                        readLines(
-                                String.format(
-                                        "kafka/%s/database/schemaevolution/topic%s/%s-data-2.txt",
-                                        format, i, format)));
-            } catch (Exception e) {
-                throw new Exception(String.format("Failed to write %s data to Kafka.", format), e);
-            }
+            writeRecordsToKafka(
+                    writeOne ? topics.get(0) : topics.get(i),
+                    "kafka/%s/database/schemaevolution/topic%s/%s-data-2.txt",
+                    format,
+                    i,
+                    format);
         }
 
         rowType1 =
@@ -235,6 +219,7 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                         new String[] {"id", "name", "description", "weight"}),
                 Collections.emptyList(),
                 getPrimaryKey(format),
+                getBucketKey(format),
                 Collections.emptyMap());
 
         final String topic1 = "prefix_suffix_0";
@@ -244,19 +229,13 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         List<String> topics = Arrays.asList(topic1, topic2);
         topics.forEach(topic -> createTestTopic(topic, 1, 1));
 
-        // ---------- Write the data into Kafka -------------------
-
         for (int i = 0; i < topics.size(); i++) {
-            try {
-                writeRecordsToKafka(
-                        topics.get(i),
-                        readLines(
-                                String.format(
-                                        "kafka/%s/database/prefixsuffix/topic%s/%s-data-1.txt",
-                                        format, i, format)));
-            } catch (Exception e) {
-                throw new Exception(String.format("Failed to write %s data to Kafka.", format), e);
-            }
+            writeRecordsToKafka(
+                    topics.get(i),
+                    "kafka/%s/database/prefixsuffix/topic%s/%s-data-1.txt",
+                    format,
+                    i,
+                    format);
         }
 
         // try synchronization
@@ -290,6 +269,7 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                         new String[] {"id", "name", "description", "weight"}),
                 Collections.emptyList(),
                 getPrimaryKey(format),
+                getBucketKey(format),
                 Collections.emptyMap());
 
         final String topic1 = "prefix_suffix";
@@ -298,19 +278,12 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         int fileCount = 2;
         topics.forEach(topic -> createTestTopic(topic, 1, 1));
 
-        // ---------- Write the maxwell json into Kafka -------------------
-
         for (int i = 0; i < fileCount; i++) {
-            try {
-                writeRecordsToKafka(
-                        topics.get(0),
-                        readLines(
-                                String.format(
-                                        "kafka/%s/database/prefixsuffix/topic%s/%s-data-1.txt",
-                                        format, i, format)));
-            } catch (Exception e) {
-                throw new Exception(String.format("Failed to write %s data to Kafka.", format), e);
-            }
+            writeRecordsToKafka(
+                    topics.get(0),
+                    String.format(
+                            "kafka/%s/database/prefixsuffix/topic%s/%s-data-1.txt",
+                            format, i, format));
         }
 
         // try synchronization
@@ -370,16 +343,12 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         waitForResult(expected, table2, rowType2, getPrimaryKey(format));
 
         for (int i = 0; i < fileCount; i++) {
-            try {
-                writeRecordsToKafka(
-                        writeOne ? topics.get(0) : topics.get(i),
-                        readLines(
-                                String.format(
-                                        "kafka/%s/database/prefixsuffix/topic%s/%s-data-2.txt",
-                                        format, i, format)));
-            } catch (Exception e) {
-                throw new Exception(String.format("Failed to write %s data to Kafka.", format), e);
-            }
+            writeRecordsToKafka(
+                    writeOne ? topics.get(0) : topics.get(i),
+                    "kafka/%s/database/prefixsuffix/topic%s/%s-data-2.txt",
+                    format,
+                    i,
+                    format);
         }
         rowType1 =
                 RowType.of(
@@ -470,18 +439,9 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         List<String> topics = Collections.singletonList(topic1);
         topics.forEach(topic -> createTestTopic(topic, 1, 1));
 
-        // ---------- Write the data into Kafka -------------------
+        writeRecordsToKafka(
+                topics.get(0), "kafka/%s/database/include/topic0/%s-data-1.txt", format, format);
 
-        try {
-            writeRecordsToKafka(
-                    topics.get(0),
-                    readLines(
-                            String.format(
-                                    "kafka/%s/database/include/topic0/%s-data-1.txt",
-                                    format, format)));
-        } catch (Exception e) {
-            throw new Exception(String.format("Failed to write %s data to Kafka.", format), e);
-        }
         // try synchronization
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
@@ -503,14 +463,8 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         final String topic = "case-insensitive";
         createTestTopic(topic, 1, 1);
 
-        // ---------- Write the data into Kafka -------------------
-
         writeRecordsToKafka(
-                topic,
-                readLines(
-                        String.format(
-                                "kafka/%s/database/case-insensitive/%s-data-1.txt",
-                                format, format)));
+                topic, "kafka/%s/database/case-insensitive/%s-data-1.txt", format, format);
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
@@ -552,5 +506,11 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         return format.equals("debezium")
                 ? Collections.emptyList()
                 : Collections.singletonList("id");
+    }
+
+    private List<String> getBucketKey(String format) {
+        return format.equals("debezium")
+                ? Collections.singletonList("id")
+                : Collections.emptyList();
     }
 }
