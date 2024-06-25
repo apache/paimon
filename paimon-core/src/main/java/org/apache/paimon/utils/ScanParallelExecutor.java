@@ -42,9 +42,8 @@ public class ScanParallelExecutor {
     // reduce memory usage by batch iterable process, the cached result in memory will be queueSize
     public static <T, U> Iterable<T> parallelismBatchIterable(
             Function<List<U>, List<T>> processor, List<U> input, @Nullable Integer queueSize) {
-        ForkJoinPool poolCandidate = COMMON_IO_FORK_JOIN_POOL;
         if (queueSize == null) {
-            queueSize = poolCandidate.getParallelism();
+            queueSize = COMMON_IO_FORK_JOIN_POOL.getParallelism();
         } else if (queueSize <= 0) {
             throw new NegativeArraySizeException("queue size should not be negetive");
         }
@@ -73,7 +72,7 @@ public class ScanParallelExecutor {
 
                     private void advanceIfNeeded() {
                         while ((activeList == null || index >= activeList.size())
-                                && stack.size() > 0) {
+                                && !stack.isEmpty()) {
                             // reset index
                             index = 0;
                             try {

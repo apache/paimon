@@ -35,6 +35,8 @@ import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -43,7 +45,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
@@ -150,7 +151,8 @@ public class ManifestFileMeta {
             long suggestedMetaSize,
             int suggestedMinMetaCount,
             long manifestFullCompactionSize,
-            RowType partitionType) {
+            RowType partitionType,
+            @Nullable Integer manifestReadParallelism) {
         // these are the newly created manifest files, clean them up if exception occurs
         List<ManifestFileMeta> newMetas = new ArrayList<>();
 
@@ -162,7 +164,8 @@ public class ManifestFileMeta {
                             manifestFile,
                             suggestedMetaSize,
                             manifestFullCompactionSize,
-                            partitionType);
+                            partitionType,
+                            manifestReadParallelism);
             return fullCompacted.orElseGet(
                     () ->
                             tryMinorCompaction(
@@ -170,7 +173,8 @@ public class ManifestFileMeta {
                                     newMetas,
                                     manifestFile,
                                     suggestedMetaSize,
-                                    suggestedMinMetaCount));
+                                    suggestedMinMetaCount,
+                                    manifestReadParallelism));
         } catch (Throwable e) {
             // exception occurs, clean up and rethrow
             for (ManifestFileMeta manifest : newMetas) {
@@ -185,7 +189,8 @@ public class ManifestFileMeta {
             List<ManifestFileMeta> newMetas,
             ManifestFile manifestFile,
             long suggestedMetaSize,
-            int suggestedMinMetaCount) {
+            int suggestedMinMetaCount,
+            @Nullable Integer manifestReadParallelism) {
         List<ManifestFileMeta> result = new ArrayList<>();
         List<ManifestFileMeta> candidates = new ArrayList<>();
         long totalSize = 0;
@@ -195,7 +200,8 @@ public class ManifestFileMeta {
             candidates.add(manifest);
             if (totalSize >= suggestedMetaSize) {
                 // reach suggested file size, perform merging and produce new file
-                mergeCandidates(candidates, manifestFile, result, newMetas);
+                mergeCandidates(
+                        candidates, manifestFile, result, newMetas, manifestReadParallelism);
                 candidates.clear();
                 totalSize = 0;
             }
@@ -203,7 +209,7 @@ public class ManifestFileMeta {
 
         // merge the last bit of manifests if there are too many
         if (candidates.size() >= suggestedMinMetaCount) {
-            mergeCandidates(candidates, manifestFile, result, newMetas);
+            mergeCandidates(candidates, manifestFile, result, newMetas, manifestReadParallelism);
         } else {
             result.addAll(candidates);
         }
@@ -214,14 +220,15 @@ public class ManifestFileMeta {
             List<ManifestFileMeta> candidates,
             ManifestFile manifestFile,
             List<ManifestFileMeta> result,
-            List<ManifestFileMeta> newMetas) {
+            List<ManifestFileMeta> newMetas,
+            @Nullable Integer manifestReadParallelism) {
         if (candidates.size() == 1) {
             result.add(candidates.get(0));
             return;
         }
 
         Map<Identifier, ManifestEntry> map = new LinkedHashMap<>();
-        FileEntry.mergeEntries(manifestFile, candidates, map);
+        FileEntry.mergeEntries(manifestFile, candidates, map, manifestReadParallelism);
         if (!map.isEmpty()) {
             List<ManifestFileMeta> merged = manifestFile.write(new ArrayList<>(map.values()));
             result.addAll(merged);
@@ -235,12 +242,13 @@ public class ManifestFileMeta {
             ManifestFile manifestFile,
             long suggestedMetaSize,
             long sizeTrigger,
-            RowType partitionType)
+            RowType partitionType,
+            @Nullable Integer manifestReadParallelism)
             throws Exception {
         // 1. should trigger full compaction
 
         List<ManifestFileMeta> base = new ArrayList<>();
-        int totalManifestSize = 0;
+        long totalManifestSize = 0;
         int i = 0;
         for (; i < inputs.size(); i++) {
             ManifestFileMeta file = inputs.get(i);
@@ -277,7 +285,7 @@ public class ManifestFileMeta {
         // 2.1. try to skip base files by partition filter
 
         Map<Identifier, ManifestEntry> deltaMerged = new LinkedHashMap<>();
-        FileEntry.mergeEntries(manifestFile, delta, deltaMerged);
+        FileEntry.mergeEntries(manifestFile, delta, deltaMerged, manifestReadParallelism);
 
         List<ManifestFileMeta> result = new ArrayList<>();
         int j = 0;
@@ -354,29 +362,13 @@ public class ManifestFileMeta {
             mergedEntries.clear();
 
             // 2.3.2 merge base files
-            List<ManifestEntry> asyncManifestEntries = null;
-            for (; j < base.size(); j++) {
-                Future<List<ManifestEntry>> reader =
-                        FileEntry.readManifestEntry(manifestFile, base.get(j));
-                if (asyncManifestEntries != null) {
-                    for (ManifestEntry entry : asyncManifestEntries) {
-                        checkArgument(entry.kind() == FileKind.ADD);
-                        if (!deleteEntries.contains(entry.identifier())) {
-                            writer.write(entry);
-                        }
-                    }
+            for (ManifestEntry entry :
+                    FileEntry.readManifestEntries(
+                            manifestFile, base.subList(j, base.size()), manifestReadParallelism)) {
+                checkArgument(entry.kind() == FileKind.ADD);
+                if (!deleteEntries.contains(entry.identifier())) {
+                    writer.write(entry);
                 }
-                asyncManifestEntries = reader.get();
-            }
-
-            if (asyncManifestEntries != null) {
-                for (ManifestEntry entry : asyncManifestEntries) {
-                    checkArgument(entry.kind() == FileKind.ADD);
-                    if (!deleteEntries.contains(entry.identifier())) {
-                        writer.write(entry);
-                    }
-                }
-                asyncManifestEntries.clear();
             }
 
             // 2.3.3 merge deltaMerged
