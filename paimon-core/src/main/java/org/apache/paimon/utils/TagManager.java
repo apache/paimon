@@ -106,31 +106,23 @@ public class TagManager {
                         : snapshot.toJson();
         Path tagPath = tagPath(tagName);
 
-        // update tag metadata into for the same snapshot of the same tag name.
-        if (tagExists(tagName)) {
-            Snapshot tagged = taggedSnapshot(tagName);
-            Preconditions.checkArgument(
-                    tagged.id() == snapshot.id(), "Tag name '%s' already exists.", tagName);
-            try {
+        try {
+            if (tagExists(tagName)) {
+                Snapshot tagged = taggedSnapshot(tagName);
+                Preconditions.checkArgument(
+                        tagged.id() == snapshot.id(), "Tag name '%s' already exists.", tagName);
+                // update tag metadata into for the same snapshot of the same tag name.
                 fileIO.overwriteFileUtf8(tagPath, content);
-            } catch (IOException e) {
-                throw new RuntimeException(
-                        String.format(
-                                "Tag already exists. Failed to update tag metadata info for tag '%s' (path %s).",
-                                tagName, tagPath),
-                        e);
-            }
-        } else {
-            try {
+            } else {
                 fileIO.writeFileUtf8(tagPath, content);
-            } catch (IOException e) {
-                throw new RuntimeException(
-                        String.format(
-                                "Exception occurs when committing tag '%s' (path %s). "
-                                        + "Cannot clean up because we can't determine the success.",
-                                tagName, tagPath),
-                        e);
             }
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Exception occurs when committing tag '%s' (path %s). "
+                                    + "Cannot clean up because we can't determine the success.",
+                            tagName, tagPath),
+                    e);
         }
 
         try {
