@@ -34,6 +34,7 @@ import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ExecutorThreadFactory;
+import org.apache.paimon.utils.ExecutorUtils;
 import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.MutableObjectIterator;
@@ -57,6 +58,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -300,7 +302,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
     public void close() throws IOException {
         try {
             if (refreshExecutor != null) {
-                refreshExecutor.shutdown();
+                ExecutorUtils.gracefulShutdown(1L, TimeUnit.MINUTES, refreshExecutor);
             }
         } finally {
             stateFactory.close();
