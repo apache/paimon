@@ -203,7 +203,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 newKeyComparator(),
                 options.branch(),
                 newStatsFileHandler(),
-                bucketMode());
+                bucketMode(),
+                options.scanManifestParallelism());
     }
 
     @Override
