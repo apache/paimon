@@ -363,7 +363,7 @@ public class HiveCatalog extends AbstractCatalog {
                 .orElseThrow(() -> new TableNotExistException(identifier));
     }
 
-    private boolean usingExternalTable() {
+    public boolean usingExternalTable() {
         TableType tableType =
                 OptionsUtils.convertToEnum(
                         hiveConf.get(TABLE_TYPE.key(), TableType.MANAGED.toString()),

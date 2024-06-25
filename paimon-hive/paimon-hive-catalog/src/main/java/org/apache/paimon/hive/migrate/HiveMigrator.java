@@ -209,9 +209,22 @@ public class HiveMigrator implements Migrator {
             throw new RuntimeException("Migrating failed", e);
         }
 
-        // if all success, drop the origin table according the delete field
+        // if all success, drop the origin table according the deleted field
         if (delete) {
             client.dropTable(sourceDatabase, sourceTable, true, true);
+
+            if (hiveCatalog.usingExternalTable()) {
+                return;
+            }
+
+            Path path = hiveCatalog.getDataTableLocation(identifier);
+            try {
+                if (fileIO.exists(path)) {
+                    fileIO.deleteDirectoryQuietly(path);
+                }
+            } catch (Exception e) {
+                LOG.error("Delete directory[{}] fail for table {}", path, identifier, e);
+            }
         }
     }
 
