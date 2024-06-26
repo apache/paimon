@@ -124,7 +124,7 @@ public class KS3FileIO extends HadoopCompliantFileIO {
                         }
                     }
 
-                    S3AFileSystem fs = new S3AFileSystem();
+                    Ks3FileSystem fs = new Ks3FileSystem();
                     try {
                         fs.initialize(fsUri, hadoopConf);
                     } catch (IOException e) {
