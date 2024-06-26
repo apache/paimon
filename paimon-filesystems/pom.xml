@@ -36,12 +36,6 @@
             <version>0.9-SNAPSHOT</version>
             <scope>compile</scope>
         </dependency>
-        <dependency>
-            <groupId>com.ksyun.kmr</groupId>
-            <artifactId>hadoop-ks3</artifactId>
-            <version>3.1.1-1.1.2</version>
-            <scope>compile</scope>
-        </dependency>
     </dependencies>
     <packaging>pom</packaging>
 
