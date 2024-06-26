@@ -29,6 +29,20 @@
 
     <artifactId>paimon-filesystems</artifactId>
     <name>Paimon : FileSystems : </name>
+    <dependencies>
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-common</artifactId>
+            <version>0.9-SNAPSHOT</version>
+            <scope>compile</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.ksyun.kmr</groupId>
+            <artifactId>hadoop-ks3</artifactId>
+            <version>3.1.1-1.1.2</version>
+            <scope>compile</scope>
+        </dependency>
+    </dependencies>
     <packaging>pom</packaging>
 
     <modules>
@@ -37,11 +51,14 @@
         <module>paimon-oss-impl</module>
         <module>paimon-s3</module>
         <module>paimon-s3-impl</module>
+        <module>paimon-ks3</module>
+        <module>paimon-ks3-impl</module>
     </modules>
 
     <properties>
         <fs.hadoopshaded.version>3.3.4</fs.hadoopshaded.version>
         <fs.s3.aws.version>1.12.319</fs.s3.aws.version>
+        <fs.ks3.sdk.version>3.1.1-1.1.2</fs.ks3.sdk.version>
         <commons.beanutils.version>1.9.4</commons.beanutils.version>
     </properties>
 
