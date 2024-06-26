@@ -18,28 +18,23 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.options.Options;
+import org.apache.paimon.flink.sink.partition.PartitionMarkDoneAction;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.PartitionPathUtils;
 
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
-import static org.apache.paimon.flink.sink.partition.PartitionMarkDone.closeActions;
-import static org.apache.paimon.flink.sink.partition.PartitionMarkDone.getPartitionMarkDoneActions;
 import static org.apache.paimon.flink.sink.partition.PartitionMarkDone.markDone;
 
 /** Table partition mark done action for Flink. */
-public class PartitionMarkDoneAction extends TableActionBase {
+public class MarkPartitionDoneAction extends TableActionBase {
 
     private final FileStoreTable fileStoreTable;
     private final List<Map<String, String>> partitions;
-    private final CoreOptions coreOptions;
-    private final Options options;
 
-    public PartitionMarkDoneAction(
+    public MarkPartitionDoneAction(
             String warehouse,
             String databaseName,
             String tableName,
@@ -55,29 +50,19 @@ public class PartitionMarkDoneAction extends TableActionBase {
 
         this.fileStoreTable = (FileStoreTable) table;
         this.partitions = partitions;
-        this.coreOptions = fileStoreTable.coreOptions();
-        this.options = coreOptions.toConfiguration();
     }
 
     @Override
     public void run() throws Exception {
-        List<org.apache.paimon.flink.sink.partition.PartitionMarkDoneAction> actions =
-                getPartitionMarkDoneActions(fileStoreTable, coreOptions, options);
+        List<PartitionMarkDoneAction> actions =
+                PartitionMarkDoneAction.createActions(fileStoreTable, fileStoreTable.coreOptions());
 
-        List<String> partitionPaths = getPartitionPaths(fileStoreTable, partitions);
+        List<String> partitionPaths =
+                PartitionPathUtils.generatePartitionPaths(
+                        partitions, fileStoreTable.store().partitionType());
 
         markDone(partitionPaths, actions);
 
-        closeActions(actions);
-    }
-
-    public static List<String> getPartitionPaths(
-            FileStoreTable fileStoreTable, List<Map<String, String>> partitions) {
-        return partitions.stream()
-                .map(
-                        partition ->
-                                PartitionPathUtils.generatePartitionPath(
-                                        partition, fileStoreTable.store().partitionType()))
-                .collect(Collectors.toList());
+        IOUtils.closeAllQuietly(actions);
     }
 }

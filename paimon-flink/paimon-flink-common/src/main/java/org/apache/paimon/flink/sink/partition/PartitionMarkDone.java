@@ -21,10 +21,10 @@ package org.apache.paimon.flink.sink.partition;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.ManifestCommittable;
-import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.PartitionPathUtils;
 
@@ -35,18 +35,12 @@ import javax.annotation.Nullable;
 import java.io.Closeable;
 import java.io.IOException;
 import java.time.Duration;
-import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.stream.Collectors;
 
-import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.flink.FlinkConnectorOptions.PARTITION_IDLE_TIME_TO_DONE;
-import static org.apache.paimon.flink.FlinkConnectorOptions.PARTITION_MARK_DONE_ACTION;
 import static org.apache.paimon.flink.FlinkConnectorOptions.PARTITION_MARK_DONE_WHEN_END_INPUT;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Mark partition done. */
 public class PartitionMarkDone implements Closeable {
@@ -79,29 +73,9 @@ public class PartitionMarkDone implements Closeable {
                 PartitionMarkDoneTrigger.create(coreOptions, isRestored, stateStore);
 
         List<PartitionMarkDoneAction> actions =
-                getPartitionMarkDoneActions(table, coreOptions, options);
+                PartitionMarkDoneAction.createActions(table, coreOptions);
 
         return new PartitionMarkDone(partitionComputer, trigger, actions);
-    }
-
-    public static List<PartitionMarkDoneAction> getPartitionMarkDoneActions(
-            FileStoreTable fileStoreTable, CoreOptions coreOptions, Options options) {
-        return Arrays.asList(options.get(PARTITION_MARK_DONE_ACTION).split(",")).stream()
-                .map(
-                        action -> {
-                            switch (action) {
-                                case "success-file":
-                                    return new SuccessFileMarkDoneAction(
-                                            fileStoreTable.fileIO(), fileStoreTable.location());
-                                case "done-partition":
-                                    return new AddDonePartitionAction(
-                                            createMetastoreClient(
-                                                    fileStoreTable, coreOptions, options));
-                                default:
-                                    throw new UnsupportedOperationException(action);
-                            }
-                        })
-                .collect(Collectors.toList());
     }
 
     private static boolean disablePartitionMarkDone(
@@ -122,24 +96,6 @@ public class PartitionMarkDone implements Closeable {
         }
 
         return false;
-    }
-
-    public static MetastoreClient createMetastoreClient(
-            FileStoreTable table, CoreOptions coreOptions, Options options) {
-        MetastoreClient.Factory metastoreClientFactory =
-                table.catalogEnvironment().metastoreClientFactory();
-
-        if (options.get(PARTITION_MARK_DONE_ACTION).contains("done-partition")) {
-            checkNotNull(
-                    metastoreClientFactory,
-                    "Cannot mark done partition for table without metastore.");
-            checkArgument(
-                    coreOptions.partitionedTableInMetastore(),
-                    "Table should enable %s",
-                    METASTORE_PARTITIONED_TABLE.key());
-        }
-
-        return metastoreClientFactory.create();
     }
 
     public PartitionMarkDone(
@@ -183,18 +139,12 @@ public class PartitionMarkDone implements Closeable {
         }
     }
 
-    public static void closeActions(List<PartitionMarkDoneAction> actions) throws IOException {
-        for (PartitionMarkDoneAction action : actions) {
-            action.close();
-        }
-    }
-
     public void snapshotState() throws Exception {
         trigger.snapshotState();
     }
 
     @Override
     public void close() throws IOException {
-        closeActions(actions);
+        IOUtils.closeAllQuietly(actions);
     }
 }

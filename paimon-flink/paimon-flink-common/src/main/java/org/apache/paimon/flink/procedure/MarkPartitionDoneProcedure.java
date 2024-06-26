@@ -21,18 +21,17 @@ package org.apache.paimon.flink.procedure;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.options.Options;
+import org.apache.paimon.flink.sink.partition.PartitionMarkDoneAction;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.PartitionPathUtils;
 
 import org.apache.flink.table.procedure.ProcedureContext;
 
 import java.io.IOException;
 import java.util.List;
 
-import static org.apache.paimon.flink.action.PartitionMarkDoneAction.getPartitionPaths;
-import static org.apache.paimon.flink.sink.partition.PartitionMarkDone.closeActions;
-import static org.apache.paimon.flink.sink.partition.PartitionMarkDone.getPartitionMarkDoneActions;
 import static org.apache.paimon.flink.sink.partition.PartitionMarkDone.markDone;
 import static org.apache.paimon.utils.ParameterUtils.getPartitions;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -44,7 +43,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  *  CALL sys.mark_partition_done('tableId', 'partition1', 'partition2', ...)
  * </code></pre>
  */
-public class PartitionMarkDoneProcedure extends ProcedureBase {
+public class MarkPartitionDoneProcedure extends ProcedureBase {
 
     public static final String IDENTIFIER = "mark_partition_done";
 
@@ -64,17 +63,16 @@ public class PartitionMarkDoneProcedure extends ProcedureBase {
 
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         CoreOptions coreOptions = fileStoreTable.coreOptions();
-        Options options = coreOptions.toConfiguration();
-
-        List<org.apache.paimon.flink.sink.partition.PartitionMarkDoneAction> actions =
-                getPartitionMarkDoneActions(fileStoreTable, coreOptions, options);
+        List<PartitionMarkDoneAction> actions =
+                PartitionMarkDoneAction.createActions(fileStoreTable, coreOptions);
 
         List<String> partitionPaths =
-                getPartitionPaths(fileStoreTable, getPartitions(partitionStrings));
+                PartitionPathUtils.generatePartitionPaths(
+                        getPartitions(partitionStrings), fileStoreTable.store().partitionType());
 
         markDone(partitionPaths, actions);
 
-        closeActions(actions);
+        IOUtils.closeAllQuietly(actions);
 
         return new String[] {"Success"};
     }

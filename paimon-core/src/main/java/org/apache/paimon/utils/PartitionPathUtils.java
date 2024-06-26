@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /** Utils for file system. */
 public class PartitionPathUtils {
@@ -87,6 +88,15 @@ public class PartitionPathUtils {
         }
         suffixBuf.append(Path.SEPARATOR);
         return suffixBuf.toString();
+    }
+
+    public static List<String> generatePartitionPaths(
+            List<Map<String, String>> partitions, RowType partitionType) {
+        return partitions.stream()
+                .map(
+                        partition ->
+                                PartitionPathUtils.generatePartitionPath(partition, partitionType))
+                .collect(Collectors.toList());
     }
 
     public static String generatePartitionPath(

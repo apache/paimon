@@ -24,8 +24,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-/** Factory to create {@link PartitionMarkDoneAction}. */
-public class PartitionMarkDoneActionFactory implements ActionFactory {
+/** Factory to create {@link MarkPartitionDoneAction}. */
+public class MarkPartitionDoneActionFactory implements ActionFactory {
 
     public static final String IDENTIFIER = "mark_partition_done";
 
@@ -44,7 +44,7 @@ public class PartitionMarkDoneActionFactory implements ActionFactory {
         Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
 
         return Optional.of(
-                new PartitionMarkDoneAction(
+                new MarkPartitionDoneAction(
                         tablePath.f0, tablePath.f1, tablePath.f2, partitions, catalogConfig));
     }
 

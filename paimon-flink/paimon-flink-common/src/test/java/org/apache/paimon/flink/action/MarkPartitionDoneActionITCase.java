@@ -39,8 +39,8 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** IT cases for {@link PartitionMarkDoneAction}. */
-public class PartitionMarkDoneActionITCase extends ActionITCaseBase {
+/** IT cases for {@link MarkPartitionDoneAction}. */
+public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
 
     private static final DataType[] FIELD_TYPES =
             new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.STRING(), DataTypes.INT()};
@@ -54,7 +54,7 @@ public class PartitionMarkDoneActionITCase extends ActionITCaseBase {
         FileStoreTable table = prepareTable(hasPk);
         if (ThreadLocalRandom.current().nextBoolean()) {
             createAction(
-                            PartitionMarkDoneAction.class,
+                            MarkPartitionDoneAction.class,
                             "mark_partition_done",
                             "--warehouse",
                             warehouse,
@@ -84,7 +84,7 @@ public class PartitionMarkDoneActionITCase extends ActionITCaseBase {
 
         if (ThreadLocalRandom.current().nextBoolean()) {
             createAction(
-                            PartitionMarkDoneAction.class,
+                            MarkPartitionDoneAction.class,
                             "mark_partition_done",
                             "--warehouse",
                             warehouse,
