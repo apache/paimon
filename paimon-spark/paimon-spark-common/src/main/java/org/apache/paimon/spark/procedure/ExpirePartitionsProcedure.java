@@ -27,12 +27,14 @@ import org.apache.paimon.utils.TimeUtils;
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
-import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
+import org.apache.spark.unsafe.types.UTF8String;
 
 import java.time.Duration;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.spark.sql.types.DataTypes.StringType;
@@ -50,7 +52,7 @@ public class ExpirePartitionsProcedure extends BaseProcedure {
     private static final StructType OUTPUT_TYPE =
             new StructType(
                     new StructField[] {
-                        new StructField("result", DataTypes.BooleanType, true, Metadata.empty())
+                        new StructField("expired_partitions", StringType, true, Metadata.empty())
                     });
 
     protected ExpirePartitionsProcedure(TableCatalog tableCatalog) {
@@ -92,9 +94,20 @@ public class ExpirePartitionsProcedure extends BaseProcedure {
                                                             .metastoreClientFactory())
                                             .map(MetastoreClient.Factory::create)
                                             .orElse(null));
-                    partitionExpire.expire(Long.MAX_VALUE);
-                    InternalRow outputRow = newInternalRow(true);
-                    return new InternalRow[] {outputRow};
+                    List<Map<String, String>> expired = partitionExpire.expire(Long.MAX_VALUE);
+                    return expired == null || expired.isEmpty()
+                            ? new InternalRow[] {
+                                newInternalRow(UTF8String.fromString("No expired partitions."))
+                            }
+                            : expired.stream()
+                                    .map(
+                                            x -> {
+                                                String r = x.toString();
+                                                return newInternalRow(
+                                                        UTF8String.fromString(
+                                                                r.substring(1, r.length() - 1)));
+                                            })
+                                    .toArray(InternalRow[]::new);
                 });
     }
 
