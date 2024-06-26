@@ -51,8 +51,8 @@ public class KS3FileIO extends HadoopCompliantFileIO {
     private static final String HADOOP_CONFIG_PREFIX = "fs.ks3.";
 
     private static final String[][] MIRRORED_CONFIG_KEYS = {
-        {"fs.ks3.access-key", "fs.s3a.access.key"},
-        {"fs.ks3.secret-key", "fs.s3a.secret.key"},
+        {"fs.ks3.access-key", "fs.ks3.access.key"},
+        {"fs.ks3.secret-key", "fs.ks3.secret.key"},
         {"fs.ks3.path-style-access", "fs.ks3.path.style.access"},
         {"fs.ks3.signer-type", "fs.ks3.signing-algorithm"}
     };
