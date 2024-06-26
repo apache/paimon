@@ -139,6 +139,45 @@ public class CdcRecordKeyAndBucketExtractorTest {
         assertThat(actual.bucket()).isEqualTo(expected.bucket());
     }
 
+    @Test
+    public void testEmptyPartition() throws Exception {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        TableSchema schema = createTableSchema();
+        RowDataKeyAndBucketExtractor expected = new RowDataKeyAndBucketExtractor(schema);
+        CdcRecordKeyAndBucketExtractor actual = new CdcRecordKeyAndBucketExtractor(schema);
+
+        long k1 = random.nextLong();
+        int v1 = random.nextInt();
+        String k2 = UUID.randomUUID().toString();
+        String v2 = UUID.randomUUID().toString();
+
+        GenericRowData rowData =
+                GenericRowData.of(
+                        StringData.fromString(""),
+                        null,
+                        k1,
+                        v1,
+                        StringData.fromString(k2),
+                        StringData.fromString(v2));
+        expected.setRecord(rowData);
+
+        Map<String, String> fields = new HashMap<>();
+        fields.put("pt1", "");
+        fields.put("pt2", null);
+        fields.put("k1", String.valueOf(k1));
+        fields.put("v1", String.valueOf(v1));
+        fields.put("k2", k2);
+        fields.put("v2", v2);
+
+        actual.setRecord(new CdcRecord(RowKind.INSERT, fields));
+        assertThat(actual.partition()).isEqualTo(expected.partition());
+        assertThat(actual.bucket()).isEqualTo(expected.bucket());
+
+        actual.setRecord(new CdcRecord(RowKind.DELETE, fields));
+        assertThat(actual.partition()).isEqualTo(expected.partition());
+        assertThat(actual.bucket()).isEqualTo(expected.bucket());
+    }
+
     private TableSchema createTableSchema() throws Exception {
         return SchemaUtils.forceCommit(
                 new SchemaManager(LocalFileIO.create(), new Path(tempDir.toString())),
