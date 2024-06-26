@@ -29,6 +29,7 @@ org.apache.paimon.flink.action.MigrateDatabaseActionFactory
 org.apache.paimon.flink.action.RemoveOrphanFilesActionFactory
 org.apache.paimon.flink.action.QueryServiceActionFactory
 org.apache.paimon.flink.action.ExpirePartitionsActionFactory
+org.apache.paimon.flink.action.PartitionMarkDoneActionFactory
 
 ### procedure factories
 org.apache.paimon.flink.procedure.CompactDatabaseProcedure
@@ -57,3 +58,4 @@ org.apache.paimon.flink.procedure.privilege.RevokePrivilegeFromUserProcedure
 org.apache.paimon.flink.procedure.RepairProcedure
 org.apache.paimon.flink.procedure.ReplaceBranchProcedure
 org.apache.paimon.flink.procedure.MergeBranchProcedure
+org.apache.paimon.flink.procedure.PartitionMarkDoneProcedure
