@@ -357,6 +357,16 @@ public class PredicateBuilder {
         }
     }
 
+    public static List<Predicate> excludePredicateWithFields(
+            @Nullable List<Predicate> predicates, Set<String> fields) {
+        if (predicates == null || predicates.isEmpty() || fields.isEmpty()) {
+            return predicates;
+        }
+        return predicates.stream()
+                .filter(f -> !containsFields(f, fields))
+                .collect(Collectors.toList());
+    }
+
     @Nullable
     public static Predicate partition(
             Map<String, String> map, RowType rowType, String defaultPartValue) {

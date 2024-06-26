@@ -57,10 +57,12 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.apache.paimon.predicate.PredicateBuilder.excludePredicateWithFields;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 
 /** A {@link SplitRead} to read raw file directly from {@link DataSplit}. */
@@ -181,6 +183,9 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                         ? filters
                         : SchemaEvolutionUtil.createDataFilters(
                                 tableSchema.fields(), dataSchema.fields(), filters);
+        // Skip pushing down partition filters to reader
+        List<Predicate> nonPartitionFilters =
+                excludePredicateWithFields(dataFilters, new HashSet<>(dataSchema.partitionKeys()));
 
         Pair<int[], RowType> partitionPair = null;
         if (!dataSchema.partitionKeys().isEmpty()) {
@@ -205,7 +210,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                 partitionPair,
                 formatDiscover
                         .discover(key.format)
-                        .createReaderFactory(projectedRowType, dataFilters),
+                        .createReaderFactory(projectedRowType, nonPartitionFilters),
                 dataSchema,
                 dataFilters);
     }
