@@ -106,7 +106,8 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         Pool<ParquetReaderBatch> poolOfBatches =
                 createPoolOfBatches(context.filePath(), requestedSchema);
 
-        return new ParquetReader(reader, requestedSchema, reader.getRecordCount(), poolOfBatches);
+        return new ParquetReader(
+                reader, requestedSchema, reader.getFilteredRecordCount(), poolOfBatches);
     }
 
     private void setReadOptions(ParquetReadOptions.Builder builder) {
@@ -325,7 +326,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         }
 
         private void readNextRowGroup() throws IOException {
-            PageReadStore pages = reader.readNextRowGroup();
+            PageReadStore pages = reader.readNextFilteredRowGroup();
             if (pages == null) {
                 throw new IOException(
                         "expecting more rows but reached last block. Read "

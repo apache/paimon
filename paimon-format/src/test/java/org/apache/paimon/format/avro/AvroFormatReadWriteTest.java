@@ -19,9 +19,8 @@
 package org.apache.paimon.format.avro;
 
 import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.format.FileFormatFactory;
+import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReadWriteTest;
-import org.apache.paimon.options.Options;
 
 /** An avro {@link FormatReadWriteTest}. */
 public class AvroFormatReadWriteTest extends FormatReadWriteTest {
@@ -31,7 +30,12 @@ public class AvroFormatReadWriteTest extends FormatReadWriteTest {
     }
 
     @Override
-    protected FileFormat fileFormat() {
-        return new AvroFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024));
+    protected boolean notSupportFilterPushDown() {
+        return true;
+    }
+
+    @Override
+    protected FileFormat fileFormat(FormatContext context) {
+        return new AvroFileFormat(context);
     }
 }

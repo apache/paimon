@@ -27,10 +27,14 @@ import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
@@ -45,6 +49,7 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.UUID;
@@ -60,8 +65,8 @@ public abstract class FormatReadWriteTest {
 
     private final String formatType;
 
-    private FileIO fileIO;
-    private Path file;
+    protected FileIO fileIO;
+    protected Path file;
 
     protected FormatReadWriteTest(String formatType) {
         this.formatType = formatType;
@@ -73,10 +78,46 @@ public abstract class FormatReadWriteTest {
         this.file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
     }
 
-    protected abstract FileFormat fileFormat();
+    protected FileFormat fileFormat() {
+        return fileFormat(new FormatContext(new Options(), 1024));
+    }
+
+    protected abstract FileFormat fileFormat(FormatContext context);
 
     protected boolean supportNestedNested() {
         return true;
+    }
+
+    protected boolean notSupportFilterPushDown() {
+        return false;
+    }
+
+    @Test
+    public void testFilterPushDown() throws IOException {
+        if (notSupportFilterPushDown()) {
+            return;
+        }
+
+        FileFormat format = fileFormat();
+        RowType rowType = DataTypes.ROW(DataTypes.INT().notNull(), DataTypes.BIGINT());
+        InternalRowSerializer serializer = new InternalRowSerializer(rowType);
+        PositionOutputStream out = fileIO.newOutputStream(file, false);
+        FormatWriter writer = format.createWriterFactory(rowType).create(out, "zstd");
+        writer.addElement(GenericRow.of(1, 1L));
+        writer.flush();
+        writer.finish();
+        out.close();
+
+        PredicateBuilder predicateBuilder = new PredicateBuilder(rowType);
+        List<Predicate> filters = Collections.singletonList(predicateBuilder.equal(0, 2));
+        RecordReader<InternalRow> reader =
+                format.createReaderFactory(rowType, filters)
+                        .createReader(
+                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)));
+        List<InternalRow> result = new ArrayList<>();
+        reader.forEachRemaining(row -> result.add(serializer.copy(row)));
+
+        assertThat(result).isEmpty();
     }
 
     @Test
