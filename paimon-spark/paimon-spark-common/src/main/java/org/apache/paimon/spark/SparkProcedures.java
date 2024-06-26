@@ -33,6 +33,7 @@ import org.apache.paimon.spark.procedure.ProcedureBuilder;
 import org.apache.paimon.spark.procedure.RemoveOrphanFilesProcedure;
 import org.apache.paimon.spark.procedure.RepairProcedure;
 import org.apache.paimon.spark.procedure.ReplaceBranchProcedure;
+import org.apache.paimon.spark.procedure.ResetConsumerProcedure;
 import org.apache.paimon.spark.procedure.RollbackProcedure;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
@@ -70,6 +71,7 @@ public class SparkProcedures {
         procedureBuilders.put("repair", RepairProcedure::builder);
         procedureBuilders.put("merge_branch", MergeBranchProcedure::builder);
         procedureBuilders.put("replace_branch", ReplaceBranchProcedure::builder);
+        procedureBuilders.put("reset_consumer", ResetConsumerProcedure::builder);
         return procedureBuilders.build();
     }
 }
