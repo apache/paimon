@@ -20,14 +20,15 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.{stats, CoreOptions}
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
+import org.apache.paimon.spark.metric.SparkMetricRegistry
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
 import org.apache.paimon.spark.statistics.StatisticsHelper
 import org.apache.paimon.table.{DataTable, FileStoreTable, Table}
-import org.apache.paimon.table.source.{ReadBuilder, Split}
+import org.apache.paimon.table.source.{InnerTableScan, ReadBuilder, Split}
 import org.apache.paimon.types.RowType
 
-import org.apache.spark.sql.connector.metric.CustomMetric
+import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
 import org.apache.spark.sql.connector.read.{Batch, Scan, Statistics, SupportsReportStatistics}
 import org.apache.spark.sql.connector.read.streaming.MicroBatchStream
 import org.apache.spark.sql.sources.Filter
@@ -70,6 +71,8 @@ abstract class PaimonBaseScan(
 
   lazy val statistics: Optional[stats.Statistics] = table.statistics()
 
+  private lazy val paimonMetricsRegistry: SparkMetricRegistry = SparkMetricRegistry()
+
   lazy val requiredStatsSchema: StructType = {
     val fieldNames = tableFields.map(_.name) ++ reservedFilters.flatMap(_.references)
     StructType(tableSchema.filter(field => fieldNames.contains(field.name)))
@@ -90,7 +93,14 @@ abstract class PaimonBaseScan(
   }
 
   def getOriginSplits: Array[Split] = {
-    readBuilder.newScan().plan().splits().asScala.toArray
+    readBuilder
+      .newScan()
+      .asInstanceOf[InnerTableScan]
+      .withMetricsRegistry(paimonMetricsRegistry)
+      .plan()
+      .splits()
+      .asScala
+      .toArray
   }
 
   def getSplits: Array[Split] = {
@@ -128,12 +138,20 @@ abstract class PaimonBaseScan(
         Array(
           PaimonNumSplitMetric(),
           PaimonSplitSizeMetric(),
-          PaimonAvgSplitSizeMetric()
+          PaimonAvgSplitSizeMetric(),
+          PaimonPlanningDurationMetric(),
+          PaimonScannedManifestsMetric(),
+          PaimonSkippedTableFilesMetric(),
+          PaimonResultedTableFilesMetric()
         )
       case _ =>
         Array.empty[CustomMetric]
     }
     super.supportedCustomMetrics() ++ paimonMetrics
+  }
+
+  override def reportDriverMetrics(): Array[CustomTaskMetric] = {
+    paimonMetricsRegistry.buildSparkScanMetrics()
   }
 
   override def description(): String = {

@@ -19,7 +19,7 @@
 package org.apache.paimon.spark
 
 import org.apache.spark.sql.PaimonUtils
-import org.apache.spark.sql.connector.metric.{CustomAvgMetric, CustomSumMetric, CustomTaskMetric}
+import org.apache.spark.sql.connector.metric.{CustomAvgMetric, CustomMetric, CustomSumMetric, CustomTaskMetric}
 
 import java.text.DecimalFormat
 
@@ -30,6 +30,14 @@ object PaimonMetrics {
   val SPLIT_SIZE = "splitSize"
 
   val AVG_SPLIT_SIZE = "avgSplitSize"
+
+  val PLANNING_DURATION = "planningDuration"
+
+  val SCANNED_MANIFESTS = "scannedManifests"
+
+  val SKIPPED_TABLE_FILES = "skippedTableFiles"
+
+  val RESULTED_TABLE_FILES = "resultedTableFiles"
 }
 
 // paimon's task metric
@@ -122,4 +130,40 @@ case class PaimonAvgSplitSizeMetric() extends PaimonAvgMetric {
     PaimonUtils.bytesToString(average)
   }
 
+}
+
+case class PaimonPlanningDurationMetric() extends PaimonSumMetric {
+  override def name(): String = PaimonMetrics.PLANNING_DURATION
+  override def description(): String = "planing duration (ms)"
+}
+
+case class PaimonPlanningDurationTaskMetric(value: Long) extends PaimonTaskMetric {
+  override def name(): String = PaimonMetrics.PLANNING_DURATION
+}
+
+case class PaimonScannedManifestsMetric() extends PaimonSumMetric {
+  override def name(): String = PaimonMetrics.SCANNED_MANIFESTS
+  override def description(): String = "number of scanned manifests"
+}
+
+case class PaimonScannedManifestsTaskMetric(value: Long) extends PaimonTaskMetric {
+  override def name(): String = PaimonMetrics.SCANNED_MANIFESTS
+}
+
+case class PaimonSkippedTableFilesMetric() extends PaimonSumMetric {
+  override def name(): String = PaimonMetrics.SKIPPED_TABLE_FILES
+  override def description(): String = "number of skipped table files"
+}
+
+case class PaimonSkippedTableFilesTaskMetric(value: Long) extends PaimonTaskMetric {
+  override def name(): String = PaimonMetrics.SKIPPED_TABLE_FILES
+}
+
+case class PaimonResultedTableFilesMetric() extends PaimonSumMetric {
+  override def name(): String = PaimonMetrics.RESULTED_TABLE_FILES
+  override def description(): String = "number of resulted table files"
+}
+
+case class PaimonResultedTableFilesTaskMetric(value: Long) extends PaimonTaskMetric {
+  override def name(): String = PaimonMetrics.RESULTED_TABLE_FILES
 }
