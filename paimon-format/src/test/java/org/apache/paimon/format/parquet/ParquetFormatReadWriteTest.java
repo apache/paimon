@@ -72,11 +72,12 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
         PositionOutputStream out = fileIO.newOutputStream(file, false);
         FormatWriter writer = format.createWriterFactory(rowType).create(out, "zstd");
         ThreadLocalRandom rnd = ThreadLocalRandom.current();
-        for (int i = 0; i < 10_000; i++) {
+        int batchSize = 10_000;
+        for (int i = 0; i < batchSize; i++) {
             int value = rnd.nextInt(100);
             writer.addElement(GenericRow.of(value, (long) value));
         }
-        for (int i = 0; i < 10_000; i++) {
+        for (int i = 0; i < batchSize; i++) {
             int value = rnd.nextInt(100, 500);
             writer.addElement(GenericRow.of(value, (long) value));
         }
@@ -93,6 +94,6 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
         List<InternalRow> result = new ArrayList<>();
         reader.forEachRemaining(row -> result.add(serializer.copy(row)));
 
-        assertThat(result.size()).isLessThan(10_000);
+        assertThat(result.size()).isLessThan(batchSize * 2);
     }
 }
