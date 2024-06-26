@@ -88,3 +88,7 @@ Paimon Catalog supports views and functions.
 ## Files Schema Evolution Ingestion
 
 Introduce a files Ingestion with Schema Evolution.
+
+## Foreign Key Join
+
+Explore Foreign Key Join solution.
