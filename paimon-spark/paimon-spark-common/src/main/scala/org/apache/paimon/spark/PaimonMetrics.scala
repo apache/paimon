@@ -19,7 +19,7 @@
 package org.apache.paimon.spark
 
 import org.apache.spark.sql.PaimonUtils
-import org.apache.spark.sql.connector.metric.{CustomAvgMetric, CustomMetric, CustomSumMetric, CustomTaskMetric}
+import org.apache.spark.sql.connector.metric.{CustomAvgMetric, CustomSumMetric, CustomTaskMetric}
 
 import java.text.DecimalFormat
 
@@ -132,6 +132,7 @@ case class PaimonAvgSplitSizeMetric() extends PaimonAvgMetric {
 
 }
 
+// Metrics reported by driver
 case class PaimonPlanningDurationMetric() extends PaimonSumMetric {
   override def name(): String = PaimonMetrics.PLANNING_DURATION
   override def description(): String = "planing duration (ms)"
