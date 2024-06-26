@@ -22,6 +22,7 @@ import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.serialization.ConfluentAvroDeserializationSchema;
 
 import io.confluent.kafka.schemaregistry.client.CachedSchemaRegistryClient;
+import io.confluent.kafka.serializers.GenericContainerWithVersion;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.configuration.Configuration;
@@ -62,10 +63,15 @@ public class KafkaDebeziumAvroDeserializationSchema
             return null;
         }
 
-        GenericRecord key =
-                (GenericRecord) this.avroDeserializer.deserialize(topic, true, message.key());
-        GenericRecord value =
-                (GenericRecord) this.avroDeserializer.deserialize(topic, false, message.value());
+        GenericContainerWithVersion keyContainerWithVersion =
+                this.avroDeserializer.deserialize(topic, true, message.key());
+        GenericContainerWithVersion valueContainerWithVersion =
+                this.avroDeserializer.deserialize(topic, false, message.value());
+        GenericRecord key = null;
+        if (keyContainerWithVersion != null) {
+            key = (GenericRecord) keyContainerWithVersion.container();
+        }
+        GenericRecord value = (GenericRecord) valueContainerWithVersion.container();
         return new CdcSourceRecord(topic, key, value);
     }
 

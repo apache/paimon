@@ -137,7 +137,9 @@ public class DebeziumAvroRecordParser extends AbstractRecordParser {
             String transformed =
                     DebeziumSchemaUtils.transformRawValue(
                             rawValue,
-                            schema.getLogicalType().getName(),
+                            schema.getLogicalType() != null
+                                    ? schema.getLogicalType().getName()
+                                    : null,
                             schema.getFullName(),
                             typeMapping,
                             () ->
@@ -189,7 +191,7 @@ public class DebeziumAvroRecordParser extends AbstractRecordParser {
         if (Objects.isNull(source)) {
             return null;
         }
-        return (String) source.get(key);
+        return source.get(key).toString();
     }
 
     protected Object getAndCheck(String key) {

@@ -75,7 +75,7 @@ import java.util.stream.Collectors;
 /** Base test class for Kafka synchronization. */
 public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    protected final ObjectMapper objectMapper = new ObjectMapper();
 
     private static final Logger LOG = LoggerFactory.getLogger(KafkaActionITCaseBase.class);
 
@@ -334,7 +334,7 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
     protected void writeRecordsToKafka(
             String topic, boolean wait, String resourceDirFormat, Object... args) throws Exception {
         URL url =
-                KafkaCanalSyncTableActionITCase.class
+                KafkaActionITCaseBase.class
                         .getClassLoader()
                         .getResource(String.format(resourceDirFormat, args));
         Files.readAllLines(Paths.get(url.toURI())).stream()
@@ -342,7 +342,7 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
                 .forEach(r -> send(topic, r, wait));
     }
 
-    private boolean isRecordLine(String line) {
+    protected boolean isRecordLine(String line) {
         try {
             objectMapper.readTree(line);
             return !StringUtils.isEmpty(line);
