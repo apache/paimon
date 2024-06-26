@@ -21,6 +21,7 @@ package org.apache.paimon.spark.procedure;
 import org.apache.paimon.consumer.Consumer;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.table.FileStoreTable;
+
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
@@ -47,15 +48,15 @@ public class ResetConsumerProcedure extends BaseProcedure {
 
     private static final ProcedureParameter[] PARAMETERS =
             new ProcedureParameter[] {
-                    ProcedureParameter.required("table", StringType),
-                    ProcedureParameter.required("consumerId", StringType),
-                    ProcedureParameter.optional("nextSnapshotId", LongType)
+                ProcedureParameter.required("table", StringType),
+                ProcedureParameter.required("consumerId", StringType),
+                ProcedureParameter.optional("nextSnapshotId", LongType)
             };
 
     private static final StructType OUTPUT_TYPE =
             new StructType(
                     new StructField[] {
-                            new StructField("result", DataTypes.BooleanType, true, Metadata.empty())
+                        new StructField("result", DataTypes.BooleanType, true, Metadata.empty())
                     });
 
     protected ResetConsumerProcedure(TableCatalog tableCatalog) {
