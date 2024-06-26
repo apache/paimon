@@ -102,8 +102,6 @@ public class SnapshotReaderTest {
         assertThat(dataSplits).hasSize(2);
         for (DataSplit dataSplit : dataSplits) {
             assertThat(dataSplit.dataFiles()).hasSize(1);
-            DataFileMeta meta = dataSplit.dataFiles().get(0);
-            String partition = dataSplit.partition().getString(0).toString();
             assertThat(dataSplit.convertToRawFiles()).isPresent();
         }
 
@@ -243,7 +241,7 @@ public class SnapshotReaderTest {
                                 new RawFile(
                                         String.format(
                                                 "%s/bucket-0/%s", tablePath, meta0.fileName()),
-                                        meta.fileSize(),
+                                        meta0.fileSize(),
                                         0,
                                         meta0.fileSize(),
                                         "avro",
@@ -252,7 +250,7 @@ public class SnapshotReaderTest {
                                 new RawFile(
                                         String.format(
                                                 "%s/bucket-0/%s", tablePath, meta1.fileName()),
-                                        meta.fileSize(),
+                                        meta1.fileSize(),
                                         0,
                                         meta1.fileSize(),
                                         "avro",
