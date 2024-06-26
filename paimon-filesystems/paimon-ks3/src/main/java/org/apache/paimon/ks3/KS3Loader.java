@@ -55,9 +55,8 @@ public class KS3Loader implements FileIOLoader {
     @Override
     public List<String[]> requiredOptions() {
         List<String[]> options = new ArrayList<>();
-        options.add(new String[] {"fs.ks3.AccessKey"});
-        options.add(new String[] {"fs.ks3.AccessSecret"});
-        options.add(new String[] {"fs.ks3.endpoint"});
+        options.add(new String[] {"ks3.access-key", "ks3.access.key"});
+        options.add(new String[] {"ks3.secret-key", "ks3.secret.key"});
         return options;
     }
 
