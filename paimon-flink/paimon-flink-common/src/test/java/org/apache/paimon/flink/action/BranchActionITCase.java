@@ -89,32 +89,32 @@ class BranchActionITCase extends ActionITCaseBase {
         assertThat(branchManager.branchExists("branch_name")).isFalse();
 
         createAction(
-                CreateBranchAction.class,
-                "create_branch",
-                "--warehouse",
-                warehouse,
-                "--database",
-                database,
-                "--table",
-                tableName,
-                "--branch_name",
-                "branch_name",
-                "--tag_name",
-                "tag2")
+                        CreateBranchAction.class,
+                        "create_branch",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--branch_name",
+                        "branch_name",
+                        "--tag_name",
+                        "tag2")
                 .run();
         assertThat(branchManager.branchExists("branch_name")).isTrue();
 
         createAction(
-                DeleteBranchAction.class,
-                "delete_branch",
-                "--warehouse",
-                warehouse,
-                "--database",
-                database,
-                "--table",
-                tableName,
-                "--branch_name",
-                "branch_name")
+                        DeleteBranchAction.class,
+                        "delete_branch",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--branch_name",
+                        "branch_name")
                 .run();
         assertThat(branchManager.branchExists("branch_name")).isFalse();
     }
@@ -160,32 +160,32 @@ class BranchActionITCase extends ActionITCaseBase {
         assertThat(branchManager.branchExists("branch_name_with_snapshotId")).isFalse();
 
         createAction(
-                CreateBranchAction.class,
-                "create_branch",
-                "--warehouse",
-                warehouse,
-                "--database",
-                database,
-                "--table",
-                tableName,
-                "--branch_name",
-                "branch_name_with_snapshotId",
-                "--snapshot",
-                "2")
+                        CreateBranchAction.class,
+                        "create_branch",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--branch_name",
+                        "branch_name_with_snapshotId",
+                        "--snapshot",
+                        "2")
                 .run();
         assertThat(branchManager.branchExists("branch_name_with_snapshotId")).isTrue();
 
         createAction(
-                DeleteBranchAction.class,
-                "delete_branch",
-                "--warehouse",
-                warehouse,
-                "--database",
-                database,
-                "--table",
-                tableName,
-                "--branch_name",
-                "branch_name_with_snapshotId")
+                        DeleteBranchAction.class,
+                        "delete_branch",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--branch_name",
+                        "branch_name_with_snapshotId")
                 .run();
         assertThat(branchManager.branchExists("branch_name_with_snapshotId")).isFalse();
     }
@@ -230,30 +230,30 @@ class BranchActionITCase extends ActionITCaseBase {
         assertThat(branchManager.branchExists("empty_branch_name")).isFalse();
 
         createAction(
-                CreateBranchAction.class,
-                "create_branch",
-                "--warehouse",
-                warehouse,
-                "--database",
-                database,
-                "--table",
-                tableName,
-                "--branch_name",
-                "empty_branch_name")
+                        CreateBranchAction.class,
+                        "create_branch",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--branch_name",
+                        "empty_branch_name")
                 .run();
         assertThat(branchManager.branchExists("empty_branch_name")).isTrue();
 
         createAction(
-                DeleteBranchAction.class,
-                "delete_branch",
-                "--warehouse",
-                warehouse,
-                "--database",
-                database,
-                "--table",
-                tableName,
-                "--branch_name",
-                "empty_branch_name")
+                        DeleteBranchAction.class,
+                        "delete_branch",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--branch_name",
+                        "empty_branch_name")
                 .run();
         assertThat(branchManager.branchExists("empty_branch_name")).isFalse();
     }
@@ -301,18 +301,18 @@ class BranchActionITCase extends ActionITCaseBase {
         assertThat(branchManager.branchExists("merge_branch_name")).isTrue();
         // Create merge_branch_name_action branch
         createAction(
-                CreateBranchAction.class,
-                "create_branch",
-                "--warehouse",
-                warehouse,
-                "--database",
-                database,
-                "--table",
-                tableName,
-                "--branch_name",
-                "merge_branch_name_action",
-                "--tag_name",
-                "tag3")
+                        CreateBranchAction.class,
+                        "create_branch",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--branch_name",
+                        "merge_branch_name_action",
+                        "--tag_name",
+                        "tag3")
                 .run();
         assertThat(branchManager.branchExists("merge_branch_name_action")).isTrue();
 
@@ -326,18 +326,18 @@ class BranchActionITCase extends ActionITCaseBase {
         SnapshotManager snapshotManager = table.snapshotManager();
         assertThat(snapshotManager.snapshotExists(3)).isFalse();
 
-        //Merge branch merge_branch_name_action
+        // Merge branch merge_branch_name_action
         createAction(
-                MergeBranchAction.class,
-                "merge_branch",
-                "--warehouse",
-                warehouse,
-                "--database",
-                database,
-                "--table",
-                tableName,
-                "--branch_name",
-                "merge_branch_name_action")
+                        MergeBranchAction.class,
+                        "merge_branch",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--branch_name",
+                        "merge_branch_name_action")
                 .run();
 
         // Check snapshot
@@ -384,18 +384,18 @@ class BranchActionITCase extends ActionITCaseBase {
         expected = Arrays.asList("+I[1, Hi]", "+I[2, Hello]");
         Assert.assertEquals(expected, sortedActual);
 
-        //Merge branch merge_branch_name_action again
+        // Merge branch merge_branch_name_action again
         createAction(
-                MergeBranchAction.class,
-                "merge_branch",
-                "--warehouse",
-                warehouse,
-                "--database",
-                database,
-                "--table",
-                tableName,
-                "--branch_name",
-                "merge_branch_name_action")
+                        MergeBranchAction.class,
+                        "merge_branch",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--branch_name",
+                        "merge_branch_name_action")
                 .run();
 
         // Check main branch data
