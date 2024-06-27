@@ -151,7 +151,12 @@ abstract class PaimonBaseScan(
   }
 
   override def reportDriverMetrics(): Array[CustomTaskMetric] = {
-    paimonMetricsRegistry.buildSparkScanMetrics()
+    table match {
+      case _: FileStoreTable =>
+        paimonMetricsRegistry.buildSparkScanMetrics()
+      case _ =>
+        Array.empty[CustomTaskMetric]
+    }
   }
 
   override def description(): String = {
