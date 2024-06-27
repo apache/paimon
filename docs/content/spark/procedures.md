@@ -146,6 +146,32 @@ This section introduce all available spark procedures about paimon.
       </td>
     </tr>
     <tr>
+      <td>create_branch</td>
+      <td>
+         To merge a branch to main branch. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>branch: name of the branch to be merged.</li>
+            <li>tag: name of the new tag. Cannot be empty.</li>
+            <li>snapshot(Long):  id of the snapshot which the new tag is based on.</li>
+      </td>
+      <td>
+          CALL sys.create_branch(table => 'test_db.T', branch => 'test_branch')<br/>
+          CALL sys.create_branch(table => 'test_db.T', branch => 'test_branch', tag => 'my_tag')<br/>
+          CALL sys.create_branch(table => 'test_db.T', branch => 'test_branch', snapshot => 10)
+      </td>
+    </tr>
+    <tr>
+      <td>delete_branch</td>
+      <td>
+         To merge a branch to main branch. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>branch: name of the branch to be merged.</li>
+      </td>
+      <td>
+          CALL sys.delete_branch(table => 'test_db.T', branch => 'test_branch')
+      </td>
+    </tr>
+    <tr>
       <td>merge_branch</td>
       <td>
          To merge a branch to main branch. Arguments:
