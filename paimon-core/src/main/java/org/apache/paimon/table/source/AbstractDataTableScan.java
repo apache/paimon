@@ -54,6 +54,7 @@ import java.util.Optional;
 
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** An abstraction layer above {@link FileStoreScan} to provide input split generation. */
 public abstract class AbstractDataTableScan implements DataTableScan {
@@ -177,11 +178,14 @@ public abstract class AbstractDataTableScan implements DataTableScan {
                     throw new UnsupportedOperationException("Unknown snapshot read mode");
                 }
             case FROM_SNAPSHOT_FULL:
+                Long scanSnapshotId = options.scanSnapshotId();
+                checkNotNull(
+                        scanSnapshotId,
+                        "scan.snapshot-id must be set when startupMode is FROM_SNAPSHOT_FULL.");
                 return isStreaming
                         ? new ContinuousFromSnapshotFullStartingScanner(
-                                snapshotManager, options.scanSnapshotId())
-                        : new StaticFromSnapshotStartingScanner(
-                                snapshotManager, options.scanSnapshotId());
+                                snapshotManager, scanSnapshotId)
+                        : new StaticFromSnapshotStartingScanner(snapshotManager, scanSnapshotId);
             case INCREMENTAL:
                 checkArgument(!isStreaming, "Cannot read incremental in streaming mode.");
                 Pair<String, String> incrementalBetween = options.incrementalBetween();
