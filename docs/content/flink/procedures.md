@@ -346,19 +346,5 @@ All available procedures are listed below.
          CALL sys.merge_branch('default.T', 'branch1')
       </td>
    </tr>
-   <tr>
-      <td>replace_branch</td>
-      <td>
-         CALL [catalog.]sys.replace_branch('identifier', 'branchName')
-      </td>
-      <td>
-         To replace main branch with specified branch. Arguments:
-            <li>identifier: the target table identifier. Cannot be empty.</li>
-            <li>branchName: name of the branch to be replaced.</li>
-      </td>
-      <td>
-         CALL sys.replace_branch('default.T', 'branch1')
-      </td>
-   </tr>
    </tbody>
 </table>
