@@ -54,6 +54,24 @@ CALL sys.create_branch('default.T', 'branch1');
 ```
 {{< /tab >}}
 
+{{< tab "Flink Action Jar" >}}
+
+Run the following command:
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    create_branch \
+    --warehouse <warehouse-path> \
+    --database <database-name> \ 
+    --table <table-name> \
+    --branch_name <branch-name> \
+    [--tag_name <tag-name>] \
+    [--snapshot <snapshot_id>] \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
+```
+{{< /tab >}}
+
 {{< /tabs >}}
 
 ## Delete Branches
@@ -68,6 +86,22 @@ Run the following sql:
 
 ```sql
 CALL sys.delete_branch('default.T', 'branch1');
+```
+{{< /tab >}}
+
+{{< tab "Flink Action Jar" >}}
+
+Run the following command:
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    delete_branch \
+    --warehouse <warehouse-path> \
+    --database <database-name> \ 
+    --table <table-name> \
+    --branch_name <branch-name> \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
 ```
 {{< /tab >}}
 
@@ -105,6 +139,22 @@ Merging the custom branch to main will delete all the snapshots, tags and schema
 CALL sys.merge_branch('default.T', 'branch1');
 ```
 
+{{< /tab >}}
+
+{{< tab "Flink Action Jar" >}}
+
+Run the following command:
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    merge_branch \
+    --warehouse <warehouse-path> \
+    --database <database-name> \ 
+    --table <table-name> \
+    --branch_name <branch-name> \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
+```
 {{< /tab >}}
 
 {{< /tabs >}}
