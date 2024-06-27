@@ -1155,7 +1155,7 @@ public abstract class HiveCatalogITCaseBase {
                                 + "'partition.idle-time-to-done'='1 s',"
                                 + "'partition.time-interval'='1 d',"
                                 + "'metastore.partitioned-table'='true',"
-                                + "'partition.mark-done-action'='done-partition,success-file'"
+                                + "'partition.mark-done-action'='done-partition,success-file,mark-event'"
                                 + ")")
                 .await();
 
