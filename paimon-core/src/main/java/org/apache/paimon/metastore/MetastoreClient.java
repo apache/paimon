@@ -35,6 +35,8 @@ public interface MetastoreClient extends AutoCloseable {
 
     void deletePartition(LinkedHashMap<String, String> partitionSpec) throws Exception;
 
+    void markDone(LinkedHashMap<String, String> partitionSpec) throws Exception;
+
     /** Factory to create {@link MetastoreClient}. */
     interface Factory extends Serializable {
 
