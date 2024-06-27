@@ -110,7 +110,7 @@ public class CompactProcedure extends BaseProcedure {
                 ProcedureParameter.optional("order_strategy", StringType),
                 ProcedureParameter.optional("order_by", StringType),
                 ProcedureParameter.optional("where", StringType),
-                ProcedureParameter.optional("max_order_threads", IntegerType)
+                ProcedureParameter.optional("max_concurrent_jobs", IntegerType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -143,7 +143,7 @@ public class CompactProcedure extends BaseProcedure {
                         ? Collections.emptyList()
                         : Arrays.asList(args.getString(3).split(","));
         String where = blank(args, 4) ? null : args.getString(4);
-        int maxOrderThreads = args.isNullAt(5) ? 15 : args.getInt(5);
+        int maxConcurrentJobs = args.isNullAt(5) ? 15 : args.getInt(5);
         if (TableSorter.OrderType.NONE.name().equals(sortType) && !sortColumns.isEmpty()) {
             throw new IllegalArgumentException(
                     "order_strategy \"none\" cannot work with order_by columns.");
@@ -182,7 +182,7 @@ public class CompactProcedure extends BaseProcedure {
                                             sortColumns,
                                             relation,
                                             condition,
-                                            maxOrderThreads));
+                                            maxConcurrentJobs));
                     return new InternalRow[] {internalRow};
                 });
     }
@@ -202,7 +202,7 @@ public class CompactProcedure extends BaseProcedure {
             List<String> sortColumns,
             DataSourceV2Relation relation,
             @Nullable Expression condition,
-            int maxOrderThreads) {
+            int maxConcurrentJobs) {
         table = table.copy(Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "false"));
         BucketMode bucketMode = table.bucketMode();
         TableSorter.OrderType orderType = TableSorter.OrderType.of(sortType);
@@ -233,7 +233,7 @@ public class CompactProcedure extends BaseProcedure {
             switch (bucketMode) {
                 case BUCKET_UNAWARE:
                     sortCompactUnAwareBucketTable(
-                            table, orderType, sortColumns, relation, filter, maxOrderThreads);
+                            table, orderType, sortColumns, relation, filter, maxConcurrentJobs);
                     break;
                 default:
                     throw new UnsupportedOperationException(
@@ -388,7 +388,7 @@ public class CompactProcedure extends BaseProcedure {
             List<String> sortColumns,
             DataSourceV2Relation relation,
             @Nullable Predicate filter,
-            int maxOrderThreads) {
+            int maxConcurrentJobs) {
         SnapshotReader snapshotReader = table.newSnapshotReader();
         if (filter != null) {
             snapshotReader.withFilter(filter);
@@ -401,7 +401,7 @@ public class CompactProcedure extends BaseProcedure {
 
         ExecutorService executorService =
                 Executors.newFixedThreadPool(
-                        Math.min(maxOrderThreads, packedSplits.size()),
+                        Math.min(maxConcurrentJobs, packedSplits.size()),
                         new ExecutorThreadFactory(Thread.currentThread().getName() + "-compact"));
         LinkedList<Future<Seq<CommitMessage>>> futures = new LinkedList<>();
         TableSorter sorter = TableSorter.getSorter(table, orderType, sortColumns);
