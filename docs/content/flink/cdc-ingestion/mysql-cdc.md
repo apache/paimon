@@ -30,9 +30,13 @@ Paimon supports synchronizing changes from different databases using change data
 
 ## Prepare CDC Bundled Jar
 
-```
-flink-sql-connector-mysql-cdc-*.jar
-```
+Download `CDC Bundled Jar` and put them under <FLINK_HOME>/lib/.
+
+| Version | Bundled Jar                                                                  |
+|---------|------------------------------------------------------------------------------|
+| 2.4.x   | flink-sql-connector-mysql-cdc-2.4.2.jar                                      |
+| 3.0.x   | <li> flink-sql-connector-mysql-cdc-3.0.x.jar <li> flink-cdc-common-3.0.x.jar |
+| 3.1.x   | Not supported yet                                                            |
 
 ## Synchronizing Tables
 
