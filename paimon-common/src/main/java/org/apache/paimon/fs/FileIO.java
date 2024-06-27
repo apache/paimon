@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.hadoop.HadoopFileIOLoader;
 import org.apache.paimon.fs.local.LocalFileIO;
 
+import org.apache.commons.io.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -265,6 +266,22 @@ public interface FileIO extends Serializable {
             writer.write(content);
             writer.flush();
         }
+    }
+
+    /**
+     * Copy content of one file into another.
+     *
+     * @return false if targetPath file exists
+     */
+    default boolean copyFile(Path sourcePath, Path targetPath) throws IOException {
+        if (exists(targetPath)) {
+            return false;
+        }
+        try (SeekableInputStream is = newInputStream(sourcePath);
+                PositionOutputStream os = newOutputStream(targetPath, false)) {
+            IOUtils.copy(is, os);
+        }
+        return true;
     }
 
     /**
