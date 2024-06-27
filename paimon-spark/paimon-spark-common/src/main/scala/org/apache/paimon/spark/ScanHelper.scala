@@ -151,21 +151,6 @@ trait ScanHelper extends Logging {
     split1.partition().equals(split2.partition()) && split1.bucket() == split2.bucket()
   }
 
-  private def splitSize(split: DataSplit): Long = {
-    val dataFileSize = split.dataFiles().asScala.map(_.fileSize() + openCostInBytes).sum
-    val deletionFileSize = if (deletionVectors && split.deletionFiles().isPresent) {
-      split
-        .deletionFiles()
-        .get()
-        .asScala
-        .flatMap(deletionFile => Option(deletionFile).map(_.length()))
-        .sum
-    } else {
-      0L
-    }
-    dataFileSize + deletionFileSize
-  }
-
   private def dataFileAndDeletionFiles(split: DataSplit): Array[(DataFileMeta, DeletionFile)] = {
     if (deletionVectors && split.deletionFiles().isPresent) {
       val deletionFiles = split.deletionFiles().get().asScala

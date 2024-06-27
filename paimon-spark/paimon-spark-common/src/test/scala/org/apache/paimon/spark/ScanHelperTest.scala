@@ -52,7 +52,7 @@ class ScanHelperTest extends PaimonSparkTestBase {
             .builder()
             .withSnapshot(1)
             .withBucket(0)
-            .withPartition(new BinaryRow(0))
+            .withPartition(BinaryRow.EMPTY_ROW)
             .withDataFiles(files.zipWithIndex.filter(_._2 % splitNum == i).map(_._1).toList.asJava)
             .rawConvertible(true)
             .withBucketPath("no use")

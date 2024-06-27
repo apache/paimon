@@ -118,7 +118,6 @@ case class DeleteFromPaimonTableCommand(
   }
 
   def performNonPrimaryKeyDelete(sparkSession: SparkSession): Seq[CommitMessage] = {
-    val ts1 = System.currentTimeMillis()
     val pathFactory = fileStore.pathFactory()
     // Step1: the candidate data splits which are filtered by Paimon Predicate.
     val candidateDataSplits = findCandidateDataSplits(condition, relation.output)
@@ -132,15 +131,11 @@ case class DeleteFromPaimonTableCommand(
         condition,
         relation,
         sparkSession)
-      val ts2 = System.currentTimeMillis()
-      logInfo(s"Get deletion vectors in ${ts2 - ts1} ms.")
 
       deletionVectors.cache()
       try {
         // Step3: write these deletion vectors.
         val newIndexCommitMsg = writer.persistDeletionVectors(deletionVectors)
-        val ts3 = System.currentTimeMillis()
-        logInfo(s"Write the new deletion vectors in ${ts3 - ts2} ms.")
 
         // Step4: mark the touched index files as DELETE if needed.
         val rewriteIndexCommitMsg = fileStore.bucketMode() match {
@@ -150,8 +145,6 @@ case class DeleteFromPaimonTableCommand(
           case _ =>
             Seq.empty[CommitMessage]
         }
-        val ts4 = System.currentTimeMillis()
-        logInfo(s"Rewrite the unchanged deletion vectors in ${ts4 - ts3} ms.")
 
         newIndexCommitMsg ++ rewriteIndexCommitMsg
       } finally {

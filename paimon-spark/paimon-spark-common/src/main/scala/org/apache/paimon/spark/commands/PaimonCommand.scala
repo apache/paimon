@@ -151,7 +151,6 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
       dataFilePathToMeta: Map[String, SparkDataFileMeta],
       newDeletionVectors: Dataset[SparkDeletionVectors]
   ): Seq[IndexManifestEntry] = {
-    val ts1 = System.currentTimeMillis()
     val deletionFiles = dataFilePathToMeta.flatMap {
       case (relativePath, sdf) =>
         sdf.deletionFile match {
@@ -163,8 +162,6 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
     val dvIndexFileMaintainer = fileStore
       .newIndexFileHandler()
       .createDVIndexFileMaintainer(deletionFiles.asJava)
-    val ts2 = System.currentTimeMillis()
-    logInfo(s"initialize dv file maintainer in ${ts2 - ts1} ms.")
 
     val pathFactory = fileStore.pathFactory()
     val touchedDataFileAndDeletionFiles = newDeletionVectors
@@ -181,17 +178,10 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
           }
       }
       .toMap
-    val ts3 = System.currentTimeMillis()
-    logInfo(s"Collect the touched deletion files in ${ts3 - ts2} ms.")
 
     dvIndexFileMaintainer.notifyDeletionFiles(touchedDataFileAndDeletionFiles.asJava)
-    val ts4 = System.currentTimeMillis()
-    logInfo(s"Notify the touched deletion files in ${ts4 - ts3} ms.")
 
-    val entries = dvIndexFileMaintainer.writeUnchangedDeletionVector().asScala
-    val ts5 = System.currentTimeMillis()
-    logInfo(s"Write the unchanged deletion vectors in ${ts5 - ts4} ms.")
-    entries
+    dvIndexFileMaintainer.writeUnchangedDeletionVector().asScala
   }
   protected def collectDeletionVectors(
       candidateDataSplits: Seq[DataSplit],
