@@ -22,6 +22,7 @@ import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.serialization.ConfluentAvroDeserializationSchema;
 
 import io.confluent.kafka.schemaregistry.client.CachedSchemaRegistryClient;
+import io.confluent.kafka.serializers.GenericContainerWithVersion;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
@@ -53,10 +54,7 @@ public class PulsarDebeziumAvroDeserializationSchema
 
     @Override
     public void open(InitializationContext context) throws Exception {
-        avroDeserializer =
-                new ConfluentAvroDeserializationSchema(
-                        new CachedSchemaRegistryClient(
-                                schemaRegistryUrl, DEFAULT_IDENTITY_MAP_CAPACITY));
+        initAvroDeserializer();
     }
 
     @Override
@@ -65,8 +63,13 @@ public class PulsarDebeziumAvroDeserializationSchema
             return null;
         }
 
-        GenericRecord value =
-                (GenericRecord) this.avroDeserializer.deserialize(topic, false, message);
+        if (this.avroDeserializer == null) {
+            initAvroDeserializer();
+        }
+
+        GenericContainerWithVersion valueContainerWithVersion =
+                this.avroDeserializer.deserialize(topic, false, message);
+        GenericRecord value = (GenericRecord) valueContainerWithVersion.container();
         return new CdcSourceRecord(topic, null, value);
     }
 
@@ -78,5 +81,12 @@ public class PulsarDebeziumAvroDeserializationSchema
     @Override
     public TypeInformation<CdcSourceRecord> getProducedType() {
         return getForClass(CdcSourceRecord.class);
+    }
+
+    private void initAvroDeserializer() {
+        this.avroDeserializer =
+                new ConfluentAvroDeserializationSchema(
+                        new CachedSchemaRegistryClient(
+                                schemaRegistryUrl, DEFAULT_IDENTITY_MAP_CAPACITY));
     }
 }

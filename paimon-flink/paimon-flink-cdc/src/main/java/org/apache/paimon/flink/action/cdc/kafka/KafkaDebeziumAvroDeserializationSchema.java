@@ -24,6 +24,7 @@ import org.apache.paimon.flink.action.cdc.serialization.ConfluentAvroDeserializa
 import io.confluent.kafka.schemaregistry.client.CachedSchemaRegistryClient;
 import io.confluent.kafka.serializers.GenericContainerWithVersion;
 import org.apache.avro.generic.GenericRecord;
+import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
@@ -43,17 +44,19 @@ public class KafkaDebeziumAvroDeserializationSchema
     private static final int DEFAULT_IDENTITY_MAP_CAPACITY = 1000;
 
     private final String topic;
+    private final String schemaRegistryUrl;
 
     /** The deserializer to deserialize Debezium Avro data. */
-    private final ConfluentAvroDeserializationSchema avroDeserializer;
+    private ConfluentAvroDeserializationSchema avroDeserializer;
 
     public KafkaDebeziumAvroDeserializationSchema(Configuration cdcSourceConfig) {
         this.topic = KafkaActionUtils.findOneTopic(cdcSourceConfig);
-        String schemaRegistryUrl = cdcSourceConfig.getString(SCHEMA_REGISTRY_URL);
-        this.avroDeserializer =
-                new ConfluentAvroDeserializationSchema(
-                        new CachedSchemaRegistryClient(
-                                schemaRegistryUrl, DEFAULT_IDENTITY_MAP_CAPACITY));
+        this.schemaRegistryUrl = cdcSourceConfig.getString(SCHEMA_REGISTRY_URL);
+    }
+
+    @Override
+    public void open(DeserializationSchema.InitializationContext context) throws Exception {
+        initAvroDeserializer();
     }
 
     @Override
@@ -61,6 +64,10 @@ public class KafkaDebeziumAvroDeserializationSchema
         if (message.value() == null) {
             // skip tombstone messages
             return null;
+        }
+
+        if (this.avroDeserializer == null) {
+            initAvroDeserializer();
         }
 
         GenericContainerWithVersion keyContainerWithVersion =
@@ -83,5 +90,12 @@ public class KafkaDebeziumAvroDeserializationSchema
     @Override
     public TypeInformation<CdcSourceRecord> getProducedType() {
         return getForClass(CdcSourceRecord.class);
+    }
+
+    private void initAvroDeserializer() {
+        this.avroDeserializer =
+                new ConfluentAvroDeserializationSchema(
+                        new CachedSchemaRegistryClient(
+                                schemaRegistryUrl, DEFAULT_IDENTITY_MAP_CAPACITY));
     }
 }

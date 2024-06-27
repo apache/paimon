@@ -125,8 +125,6 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
                     boolean sameType = field.type().equals(rowType.getFieldTypes().get(i));
                     if (sameName && sameType) {
                         cnt++;
-                    } else {
-                        System.out.println("ss");
                     }
                 }
                 if (cnt == rowType.getFieldCount()) {

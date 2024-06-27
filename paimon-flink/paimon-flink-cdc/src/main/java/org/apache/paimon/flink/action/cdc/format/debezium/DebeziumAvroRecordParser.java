@@ -26,7 +26,6 @@ import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 
-import io.debezium.data.geometry.Geometry;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericRecord;
 import org.slf4j.Logger;
@@ -34,7 +33,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.nio.ByteBuffer;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -42,8 +40,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.CONNECT_NAME_PROP;
 import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.FIELD_AFTER;
 import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.FIELD_BEFORE;
 import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.FIELD_DB;
@@ -55,7 +55,9 @@ import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaU
 import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.OP_READE;
 import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.OP_TRUNCATE;
 import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.OP_UPDATE;
+import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.SCHEMA_PARAMETER_COLUMN_NAME;
 import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.avroToPaimonDataType;
+import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.getAvroConnectParameters;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
@@ -132,20 +134,25 @@ public class DebeziumAvroRecordParser extends AbstractRecordParser {
         LinkedHashMap<String, String> resultMap = new LinkedHashMap<>();
         for (Schema.Field field : payloadSchema.getFields()) {
             Schema schema = sanitizedSchema(field.schema());
-            String fieldName = field.name();
+            Map<String, String> connectParameters = getAvroConnectParameters(schema);
+
+            String fieldName =
+                    Optional.of(schema)
+                            .filter(s -> s.getType() == Schema.Type.RECORD)
+                            .map(s -> field.name())
+                            .orElseGet(
+                                    () ->
+                                            connectParameters.getOrDefault(
+                                                    SCHEMA_PARAMETER_COLUMN_NAME, field.name()));
             String rawValue = Objects.toString(record.get(fieldName), null);
+            String className = schema.getProp(CONNECT_NAME_PROP);
             String transformed =
-                    DebeziumSchemaUtils.transformRawValue(
+                    DebeziumSchemaUtils.transformAvroRawValue(
                             rawValue,
-                            schema.getLogicalType() != null
-                                    ? schema.getLogicalType().getName()
-                                    : null,
                             schema.getFullName(),
+                            className,
                             typeMapping,
-                            () ->
-                                    (ByteBuffer)
-                                            ((GenericRecord) record.get(fieldName))
-                                                    .get(Geometry.WKB_FIELD),
+                            record.get(fieldName),
                             ZoneOffset.UTC);
             resultMap.put(fieldName, transformed);
             rowTypeBuilder.field(fieldName, avroToPaimonDataType(schema));

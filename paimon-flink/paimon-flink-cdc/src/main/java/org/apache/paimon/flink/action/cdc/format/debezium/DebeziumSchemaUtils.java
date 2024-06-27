@@ -37,6 +37,7 @@ import io.debezium.time.MicroTimestamp;
 import io.debezium.time.Timestamp;
 import io.debezium.time.ZonedTimestamp;
 import org.apache.avro.Schema;
+import org.apache.avro.generic.GenericRecord;
 import org.apache.kafka.connect.json.JsonConverterConfig;
 
 import javax.annotation.Nullable;
@@ -49,8 +50,8 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 
@@ -100,6 +101,27 @@ public class DebeziumSchemaUtils {
                                 e);
                     }
                 },
+                serverTimeZone);
+    }
+
+    public static String transformAvroRawValue(
+            @Nullable String rawValue,
+            String debeziumType,
+            @Nullable String className,
+            TypeMapping typeMapping,
+            Object origin,
+            ZoneId serverTimeZone) {
+
+        if (rawValue != null && "bytes".equals(debeziumType) && className == null) {
+            return new String(((ByteBuffer) origin).array());
+        }
+
+        return transformRawValue(
+                rawValue,
+                debeziumType,
+                className,
+                typeMapping,
+                () -> (ByteBuffer) ((GenericRecord) origin).get(Geometry.WKB_FIELD),
                 serverTimeZone);
     }
 
@@ -301,33 +323,25 @@ public class DebeziumSchemaUtils {
     protected static final String CONNECT_PARAMETERS_PROP = "connect.parameters";
     protected static final String CONNECT_NAME_PROP = "connect.name";
 
-    private static final String POINT_LOGICAL_NAME = "io.debezium.data.geometry.Point";
-    private static final String GEOMETRY_LOGICAL_NAME = "io.debezium.data.geometry.Geometry";
-    private static final String ENUM_SET_LOGICAL_NAME = "io.debezium.data.EnumSet";
-    private static final String DATE_SCHEMA_NAME = "io.debezium.time.Date";
-    private static final String TIMESTAMP_SCHEMA_NAME = "io.debezium.time.Timestamp";
-    private static final String MICRO_TIMESTAMP_SCHEMA_NAME = "io.debezium.time.MicroTimestamp";
-    private static final String NANO_TIMESTAMP_SCHEMA_NAME = "io.debezium.time.NanoTimestamp";
-    private static final String TIME_SCHEMA_NAME = "io.debezium.time.Time";
-    private static final String MICRO_TIME_SCHEMA_NAME = "io.debezium.time.MicroTime";
-    private static final String NANO_TIME_SCHEMA_NAME = "io.debezium.time.NanoTime";
-    private static final String ZONED_TIME_SCHEMA_NAME = "io.debezium.time.ZonedTime";
-    private static final String ZONED_TIMESTAMP_SCHEMA_NAME = "io.debezium.time.ZonedTimestamp";
-    private static final String DECIMAL_PRECISE_SCHEMA_NAME =
-            "org.apache.kafka.connect.data.Decimal";
-    private static final String SCHEMA_PARAMETER_COLUMN_TYPE = "__debezium.source.column.type";
+    static final String SCHEMA_PARAMETER_COLUMN_TYPE = "__debezium.source.column.type";
     private static final String SCHEMA_PARAMETER_COLUMN_SIZE = "__debezium.source.column.length";
     private static final String SCHEMA_PARAMETER_COLUMN_PRECISION =
             "__debezium.source.column.scale";
-    private static final String SCHEMA_PARAMETER_COLUMN_NAME = "__debezium.source.column.name";
+    static final String SCHEMA_PARAMETER_COLUMN_NAME = "__debezium.source.column.name";
 
-    public static DataType avroToPaimonDataType(Schema schema) {
+    public static Map<String, String> getAvroConnectParameters(Schema schema) {
         // Mapping by mysql types
         // Parse actual source column type from connect.parameters if enable debezium property
         // "column.propagate.source.type", otherwise will infer avro schema type mapping to paimon
-        Map<String, String> connectParameters =
-                (Map<String, String>) schema.getObjectProp(CONNECT_PARAMETERS_PROP);
-        if (Objects.nonNull(connectParameters)) {
+        if (schema.getObjectProp(CONNECT_PARAMETERS_PROP) != null) {
+            return (Map<String, String>) schema.getObjectProp(CONNECT_PARAMETERS_PROP);
+        }
+        return new HashMap<>();
+    }
+
+    public static DataType avroToPaimonDataType(Schema schema) {
+        Map<String, String> connectParameters = getAvroConnectParameters(schema);
+        if (!connectParameters.isEmpty()) {
             String typeName =
                     connectParameters.getOrDefault(
                             SCHEMA_PARAMETER_COLUMN_TYPE, schema.getType().name());
