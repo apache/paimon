@@ -19,37 +19,23 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
-import org.apache.paimon.table.source.{ReadBuilder, Split}
+import org.apache.paimon.table.source.ReadBuilder
 
 import org.apache.spark.sql.connector.read.{Batch, InputPartition, PartitionReaderFactory}
-import org.apache.spark.sql.types.StructType
 
 import java.util.Objects
 
 /** A Spark [[Batch]] for paimon. */
 case class PaimonBatch(
-    inputPartitions: Array[PaimonInputPartition],
+    inputPartitions: Seq[PaimonInputPartition],
     readBuilder: ReadBuilder,
     metadataColumns: Seq[PaimonMetadataColumn] = Seq.empty)
   extends Batch {
 
   override def planInputPartitions(): Array[InputPartition] =
-    inputPartitions.map(_.asInstanceOf[InputPartition])
+    inputPartitions.map(_.asInstanceOf[InputPartition]).toArray
 
   override def createReaderFactory(): PartitionReaderFactory =
     PaimonPartitionReaderFactory(readBuilder, metadataColumns)
 
-  override def equals(obj: Any): Boolean = {
-    obj match {
-      case other: PaimonBatch =>
-        this.inputPartitions.sameElements(other.inputPartitions) &&
-        readBuilder.equals(other.readBuilder)
-
-      case _ => false
-    }
-  }
-
-  override def hashCode(): Int = {
-    Objects.hashCode(inputPartitions.toSeq, readBuilder)
-  }
 }

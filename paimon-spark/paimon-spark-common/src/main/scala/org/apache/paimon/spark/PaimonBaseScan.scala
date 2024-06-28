@@ -64,7 +64,7 @@ abstract class PaimonBaseScan(
 
   protected var runtimeFilters: Array[Filter] = Array.empty
 
-  protected var inputPartitions: Array[PaimonInputPartition] = _
+  protected var inputPartitions: Seq[PaimonInputPartition] = _
 
   override val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
 
@@ -93,7 +93,7 @@ abstract class PaimonBaseScan(
     readBuilder.newScan().plan().splits().asScala.toArray
   }
 
-  def getInputPartitions: Array[PaimonInputPartition] = {
+  def getInputPartitions: Seq[PaimonInputPartition] = {
     if (inputPartitions == null) {
       inputPartitions = getInputPartitions(getOriginSplits)
     }

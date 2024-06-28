@@ -44,7 +44,7 @@ trait ScanHelper extends Logging {
       .toInt
   }
 
-  def getInputPartitions(splits: Array[Split]): Array[PaimonInputPartition] = {
+  def getInputPartitions(splits: Array[Split]): Seq[PaimonInputPartition] = {
     val (toReshuffle, reserved) = splits.partition {
       case split: DataSplit => split.beforeFiles().isEmpty && split.rawConvertible()
       case _ => false
@@ -138,7 +138,7 @@ trait ScanHelper extends Logging {
       .withPartition(split.partition())
       .withBucket(split.bucket())
       .withDataFiles(dataFiles.toList.asJava)
-      .rawConvertible(true)
+      .rawConvertible(split.rawConvertible)
       .withBucketPath(split.bucketPath)
     if (deletionVectors) {
       builder.withDataDeletionFiles(deletionFiles.toList.asJava)

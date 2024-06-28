@@ -122,7 +122,7 @@ class PaimonMicroBatchStream(
     val endOffset = PaimonSourceOffset(end)
 
     getBatch(startOffset, Some(endOffset), None)
-      .map(ids => PaimonInputPartition(Array(ids.entry)))
+      .map(ids => PaimonInputPartition(ids.entry))
       .toArray[InputPartition]
   }
 

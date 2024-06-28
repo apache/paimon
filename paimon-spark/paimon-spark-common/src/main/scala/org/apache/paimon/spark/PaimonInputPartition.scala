@@ -22,14 +22,10 @@ import org.apache.paimon.table.source.Split
 
 import org.apache.spark.sql.connector.read.InputPartition
 
-case class PaimonInputPartition(splits: Array[Split]) extends InputPartition {}
+case class PaimonInputPartition(splits: Seq[Split]) extends InputPartition {}
 
 object PaimonInputPartition {
   def apply(split: Split): PaimonInputPartition = {
-    PaimonInputPartition(Array(split))
-  }
-
-  def apply(splits: Seq[Split]): PaimonInputPartition = {
-    PaimonInputPartition(splits.toArray)
+    PaimonInputPartition(Seq(split))
   }
 }
