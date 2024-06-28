@@ -23,6 +23,7 @@ import org.apache.paimon.types.DataField;
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
@@ -45,8 +46,13 @@ public class RichCdcMultiplexRecord implements Serializable {
             CdcRecord cdcRecord) {
         this.databaseName = databaseName;
         this.tableName = tableName;
-        this.fields = fields;
-        this.primaryKeys = primaryKeys;
+        // This class can not be deserialized by kryoSerializer,
+        // Throw an exception message `com.esotericsoftware.kryo.KryoException:
+        // java.lang.UnsupportedOperationException` ,
+        // because fields and primaryKeys is an
+        // unmodifiableList. So we need to ensure that List is a modifiable list.
+        this.fields = new ArrayList<>(fields);
+        this.primaryKeys = new ArrayList<>(primaryKeys);
         this.cdcRecord = cdcRecord;
     }
 
