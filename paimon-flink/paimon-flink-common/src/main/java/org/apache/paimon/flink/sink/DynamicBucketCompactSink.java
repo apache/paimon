@@ -50,7 +50,7 @@ public class DynamicBucketCompactSink extends RowDynamicBucketSink {
 
         // bucket-assigner
         HashBucketAssignerOperator<InternalRow> assignerOperator =
-                new HashBucketAssignerOperator<>(
+                createHashBucketAssignerOperator(
                         initialCommitUser, table, null, extractorFunction(), true);
         TupleTypeInfo<Tuple2<InternalRow, Integer>> rowWithBucketType =
                 new TupleTypeInfo<>(input.getType(), BasicTypeInfo.INT_TYPE_INFO);
