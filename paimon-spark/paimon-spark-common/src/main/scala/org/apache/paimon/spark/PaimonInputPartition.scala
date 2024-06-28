@@ -18,30 +18,14 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.CoreOptions
-import org.apache.paimon.spark.schema.PaimonMetadataColumn
-import org.apache.paimon.table.Table
-import org.apache.paimon.table.source.{DataSplit, Split}
+import org.apache.paimon.table.source.Split
 
-import org.apache.spark.sql.connector.read.{Batch, Scan}
-import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.connector.read.InputPartition
 
-/** For internal use only. */
-case class PaimonSplitScan(
-    table: Table,
-    dataSplits: Array[DataSplit],
-    metadataColumns: Seq[PaimonMetadataColumn] = Seq.empty)
-  extends Scan
-  with ScanHelper {
+case class PaimonInputPartition(splits: Seq[Split]) extends InputPartition {}
 
-  override val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
-
-  override def readSchema(): StructType = SparkTypeUtils.fromPaimonRowType(table.rowType())
-
-  override def toBatch: Batch = {
-    PaimonBatch(
-      getInputPartitions(dataSplits.asInstanceOf[Array[Split]]),
-      table.newReadBuilder,
-      metadataColumns)
+object PaimonInputPartition {
+  def apply(split: Split): PaimonInputPartition = {
+    PaimonInputPartition(Seq(split))
   }
 }

@@ -50,7 +50,7 @@ case class PaimonPartitionReaderFactory(
 
   override def createReader(partition: InputPartition): PartitionReader[InternalRow] = {
     partition match {
-      case paimonInputPartition: SparkInputPartition =>
+      case paimonInputPartition: PaimonInputPartition =>
         val readFunc: Split => RecordReader[data.InternalRow] =
           (split: Split) => readBuilder.newRead().withIOManager(ioManager).createReader(split)
         PaimonPartitionReader(readFunc, paimonInputPartition, row, metadataColumns)
