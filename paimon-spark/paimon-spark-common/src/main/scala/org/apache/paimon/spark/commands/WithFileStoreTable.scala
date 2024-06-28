@@ -19,12 +19,15 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.{CoreOptions, FileStore}
+import org.apache.paimon.fs.Path
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.types.RowType
 
 private[spark] trait WithFileStoreTable {
 
   def table: FileStoreTable
+
+  def root: Path = table.location()
 
   def withPrimaryKeys: Boolean = !table.primaryKeys().isEmpty
 
