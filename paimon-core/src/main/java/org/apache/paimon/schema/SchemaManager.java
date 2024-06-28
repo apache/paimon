@@ -67,7 +67,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.catalog.AbstractCatalog.DB_SUFFIX;
 import static org.apache.paimon.catalog.Identifier.UNKNOWN_DATABASE;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
-import static org.apache.paimon.utils.BranchManager.getBranchPath;
+import static org.apache.paimon.utils.BranchManager.branchPath;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -499,13 +499,12 @@ public class SchemaManager implements Serializable {
     }
 
     public Path schemaDirectory() {
-        return new Path(getBranchPath(fileIO, tableRoot, branch) + "/schema");
+        return new Path(branchPath(tableRoot, branch) + "/schema");
     }
 
     @VisibleForTesting
     public Path toSchemaPath(long schemaId) {
-        return new Path(
-                getBranchPath(fileIO, tableRoot, branch) + "/schema/" + SCHEMA_PREFIX + schemaId);
+        return new Path(branchPath(tableRoot, branch) + "/schema/" + SCHEMA_PREFIX + schemaId);
     }
 
     /**

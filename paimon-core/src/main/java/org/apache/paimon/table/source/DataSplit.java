@@ -136,6 +136,7 @@ public class DataSplit implements Split {
     private RawFile makeRawTableFile(String bucketPath, DataFileMeta file) {
         return new RawFile(
                 bucketPath + "/" + file.fileName(),
+                file.fileSize(),
                 0,
                 file.fileSize(),
                 file.fileFormat(),

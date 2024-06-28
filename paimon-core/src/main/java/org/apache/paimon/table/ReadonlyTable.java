@@ -191,14 +191,6 @@ public interface ReadonlyTable extends InnerTable {
     }
 
     @Override
-    default void replaceBranch(String fromBranch) {
-        throw new UnsupportedOperationException(
-                String.format(
-                        "Readonly Table %s does not support replaceBranch.",
-                        this.getClass().getSimpleName()));
-    }
-
-    @Override
     default ExpireSnapshots newExpireSnapshots() {
         throw new UnsupportedOperationException(
                 String.format(

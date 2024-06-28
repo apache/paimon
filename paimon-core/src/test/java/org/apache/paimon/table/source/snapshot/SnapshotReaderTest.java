@@ -102,8 +102,6 @@ public class SnapshotReaderTest {
         assertThat(dataSplits).hasSize(2);
         for (DataSplit dataSplit : dataSplits) {
             assertThat(dataSplit.dataFiles()).hasSize(1);
-            DataFileMeta meta = dataSplit.dataFiles().get(0);
-            String partition = dataSplit.partition().getString(0).toString();
             assertThat(dataSplit.convertToRawFiles()).isPresent();
         }
 
@@ -149,6 +147,7 @@ public class SnapshotReaderTest {
                                             String.format(
                                                     "%s/pt=%s/bucket-0/%s",
                                                     tablePath, partition, meta.fileName()),
+                                            meta.fileSize(),
                                             0,
                                             meta.fileSize(),
                                             meta.level() == 5 ? "orc" : "avro",
@@ -207,6 +206,7 @@ public class SnapshotReaderTest {
                         Collections.singletonList(
                                 new RawFile(
                                         String.format("%s/bucket-0/%s", tablePath, meta.fileName()),
+                                        meta.fileSize(),
                                         0,
                                         meta.fileSize(),
                                         "avro",
@@ -241,6 +241,7 @@ public class SnapshotReaderTest {
                                 new RawFile(
                                         String.format(
                                                 "%s/bucket-0/%s", tablePath, meta0.fileName()),
+                                        meta0.fileSize(),
                                         0,
                                         meta0.fileSize(),
                                         "avro",
@@ -249,6 +250,7 @@ public class SnapshotReaderTest {
                                 new RawFile(
                                         String.format(
                                                 "%s/bucket-0/%s", tablePath, meta1.fileName()),
+                                        meta1.fileSize(),
                                         0,
                                         meta1.fileSize(),
                                         "avro",

@@ -51,6 +51,7 @@ import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.BranchManager.branchDirectory;
 import static org.apache.paimon.utils.BranchManager.getBranchPath;
 import static org.apache.paimon.utils.FileUtils.listOriginalVersionedFiles;
+import static org.apache.paimon.utils.BranchManager.branchPath;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 
 /** Manager for {@link Snapshot}, providing utility methods related to paths and snapshot hints. */
@@ -93,27 +94,21 @@ public class SnapshotManager implements Serializable {
     }
 
     public Path changelogDirectory() {
-        return new Path(getBranchPath(fileIO, tablePath, branch) + "/changelog");
+        return new Path(branchPath(tablePath, branch) + "/changelog");
     }
 
     public Path longLivedChangelogPath(long snapshotId) {
         return new Path(
-                getBranchPath(fileIO, tablePath, branch)
-                        + "/changelog/"
-                        + CHANGELOG_PREFIX
-                        + snapshotId);
+                branchPath(tablePath, branch) + "/changelog/" + CHANGELOG_PREFIX + snapshotId);
     }
 
     public Path snapshotPath(long snapshotId) {
         return new Path(
-                getBranchPath(fileIO, tablePath, branch)
-                        + "/snapshot/"
-                        + SNAPSHOT_PREFIX
-                        + snapshotId);
+                branchPath(tablePath, branch) + "/snapshot/" + SNAPSHOT_PREFIX + snapshotId);
     }
 
     public Path snapshotDirectory() {
-        return new Path(getBranchPath(fileIO, tablePath, branch) + "/snapshot");
+        return new Path(branchPath(tablePath, branch) + "/snapshot");
     }
 
     public Snapshot snapshot(long snapshotId) {

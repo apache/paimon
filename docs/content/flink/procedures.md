@@ -295,6 +295,56 @@ All available procedures are listed below.
          -- repair all tables in a specific partition<br/>
          CALL sys.rewrite_file_index('test_db.T', 'pt=a')<br/><br/>
      </td>
+   <tr>
+      <td>create_branch</td>
+      <td>
+         -- based on the specified snapshot <br/>
+         CALL [catalog.]sys.create_branch('identifier', 'branchName', snapshotId) <br/>
+         -- based on the specified tag <br/>
+         CALL [catalog.]sys.create_branch('identifier', 'branchName', 'tagName')
+         -- create empty branch <br/>
+         CALL [catalog.]sys.create_branch('identifier', 'branchName')
+      </td>
+      <td>
+         To create a branch based on given snapshot / tag, or just create empty branch. Arguments:
+            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>branchName: name of the new branch.</li>
+            <li>snapshotId (Long): id of the snapshot which the new branch is based on.</li>
+            <li>tagName: name of the tag which the new branch is based on.</li>
+      </td>
+      <td>
+         CALL sys.create_branch('default.T', 'branch1', 10)<br/><br/>
+         CALL sys.create_branch('default.T', 'branch1', 'tag1')<br/><br/>
+         CALL sys.create_branch('default.T', 'branch1')<br/><br/>
+      </td>
+   </tr>
+   <tr>
+      <td>delete_branch</td>
+      <td>
+         CALL [catalog.]sys.delete_branch('identifier', 'branchName')
+      </td>
+      <td>
+         To delete a branch. Arguments:
+            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>branchName: name of the branch to be deleted.</li>
+      </td>
+      <td>
+         CALL sys.delete_branch('default.T', 'branch1')
+      </td>
+   </tr>
+   <tr>
+      <td>merge_branch</td>
+      <td>
+         CALL [catalog.]sys.merge_branch('identifier', 'branchName')
+      </td>
+      <td>
+         To merge a branch to main branch. Arguments:
+            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>branchName: name of the branch to be merged.</li>
+      </td>
+      <td>
+         CALL sys.merge_branch('default.T', 'branch1')
+      </td>
    </tr>
    </tbody>
 </table>
