@@ -57,7 +57,7 @@ If you need to wait for late data, you can configure a delay time: `'tag.creatio
 
 **Step 3: Automatic deletion of tags**
 
-You can configure `'tag.num-retained-max'` to delete tags automatically.
+You can configure `'tag.num-retained-max'` or `tag.default-time-retained` to delete tags automatically.
 
 Example, configure table to create a tag at 0:10 every day, with a maximum retention time of 3 months:
 
