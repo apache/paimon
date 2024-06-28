@@ -22,7 +22,6 @@ import org.apache.paimon.data
 import org.apache.paimon.disk.IOManager
 import org.apache.paimon.reader.RecordReader
 import org.apache.paimon.spark.SparkUtils.createIOManager
-import org.apache.paimon.spark.catalog.PaimonInputPartition
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.table.source.{ReadBuilder, Split}
 import org.apache.paimon.types.RowType

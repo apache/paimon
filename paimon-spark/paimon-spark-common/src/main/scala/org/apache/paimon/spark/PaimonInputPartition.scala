@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.catalog
+package org.apache.paimon.spark
 
 import org.apache.paimon.table.source.Split
 

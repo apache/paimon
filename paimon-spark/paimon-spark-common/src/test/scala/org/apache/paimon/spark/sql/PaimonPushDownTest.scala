@@ -18,8 +18,7 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.spark.{PaimonBatch, PaimonScan, PaimonSparkTestBase, SparkTable}
-import org.apache.paimon.spark.catalog.PaimonInputPartition
+import org.apache.paimon.spark.{PaimonBatch, PaimonInputPartition, PaimonScan, PaimonSparkTestBase, SparkTable}
 import org.apache.paimon.table.source.DataSplit
 
 import org.apache.spark.sql.Row
