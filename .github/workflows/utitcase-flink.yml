@@ -56,6 +56,6 @@ jobs:
             test_modules+="org.apache.paimon:paimon-flink-${suffix}," 
           done
           test_modules="${test_modules%,}"
-          mvn -T 1C -B clean install -pl "${test_modules}" -Duser.timezone=$jvm_timezone
+          mvn -T 1C -B clean install -pl org.apache.paimon:paimon-flink-common -Dtest=org.apache.paimon.flink.RemoteLookupJoinITCase -Duser.timezone=$jvm_timezone
         env:
           MAVEN_OPTS: -Xmx4096m

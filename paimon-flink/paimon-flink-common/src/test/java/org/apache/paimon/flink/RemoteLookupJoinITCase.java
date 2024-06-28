@@ -39,6 +39,7 @@ import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
+import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 
 import java.io.Closeable;
@@ -134,7 +135,7 @@ public class RemoteLookupJoinITCase extends CatalogITCaseBase {
         proxy.close();
     }
 
-    @Test
+    @RepeatedTest(value = 100)
     public void testServiceFileCleaned() throws Exception {
         sql(
                 "CREATE TABLE DIM (k INT PRIMARY KEY NOT ENFORCED, v INT) WITH ('bucket' = '2', 'continuous.discovery-interval' = '1ms')");
