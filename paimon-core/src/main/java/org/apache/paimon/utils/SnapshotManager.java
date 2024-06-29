@@ -296,16 +296,17 @@ public class SnapshotManager implements Serializable {
         }
         Long earliestWatermark = null;
         // find the first snapshot with watermark
-        if ((earliestWatermark = snapshot(earliest).watermark()) == null) {
+        earliestWatermark = snapshot(earliest).watermark();
+        if (earliestWatermark == null || earliestWatermark == Long.MIN_VALUE) {
             while (earliest < latest) {
                 earliest++;
                 earliestWatermark = snapshot(earliest).watermark();
-                if (earliestWatermark != null) {
+                if (earliestWatermark != null && earliestWatermark != Long.MIN_VALUE) {
                     break;
                 }
             }
         }
-        if (earliestWatermark == null) {
+        if (earliestWatermark == null || earliestWatermark == Long.MIN_VALUE) {
             return null;
         }
 
