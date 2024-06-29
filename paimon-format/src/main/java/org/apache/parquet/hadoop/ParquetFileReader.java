@@ -215,6 +215,7 @@ public class ParquetFileReader implements Closeable {
     private final List<BlockMetaData> blocks;
     private final List<ColumnIndexStore> blockIndexStores;
     private final List<RowRanges> blockRowRanges;
+    private final boolean blocksFiltered;
 
     // not final. in some cases, this may be lazily loaded for backward-compat.
     private ParquetMetadata footer;
@@ -247,6 +248,7 @@ public class ParquetFileReader implements Closeable {
 
         try {
             this.blocks = filterRowGroups(footer.getBlocks());
+            this.blocksFiltered = this.blocks.size() != footer.getBlocks().size();
         } catch (Exception e) {
             // In case that filterRowGroups throws an exception in the constructor, the new stream
             // should be closed. Otherwise, there's no way to close this outside.
@@ -263,6 +265,18 @@ public class ParquetFileReader implements Closeable {
 
     private static <T> List<T> listWithNulls(int size) {
         return new ArrayList<>(Collections.nCopies(size, null));
+    }
+
+    private boolean checkRowIndexOffsetExists(List<BlockMetaData> blocks) {
+        for (BlockMetaData block : blocks) {
+            if (block.getRowIndexOffset() == -1) {
+                LOG.warn(
+                        "Row index offset was not found in block metadata of file {}, skip applying filter in order to get the correct row position",
+                        file.getPath());
+                return false;
+            }
+        }
+        return true;
     }
 
     public ParquetMetadata getFooter() {
@@ -319,7 +333,7 @@ public class ParquetFileReader implements Closeable {
 
     private List<BlockMetaData> filterRowGroups(List<BlockMetaData> blocks) throws IOException {
         FilterCompat.Filter recordFilter = options.getRecordFilter();
-        if (FilterCompat.isFilteringRequired(recordFilter)) {
+        if (checkRowIndexOffsetExists(blocks) && FilterCompat.isFilteringRequired(recordFilter)) {
             // set up data filters based on configured levels
             List<RowGroupFilter.FilterLevel> levels = new ArrayList<>();
 
@@ -338,6 +352,10 @@ public class ParquetFileReader implements Closeable {
         }
 
         return blocks;
+    }
+
+    public boolean rowGroupsFiltered() {
+        return blocksFiltered;
     }
 
     public List<BlockMetaData> getRowGroups() {

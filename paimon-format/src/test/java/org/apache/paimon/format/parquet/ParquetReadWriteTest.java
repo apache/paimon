@@ -31,10 +31,12 @@ import org.apache.paimon.format.parquet.writer.RowDataParquetBuilder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BooleanType;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
@@ -49,6 +51,7 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarCharType;
 
 import org.apache.parquet.filter2.compat.FilterCompat;
+import org.apache.parquet.filter2.predicate.ParquetFilters;
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -61,11 +64,13 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
@@ -329,6 +334,62 @@ public class ParquetReadWriteTest {
                         // check row position
                         assertThat(rowPosition).isEqualTo(cnt.get());
                         cnt.incrementAndGet();
+                    });
+        }
+    }
+
+    @RepeatedTest(10)
+    void testReadRowPositionWithRandomFilter() throws IOException {
+        int recordNumber = new Random().nextInt(10000) + 1;
+        int batchSize = new Random().nextInt(1000) + 1;
+        // make row group size = 1, then the row count in one row group will be
+        // `parquet.page.size.row.check.min`, which default value is 100
+        int rowGroupSize = 1;
+        int rowGroupCount = 100;
+        int randomStart = new Random().nextInt(10000) + 1;
+        List<InternalRow> records = new ArrayList<>(recordNumber);
+        for (int i = 0; i < recordNumber; i++) {
+            Integer v = i;
+            records.add(newRow(v));
+        }
+
+        Path testPath = createTempParquetFile(folder, records, rowGroupSize);
+
+        DataType[] fieldTypes = new DataType[] {new IntType()};
+        // Build filter: f4 > randomStart
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        new RowType(
+                                Collections.singletonList(new DataField(0, "f4", new IntType()))));
+        FilterCompat.Filter filter =
+                ParquetFilters.convert(
+                        PredicateBuilder.splitAnd(builder.greaterThan(0, randomStart)));
+        ParquetReaderFactory format =
+                new ParquetReaderFactory(
+                        new Options(),
+                        RowType.builder().fields(fieldTypes, new String[] {"f4"}).build(),
+                        batchSize,
+                        filter);
+
+        AtomicBoolean isFirst = new AtomicBoolean(true);
+        try (RecordReader<InternalRow> reader =
+                format.createReader(
+                        new FormatReaderContext(
+                                new LocalFileIO(),
+                                testPath,
+                                new LocalFileIO().getFileSize(testPath)))) {
+            reader.forEachRemainingWithPosition(
+                    (rowPosition, row) -> {
+                        // check filter
+                        // Note: the minimum unit of filter is row group
+                        if (isFirst.get()) {
+                            assertThat(randomStart - row.getInt(0)).isLessThan(rowGroupCount);
+                            isFirst.set(false);
+                        }
+                        // check row position
+                        // Note: in the written file, field f4's value is equaled to row position,
+                        // so we can use it to check row position
+                        assertThat(rowPosition).isEqualTo(row.getInt(0));
                     });
         }
     }
