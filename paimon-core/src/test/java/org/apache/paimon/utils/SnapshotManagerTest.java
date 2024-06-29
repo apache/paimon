@@ -123,6 +123,21 @@ public class SnapshotManagerTest {
                 .isEqualTo(millis + 1000);
     }
 
+    @Test
+    public void testlaterOrEqualWatermark() throws IOException {
+        long millis = Long.MIN_VALUE;
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                new SnapshotManager(localFileIO, new Path(tempDir.toString()));
+        // create 10 snapshots
+        for (long i = 0; i < 10; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, millis);
+            localFileIO.writeFileUtf8(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+        // smaller than the second snapshot
+        assertThat(snapshotManager.laterOrEqualWatermark(millis + 999)).isNull();
+    }
+
     private Snapshot createSnapshotWithMillis(long id, long millis) {
         return new Snapshot(
                 id,
