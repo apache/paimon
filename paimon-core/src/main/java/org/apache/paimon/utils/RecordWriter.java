@@ -73,6 +73,15 @@ public interface RecordWriter<T> {
      */
     void sync() throws Exception;
 
+    /**
+     * This method is called when the insert only status of the records changes.
+     *
+     * @param insertOnly If true, all the following records would be of {@link
+     *     org.apache.paimon.types.RowKind#INSERT}, and no two records would have the same primary
+     *     key.
+     */
+    void withInsertOnly(boolean insertOnly);
+
     /** Close this writer, the call will delete newly generated but not committed files. */
     void close() throws Exception;
 }

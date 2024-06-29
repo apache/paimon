@@ -86,6 +86,15 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
     void withCompactExecutor(ExecutorService compactExecutor);
 
     /**
+     * This method is called when the insert only status of the records changes.
+     *
+     * @param insertOnly If true, all the following records would be of {@link
+     *     org.apache.paimon.types.RowKind#INSERT}, and no two records would have the same primary
+     *     key.
+     */
+    void withInsertOnly(boolean insertOnly);
+
+    /**
      * Write the data to the store according to the partition and bucket.
      *
      * @param partition the partition of the data

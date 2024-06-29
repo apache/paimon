@@ -103,6 +103,9 @@ public class StoreCompactOperatorTest extends TableTestBase {
         }
 
         @Override
+        public void withInsertOnly(boolean insertOnly) {}
+
+        @Override
         public SinkRecord write(InternalRow rowData) {
             return null;
         }
