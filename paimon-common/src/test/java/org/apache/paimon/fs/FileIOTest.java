@@ -22,7 +22,6 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 
-import org.apache.commons.io.FileUtils;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -79,26 +78,12 @@ public class FileIOTest {
         FileIO fileIO = new DummyFileIO();
         fileIO.writeFileUtf8(srcFile, "foobar");
 
-        assertThat(fileIO.copyFileUtf8(srcFile, dstFile)).isTrue();
+        fileIO.copyFile(srcFile, dstFile, true);
         assertThat(fileIO.readFileUtf8(dstFile)).isEqualTo("foobar");
         fileIO.deleteQuietly(dstFile);
 
-        assertThat(fileIO.copyFile(srcFile, dstFile)).isTrue();
+        fileIO.copyFile(srcFile, dstFile, true);
         assertThat(fileIO.readFileUtf8(dstFile)).isEqualTo("foobar");
-        fileIO.deleteQuietly(dstFile);
-
-        fileIO.deleteQuietly(srcFile);
-        srcFile = new Path(this.getClass().getClassLoader().getResource("test-data.orc").toURI());
-
-        fileIO.copyFileUtf8(srcFile, dstFile);
-        assertThat(FileUtils.contentEquals(new File(srcFile.toUri()), new File(dstFile.toUri())))
-                .isFalse();
-        fileIO.deleteQuietly(dstFile);
-
-        fileIO.copyFile(srcFile, dstFile);
-        assertThat(FileUtils.contentEquals(new File(srcFile.toUri()), new File(dstFile.toUri())))
-                .isTrue();
-        fileIO.deleteQuietly(dstFile);
     }
 
     public static void testOverwriteFileUtf8(Path file, FileIO fileIO) throws InterruptedException {

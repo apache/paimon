@@ -271,28 +271,27 @@ public interface FileIO extends Serializable {
     /**
      * Copy content of one file into another.
      *
-     * @return false if targetPath file exists
+     * @throws IOException Thrown, if the stream could not be opened because of an I/O, or because
+     *     target file already exists at that path and the write mode indicates to not overwrite the
+     *     file.
      */
-    default boolean copyFile(Path sourcePath, Path targetPath) throws IOException {
-        if (exists(targetPath)) {
-            return false;
-        }
+    default void copyFile(Path sourcePath, Path targetPath, boolean overwrite) throws IOException {
         try (SeekableInputStream is = newInputStream(sourcePath);
-                PositionOutputStream os = newOutputStream(targetPath, false)) {
+                PositionOutputStream os = newOutputStream(targetPath, overwrite)) {
             IOUtils.copy(is, os);
         }
-        return true;
     }
 
     /** Copy all files in sourceDirectory to directory targetDirectory. */
-    default void copyFiles(Path sourceDirectory, Path targetDirectory) throws IOException {
+    default void copyFiles(Path sourceDirectory, Path targetDirectory, boolean overwrite)
+            throws IOException {
         FileStatus[] fileStatuses = listStatus(sourceDirectory);
         List<Path> copyFiles =
                 Arrays.stream(fileStatuses).map(FileStatus::getPath).collect(Collectors.toList());
         for (Path file : copyFiles) {
             String fileName = file.getName();
             Path targetPath = new Path(targetDirectory.toString() + "/" + fileName);
-            copyFile(file, targetPath);
+            copyFile(file, targetPath, overwrite);
         }
     }
 

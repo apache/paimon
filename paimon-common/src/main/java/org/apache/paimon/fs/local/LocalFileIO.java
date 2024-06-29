@@ -218,12 +218,11 @@ public class LocalFileIO implements FileIO {
     }
 
     @Override
-    public boolean copyFile(Path sourcePath, Path targetPath) throws IOException {
-        if (exists(targetPath)) {
-            return false;
+    public void copyFile(Path sourcePath, Path targetPath, boolean overwrite) throws IOException {
+        if (!overwrite && exists(targetPath)) {
+            return;
         }
-        Files.copy(toPath(sourcePath), toPath(targetPath), StandardCopyOption.COPY_ATTRIBUTES);
-        return true;
+        Files.copy(toPath(sourcePath), toPath(targetPath), StandardCopyOption.REPLACE_EXISTING);
     }
 
     private java.nio.file.Path toPath(Path path) {

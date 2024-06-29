@@ -128,7 +128,7 @@ public class KeyValueFileWriterFactory {
             throws IOException {
         Path sourcePath = formatContext.pathFactory(level).toPath(sourceFileName);
         Path targetPath = formatContext.pathFactory(level).toPath(targetFileName);
-        fileIO.copyFile(sourcePath, targetPath);
+        fileIO.copyFile(sourcePath, targetPath, true);
     }
 
     public FileIO getFileIO() {

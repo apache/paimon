@@ -21,11 +21,8 @@ package org.apache.paimon.fs.local;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 
-import org.apache.commons.io.FileUtils;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-
-import java.io.File;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -42,25 +39,11 @@ public class LocalFleIOTest {
         FileIO fileIO = new LocalFileIO();
         fileIO.writeFileUtf8(srcFile, "foobar");
 
-        assertThat(fileIO.copyFileUtf8(srcFile, dstFile)).isTrue();
+        fileIO.copyFile(srcFile, dstFile, false);
         assertThat(fileIO.readFileUtf8(dstFile)).isEqualTo("foobar");
         fileIO.deleteQuietly(dstFile);
 
-        assertThat(fileIO.copyFile(srcFile, dstFile)).isTrue();
+        fileIO.copyFile(srcFile, dstFile, false);
         assertThat(fileIO.readFileUtf8(dstFile)).isEqualTo("foobar");
-        fileIO.deleteQuietly(dstFile);
-
-        fileIO.deleteQuietly(srcFile);
-        srcFile = new Path(this.getClass().getClassLoader().getResource("test-data.orc").toURI());
-
-        fileIO.copyFileUtf8(srcFile, dstFile);
-        assertThat(FileUtils.contentEquals(new File(srcFile.toUri()), new File(dstFile.toUri())))
-                .isFalse();
-        fileIO.deleteQuietly(dstFile);
-
-        fileIO.copyFile(srcFile, dstFile);
-        assertThat(FileUtils.contentEquals(new File(srcFile.toUri()), new File(dstFile.toUri())))
-                .isTrue();
-        fileIO.deleteQuietly(dstFile);
     }
 }

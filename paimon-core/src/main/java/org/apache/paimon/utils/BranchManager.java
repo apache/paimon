@@ -111,7 +111,8 @@ public class BranchManager {
             TableSchema latestSchema = schemaManager.latest().get();
             fileIO.copyFile(
                     schemaManager.toSchemaPath(latestSchema.id()),
-                    schemaManager.copyWithBranch(branchName).toSchemaPath(latestSchema.id()));
+                    schemaManager.copyWithBranch(branchName).toSchemaPath(latestSchema.id()),
+                    true);
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(
@@ -140,10 +141,12 @@ public class BranchManager {
             // Copy the corresponding snapshot and schema files into the branch directory
             fileIO.copyFile(
                     snapshotManager.snapshotPath(snapshotId),
-                    snapshotManager.copyWithBranch(branchName).snapshotPath(snapshot.id()));
+                    snapshotManager.copyWithBranch(branchName).snapshotPath(snapshot.id()),
+                    true);
             fileIO.copyFile(
                     schemaManager.toSchemaPath(snapshot.schemaId()),
-                    schemaManager.copyWithBranch(branchName).toSchemaPath(snapshot.schemaId()));
+                    schemaManager.copyWithBranch(branchName).toSchemaPath(snapshot.schemaId()),
+                    true);
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(
@@ -173,13 +176,16 @@ public class BranchManager {
             // Copy the corresponding tag, snapshot and schema files into the branch directory
             fileIO.copyFile(
                     tagManager.tagPath(tagName),
-                    tagManager.copyWithBranch(branchName).tagPath(tagName));
+                    tagManager.copyWithBranch(branchName).tagPath(tagName),
+                    true);
             fileIO.copyFile(
                     snapshotManager.snapshotPath(snapshot.id()),
-                    snapshotManager.copyWithBranch(branchName).snapshotPath(snapshot.id()));
+                    snapshotManager.copyWithBranch(branchName).snapshotPath(snapshot.id()),
+                    true);
             fileIO.copyFile(
                     schemaManager.toSchemaPath(snapshot.schemaId()),
-                    schemaManager.copyWithBranch(branchName).toSchemaPath(snapshot.schemaId()));
+                    schemaManager.copyWithBranch(branchName).toSchemaPath(snapshot.schemaId()),
+                    true);
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(
@@ -272,13 +278,16 @@ public class BranchManager {
             fileIO.deleteFilesQuietly(deletePaths);
             fileIO.copyFiles(
                     snapshotManager.copyWithBranch(branchName).snapshotDirectory(),
-                    snapshotManager.snapshotDirectory());
+                    snapshotManager.snapshotDirectory(),
+                    true);
             fileIO.copyFiles(
                     schemaManager.copyWithBranch(branchName).schemaDirectory(),
-                    schemaManager.schemaDirectory());
+                    schemaManager.schemaDirectory(),
+                    true);
             fileIO.copyFiles(
                     tagManager.copyWithBranch(branchName).tagDirectory(),
-                    tagManager.tagDirectory());
+                    tagManager.tagDirectory(),
+                    true);
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(
