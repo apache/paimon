@@ -46,11 +46,8 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
-import static org.apache.paimon.utils.BranchManager.BRANCH_PREFIX;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
-import static org.apache.paimon.utils.BranchManager.branchDirectory;
-import static org.apache.paimon.utils.BranchManager.getBranchPath;
-import static org.apache.paimon.utils.FileUtils.listOriginalVersionedFiles;
+import static org.apache.paimon.utils.BranchManager.branchNames;
 import static org.apache.paimon.utils.BranchManager.branchPath;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 
@@ -97,6 +94,10 @@ public class SnapshotManager implements Serializable {
         return new Path(branchPath(tablePath, branch) + "/changelog");
     }
 
+    public static Path changelogDirectory(Path tablePath, String branch) {
+        return new Path(branchPath(tablePath, branch) + "/changelog");
+    }
+
     public Path longLivedChangelogPath(long snapshotId) {
         return new Path(
                 branchPath(tablePath, branch) + "/changelog/" + CHANGELOG_PREFIX + snapshotId);
@@ -108,6 +109,10 @@ public class SnapshotManager implements Serializable {
     }
 
     public Path snapshotDirectory() {
+        return new Path(branchPath(tablePath, branch) + "/snapshot");
+    }
+
+    public static Path snapshotDirectory(Path tablePath, String branch) {
         return new Path(branchPath(tablePath, branch) + "/snapshot");
     }
 
@@ -392,17 +397,20 @@ public class SnapshotManager implements Serializable {
      * be deleted by other processes, so just skip this snapshot.
      */
     public List<Snapshot> safelyGetAllSnapshots() throws IOException {
+        // For main branch
         List<Path> paths =
                 listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX)
                         .map(id -> snapshotPath(id))
                         .collect(Collectors.toList());
 
-        List<String> allBranchNames =
-                listOriginalVersionedFiles(fileIO, branchDirectory(tablePath), BRANCH_PREFIX)
-                        .collect(Collectors.toList());
+        // For other branch
+        List<String> allBranchNames = branchNames(fileIO, tablePath);
         for (String branchName : allBranchNames) {
             List<Path> branchPaths =
-                    listVersionedFiles(fileIO, branchSnapshotDirectory(branchName), SNAPSHOT_PREFIX)
+                    listVersionedFiles(
+                                    fileIO,
+                                    snapshotDirectory(tablePath, branchName),
+                                    SNAPSHOT_PREFIX)
                             .map(this::snapshotPath)
                             .collect(Collectors.toList());
             paths.addAll(branchPaths);
@@ -441,8 +449,23 @@ public class SnapshotManager implements Serializable {
      * Try to get non snapshot files. If any error occurred, just ignore it and return an empty
      * result.
      */
-    public List<Path> tryGetNonSnapshotFiles(Predicate<FileStatus> fileStatusFilter) {
-        return listPathWithFilter(snapshotDirectory(), fileStatusFilter, nonSnapshotFileFilter());
+    public List<Path> tryGetNonSnapshotFiles(Predicate<FileStatus> fileStatusFilter)
+            throws IOException {
+        // For main branch
+        List<Path> nonSnapshotFiles =
+                listPathWithFilter(snapshotDirectory(), fileStatusFilter, nonSnapshotFileFilter());
+
+        // For other branch
+        List<String> allBranchNames = branchNames(fileIO, tablePath);
+        allBranchNames.stream()
+                .map(
+                        branchName ->
+                                listPathWithFilter(
+                                        snapshotDirectory(tablePath, branchName),
+                                        fileStatusFilter,
+                                        nonSnapshotFileFilter()))
+                .forEach(nonSnapshotFiles::addAll);
+        return nonSnapshotFiles;
     }
 
     public List<Path> tryGetNonChangelogFiles(Predicate<FileStatus> fileStatusFilter) {
@@ -452,28 +475,12 @@ public class SnapshotManager implements Serializable {
     private List<Path> listPathWithFilter(
             Path directory, Predicate<FileStatus> fileStatusFilter, Predicate<Path> fileFilter) {
         try {
-//             List<FileStatus> statuses =
-//                     Arrays.stream(fileIO.listStatus(snapshotDirectory()))
-//                             .collect(Collectors.toList());
-
-//             // find all branch name
-//             List<String> allBranchNames =
-//                     listOriginalVersionedFiles(fileIO, branchDirectory(tablePath), BRANCH_PREFIX)
-//                             .collect(Collectors.toList());
-//             for (String branchName : allBranchNames) {
-//                 List<FileStatus> branchStatuses =
-//                         Arrays.stream(fileIO.listStatus(branchSnapshotDirectory(branchName)))
-//                                 .collect(Collectors.toList());
-//                 statuses.addAll(branchStatuses);
-//             }
-
-//             if (statuses.size() == 0) {
             FileStatus[] statuses = fileIO.listStatus(directory);
             if (statuses == null) {
                 return Collections.emptyList();
             }
 
-            return statuses.stream()
+            return Arrays.stream(statuses)
                     .filter(fileStatusFilter)
                     .map(FileStatus::getPath)
                     .filter(fileFilter)

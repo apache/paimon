@@ -81,7 +81,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.io.DataFilePathFactory.CHANGELOG_FILE_PREFIX;
 import static org.apache.paimon.io.DataFilePathFactory.DATA_FILE_PREFIX;
-import static org.apache.paimon.utils.BranchManager.getBranchPath;
+import static org.apache.paimon.utils.BranchManager.branchPath;
 import static org.apache.paimon.utils.FileStorePathFactory.BUCKET_PATH_PREFIX;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -149,19 +149,12 @@ public class OrphanFilesCleanTest {
             }
         }
 
-        // generate non used files
-        int shouldBeDeleted = generateUnUsedFile();
-        assertThat(manuallyAddedFiles.size()).isEqualTo(shouldBeDeleted);
-
         // create branch1 by tag
         table.createBranch("branch1", allTags.get(0));
 
-        // branch snapshot
-        addNonUsedFiles(
-                new Path(getBranchPath(tablePath, "branch1") + "/snapshot"),
-                fileNum,
-                Collections.singletonList("UNKNOWN"));
-        shouldBeDeleted += fileNum;
+        // generate non used files
+        int shouldBeDeleted = generateUnUsedFile();
+        assertThat(manuallyAddedFiles.size()).isEqualTo(shouldBeDeleted);
 
         // randomly expire snapshots
         int expired = RANDOM.nextInt(snapshotCount / 2);
@@ -477,6 +470,14 @@ public class OrphanFilesCleanTest {
                 fileNum,
                 Arrays.asList("manifest-list-", "manifest-", "index-manifest-", "UNKNOWN-"));
         shouldBeDeleted += fileNum;
+
+        // branch snapshot
+        addNonUsedFiles(
+                new Path(branchPath(tablePath, "branch1") + "/snapshot"),
+                fileNum,
+                Collections.singletonList("UNKNOWN"));
+        shouldBeDeleted += fileNum;
+
         return shouldBeDeleted;
     }
 
