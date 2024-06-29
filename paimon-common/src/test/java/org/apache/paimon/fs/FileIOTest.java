@@ -79,7 +79,7 @@ public class FileIOTest {
         FileIO fileIO = new DummyFileIO();
         fileIO.writeFileUtf8(srcFile, "foobar");
 
-        assertThat(fileIO.copyFileUtf8(srcFile, dstFile)).isTrue();
+        assertThat(fileIO.copyFile(srcFile, dstFile)).isTrue();
         assertThat(fileIO.readFileUtf8(dstFile)).isEqualTo("foobar");
         fileIO.deleteQuietly(dstFile);
 
@@ -90,7 +90,7 @@ public class FileIOTest {
         fileIO.deleteQuietly(srcFile);
         srcFile = new Path(this.getClass().getClassLoader().getResource("test-data.orc").toURI());
 
-        fileIO.copyFileUtf8(srcFile, dstFile);
+        fileIO.copyFile(srcFile, dstFile);
         assertThat(FileUtils.contentEquals(new File(srcFile.toUri()), new File(dstFile.toUri())))
                 .isFalse();
         fileIO.deleteQuietly(dstFile);
