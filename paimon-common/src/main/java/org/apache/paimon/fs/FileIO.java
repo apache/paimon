@@ -284,28 +284,15 @@ public interface FileIO extends Serializable {
         return true;
     }
 
-    /**
-     * Read file to UTF_8 decoding, then write content to one file atomically, initially writes to
-     * temp hidden file and only renames to the target file once temp file is closed.
-     *
-     * @return false if targetPath file exists
-     */
-    default boolean copyFileUtf8(Path sourcePath, Path targetPath) throws IOException {
-        String content = readFileUtf8(sourcePath);
-        return writeFileUtf8(targetPath, content);
-    }
-
     /** Copy all files in sourceDirectory to directory targetDirectory. */
-    default void copyFilesUtf8(Path sourceDirectory, Path targetDirectory) throws IOException {
+    default void copyFiles(Path sourceDirectory, Path targetDirectory) throws IOException {
         FileStatus[] fileStatuses = listStatus(sourceDirectory);
         List<Path> copyFiles =
-                Arrays.stream(fileStatuses)
-                        .map(fileStatus -> fileStatus.getPath())
-                        .collect(Collectors.toList());
+                Arrays.stream(fileStatuses).map(FileStatus::getPath).collect(Collectors.toList());
         for (Path file : copyFiles) {
             String fileName = file.getName();
             Path targetPath = new Path(targetDirectory.toString() + "/" + fileName);
-            copyFileUtf8(file, targetPath);
+            copyFile(file, targetPath);
         }
     }
 
