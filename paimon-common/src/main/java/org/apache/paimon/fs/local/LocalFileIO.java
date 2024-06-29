@@ -217,6 +217,18 @@ public class LocalFileIO implements FileIO {
         }
     }
 
+    @Override
+    public void copyFile(Path sourcePath, Path targetPath, boolean overwrite) throws IOException {
+        if (!overwrite && exists(targetPath)) {
+            return;
+        }
+        Files.copy(toPath(sourcePath), toPath(targetPath), StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    private java.nio.file.Path toPath(Path path) {
+        return toFile(path).toPath();
+    }
+
     /**
      * Converts the given Path to a File for this file system. If the path is empty, we will return
      * <tt>new File(".")</tt> instead of <tt>new File("")</tt>, since the latter returns

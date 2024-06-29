@@ -77,7 +77,7 @@ class CreateAndDeleteBranchProcedureTest extends PaimonSparkTestBase with Stream
               spark.sql("SELECT tag_name FROM paimon.test.`T$tags`"),
               Row("test_tag") :: Nil)
 
-            // create branch
+            // create branch with tag
             checkAnswer(
               spark.sql(
                 "CALL paimon.sys.create_branch(table => 'test.T', branch => 'test_branch', tag => 'test_tag')"),
@@ -85,6 +85,20 @@ class CreateAndDeleteBranchProcedureTest extends PaimonSparkTestBase with Stream
             val table = loadTable("T")
             val branchManager = table.branchManager()
             assert(branchManager.branchExists("test_branch"))
+
+            // create empty branch
+            checkAnswer(
+              spark.sql(
+                "CALL paimon.sys.create_branch(table => 'test.T', branch => 'empty_branch')"),
+              Row(true) :: Nil)
+            assert(branchManager.branchExists("empty_branch"))
+
+            // create branch with snapshot
+            checkAnswer(
+              spark.sql(
+                "CALL paimon.sys.create_branch(table => 'test.T', branch => 'snapshot_branch', snapshot => 2)"),
+              Row(true) :: Nil)
+            assert(branchManager.branchExists("snapshot_branch"))
 
             // delete branch
             checkAnswer(

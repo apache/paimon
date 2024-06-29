@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.spark.{PaimonBatch, PaimonScan, PaimonSparkTestBase, SparkInputPartition, SparkTable}
+import org.apache.paimon.spark.{PaimonBatch, PaimonInputPartition, PaimonScan, PaimonSparkTestBase, SparkTable}
 import org.apache.paimon.table.source.DataSplit
 
 import org.apache.spark.sql.Row
@@ -89,33 +89,26 @@ class PaimonPushDownTest extends PaimonSparkTestBase {
   test("Paimon pushDown: limit for append-only tables") {
     spark.sql(s"""
                  |CREATE TABLE T (a INT, b STRING, c STRING)
+                 |PARTITIONED BY (c)
                  |""".stripMargin)
 
-    spark.sql("INSERT INTO T VALUES (1, 'a', '11'), (2, 'b', '22')")
-    spark.sql("INSERT INTO T VALUES (3, 'c', '11'), (4, 'd', '22')")
+    spark.sql("INSERT INTO T VALUES (1, 'a', '11'), (2, 'b', '11')")
+    spark.sql("INSERT INTO T VALUES (3, 'c', '22'), (4, 'd', '22')")
 
     checkAnswer(
       spark.sql("SELECT * FROM T ORDER BY a"),
-      Row(1, "a", "11") :: Row(2, "b", "22") :: Row(3, "c", "11") :: Row(4, "d", "22") :: Nil)
+      Row(1, "a", "11") :: Row(2, "b", "11") :: Row(3, "c", "22") :: Row(4, "d", "22") :: Nil)
 
     val scanBuilder = getScanBuilder()
     Assertions.assertTrue(scanBuilder.isInstanceOf[SupportsPushDownLimit])
 
-    val dataFilesWithoutLimit = scanBuilder.build().toBatch.planInputPartitions().flatMap {
-      case partition: SparkInputPartition =>
-        partition.split() match {
-          case dataSplit: DataSplit => dataSplit.dataFiles().asScala
-          case _ => Seq.empty
-        }
-    }
-    Assertions.assertTrue(dataFilesWithoutLimit.length >= 2)
+    val dataSplitsWithoutLimit = scanBuilder.build().asInstanceOf[PaimonScan].getOriginSplits
+    Assertions.assertTrue(dataSplitsWithoutLimit.length >= 2)
 
     // It still return false even it can push down limit.
     Assertions.assertFalse(scanBuilder.asInstanceOf[SupportsPushDownLimit].pushLimit(1))
-    val paimonScan = scanBuilder.build().asInstanceOf[PaimonScan]
-    val partitions =
-      PaimonBatch(paimonScan.getOriginSplits, paimonScan.readBuilder).planInputPartitions()
-    Assertions.assertEquals(1, partitions.length)
+    val dataSplitsWithLimit = scanBuilder.build().asInstanceOf[PaimonScan].getOriginSplits
+    Assertions.assertEquals(1, dataSplitsWithLimit.length)
 
     Assertions.assertEquals(1, spark.sql("SELECT * FROM T LIMIT 1").count())
   }

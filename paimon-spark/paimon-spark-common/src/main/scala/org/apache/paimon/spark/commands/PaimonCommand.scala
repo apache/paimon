@@ -180,6 +180,7 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
       .toMap
 
     dvIndexFileMaintainer.notifyDeletionFiles(touchedDataFileAndDeletionFiles.asJava)
+
     dvIndexFileMaintainer.writeUnchangedDeletionVector().asScala
   }
   protected def collectDeletionVectors(

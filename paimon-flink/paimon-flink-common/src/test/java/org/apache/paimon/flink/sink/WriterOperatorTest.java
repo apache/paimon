@@ -40,6 +40,7 @@ import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 
 import org.apache.flink.api.common.ExecutionConfig;
@@ -54,6 +55,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -281,6 +283,101 @@ public class WriterOperatorTest {
             commitMessages.add((CommitMessage) committable.wrappedCommittable());
         }
         commit.commit(commitIdentifier, commitMessages);
+    }
+
+    @Test
+    public void testChangelog() throws Exception {
+        testChangelog(false);
+    }
+
+    @Test
+    public void testChangelogWithInsertOnly() throws Exception {
+        testChangelog(true);
+    }
+
+    private void testChangelog(boolean insertOnly) throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.INT()},
+                        new String[] {"pt", "k", "v"});
+
+        Options options = new Options();
+        options.set("bucket", "1");
+        options.set("changelog-producer", "input");
+
+        FileStoreTable fileStoreTable =
+                createFileStoreTable(
+                        rowType, Arrays.asList("pt", "k"), Collections.singletonList("k"), options);
+
+        RowDataStoreWriteOperator operator =
+                new RowDataStoreWriteOperator(
+                        fileStoreTable,
+                        null,
+                        (table, commitUser, state, ioManager, memoryPool, metricGroup) ->
+                                new StoreSinkWriteImpl(
+                                        table,
+                                        commitUser,
+                                        state,
+                                        ioManager,
+                                        false,
+                                        false,
+                                        true,
+                                        memoryPool,
+                                        metricGroup),
+                        "test");
+
+        OneInputStreamOperatorTestHarness<InternalRow, Committable> harness =
+                createHarness(operator);
+
+        TableCommitImpl commit = fileStoreTable.newCommit("test");
+
+        TypeSerializer<Committable> serializer =
+                new CommittableTypeInfo().createSerializer(new ExecutionConfig());
+        harness.setup(serializer);
+        harness.open();
+
+        if (insertOnly) {
+            Field field = TableWriteOperator.class.getDeclaredField("write");
+            field.setAccessible(true);
+            StoreSinkWrite write = (StoreSinkWrite) field.get(operator);
+            write.withInsertOnly(true);
+        }
+
+        // write basic records
+        harness.processElement(GenericRow.ofKind(RowKind.INSERT, 1, 10, 100), 1);
+        harness.processElement(GenericRow.ofKind(RowKind.DELETE, 1, 10, 200), 2);
+        harness.processElement(GenericRow.ofKind(RowKind.INSERT, 1, 10, 300), 3);
+        harness.prepareSnapshotPreBarrier(1);
+        harness.snapshot(1, 10);
+        harness.notifyOfCompletedCheckpoint(1);
+        commitAll(harness, commit, 1);
+        harness.close();
+        commit.close();
+
+        // check result
+        ReadBuilder readBuilder = fileStoreTable.newReadBuilder();
+        StreamTableScan scan = readBuilder.newStreamScan();
+        scan.restore(1L);
+        List<Split> splits = scan.plan().splits();
+        TableRead read = readBuilder.newRead();
+        RecordReader<InternalRow> reader = read.createReader(splits);
+        List<String> actual = new ArrayList<>();
+        reader.forEachRemaining(
+                row ->
+                        actual.add(
+                                String.format(
+                                        "%s[%d, %d, %d]",
+                                        row.getRowKind().shortString(),
+                                        row.getInt(0),
+                                        row.getInt(1),
+                                        row.getInt(2))));
+        if (insertOnly) {
+            assertThat(actual).containsExactlyInAnyOrder("+I[1, 10, 300]");
+        } else {
+            assertThat(actual)
+                    .containsExactlyInAnyOrder(
+                            "+I[1, 10, 100]", "-D[1, 10, 200]", "+I[1, 10, 300]");
+        }
     }
 
     private FileStoreTable createFileStoreTable(

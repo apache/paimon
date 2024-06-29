@@ -16,26 +16,27 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark
+package org.apache.paimon.flink.action;
 
-import org.apache.paimon.spark.schema.PaimonMetadataColumn
-import org.apache.paimon.table.source.ReadBuilder
+import java.util.Map;
 
-import org.apache.spark.sql.connector.read.{Batch, InputPartition, PartitionReaderFactory}
+/** Delete branch action for Flink. */
+public class DeleteBranchAction extends TableActionBase {
 
-import java.util.Objects
+    private final String branchName;
 
-/** A Spark [[Batch]] for paimon. */
-case class PaimonBatch(
-    inputPartitions: Seq[PaimonInputPartition],
-    readBuilder: ReadBuilder,
-    metadataColumns: Seq[PaimonMetadataColumn] = Seq.empty)
-  extends Batch {
+    public DeleteBranchAction(
+            String warehouse,
+            String databaseName,
+            String tableName,
+            Map<String, String> catalogConfig,
+            String branchName) {
+        super(warehouse, databaseName, tableName, catalogConfig);
+        this.branchName = branchName;
+    }
 
-  override def planInputPartitions(): Array[InputPartition] =
-    inputPartitions.map(_.asInstanceOf[InputPartition]).toArray
-
-  override def createReaderFactory(): PartitionReaderFactory =
-    PaimonPartitionReaderFactory(readBuilder, metadataColumns)
-
+    @Override
+    public void run() throws Exception {
+        table.deleteBranch(branchName);
+    }
 }

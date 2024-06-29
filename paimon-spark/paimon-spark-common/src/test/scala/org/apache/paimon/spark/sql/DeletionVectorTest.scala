@@ -25,6 +25,7 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.Row
+import org.apache.spark.sql.functions.lit
 import org.junit.jupiter.api.Assertions
 
 import scala.collection.JavaConverters._
@@ -301,6 +302,48 @@ class DeletionVectorTest extends PaimonSparkTestBase {
       operations(Random.nextInt(operations.size))()
       checkResult(dvTbl, resultTbl)
     }
+  }
+
+  test("Paimon deletionVector: select with format filter push down") {
+    val format = Random.shuffle(Seq("parquet", "orc", "avro")).head
+    val blockSize = Random.nextInt(10240) + 1
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, name STRING)
+                 |TBLPROPERTIES (
+                 | 'primary-key' = 'id',
+                 | 'deletion-vectors.enabled' = 'true',
+                 | 'file.format' = '$format',
+                 | 'file.block-size' = '${blockSize}b',
+                 | 'bucket' = '1'
+                 |)
+                 |""".stripMargin)
+
+    spark
+      .range(1, 10001)
+      .toDF("id")
+      .withColumn("name", lit("a"))
+      .createOrReplaceTempView("source_tbl")
+
+    sql("INSERT INTO T SELECT * FROM source_tbl")
+    // update to create dv
+    sql("INSERT INTO T VALUES (1111, 'a_new'), (2222, 'a_new')")
+
+    checkAnswer(
+      sql("SELECT count(*) FROM T"),
+      Seq(10000).toDF()
+    )
+    checkAnswer(
+      sql("SELECT count(*) FROM T WHERE (id > 1000 and id <= 2000) or (id > 3000 and id <= 4000)"),
+      Seq(2000).toDF()
+    )
+    checkAnswer(
+      spark.sql("SELECT name FROM T WHERE id = 1111"),
+      Seq("a_new").toDF()
+    )
+    checkAnswer(
+      spark.sql("SELECT name FROM T WHERE id = 2222"),
+      Seq("a_new").toDF()
+    )
   }
 
   private def getPathName(path: String): String = {

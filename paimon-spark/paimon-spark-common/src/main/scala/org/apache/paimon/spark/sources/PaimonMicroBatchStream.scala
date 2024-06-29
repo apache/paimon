@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.sources
 
 import org.apache.paimon.options.Options
-import org.apache.paimon.spark.{PaimonImplicits, PaimonPartitionReaderFactory, SparkConnectorOptions, SparkInputPartition}
+import org.apache.paimon.spark.{PaimonImplicits, PaimonInputPartition, PaimonPartitionReaderFactory, SparkConnectorOptions}
 import org.apache.paimon.table.DataTable
 import org.apache.paimon.table.source.ReadBuilder
 
@@ -122,7 +122,7 @@ class PaimonMicroBatchStream(
     val endOffset = PaimonSourceOffset(end)
 
     getBatch(startOffset, Some(endOffset), None)
-      .map(ids => new SparkInputPartition(ids.entry))
+      .map(ids => PaimonInputPartition(ids.entry))
       .toArray[InputPartition]
   }
 

@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.hadoop.HadoopFileIOLoader;
 import org.apache.paimon.fs.local.LocalFileIO;
 
+import org.apache.commons.io.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -268,27 +269,29 @@ public interface FileIO extends Serializable {
     }
 
     /**
-     * Read file to UTF_8 decoding, then write content to one file atomically, initially writes to
-     * temp hidden file and only renames to the target file once temp file is closed.
+     * Copy content of one file into another.
      *
-     * @return false if targetPath file exists
+     * @throws IOException Thrown, if the stream could not be opened because of an I/O, or because
+     *     target file already exists at that path and the write mode indicates to not overwrite the
+     *     file.
      */
-    default boolean copyFileUtf8(Path sourcePath, Path targetPath) throws IOException {
-        String content = readFileUtf8(sourcePath);
-        return writeFileUtf8(targetPath, content);
+    default void copyFile(Path sourcePath, Path targetPath, boolean overwrite) throws IOException {
+        try (SeekableInputStream is = newInputStream(sourcePath);
+                PositionOutputStream os = newOutputStream(targetPath, overwrite)) {
+            IOUtils.copy(is, os);
+        }
     }
 
     /** Copy all files in sourceDirectory to directory targetDirectory. */
-    default void copyFilesUtf8(Path sourceDirectory, Path targetDirectory) throws IOException {
+    default void copyFiles(Path sourceDirectory, Path targetDirectory, boolean overwrite)
+            throws IOException {
         FileStatus[] fileStatuses = listStatus(sourceDirectory);
         List<Path> copyFiles =
-                Arrays.stream(fileStatuses)
-                        .map(fileStatus -> fileStatus.getPath())
-                        .collect(Collectors.toList());
+                Arrays.stream(fileStatuses).map(FileStatus::getPath).collect(Collectors.toList());
         for (Path file : copyFiles) {
             String fileName = file.getName();
             Path targetPath = new Path(targetDirectory.toString() + "/" + fileName);
-            copyFileUtf8(file, targetPath);
+            copyFile(file, targetPath, overwrite);
         }
     }
 
