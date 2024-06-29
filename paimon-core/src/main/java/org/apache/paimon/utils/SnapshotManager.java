@@ -293,7 +293,7 @@ public class SnapshotManager implements Serializable {
         Long latest = latestSnapshotId();
         // If latest == Long.MIN_VALUE don't need next binary search for watermark
         // which can reduce IO cost with snapshot
-        if (earliest == null || latest == null || latest == Long.MIN_VALUE) {
+        if (earliest == null || latest == null || snapshot(latest).watermark() == Long.MIN_VALUE) {
             return null;
         }
         Long earliestWatermark = null;

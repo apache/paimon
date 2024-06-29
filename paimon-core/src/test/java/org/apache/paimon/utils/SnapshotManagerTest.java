@@ -131,7 +131,7 @@ public class SnapshotManagerTest {
                 new SnapshotManager(localFileIO, new Path(tempDir.toString()));
         // create 10 snapshots
         for (long i = 0; i < 10; i++) {
-            Snapshot snapshot = createSnapshotWithMillis(i, millis);
+            Snapshot snapshot = createSnapshotWithMillis(i, millis, Long.MIN_VALUE);
             localFileIO.writeFileUtf8(snapshotManager.snapshotPath(i), snapshot.toJson());
         }
         // smaller than the second snapshot
@@ -155,6 +155,26 @@ public class SnapshotManagerTest {
                 null,
                 null,
                 null,
+                null);
+    }
+
+    private Snapshot createSnapshotWithMillis(long id, long millis, long watermark) {
+        return new Snapshot(
+                id,
+                0L,
+                null,
+                null,
+                null,
+                null,
+                null,
+                0L,
+                Snapshot.CommitKind.APPEND,
+                millis,
+                null,
+                null,
+                null,
+                null,
+                watermark,
                 null);
     }
 
