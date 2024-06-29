@@ -261,6 +261,8 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         /** The current row's position in the file. */
         private long currentRowPosition;
 
+        private long nextRowPosition;
+
         /**
          * For each request column, the reader to read this column. This is NULL if this column is
          * missing from the file, in which case we populate the attribute with NULL.
@@ -280,6 +282,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             this.rowsReturned = 0;
             this.totalCountLoadedSoFar = 0;
             this.currentRowPosition = 0;
+            this.nextRowPosition = 0;
         }
 
         @Nullable
@@ -287,13 +290,12 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         public RecordIterator<InternalRow> readBatch() throws IOException {
             final ParquetReaderBatch batch = getCachedEntry();
 
-            long rowNumber = currentRowPosition;
             if (!nextBatch(batch)) {
                 batch.recycle();
                 return null;
             }
 
-            return batch.convertAndGetIterator(rowNumber);
+            return batch.convertAndGetIterator(currentRowPosition);
         }
 
         /** Advances to the next batch of rows. Returns false if there are no more. */
@@ -307,6 +309,8 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             }
             if (rowsReturned == totalCountLoadedSoFar) {
                 readNextRowGroup();
+            } else {
+                currentRowPosition = nextRowPosition;
             }
 
             int num = (int) Math.min(batchSize, totalCountLoadedSoFar - rowsReturned);
@@ -319,14 +323,14 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 }
             }
             rowsReturned += num;
-            currentRowPosition += num;
+            nextRowPosition = currentRowPosition + num;
             batch.columnarBatch.setNumRows(num);
             return true;
         }
 
         private void readNextRowGroup() throws IOException {
-            PageReadStore pages = reader.readNextRowGroup();
-            if (pages == null) {
+            PageReadStore rowGroup = reader.readNextRowGroup();
+            if (rowGroup == null) {
                 throw new IOException(
                         "expecting more rows but reached last block. Read "
                                 + rowsReturned
@@ -343,11 +347,20 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                                     projectedTypes[i],
                                     types.get(i),
                                     requestedSchema.getColumns(),
-                                    pages,
+                                    rowGroup,
                                     0);
                 }
             }
-            totalCountLoadedSoFar += pages.getRowCount();
+            totalCountLoadedSoFar += rowGroup.getRowCount();
+            if (rowGroup.getRowIndexOffset().isPresent()) {
+                currentRowPosition = rowGroup.getRowIndexOffset().get();
+            } else {
+                if (reader.rowGroupsFiltered()) {
+                    throw new RuntimeException(
+                            "There is a bug, rowIndexOffset must be present when row groups are filtered.");
+                }
+                currentRowPosition = nextRowPosition;
+            }
         }
 
         private ParquetReaderBatch getCachedEntry() throws IOException {
