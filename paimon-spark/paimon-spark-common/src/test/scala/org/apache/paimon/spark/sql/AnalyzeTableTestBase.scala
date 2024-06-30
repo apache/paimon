@@ -300,7 +300,7 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     Assertions.assertEquals(1, statsFileCount(tableLocation, fileIO))
 
     val orphanStats = new Path(tableLocation, "statistics/stats-orphan-0")
-    fileIO.writeFileUtf8(orphanStats, "x")
+    fileIO.tryToWriteAtomic(orphanStats, "x")
     Assertions.assertEquals(2, statsFileCount(tableLocation, fileIO))
 
     // test clean orhan statistic

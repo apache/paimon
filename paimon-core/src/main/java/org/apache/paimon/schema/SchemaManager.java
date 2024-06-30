@@ -474,7 +474,8 @@ public class SchemaManager implements Serializable {
     boolean commit(TableSchema newSchema) throws Exception {
         SchemaValidation.validateTableSchema(newSchema);
         Path schemaPath = toSchemaPath(newSchema.id());
-        Callable<Boolean> callable = () -> fileIO.writeFileUtf8(schemaPath, newSchema.toString());
+        Callable<Boolean> callable =
+                () -> fileIO.tryToWriteAtomic(schemaPath, newSchema.toString());
         if (lock == null) {
             return callable.call();
         }

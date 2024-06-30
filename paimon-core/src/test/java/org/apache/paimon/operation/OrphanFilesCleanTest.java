@@ -595,7 +595,7 @@ public class OrphanFilesCleanTest {
                     fileNamePrefix.get(RANDOM.nextInt(fileNamePrefix.size())) + UUID.randomUUID();
             Path file = new Path(dir, fileName);
             if (RANDOM.nextBoolean()) {
-                fileIO.writeFileUtf8(file, "");
+                fileIO.tryToWriteAtomic(file, "");
             } else {
                 fileIO.mkdirs(file);
             }

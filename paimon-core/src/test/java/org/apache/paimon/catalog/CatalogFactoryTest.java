@@ -51,7 +51,7 @@ public class CatalogFactoryTest {
     public void testNotDirectory(@TempDir java.nio.file.Path path) throws IOException {
         Path root = new Path(path.toUri().toString());
         Path warehouse = new Path(root, "warehouse");
-        LocalFileIO.create().writeFileUtf8(warehouse, "");
+        LocalFileIO.create().tryToWriteAtomic(warehouse, "");
         Options options = new Options();
         options.set(WAREHOUSE, warehouse.toString());
         assertThatThrownBy(() -> CatalogFactory.createCatalog(CatalogContext.create(options)))

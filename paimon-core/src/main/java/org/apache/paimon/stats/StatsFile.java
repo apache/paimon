@@ -54,7 +54,7 @@ public class StatsFile {
         Path path = pathFactory.newPath();
 
         try {
-            fileIO.writeFileUtf8(path, stats.toJson());
+            fileIO.writeFile(path, stats.toJson(), false);
         } catch (IOException e) {
             throw new RuntimeException("Failed to write stats file: " + path, e);
         }

@@ -939,7 +939,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Callable<Boolean> callable =
                     () -> {
                         boolean committed =
-                                fileIO.writeFileUtf8(newSnapshotPath, newSnapshot.toJson());
+                                fileIO.tryToWriteAtomic(newSnapshotPath, newSnapshot.toJson());
                         if (committed) {
                             snapshotManager.commitLatestHint(newSnapshotId);
                         }

@@ -114,7 +114,7 @@ public class TagManager {
                 // update tag metadata into for the same snapshot of the same tag name.
                 fileIO.overwriteFileUtf8(tagPath, content);
             } else {
-                fileIO.writeFileUtf8(tagPath, content);
+                fileIO.writeFile(tagPath, content, false);
             }
         } catch (IOException e) {
             throw new RuntimeException(

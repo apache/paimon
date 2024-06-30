@@ -37,7 +37,7 @@ public class LocalFleIOTest {
         Path dstFile = new Path(tempDir.resolve("dst.txt").toUri());
 
         FileIO fileIO = new LocalFileIO();
-        fileIO.writeFileUtf8(srcFile, "foobar");
+        fileIO.tryToWriteAtomic(srcFile, "foobar");
 
         fileIO.copyFile(srcFile, dstFile, false);
         assertThat(fileIO.readFileUtf8(dstFile)).isEqualTo("foobar");

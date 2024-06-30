@@ -44,9 +44,9 @@ class RemoveOrphanFilesProcedureTest extends PaimonSparkTestBase {
     val orphanFile1 = new Path(tablePath, "bucket-0/orphan_file1")
     val orphanFile2 = new Path(tablePath, "bucket-0/orphan_file2")
 
-    fileIO.writeFileUtf8(orphanFile1, "a")
+    fileIO.tryToWriteAtomic(orphanFile1, "a")
     Thread.sleep(2000)
-    fileIO.writeFileUtf8(orphanFile2, "b")
+    fileIO.tryToWriteAtomic(orphanFile2, "b")
 
     // by default, no file deleted
     checkAnswer(spark.sql(s"CALL sys.remove_orphan_files(table => 'T')"), Row("Deleted=0") :: Nil)
