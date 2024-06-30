@@ -222,6 +222,7 @@ public class LocalFileIO implements FileIO {
         if (!overwrite && exists(targetPath)) {
             return;
         }
+        toPath(targetPath.getParent()).toFile().mkdirs();
         Files.copy(toPath(sourcePath), toPath(targetPath), StandardCopyOption.REPLACE_EXISTING);
     }
 
