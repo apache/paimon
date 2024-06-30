@@ -25,8 +25,11 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.hive.annotation.Minio;
 import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
+import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.privilege.NoPrivilegeException;
 import org.apache.paimon.s3.MinioTestContainer;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.IOUtils;
 
 import com.klarna.hiverunner.HiveShell;
@@ -47,7 +50,9 @@ import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableAlreadyExistException;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
+import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.MetaException;
+import org.apache.hadoop.hive.metastore.api.PartitionEventType;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.jupiter.api.function.Executable;
@@ -76,7 +81,9 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** IT cases for using Paimon {@link HiveCatalog} together with Paimon Hive connector. */
 @RunWith(PaimonEmbeddedHiveRunner.class)
@@ -1164,7 +1171,28 @@ public abstract class HiveCatalogITCaseBase {
 
         tEnv.executeSql("INSERT INTO mark_done_t1 VALUES (5, '20240501')").await();
 
+        // check event.
+        Catalog catalog =
+                ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
+        Identifier identifier = new Identifier("test_db", "mark_done_t2");
+        Table table = catalog.getTable(identifier);
+        assertThat(table instanceof FileStoreTable);
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
+        MetastoreClient.Factory metastoreClientFactory =
+                fileStoreTable.catalogEnvironment().metastoreClientFactory();
+        HiveMetastoreClient metastoreClient = (HiveMetastoreClient) metastoreClientFactory.create();
+        IMetaStoreClient hmsClient = metastoreClient.client();
+        Map<String, String> partitionSpec = Collections.singletonMap("dt", "20240501");
+        // LOAD_DONE event is not marked by now.
+        assertFalse(
+                hmsClient.isPartitionMarkedForEvent(
+                        "test_db", "mark_done_t2", partitionSpec, PartitionEventType.LOAD_DONE));
+
         Thread.sleep(10 * 1000);
+        // after sleep, LOAD_DONE event should be marked.
+        assertTrue(
+                hmsClient.isPartitionMarkedForEvent(
+                        "test_db", "mark_done_t2", partitionSpec, PartitionEventType.LOAD_DONE));
 
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS mark_done_t2"))
                 .containsExactlyInAnyOrder("dt=20240501", "dt=20240501.done");

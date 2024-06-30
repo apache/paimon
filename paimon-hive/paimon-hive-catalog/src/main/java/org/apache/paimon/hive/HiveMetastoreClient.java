@@ -124,6 +124,10 @@ public class HiveMetastoreClient implements MetastoreClient {
         client.close();
     }
 
+    public IMetaStoreClient client() {
+        return this.client;
+    }
+
     /** Factory to create {@link HiveMetastoreClient}. */
     public static class Factory implements MetastoreClient.Factory {
 
