@@ -225,7 +225,7 @@ public class BranchManager {
     public void fastForward(String branchName) {
         checkArgument(
                 !branchName.equals(DEFAULT_MAIN_BRANCH),
-                "Branch name '%s' do not use in fast forward.",
+                "Branch name '%s' do not use in fast-forward.",
                 branchName);
         checkArgument(!StringUtils.isBlank(branchName), "Branch name '%s' is blank.", branchName);
         checkArgument(branchExists(branchName), "Branch name '%s' doesn't exist.", branchName);
