@@ -20,6 +20,7 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.procedure.ProcedureContext;
@@ -54,17 +55,22 @@ public class RepairProcedure extends ProcedureBase {
 
     public String[] call(ProcedureContext procedureContext, String identifier)
             throws Catalog.DatabaseNotExistException, Catalog.TableNotExistException {
+        if (!(catalog instanceof HiveCatalog)) {
+            throw new IllegalArgumentException("Only support Hive Catalog");
+        }
+        HiveCatalog hiveCatalog = (HiveCatalog) catalog;
+
         if (StringUtils.isBlank(identifier)) {
-            catalog.repairCatalog();
+            hiveCatalog.repairCatalog();
             return new String[] {"Success"};
         }
         String[] paths = identifier.split("\\.");
         switch (paths.length) {
             case 1:
-                catalog.repairDatabase(paths[0]);
+                hiveCatalog.repairDatabase(paths[0]);
                 break;
             case 2:
-                catalog.repairTable(Identifier.create(paths[0], paths[1]));
+                hiveCatalog.repairTable(Identifier.create(paths[0], paths[1]));
                 break;
             default:
                 throw new IllegalArgumentException(
