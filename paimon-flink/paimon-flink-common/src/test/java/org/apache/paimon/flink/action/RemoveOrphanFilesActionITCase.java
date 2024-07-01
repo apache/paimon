@@ -69,9 +69,9 @@ public class RemoveOrphanFilesActionITCase extends ActionITCaseBase {
         Path orphanFile2 = new Path(table.location(), "bucket-0/orphan_file2");
 
         FileIO fileIO = table.fileIO();
-        fileIO.writeFileUtf8(orphanFile1, "a");
+        fileIO.writeFile(orphanFile1, "a", true);
         Thread.sleep(2000);
-        fileIO.writeFileUtf8(orphanFile2, "b");
+        fileIO.writeFile(orphanFile2, "b", true);
 
         List<String> args =
                 new ArrayList<>(
