@@ -75,25 +75,39 @@ public class DeletionVectorIndexFileMaintainerTest {
         List<IndexManifestEntry> res = dvIFMaintainer.writeUnchangedDeletionVector();
         assertThat(res.size()).isEqualTo(0);
 
-        // no dv should be rewritten, because all the deletion vectors have been updated in the
-        // index file that contains the dv of f3.
+        // the dv of f3 is updated, and the index file that contains the dv of f3 should be marked
+        // as REMOVE.
         dvIFMaintainer.notifyDeletionFiles(
                 Collections.singletonMap("f3", dataFileToDeletionFiles.get("f3")));
         res = dvIFMaintainer.writeUnchangedDeletionVector();
-        assertThat(res.size()).isEqualTo(0);
+        assertThat(res.size()).isEqualTo(1);
+        assertThat(res.get(0).kind()).isEqualTo(FileKind.DELETE);
 
         // the dv of f1 and f2 are in one index file, and the dv of f1 is updated.
         // the dv of f2 need to be rewritten, and this index file should be marked as REMOVE.
         dvIFMaintainer.notifyDeletionFiles(
                 Collections.singletonMap("f1", dataFileToDeletionFiles.get("f1")));
         res = dvIFMaintainer.writeUnchangedDeletionVector();
-        assertThat(res.size()).isEqualTo(2);
+        assertThat(res.size()).isEqualTo(3);
         IndexManifestEntry entry =
                 res.stream().filter(file -> file.kind() == FileKind.ADD).findAny().get();
         assertThat(entry.indexFile().deletionVectorsRanges().containsKey("f2")).isTrue();
-        entry = res.stream().filter(file -> file.kind() == FileKind.DELETE).findAny().get();
+        entry =
+                res.stream()
+                        .filter(file -> file.kind() == FileKind.DELETE)
+                        .filter(file -> file.bucket() == 0)
+                        .findAny()
+                        .get();
         assertThat(entry.indexFile())
                 .isEqualTo(commitMessage1.indexIncrement().newIndexFiles().get(0));
+        entry =
+                res.stream()
+                        .filter(file -> file.kind() == FileKind.DELETE)
+                        .filter(file -> file.bucket() == 1)
+                        .findAny()
+                        .get();
+        assertThat(entry.indexFile())
+                .isEqualTo(commitMessage2.indexIncrement().newIndexFiles().get(0));
     }
 
     private Map<String, DeletionFile> createDeletionFileMapFromIndexFileMetas(
