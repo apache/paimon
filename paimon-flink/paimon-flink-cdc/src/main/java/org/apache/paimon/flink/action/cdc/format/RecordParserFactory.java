@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action.cdc.format;
 
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
+import org.apache.paimon.flink.action.cdc.DatabaseSyncTableFilter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 
 import java.util.List;
@@ -41,5 +42,8 @@ public interface RecordParserFactory {
      * @param computedColumns List of computed columns to be considered by the parser.
      * @return A new instance of {@link RecordParser}.
      */
-    RecordParser createParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns);
+    RecordParser createParser(
+            TypeMapping typeMapping,
+            List<ComputedColumn> computedColumns,
+            DatabaseSyncTableFilter databaseSyncTableFilter);
 }

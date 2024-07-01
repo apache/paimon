@@ -21,6 +21,7 @@ package org.apache.paimon.flink.action.cdc.postgres;
 import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
+import org.apache.paimon.flink.action.cdc.DatabaseSyncTableFilter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mysql.format.DebeziumEvent;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
@@ -55,6 +56,8 @@ import org.apache.kafka.connect.json.JsonConverterConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -86,6 +89,7 @@ public class PostgresRecordParser
     private final ZoneId serverTimeZone;
     private final List<ComputedColumn> computedColumns;
     private final TypeMapping typeMapping;
+    @Nullable private final DatabaseSyncTableFilter databaseSyncTableFilter;
 
     private DebeziumEvent root;
 
@@ -98,7 +102,8 @@ public class PostgresRecordParser
             Configuration postgresConfig,
             List<ComputedColumn> computedColumns,
             TypeMapping typeMapping,
-            CdcMetadataConverter[] metadataConverters) {
+            CdcMetadataConverter[] metadataConverters,
+            @Nullable DatabaseSyncTableFilter databaseSyncTableFilter) {
         this.computedColumns = computedColumns;
         this.typeMapping = typeMapping;
         this.metadataConverters = metadataConverters;
@@ -110,16 +115,21 @@ public class PostgresRecordParser
                 stringifyServerTimeZone == null
                         ? ZoneId.systemDefault()
                         : ZoneId.of(stringifyServerTimeZone);
+        this.databaseSyncTableFilter = databaseSyncTableFilter;
     }
 
     @Override
     public void flatMap(CdcSourceRecord rawEvent, Collector<RichCdcMultiplexRecord> out)
             throws Exception {
         root = objectMapper.readValue((String) rawEvent.getValue(), DebeziumEvent.class);
+        JsonNode source = root.payload().source();
+        currentTable = source.get(AbstractSourceInfo.TABLE_NAME_KEY).asText();
+        databaseName = source.get(AbstractSourceInfo.DATABASE_NAME_KEY).asText();
 
-        currentTable = root.payload().source().get(AbstractSourceInfo.TABLE_NAME_KEY).asText();
-        databaseName = root.payload().source().get(AbstractSourceInfo.DATABASE_NAME_KEY).asText();
-
+        if (databaseSyncTableFilter != null
+                && !databaseSyncTableFilter.filter(databaseName, currentTable, source)) {
+            return;
+        }
         extractRecords().forEach(out::collect);
     }
 

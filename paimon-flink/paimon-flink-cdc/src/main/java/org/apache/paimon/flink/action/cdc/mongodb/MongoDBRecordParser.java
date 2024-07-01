@@ -20,6 +20,7 @@ package org.apache.paimon.flink.action.cdc.mongodb;
 
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
+import org.apache.paimon.flink.action.cdc.DatabaseSyncTableFilter;
 import org.apache.paimon.flink.action.cdc.mongodb.strategy.Mongo4VersionStrategy;
 import org.apache.paimon.flink.action.cdc.mongodb.strategy.MongoVersionStrategy;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
@@ -30,6 +31,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMap
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.util.Collector;
+
+import javax.annotation.Nullable;
 
 import java.util.List;
 
@@ -60,12 +63,17 @@ public class MongoDBRecordParser
     private static final String FIELD_NAMESPACE = "ns";
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private final List<ComputedColumn> computedColumns;
+    @Nullable private final DatabaseSyncTableFilter databaseSyncTableFilter;
     private final Configuration mongodbConfig;
     private JsonNode root;
 
-    public MongoDBRecordParser(List<ComputedColumn> computedColumns, Configuration mongodbConfig) {
+    public MongoDBRecordParser(
+            List<ComputedColumn> computedColumns,
+            Configuration mongodbConfig,
+            @Nullable DatabaseSyncTableFilter databaseSyncTableFilter) {
         this.computedColumns = computedColumns;
         this.mongodbConfig = mongodbConfig;
+        this.databaseSyncTableFilter = databaseSyncTableFilter;
     }
 
     @Override
@@ -74,6 +82,10 @@ public class MongoDBRecordParser
         root = OBJECT_MAPPER.readValue((String) value.getValue(), JsonNode.class);
         String databaseName = extractString(FIELD_DATABASE);
         String collection = extractString(FIELD_TABLE);
+        if (databaseSyncTableFilter != null
+                && !databaseSyncTableFilter.filter(databaseName, collection, root)) {
+            return;
+        }
         MongoVersionStrategy versionStrategy =
                 VersionStrategyFactory.create(
                         databaseName, collection, computedColumns, mongodbConfig);

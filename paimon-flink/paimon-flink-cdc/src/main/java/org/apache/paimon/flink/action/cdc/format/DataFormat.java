@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action.cdc.format;
 
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
+import org.apache.paimon.flink.action.cdc.DatabaseSyncTableFilter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.format.canal.CanalRecordParser;
 import org.apache.paimon.flink.action.cdc.format.debezium.DebeziumRecordParser;
@@ -57,8 +58,15 @@ public enum DataFormat {
      * @return A new instance of {@link RecordParser}.
      */
     public RecordParser createParser(
+            TypeMapping typeMapping,
+            List<ComputedColumn> computedColumns,
+            DatabaseSyncTableFilter databaseSyncTableFilter) {
+        return parser.createParser(typeMapping, computedColumns, databaseSyncTableFilter);
+    }
+
+    public RecordParser createParser(
             TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        return parser.createParser(typeMapping, computedColumns);
+        return parser.createParser(typeMapping, computedColumns, null);
     }
 
     public static DataFormat fromConfigString(String format) {

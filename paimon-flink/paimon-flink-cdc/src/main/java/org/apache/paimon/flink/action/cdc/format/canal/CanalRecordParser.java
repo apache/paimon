@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action.cdc.format.canal;
 
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
+import org.apache.paimon.flink.action.cdc.DatabaseSyncTableFilter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.format.RecordParser;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils;
@@ -84,8 +85,11 @@ public class CanalRecordParser extends RecordParser {
         return !isNull(node) && node.asBoolean();
     }
 
-    public CanalRecordParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        super(typeMapping, computedColumns);
+    public CanalRecordParser(
+            TypeMapping typeMapping,
+            List<ComputedColumn> computedColumns,
+            DatabaseSyncTableFilter databaseSyncTableFilter) {
+        super(typeMapping, computedColumns, databaseSyncTableFilter);
     }
 
     @Override

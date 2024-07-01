@@ -196,19 +196,37 @@ public class SyncJobHandler {
             List<ComputedColumn> computedColumns,
             TypeMapping typeMapping,
             CdcMetadataConverter[] metadataConverters) {
+        return provideRecordParser(computedColumns, typeMapping, metadataConverters, null);
+    }
+
+    public FlatMapFunction<CdcSourceRecord, RichCdcMultiplexRecord> provideRecordParser(
+            List<ComputedColumn> computedColumns,
+            TypeMapping typeMapping,
+            CdcMetadataConverter[] metadataConverters,
+            DatabaseSyncTableFilter databaseSyncTableFilter) {
         switch (sourceType) {
             case MYSQL:
                 return new MySqlRecordParser(
-                        cdcSourceConfig, computedColumns, typeMapping, metadataConverters);
+                        cdcSourceConfig,
+                        computedColumns,
+                        typeMapping,
+                        metadataConverters,
+                        databaseSyncTableFilter);
             case POSTGRES:
                 return new PostgresRecordParser(
-                        cdcSourceConfig, computedColumns, typeMapping, metadataConverters);
+                        cdcSourceConfig,
+                        computedColumns,
+                        typeMapping,
+                        metadataConverters,
+                        databaseSyncTableFilter);
             case KAFKA:
             case PULSAR:
                 DataFormat dataFormat = provideDataFormat();
-                return dataFormat.createParser(typeMapping, computedColumns);
+                return dataFormat.createParser(
+                        typeMapping, computedColumns, databaseSyncTableFilter);
             case MONGODB:
-                return new MongoDBRecordParser(computedColumns, cdcSourceConfig);
+                return new MongoDBRecordParser(
+                        computedColumns, cdcSourceConfig, databaseSyncTableFilter);
             default:
                 throw new UnsupportedOperationException("Unknown source type " + sourceType);
         }
