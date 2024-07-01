@@ -27,7 +27,7 @@ import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 public class HeapRowVector extends AbstractHeapVector
         implements WritableColumnVector, RowColumnVector {
 
-    private final WritableColumnVector[] fields;
+    private WritableColumnVector[] fields;
 
     public HeapRowVector(int len, WritableColumnVector... fields) {
         super(len);
@@ -56,5 +56,9 @@ public class HeapRowVector extends AbstractHeapVector
         for (WritableColumnVector field : fields) {
             field.reset();
         }
+    }
+
+    public void setFields(WritableColumnVector[] fields) {
+        this.fields = fields;
     }
 }
