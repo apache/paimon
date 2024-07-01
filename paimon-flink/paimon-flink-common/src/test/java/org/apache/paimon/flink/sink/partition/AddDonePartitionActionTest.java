@@ -55,6 +55,12 @@ class AddDonePartitionActionTest {
                     }
 
                     @Override
+                    public void markDone(LinkedHashMap<String, String> partitionSpec)
+                            throws Exception {
+                        throw new UnsupportedOperationException();
+                    }
+
+                    @Override
                     public void close() throws Exception {
                         closed.set(true);
                     }

@@ -50,6 +50,9 @@ public interface PartitionMarkDoneAction extends Closeable {
                                 case "done-partition":
                                     return new AddDonePartitionAction(
                                             createMetastoreClient(fileStoreTable, options));
+                                case "mark-event":
+                                    return new MarkPartitionDoneEventAction(
+                                            createMetastoreClient(fileStoreTable, options));
                                 default:
                                     throw new UnsupportedOperationException(action);
                             }
