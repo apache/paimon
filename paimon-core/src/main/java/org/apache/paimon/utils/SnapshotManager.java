@@ -94,10 +94,6 @@ public class SnapshotManager implements Serializable {
         return new Path(branchPath(tablePath, branch) + "/changelog");
     }
 
-    public static Path changelogDirectory(Path tablePath, String branch) {
-        return new Path(branchPath(tablePath, branch) + "/changelog");
-    }
-
     public Path longLivedChangelogPath(long snapshotId) {
         return new Path(
                 branchPath(tablePath, branch) + "/changelog/" + CHANGELOG_PREFIX + snapshotId);
