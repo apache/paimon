@@ -177,9 +177,9 @@ public class OrphanFilesCleanTest {
         // second check
         orphanFilesClean = new OrphanFilesClean(table);
         setOlderThan(orphanFilesClean);
-        orphanFilesClean.clean();
+        List<Path> deleted = orphanFilesClean.clean();
         try {
-            validate(orphanFilesClean.getDeleteFiles(), snapshotData, new HashMap<>());
+            validate(deleted, snapshotData, new HashMap<>());
         } catch (Throwable t) {
             String tableOptions = "Table options:\n" + table.options();
 
@@ -367,9 +367,8 @@ public class OrphanFilesCleanTest {
         // second check
         orphanFilesClean = new OrphanFilesClean(table);
         setOlderThan(orphanFilesClean);
-        orphanFilesClean.clean();
-        List<Path> cleanFiles = orphanFilesClean.getDeleteFiles();
-        validate(cleanFiles, snapshotData, changelogData);
+        List<Path> deleted = orphanFilesClean.clean();
+        validate(deleted, snapshotData, changelogData);
     }
 
     /** Manually make a FileNotFoundException to simulate snapshot expire while clean. */

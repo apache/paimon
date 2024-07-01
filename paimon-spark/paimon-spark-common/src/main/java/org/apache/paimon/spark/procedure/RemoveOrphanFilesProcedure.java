@@ -18,7 +18,6 @@
 
 package org.apache.paimon.spark.procedure;
 
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.OrphanFilesClean;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.StringUtils;
@@ -88,15 +87,16 @@ public class RemoveOrphanFilesProcedure extends BaseProcedure {
                     if (!StringUtils.isBlank(olderThan)) {
                         orphanFilesClean.olderThan(olderThan);
                     }
-                    orphanFilesClean.dryRun(dryRun);
+                    if (dryRun) {
+                        orphanFilesClean.fileCleaner(path -> {});
+                    }
                     try {
-                        List<Path> orphanFiles = orphanFilesClean.clean();
-                        InternalRow[] rows = new InternalRow[orphanFiles.size()];
+                        List<String> result =
+                                OrphanFilesClean.showDeletedFiles(orphanFilesClean.clean(), 200);
+                        InternalRow[] rows = new InternalRow[result.size()];
                         int index = 0;
-                        for (Path filePath : orphanFiles) {
-                            rows[index] =
-                                    newInternalRow(
-                                            UTF8String.fromString(filePath.toUri().getPath()));
+                        for (String line : result) {
+                            rows[index] = newInternalRow(UTF8String.fromString(line));
                             index++;
                         }
                         return rows;

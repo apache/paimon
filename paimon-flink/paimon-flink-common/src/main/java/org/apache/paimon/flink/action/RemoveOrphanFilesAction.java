@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.OrphanFilesClean;
 import org.apache.paimon.table.FileStoreTable;
 
@@ -27,7 +26,6 @@ import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -56,18 +54,15 @@ public class RemoveOrphanFilesAction extends TableActionBase {
         return this;
     }
 
-    public RemoveOrphanFilesAction dryRun(Boolean dryRun) {
-        this.orphanFilesClean.dryRun(dryRun);
+    public RemoveOrphanFilesAction dryRun() {
+        this.orphanFilesClean.fileCleaner(path -> {});
         return this;
     }
 
     @Override
     public void run() throws Exception {
-        List<Path> orphanFiles = orphanFilesClean.clean();
-        String files =
-                orphanFiles.stream()
-                        .map(filePath -> filePath.toUri().getPath())
-                        .collect(Collectors.joining(", "));
+        List<String> result = OrphanFilesClean.showDeletedFiles(orphanFilesClean.clean(), 200);
+        String files = String.join(", ", result);
         LOG.info("orphan files: [{}]", files);
     }
 }

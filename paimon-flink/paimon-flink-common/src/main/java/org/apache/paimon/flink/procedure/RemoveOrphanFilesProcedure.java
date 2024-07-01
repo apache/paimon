@@ -68,11 +68,12 @@ public class RemoveOrphanFilesProcedure extends ProcedureBase {
             orphanFilesClean.olderThan(olderThan);
         }
 
-        orphanFilesClean.dryRun(dryRun);
+        if (dryRun) {
+            orphanFilesClean.fileCleaner(path -> {});
+        }
 
-        return orphanFilesClean.clean().stream()
-                .map(filePath -> filePath.toUri().getPath())
-                .toArray(String[]::new);
+        return OrphanFilesClean.showDeletedFiles(orphanFilesClean.clean(), 200)
+                .toArray(new String[0]);
     }
 
     @Override

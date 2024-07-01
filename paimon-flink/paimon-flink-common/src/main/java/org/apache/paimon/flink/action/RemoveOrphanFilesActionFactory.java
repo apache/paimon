@@ -49,8 +49,8 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
             action.olderThan(params.get(OLDER_THAN));
         }
 
-        if (params.has(DRY_RUN)) {
-            action.dryRun(Boolean.parseBoolean(params.get(DRY_RUN)));
+        if (params.has(DRY_RUN) && Boolean.parseBoolean(params.get(DRY_RUN))) {
+            action.dryRun();
         }
 
         return Optional.of(action);
