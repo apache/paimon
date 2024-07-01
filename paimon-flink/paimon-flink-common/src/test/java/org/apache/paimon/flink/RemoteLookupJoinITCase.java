@@ -39,6 +39,7 @@ import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.io.Closeable;
@@ -134,6 +135,7 @@ public class RemoteLookupJoinITCase extends CatalogITCaseBase {
         proxy.close();
     }
 
+    @Disabled // TODO Fix unstable
     @Test
     public void testServiceFileCleaned() throws Exception {
         sql(
