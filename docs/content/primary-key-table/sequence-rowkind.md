@@ -54,6 +54,10 @@ order will be used to determine which one is the last one.
 
 You can define multiple fields for `sequence.field`, for example `'update_time,flag'`, multiple fields will be compared in order.
 
+{{< hint info >}}
+User defined sequence fields conflict with features such as `first_row` and `first_value`, which may result in unexpected results.
+{{< /hint >}}
+
 ## Row Kind Field
 
 By default, the primary key table determines the row kind according to the input row. You can also define the
