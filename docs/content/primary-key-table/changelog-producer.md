@@ -1,6 +1,6 @@
 ---
 title: "Changelog Producer"
-weight: 4
+weight: 5
 type: docs
 aliases:
 - /primary-key-table/changelog-producer.html

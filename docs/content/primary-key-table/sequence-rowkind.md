@@ -1,6 +1,6 @@
 ---
 title: "Sequence & Rowkind"
-weight: 5
+weight: 6
 type: docs
 aliases:
 - /primary-key-table/sequence-rowkind.html

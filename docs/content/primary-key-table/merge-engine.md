@@ -1,6 +1,6 @@
 ---
 title: "Merge Engine"
-weight: 3
+weight: 4
 type: docs
 aliases:
 - /primary-key-table/merge-engine.html
