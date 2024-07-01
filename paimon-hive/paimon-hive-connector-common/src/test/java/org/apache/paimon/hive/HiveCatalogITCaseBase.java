@@ -23,6 +23,9 @@ import org.apache.paimon.catalog.CatalogLock;
 import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkCatalog;
+import org.apache.paimon.flink.action.ActionITCaseBase;
+import org.apache.paimon.flink.action.ExpirePartitionsAction;
+import org.apache.paimon.flink.action.RepairAction;
 import org.apache.paimon.hive.annotation.Minio;
 import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
 import org.apache.paimon.metastore.MetastoreClient;
@@ -87,7 +90,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** IT cases for using Paimon {@link HiveCatalog} together with Paimon Hive connector. */
 @RunWith(PaimonEmbeddedHiveRunner.class)
-public abstract class HiveCatalogITCaseBase {
+public abstract class HiveCatalogITCaseBase extends ActionITCaseBase {
 
     @Rule public TemporaryFolder folder = new TemporaryFolder();
 
@@ -161,7 +164,7 @@ public abstract class HiveCatalogITCaseBase {
         sEnv.registerCatalog(catalogName, tEnv.getCatalog(catalogName).get());
     }
 
-    private void after() {
+    public void after() {
         hiveShell.execute("DROP DATABASE IF EXISTS test_db CASCADE");
         hiveShell.execute("DROP DATABASE IF EXISTS test_db2 CASCADE");
     }
@@ -1225,6 +1228,50 @@ public abstract class HiveCatalogITCaseBase {
         // When the Hive table exists, specify the paimon table to update hive table in hive
         // metastore.
         tEnv.executeSql("CALL sys.repair('test_db.t_repair_hive')");
+        assertThat(
+                        hiveShell
+                                .executeQuery("DESC FORMATTED t_repair_hive")
+                                .contains("item_id\tbigint\titem id"))
+                .isTrue();
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t_repair_hive"))
+                .containsExactlyInAnyOrder("dt=2020-01-02/hh=09", "dt=2020-01-03/hh=10");
+    }
+
+    @Test
+    public void testRepairTableWithAction() throws Exception {
+        TableEnvironment fileCatalog = useFileCatalog();
+        // Database test_db exists in hive metastore
+        hiveShell.execute("use test_db");
+        // When the Hive table does not exist, specify the paimon table to create hive table in hive
+        // metastore.
+        createAction(
+                        RepairAction.class,
+                        "expire_partitions",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        "test_db",
+                        "--table",
+                        "t_repair_hive")
+                .run();
+
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t_repair_hive"))
+                .containsExactlyInAnyOrder("dt=2020-01-02/hh=09");
+
+        alterTableInFileSystem(fileCatalog);
+
+        // When the Hive table exists, specify the paimon table to update hive table in hive
+        // metastore.
+        createAction(
+                        ExpirePartitionsAction.class,
+                        "expire_partitions",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        "test_db",
+                        "--table",
+                        "t_repair_hive")
+                .run();
         assertThat(
                         hiveShell
                                 .executeQuery("DESC FORMATTED t_repair_hive")
