@@ -56,7 +56,7 @@ public class RepairActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"orc", "parquet", "avro"})
-    public void testMigrateAction(String format) throws Exception {
+    public void testRepairTableAction() throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql(
                 "CREATE CATALOG PAIMON WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:"
@@ -95,6 +95,6 @@ public class RepairActionITCase extends ActionITCaseBase {
         List<Row> ret =
                 ImmutableList.copyOf(tEnv.executeSql("SHOW PARTITIONS t_repair_hive").collect());
         Assertions.assertThat(ret.size() == 1);
-        Assertions.assertThat(ret.get(0).toString()).isEqualTo("dt=2020-01-02/hh=09");
+        Assertions.assertThat(ret.get(0).toString()).isEqualTo("+I[dt=2020-01-02/hh=09]");
     }
 }
