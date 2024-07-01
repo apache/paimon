@@ -110,10 +110,14 @@ public class KvQueryClient {
 
     public void shutdown() {
         try {
-            networkClient.shutdown().get(10L, TimeUnit.SECONDS);
+            shutdownFuture().get(10L, TimeUnit.SECONDS);
             LOG.info("{} was shutdown successfully.", networkClient.getClientName());
         } catch (Exception e) {
             LOG.warn(String.format("%s shutdown failed.", networkClient.getClientName()), e);
         }
+    }
+
+    public CompletableFuture<Void> shutdownFuture() {
+        return networkClient.shutdown();
     }
 }
