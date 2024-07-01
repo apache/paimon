@@ -30,8 +30,7 @@ import org.apache.hadoop.hive.conf.HiveConf;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
 import java.util.List;
@@ -54,8 +53,7 @@ public class RepairActionITCase extends ActionITCaseBase {
         TEST_HIVE_METASTORE.stop();
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = {"orc", "parquet", "avro"})
+    @Test
     public void testRepairTableAction() throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql(

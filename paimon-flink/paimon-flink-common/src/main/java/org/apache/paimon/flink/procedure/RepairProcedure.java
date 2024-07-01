@@ -58,19 +58,18 @@ public class RepairProcedure extends ProcedureBase {
         if (!(catalog instanceof HiveCatalog)) {
             throw new IllegalArgumentException("Only support Hive Catalog");
         }
-        HiveCatalog hiveCatalog = (HiveCatalog) catalog;
 
         if (StringUtils.isBlank(identifier)) {
-            hiveCatalog.repairCatalog();
+            catalog.repairCatalog();
             return new String[] {"Success"};
         }
         String[] paths = identifier.split("\\.");
         switch (paths.length) {
             case 1:
-                hiveCatalog.repairDatabase(paths[0]);
+                catalog.repairDatabase(paths[0]);
                 break;
             case 2:
-                hiveCatalog.repairTable(Identifier.create(paths[0], paths[1]));
+                catalog.repairTable(Identifier.create(paths[0], paths[1]));
                 break;
             default:
                 throw new IllegalArgumentException(
