@@ -22,7 +22,11 @@ import org.apache.paimon.table.source.Split
 
 import org.apache.spark.sql.connector.read.InputPartition
 
-case class PaimonInputPartition(splits: Seq[Split]) extends InputPartition {}
+case class PaimonInputPartition(splits: Seq[Split]) extends InputPartition {
+  def rowCount(): Long = {
+    splits.map(_.rowCount()).sum
+  }
+}
 
 object PaimonInputPartition {
   def apply(split: Split): PaimonInputPartition = {

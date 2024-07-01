@@ -92,7 +92,7 @@ abstract class PaimonBaseScan(
     _readBuilder
   }
 
-  def getOriginSplits: Array[Split] = {
+  private def getOriginSplits: Array[Split] = {
     readBuilder
       .newScan()
       .asInstanceOf[InnerTableScan]
