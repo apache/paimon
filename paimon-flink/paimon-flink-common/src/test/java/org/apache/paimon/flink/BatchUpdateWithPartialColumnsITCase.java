@@ -79,6 +79,7 @@ public class BatchUpdateWithPartialColumnsITCase extends AbstractTestBase {
                                 "ut2 TIMESTAMP",
                                 "dt STRING"),
                         Arrays.asList("id", "dt"),
+                        Arrays.asList("id"),
                         Collections.singletonList("dt"),
                         setupOptions(
                                 MERGE_ENGINE.key(),
@@ -153,6 +154,7 @@ public class BatchUpdateWithPartialColumnsITCase extends AbstractTestBase {
                                 "ut1 TIMESTAMP",
                                 "dt STRING"),
                         Arrays.asList("id", "dt"),
+                        Arrays.asList("id"),
                         Collections.singletonList("dt"),
                         setupOptions(
                                 MERGE_ENGINE.key(),
@@ -212,6 +214,7 @@ public class BatchUpdateWithPartialColumnsITCase extends AbstractTestBase {
                                 "ut1 TIMESTAMP",
                                 "dt STRING"),
                         Arrays.asList("id", "dt"),
+                        Arrays.asList("id"),
                         Collections.singletonList("dt"),
                         setupOptions(
                                 MERGE_ENGINE.key(),
@@ -309,6 +312,7 @@ public class BatchUpdateWithPartialColumnsITCase extends AbstractTestBase {
                                 "ut1 TIMESTAMP",
                                 "dt STRING"),
                         Arrays.asList("id", "dt"),
+                        Arrays.asList("id"),
                         Collections.singletonList("dt"),
                         setupOptions(
                                 MERGE_ENGINE.key(),
@@ -352,6 +356,7 @@ public class BatchUpdateWithPartialColumnsITCase extends AbstractTestBase {
                                 "ut1 TIMESTAMP",
                                 "dt STRING"),
                         Arrays.asList("id", "dt"),
+                        Arrays.asList("id"),
                         Collections.singletonList("dt"),
                         setupOptions(
                                 MERGE_ENGINE.key(),
@@ -402,6 +407,7 @@ public class BatchUpdateWithPartialColumnsITCase extends AbstractTestBase {
                                 "ut1 TIMESTAMP",
                                 "dt STRING"),
                         Arrays.asList("id", "dt"),
+                        Arrays.asList("id"),
                         Collections.singletonList("dt"),
                         setupOptions(
                                 MERGE_ENGINE.key(),
@@ -445,6 +451,7 @@ public class BatchUpdateWithPartialColumnsITCase extends AbstractTestBase {
                                 "ut1 TIMESTAMP",
                                 "dt STRING"),
                         Arrays.asList("id", "dt"),
+                        Arrays.asList("id"),
                         Collections.singletonList("dt"),
                         setupOptions(
                                 MERGE_ENGINE.key(),
@@ -494,6 +501,7 @@ public class BatchUpdateWithPartialColumnsITCase extends AbstractTestBase {
                                 "ut1 TIMESTAMP",
                                 "dt STRING"),
                         Arrays.asList("id", "dt"),
+                        Arrays.asList("id"),
                         Collections.singletonList("dt"),
                         setupOptions(
                                 MERGE_ENGINE.key(),
@@ -602,6 +610,7 @@ public class BatchUpdateWithPartialColumnsITCase extends AbstractTestBase {
                                 "ut1 TIMESTAMP",
                                 "dt STRING"),
                         Arrays.asList("id", "dt"),
+                        Arrays.asList("id"),
                         Collections.singletonList("dt"),
                         setupOptions(
                                 MERGE_ENGINE.key(),
@@ -639,6 +648,7 @@ public class BatchUpdateWithPartialColumnsITCase extends AbstractTestBase {
                                 "ut1 TIMESTAMP",
                                 "dt STRING"),
                         Arrays.asList("id", "dt"),
+                        Arrays.asList("id"),
                         Collections.singletonList("dt"),
                         setupOptions(
                                 MERGE_ENGINE.key(),
@@ -704,6 +714,7 @@ public class BatchUpdateWithPartialColumnsITCase extends AbstractTestBase {
                                 "ut1 TIMESTAMP",
                                 "dt STRING"),
                         Arrays.asList("id", "dt"),
+                        Arrays.asList("id"),
                         Collections.singletonList("dt"),
                         setupOptions(
                                 MERGE_ENGINE.key(),
@@ -778,6 +789,7 @@ public class BatchUpdateWithPartialColumnsITCase extends AbstractTestBase {
                                 "ut1 TIMESTAMP",
                                 "dt STRING"),
                         Arrays.asList("id", "dt"),
+                        Arrays.asList("id"),
                         Collections.singletonList("dt"),
                         setupOptions(
                                 MERGE_ENGINE.key(),
@@ -818,6 +830,7 @@ public class BatchUpdateWithPartialColumnsITCase extends AbstractTestBase {
                                 "ut1 TIMESTAMP",
                                 "dt STRING"),
                         Arrays.asList("id", "dt"),
+                        Arrays.asList("id"),
                         Collections.singletonList("dt"),
                         setupOptions(
                                 MERGE_ENGINE.key(),
