@@ -23,8 +23,8 @@ import org.apache.paimon.catalog.CatalogLock;
 import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkCatalog;
-import org.apache.paimon.flink.action.ActionITCaseBase;
-import org.apache.paimon.flink.action.ExpirePartitionsAction;
+import org.apache.paimon.flink.action.ActionBase;
+import org.apache.paimon.flink.action.ActionFactory;
 import org.apache.paimon.flink.action.RepairAction;
 import org.apache.paimon.hive.annotation.Minio;
 import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
@@ -78,6 +78,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -90,7 +91,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** IT cases for using Paimon {@link HiveCatalog} together with Paimon Hive connector. */
 @RunWith(PaimonEmbeddedHiveRunner.class)
-public abstract class HiveCatalogITCaseBase extends ActionITCaseBase {
+public abstract class HiveCatalogITCaseBase {
 
     @Rule public TemporaryFolder folder = new TemporaryFolder();
 
@@ -124,6 +125,30 @@ public abstract class HiveCatalogITCaseBase extends ActionITCaseBase {
         hiveShell.execute("USE test_db");
         hiveShell.execute("CREATE TABLE hive_table ( a INT, b STRING )");
         hiveShell.execute("INSERT INTO hive_table VALUES (100, 'Hive'), (200, 'Table')");
+    }
+
+    protected <T extends ActionBase> T createAction(Class<T> clazz, List<String> args) {
+        return createAction(clazz, args.toArray(new String[0]));
+    }
+
+    protected <T extends ActionBase> T createAction(Class<T> clazz, String... args) {
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            confuseArgs(args, "_", "-");
+        } else {
+            confuseArgs(args, "-", "_");
+        }
+        return ActionFactory.createAction(args)
+                .filter(clazz::isInstance)
+                .map(clazz::cast)
+                .orElseThrow(() -> new RuntimeException("Failed to create action"));
+    }
+
+    private void confuseArgs(String[] args, String regex, String replacement) {
+        args[0] = args[0].replaceAll(regex, replacement);
+        for (int i = 1; i < args.length; i += 2) {
+            String arg = args[i].substring(2);
+            args[i] = "--" + arg.replaceAll(regex, replacement);
+        }
     }
 
     private void registerHiveCatalog(String catalogName, Map<String, String> catalogProperties)
@@ -164,7 +189,7 @@ public abstract class HiveCatalogITCaseBase extends ActionITCaseBase {
         sEnv.registerCatalog(catalogName, tEnv.getCatalog(catalogName).get());
     }
 
-    public void after() {
+    private void after() {
         hiveShell.execute("DROP DATABASE IF EXISTS test_db CASCADE");
         hiveShell.execute("DROP DATABASE IF EXISTS test_db2 CASCADE");
     }
@@ -1246,9 +1271,9 @@ public abstract class HiveCatalogITCaseBase extends ActionITCaseBase {
         // metastore.
         createAction(
                         RepairAction.class,
-                        "expire_partitions",
+                        "repair_table",
                         "--warehouse",
-                        warehouse,
+                        path,
                         "--database",
                         "test_db",
                         "--table",
@@ -1263,10 +1288,10 @@ public abstract class HiveCatalogITCaseBase extends ActionITCaseBase {
         // When the Hive table exists, specify the paimon table to update hive table in hive
         // metastore.
         createAction(
-                        ExpirePartitionsAction.class,
+                        RepairAction.class,
                         "expire_partitions",
                         "--warehouse",
-                        warehouse,
+                        path,
                         "--database",
                         "test_db",
                         "--table",

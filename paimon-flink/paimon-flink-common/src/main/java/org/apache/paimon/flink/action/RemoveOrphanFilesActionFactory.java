@@ -44,7 +44,6 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
         RemoveOrphanFilesAction action =
                 new RemoveOrphanFilesAction(
                         tablePath.f0, tablePath.f1, tablePath.f2, catalogConfig);
-
         if (params.has(OLDER_THAN)) {
             action.olderThan(params.get(OLDER_THAN));
         }
