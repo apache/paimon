@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.flink.procedure.RepairProcedure;
+import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.table.procedure.DefaultProcedureContext;
@@ -26,7 +27,7 @@ import org.apache.flink.table.procedure.DefaultProcedureContext;
 import java.util.Map;
 
 /** Repair action for Flink. */
-public class RepairAction extends TableActionBase {
+public class RepairAction extends ActionBase {
 
     private String tableName;
 
@@ -37,7 +38,7 @@ public class RepairAction extends TableActionBase {
             String databaseName,
             String tableName,
             Map<String, String> catalogConfig) {
-        super(warehouse, databaseName, tableName, catalogConfig);
+        super(warehouse, catalogConfig);
         this.databaseName = databaseName;
         this.tableName = tableName;
     }
