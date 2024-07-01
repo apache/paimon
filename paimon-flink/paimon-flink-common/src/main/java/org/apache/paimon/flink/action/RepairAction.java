@@ -18,9 +18,10 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.procedure.RepairProcedure;
 import org.apache.paimon.utils.Preconditions;
-import org.apache.paimon.utils.StringUtils;
+
+import org.apache.flink.table.procedure.DefaultProcedureContext;
 
 import java.util.Map;
 
@@ -45,17 +46,9 @@ public class RepairAction extends TableActionBase {
     public void run() throws Exception {
         Preconditions.checkArgument(!tableName.contains("\\."), "tableName can't contain ','");
 
-        if (StringUtils.isBlank(databaseName) && StringUtils.isBlank(tableName)) {
-            catalog.repairCatalog();
-        } else if (!StringUtils.isBlank(databaseName) && StringUtils.isBlank(tableName)) {
-            catalog.repairDatabase(databaseName);
-        } else if (!StringUtils.isBlank(databaseName) && !StringUtils.isBlank(tableName)) {
-            catalog.repairTable(Identifier.create(databaseName, tableName));
-        } else {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "database need be specify when use '%s' if table name is given",
-                            identifier));
-        }
+        RepairProcedure repairProcedure = new RepairProcedure();
+        repairProcedure.withCatalog(catalog);
+        String identifier = databaseName.concat(".").concat(tableName);
+        repairProcedure.call(new DefaultProcedureContext(env), identifier);
     }
 }
