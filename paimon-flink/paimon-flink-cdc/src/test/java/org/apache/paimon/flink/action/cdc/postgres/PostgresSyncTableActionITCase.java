@@ -20,6 +20,7 @@ package org.apache.paimon.flink.action.cdc.postgres;
 
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -38,6 +39,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -100,7 +103,9 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.INT().notNull(), DataTypes.STRING()
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.VARCHAR(10)
                         },
                         new String[] {"pt", "_id", "v1"});
         List<String> primaryKeys = Arrays.asList("pt", "_id");
@@ -118,7 +123,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
                         new DataType[] {
                             DataTypes.INT().notNull(),
                             DataTypes.INT().notNull(),
-                            DataTypes.STRING(),
+                            DataTypes.VARCHAR(10),
                             DataTypes.INT()
                         },
                         new String[] {"pt", "_id", "v1", "v2"});
@@ -145,7 +150,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
                         new DataType[] {
                             DataTypes.INT().notNull(),
                             DataTypes.INT().notNull(),
-                            DataTypes.STRING(),
+                            DataTypes.VARCHAR(10),
                             DataTypes.BIGINT()
                         },
                         new String[] {"pt", "_id", "v1", "v2"});
@@ -170,14 +175,14 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
         statement.executeUpdate("ALTER TABLE schema_evolution_2 ADD COLUMN v4 BYTEA");
         statement.executeUpdate("ALTER TABLE schema_evolution_2 ADD COLUMN v5 FLOAT");
         statement.executeUpdate("ALTER TABLE schema_evolution_2 ALTER COLUMN v1 TYPE VARCHAR(20)");
-        statement.executeUpdate(
-                "UPDATE schema_evolution_2 SET v1 = 'very long string' WHERE _id = 8");
+        String v1 = "very long string";
+        statement.executeUpdate("UPDATE schema_evolution_2 SET v1 = '" + v1 + "' WHERE _id = 8");
         rowType =
                 RowType.of(
                         new DataType[] {
                             DataTypes.INT().notNull(),
                             DataTypes.INT().notNull(),
-                            DataTypes.STRING(),
+                            DataTypes.VARCHAR(Math.max(v1.length(), 10)),
                             DataTypes.BIGINT(),
                             DataTypes.DECIMAL(8, 3),
                             DataTypes.BYTES(),
@@ -209,7 +214,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
                         new DataType[] {
                             DataTypes.INT().notNull(),
                             DataTypes.INT().notNull(),
-                            DataTypes.STRING(),
+                            DataTypes.VARCHAR(Math.max(v1.length(), 10)),
                             DataTypes.BIGINT(),
                             DataTypes.DECIMAL(8, 3),
                             DataTypes.BYTES(),
@@ -263,9 +268,9 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
                 RowType.of(
                         new DataType[] {
                             DataTypes.INT().notNull(),
-                            DataTypes.STRING(),
+                            DataTypes.VARCHAR(10),
                             DataTypes.INT(),
-                            DataTypes.STRING()
+                            DataTypes.VARCHAR(10)
                         },
                         new String[] {"_id", "v1", "v2", "v3"});
         List<String> primaryKeys = Collections.singletonList("_id");
@@ -280,20 +285,30 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
                         + "ADD COLUMN v6 DECIMAL(5, 3),"
                         + "ADD COLUMN \"$% ^,& *(\" VARCHAR(10),"
                         + "ALTER COLUMN v2 TYPE BIGINT");
+        String v1 = "long_string_two";
+        String v3 = "string_2";
+        String v7 = "test_2";
+
         statement.executeUpdate(
                 "INSERT INTO schema_evolution_multiple VALUES "
-                        + "(2, 'long_string_two', 2000000000000, 'string_2', 20, 20.5, 20.002, 'test_2')");
+                        + "(2, '"
+                        + v1
+                        + "', 2000000000000, '"
+                        + v3
+                        + "', 20, 20.5, 20.002, '"
+                        + v7
+                        + "')");
         rowType =
                 RowType.of(
                         new DataType[] {
                             DataTypes.INT().notNull(),
-                            DataTypes.STRING(),
+                            DataTypes.VARCHAR(v1.length()),
                             DataTypes.BIGINT(),
-                            DataTypes.STRING(),
+                            DataTypes.VARCHAR(10),
                             DataTypes.INT(),
                             DataTypes.DOUBLE(),
                             DataTypes.DECIMAL(5, 3),
-                            DataTypes.STRING()
+                            DataTypes.VARCHAR(v7.length())
                         },
                         new String[] {"_id", "v1", "v2", "v3", "v4", "v5", "v6", "$% ^,& *("});
         expected =
@@ -362,8 +377,8 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
                             DataTypes.TIMESTAMP(6), // _timestamp0
                             DataTypes.TIME(6), // _time
                             DataTypes.TIME(6), // _time0
-                            DataTypes.STRING(), // _char
-                            DataTypes.STRING(), // _varchar
+                            DataTypes.CHAR(10), // _char
+                            DataTypes.VARCHAR(20), // _varchar
                             DataTypes.STRING(), // _text
                             DataTypes.BYTES(), // _bin
                             DataTypes.STRING(), // _json
@@ -663,7 +678,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
                 RowType.of(
                         new DataType[] {
                             DataTypes.INT().notNull(),
-                            DataTypes.STRING(),
+                            DataTypes.VARCHAR(10),
                             DataTypes.STRING().notNull()
                         },
                         new String[] {"pk", "_date", "pt"});
@@ -756,7 +771,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
                 RowType.of(
                         new DataType[] {
                             DataTypes.INT().notNull(),
-                            DataTypes.STRING(),
+                            DataTypes.VARCHAR(10),
                             DataTypes.STRING().notNull(),
                             DataTypes.STRING().notNull(),
                             DataTypes.STRING().notNull()
@@ -786,6 +801,50 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
         assertThat(action.catalogConfig()).containsEntry("catalog-key", "catalog-value");
         assertThat(action.tableConfig())
                 .containsExactlyEntriesOf(Collections.singletonMap("table-key", "table-value"));
+    }
+
+    @Test
+    @Timeout(60)
+    public void testColumnAlterInExistingTableWhenStartJob() throws Exception {
+        String tableName = "test_exist_column_alter";
+        Map<String, String> options = new HashMap<>();
+        options.put("bucket", "1");
+        options.put("sink.parallelism", "1");
+
+        RowType rowType =
+                RowType.builder()
+                        .field("pk", DataTypes.INT().notNull())
+                        .field("a", DataTypes.BIGINT())
+                        .field("b", DataTypes.VARCHAR(20))
+                        .build();
+
+        createFileStoreTable(
+                rowType,
+                Collections.emptyList(),
+                Collections.singletonList("pk"),
+                Collections.emptyList(),
+                options);
+
+        Map<String, String> postgresConfig = getBasicPostgresConfig();
+        postgresConfig.put(PostgresSourceOptions.DATABASE_NAME.key(), DATABASE_NAME);
+        postgresConfig.put(PostgresSourceOptions.SCHEMA_NAME.key(), SCHEMA_NAME);
+        postgresConfig.put(PostgresSourceOptions.TABLE_NAME.key(), tableName);
+
+        PostgresSyncTableAction action =
+                syncTableActionBuilder(postgresConfig).withPrimaryKeys("pk").build();
+
+        runActionWithDefaultEnv(action);
+
+        FileStoreTable table = getFileStoreTable();
+
+        Map<String, DataField> actual =
+                table.schema().fields().stream()
+                        .collect(Collectors.toMap(DataField::name, Function.identity()));
+
+        assertThat(actual.get("pk").type()).isEqualTo(DataTypes.INT().notNull());
+        assertThat(actual.get("a").type()).isEqualTo(DataTypes.BIGINT());
+        assertThat(actual.get("b").type()).isEqualTo(DataTypes.VARCHAR(30));
+        assertThat(actual.get("c").type()).isEqualTo(DataTypes.INT());
     }
 
     private FileStoreTable getFileStoreTable() throws Exception {

@@ -124,13 +124,13 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
         // Check if table exists before trying to get or create it
         if (catalog.tableExists(identifier)) {
             fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
-            fileStoreTable = alterTableOptions(identifier, fileStoreTable);
             try {
                 Schema retrievedSchema = retrieveSchema();
                 computedColumns =
                         buildComputedColumns(computedColumnArgs, retrievedSchema.fields());
                 Schema paimonSchema = buildPaimonSchema(retrievedSchema);
                 assertSchemaCompatible(fileStoreTable.schema(), paimonSchema.fields());
+                fileStoreTable = alterTableSchema(identifier, fileStoreTable, paimonSchema);
             } catch (SchemaRetrievalException e) {
                 LOG.info(
                         "Failed to retrieve schema from record data but there exists specified Paimon table. "
@@ -157,7 +157,8 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
 
     @Override
     protected FlatMapFunction<CdcSourceRecord, RichCdcMultiplexRecord> recordParse() {
-        return syncJobHandler.provideRecordParser(computedColumns, typeMapping, metadataConverters);
+        return syncJobHandler.provideRecordParser(
+                computedColumns, typeMapping, metadataConverters, fileStoreTable.schema());
     }
 
     @Override

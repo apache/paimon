@@ -1361,8 +1361,6 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "test_exist_column_comment_change");
 
-        // Flink cdc 2.3 does not support collecting field comments, and existing paimon table field
-        // comments will not be changed.
         MySqlSyncTableAction action =
                 syncTableActionBuilder(mySqlConfig)
                         .withPrimaryKeys("pk")
@@ -1374,13 +1372,96 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         Map<String, DataField> actual =
                 table.schema().fields().stream()
                         .collect(Collectors.toMap(DataField::name, Function.identity()));
-        assertThat(actual.get("pk").description()).isEqualTo("pk comment");
-        assertThat(actual.get("c1").description()).isEqualTo("c1 comment");
+        assertThat(actual.get("pk").description()).isEqualTo("pk new_comment");
+        assertThat(actual.get("c1").description()).isEqualTo("c1 new_comment");
         assertThat(actual.get("c2").description()).isEqualTo("c2 comment");
     }
 
     @Test
     @Timeout(60)
+    public void testColumnAlterInExistingTableBeforeStartJob() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put("bucket", "1");
+        options.put("sink.parallelism", "1");
+
+        RowType rowType =
+                RowType.builder()
+                        .field("pk", DataTypes.INT().notNull())
+                        .field("a", DataTypes.BIGINT())
+                        .field("b", DataTypes.VARCHAR(20))
+                        .build();
+
+        createFileStoreTable(
+                rowType,
+                Collections.emptyList(),
+                Collections.singletonList("pk"),
+                Collections.emptyList(),
+                options);
+
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", DATABASE_NAME);
+        mySqlConfig.put("table-name", "test_exist_column_alter");
+
+        MySqlSyncTableAction action =
+                syncTableActionBuilder(mySqlConfig)
+                        .withPrimaryKeys("pk")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+
+        runActionWithDefaultEnv(action);
+
+        FileStoreTable table = getFileStoreTable();
+
+        Map<String, DataField> actual =
+                table.schema().fields().stream()
+                        .collect(Collectors.toMap(DataField::name, Function.identity()));
+
+        assertThat(actual.get("pk").type()).isEqualTo(DataTypes.INT().notNull());
+        assertThat(actual.get("a").type()).isEqualTo(DataTypes.BIGINT());
+        assertThat(actual.get("b").type()).isEqualTo(DataTypes.VARCHAR(30));
+        assertThat(actual.get("c").type()).isEqualTo(DataTypes.INT());
+    }
+
+    @Test
+    @Timeout(60)
+    public void testAssertSchemaCompatibleWithAddColumnISNOTNULL() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put("bucket", "1");
+        options.put("sink.parallelism", "1");
+
+        RowType rowType =
+                RowType.builder()
+                        .field("pk", DataTypes.INT().notNull())
+                        .field("a", DataTypes.BIGINT())
+                        .field("b", DataTypes.VARCHAR(20))
+                        .build();
+
+        createFileStoreTable(
+                rowType,
+                Collections.emptyList(),
+                Collections.singletonList("pk"),
+                Collections.emptyList(),
+                options);
+
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", DATABASE_NAME);
+        mySqlConfig.put("table-name", "assert_schema_compatible");
+
+        MySqlSyncTableAction action =
+                syncTableActionBuilder(mySqlConfig)
+                        .withPrimaryKeys("pk")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+
+        assertThatThrownBy(action::run)
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Paimon schema and source table schema are not compatible.\n"
+                                        + "Paimon fields are: [`pk` INT NOT NULL, `a` BIGINT, `b` VARCHAR(20)].\n"
+                                        + "Source table fields are: [`pk` INT NOT NULL '', `a` BIGINT '', `b` VARCHAR(30) '', `c` INT NOT NULL 'Add column cannot specify NOT NULL in the Paimon table']"));
+    }
+
     public void testWriteOnlyAndSchemaEvolution() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "write_only_and_schema_evolution");

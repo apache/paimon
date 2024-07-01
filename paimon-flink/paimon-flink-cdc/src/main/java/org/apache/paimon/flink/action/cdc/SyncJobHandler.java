@@ -27,6 +27,7 @@ import org.apache.paimon.flink.action.cdc.postgres.PostgresActionUtils;
 import org.apache.paimon.flink.action.cdc.postgres.PostgresRecordParser;
 import org.apache.paimon.flink.action.cdc.pulsar.PulsarActionUtils;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
+import org.apache.paimon.schema.TableSchema;
 
 import com.ververica.cdc.connectors.mongodb.source.config.MongoDBSourceOptions;
 import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
@@ -196,13 +197,25 @@ public class SyncJobHandler {
             List<ComputedColumn> computedColumns,
             TypeMapping typeMapping,
             CdcMetadataConverter[] metadataConverters) {
+        return this.provideRecordParser(computedColumns, typeMapping, metadataConverters, null);
+    }
+
+    public FlatMapFunction<CdcSourceRecord, RichCdcMultiplexRecord> provideRecordParser(
+            List<ComputedColumn> computedColumns,
+            TypeMapping typeMapping,
+            CdcMetadataConverter[] metadataConverters,
+            TableSchema paimonSchema) {
         switch (sourceType) {
             case MYSQL:
                 return new MySqlRecordParser(
                         cdcSourceConfig, computedColumns, typeMapping, metadataConverters);
             case POSTGRES:
                 return new PostgresRecordParser(
-                        cdcSourceConfig, computedColumns, typeMapping, metadataConverters);
+                        cdcSourceConfig,
+                        computedColumns,
+                        typeMapping,
+                        metadataConverters,
+                        paimonSchema);
             case KAFKA:
             case PULSAR:
                 DataFormat dataFormat = provideDataFormat();
