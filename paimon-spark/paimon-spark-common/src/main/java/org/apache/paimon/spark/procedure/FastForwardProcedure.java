@@ -29,13 +29,13 @@ import org.apache.spark.sql.types.StructType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /**
- * Merge branch procedure for given branch. Usage:
+ * Fast-forward branch procedure for given branch. Usage:
  *
  * <pre><code>
- *  CALL sys.merge_branch('tableId', 'branchName')
+ *  CALL sys.fast_forward('tableId', 'branchName')
  * </code></pre>
  */
-public class MergeBranchProcedure extends BaseProcedure {
+public class FastForwardProcedure extends BaseProcedure {
 
     private static final ProcedureParameter[] PARAMETERS =
             new ProcedureParameter[] {
@@ -49,7 +49,7 @@ public class MergeBranchProcedure extends BaseProcedure {
                         new StructField("result", DataTypes.BooleanType, true, Metadata.empty())
                     });
 
-    protected MergeBranchProcedure(TableCatalog tableCatalog) {
+    protected FastForwardProcedure(TableCatalog tableCatalog) {
         super(tableCatalog);
     }
 
@@ -70,23 +70,23 @@ public class MergeBranchProcedure extends BaseProcedure {
         return modifyPaimonTable(
                 tableIdent,
                 table -> {
-                    table.mergeBranch(branch);
+                    table.fastForward(branch);
                     InternalRow outputRow = newInternalRow(true);
                     return new InternalRow[] {outputRow};
                 });
     }
 
     public static ProcedureBuilder builder() {
-        return new BaseProcedure.Builder<MergeBranchProcedure>() {
+        return new BaseProcedure.Builder<FastForwardProcedure>() {
             @Override
-            public MergeBranchProcedure doBuild() {
-                return new MergeBranchProcedure(tableCatalog());
+            public FastForwardProcedure doBuild() {
+                return new FastForwardProcedure(tableCatalog());
             }
         };
     }
 
     @Override
     public String description() {
-        return "MergeBranchProcedure";
+        return "FastForwardProcedure";
     }
 }

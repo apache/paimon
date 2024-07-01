@@ -25,7 +25,7 @@ import org.apache.paimon.spark.procedure.DeleteBranchProcedure;
 import org.apache.paimon.spark.procedure.DeleteTagProcedure;
 import org.apache.paimon.spark.procedure.ExpirePartitionsProcedure;
 import org.apache.paimon.spark.procedure.ExpireSnapshotsProcedure;
-import org.apache.paimon.spark.procedure.MergeBranchProcedure;
+import org.apache.paimon.spark.procedure.FastForwardProcedure;
 import org.apache.paimon.spark.procedure.MigrateFileProcedure;
 import org.apache.paimon.spark.procedure.MigrateTableProcedure;
 import org.apache.paimon.spark.procedure.Procedure;
@@ -68,7 +68,7 @@ public class SparkProcedures {
         procedureBuilders.put("expire_snapshots", ExpireSnapshotsProcedure::builder);
         procedureBuilders.put("expire_partitions", ExpirePartitionsProcedure::builder);
         procedureBuilders.put("repair", RepairProcedure::builder);
-        procedureBuilders.put("merge_branch", MergeBranchProcedure::builder);
+        procedureBuilders.put("fast_forward", FastForwardProcedure::builder);
         procedureBuilders.put("reset_consumer", ResetConsumerProcedure::builder);
         return procedureBuilders.build();
     }

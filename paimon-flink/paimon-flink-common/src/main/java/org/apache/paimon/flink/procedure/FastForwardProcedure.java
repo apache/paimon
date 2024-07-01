@@ -25,15 +25,15 @@ import org.apache.paimon.table.Table;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 /**
- * Merge branch procedure for given branch. Usage:
+ * Fast Forward procedure for given branch. Usage:
  *
  * <pre><code>
- *  CALL sys.merge_branch('tableId', 'branchName')
+ *  CALL sys.fast_forward('tableId', 'branchName')
  * </code></pre>
  */
-public class MergeBranchProcedure extends ProcedureBase {
+public class FastForwardProcedure extends ProcedureBase {
 
-    public static final String IDENTIFIER = "merge_branch";
+    public static final String IDENTIFIER = "fast_forward";
 
     @Override
     public String identifier() {
@@ -48,7 +48,7 @@ public class MergeBranchProcedure extends ProcedureBase {
     private String[] innerCall(String tableId, String branchName)
             throws Catalog.TableNotExistException {
         Table table = catalog.getTable(Identifier.fromString(tableId));
-        table.mergeBranch(branchName);
+        table.fastForward(branchName);
         return new String[] {"Success"};
     }
 }

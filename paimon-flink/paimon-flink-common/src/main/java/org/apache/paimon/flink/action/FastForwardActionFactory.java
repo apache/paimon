@@ -23,10 +23,10 @@ import org.apache.flink.api.java.tuple.Tuple3;
 import java.util.Map;
 import java.util.Optional;
 
-/** Factory to create {@link MergeBranchAction}. */
-public class MergeBranchActionFactory implements ActionFactory {
+/** Factory to create {@link FastForwardAction}. */
+public class FastForwardActionFactory implements ActionFactory {
 
-    public static final String IDENTIFIER = "merge_branch";
+    public static final String IDENTIFIER = "fast_forward";
 
     private static final String BRANCH_NAME = "branch_name";
 
@@ -43,20 +43,20 @@ public class MergeBranchActionFactory implements ActionFactory {
         Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
         String branchName = params.get(BRANCH_NAME);
 
-        MergeBranchAction action =
-                new MergeBranchAction(
+        FastForwardAction action =
+                new FastForwardAction(
                         tablePath.f0, tablePath.f1, tablePath.f2, catalogConfig, branchName);
         return Optional.of(action);
     }
 
     @Override
     public void printHelp() {
-        System.out.println("Action \"merge_branch\" merge a branch by name.");
+        System.out.println("Action \"fast_forward\" fast_forward a branch by name.");
         System.out.println();
 
         System.out.println("Syntax:");
         System.out.println(
-                "  merge_branch --warehouse <warehouse_path> --database <database_name> "
+                "  fast_forward --warehouse <warehouse_path> --database <database_name> "
                         + "--table <table_name> --branch_name <branch_name>");
         System.out.println();
     }

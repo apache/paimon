@@ -127,16 +127,16 @@ INSERT INTO t /*+ OPTIONS('branch' = 'branch1') */ SELECT ...
 
 {{< /tabs >}}
 
-## Merge Branch
+## Fast Forward
 
-Merging the custom branch to main will delete all the snapshots, tags and schemas in the main branch that are created after the branch's initial tag. And copy snapshots, tags and schemas from the branch to the main branch.
+Fast-Forward the custom branch to main will delete all the snapshots, tags and schemas in the main branch that are created after the branch's initial tag. And copy snapshots, tags and schemas from the branch to the main branch.
 
-{{< tabs "merge-branch" >}}
+{{< tabs "fast_forward" >}}
 
 {{< tab "Flink" >}}
 
 ```sql
-CALL sys.merge_branch('default.T', 'branch1');
+CALL sys.fast_forward('default.T', 'branch1');
 ```
 
 {{< /tab >}}
@@ -148,7 +148,7 @@ Run the following command:
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    merge_branch \
+    fast_forward \
     --warehouse <warehouse-path> \
     --database <database-name> \ 
     --table <table-name> \
