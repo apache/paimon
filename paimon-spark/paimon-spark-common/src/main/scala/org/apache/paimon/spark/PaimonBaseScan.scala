@@ -19,6 +19,7 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.{stats, CoreOptions}
+import org.apache.paimon.annotation.VisibleForTesting
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
 import org.apache.paimon.spark.metric.SparkMetricRegistry
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
@@ -92,6 +93,7 @@ abstract class PaimonBaseScan(
     _readBuilder
   }
 
+  @VisibleForTesting
   def getOriginSplits: Array[Split] = {
     readBuilder
       .newScan()
