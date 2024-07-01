@@ -34,7 +34,9 @@ import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.schema.TableSchema.PAIMON_07_VERSION;
+import static org.apache.paimon.schema.TableSchema.PAIMON_08_VERSION;
 
 /** A {@link JsonSerializer} for {@link TableSchema}. */
 public class SchemaSerializer
@@ -119,9 +121,13 @@ public class SchemaSerializer
             String key = optionsKeys.next();
             options.put(key, optionsJson.get(key).asText());
         }
-        if (version == PAIMON_07_VERSION && !options.containsKey(BUCKET.key())) {
+        if (version <= PAIMON_07_VERSION && !options.containsKey(BUCKET.key())) {
             // the default value of BUCKET in old version is 1
             options.put(BUCKET.key(), "1");
+        }
+        if (version <= PAIMON_08_VERSION && !options.containsKey(FILE_FORMAT.key())) {
+            // the default value of FILE_FORMAT in old version is orc
+            options.put(FILE_FORMAT.key(), "orc");
         }
 
         JsonNode commentNode = node.get("comment");
