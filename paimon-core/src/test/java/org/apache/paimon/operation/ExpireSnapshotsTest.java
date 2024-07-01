@@ -184,11 +184,11 @@ public class ExpireSnapshotsTest {
         BinaryRow partition = gen.getPartition(gen.next());
         Path bucketPath = store.pathFactory().bucketPath(partition, 0);
         Path myDataFile = new Path(bucketPath, "myDataFile");
-        new LocalFileIO().writeFileUtf8(myDataFile, "1");
+        new LocalFileIO().tryToWriteAtomic(myDataFile, "1");
         Path extra1 = new Path(bucketPath, "extra1");
-        fileIO.writeFileUtf8(extra1, "2");
+        fileIO.tryToWriteAtomic(extra1, "2");
         Path extra2 = new Path(bucketPath, "extra2");
-        fileIO.writeFileUtf8(extra2, "3");
+        fileIO.tryToWriteAtomic(extra2, "3");
 
         // create DataFileMeta and ManifestEntry
         List<String> extraFiles = Arrays.asList("extra1", "extra2");

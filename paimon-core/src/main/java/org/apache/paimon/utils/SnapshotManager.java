@@ -526,7 +526,7 @@ public class SnapshotManager implements Serializable {
     }
 
     public void commitChangelog(Changelog changelog, long id) throws IOException {
-        fileIO.writeFileUtf8(longLivedChangelogPath(id), changelog.toJson());
+        fileIO.writeFile(longLivedChangelogPath(id), changelog.toJson(), false);
     }
 
     /**

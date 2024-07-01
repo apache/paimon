@@ -76,7 +76,7 @@ public class FileIOTest {
         Path dstFile = new Path(tempDir.resolve("dst.txt").toUri());
 
         FileIO fileIO = new DummyFileIO();
-        fileIO.writeFileUtf8(srcFile, "foobar");
+        fileIO.tryToWriteAtomic(srcFile, "foobar");
 
         fileIO.copyFile(srcFile, dstFile, true);
         assertThat(fileIO.readFileUtf8(dstFile)).isEqualTo("foobar");

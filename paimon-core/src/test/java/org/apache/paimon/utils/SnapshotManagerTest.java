@@ -73,7 +73,7 @@ public class SnapshotManagerTest {
         int firstSnapshotId = random.nextInt(1, 100);
         for (int i = 0; i < numSnapshots; i++) {
             Snapshot snapshot = createSnapshotWithMillis(firstSnapshotId + i, millis.get(i));
-            localFileIO.writeFileUtf8(
+            localFileIO.tryToWriteAtomic(
                     snapshotManager.snapshotPath(firstSnapshotId + i), snapshot.toJson());
         }
 
@@ -110,7 +110,7 @@ public class SnapshotManagerTest {
         // create 10 snapshots
         for (long i = 0; i < 10; i++) {
             Snapshot snapshot = createSnapshotWithMillis(i, millis + i * 1000);
-            localFileIO.writeFileUtf8(snapshotManager.snapshotPath(i), snapshot.toJson());
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
         }
         // smaller than the second snapshot return the first snapshot
         assertThat(snapshotManager.earlierOrEqualTimeMills(millis + 999).timeMillis())
@@ -132,7 +132,7 @@ public class SnapshotManagerTest {
         // create 10 snapshots
         for (long i = 0; i < 10; i++) {
             Snapshot snapshot = createSnapshotWithMillis(i, millis, Long.MIN_VALUE);
-            localFileIO.writeFileUtf8(snapshotManager.snapshotPath(i), snapshot.toJson());
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
         }
         // smaller than the second snapshot
         assertThat(snapshotManager.laterOrEqualWatermark(millis + 999)).isNull();
@@ -224,7 +224,7 @@ public class SnapshotManagerTest {
                             null,
                             null,
                             null);
-            localFileIO.writeFileUtf8(snapshotManager.snapshotPath(i), snapshot.toJson());
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
         }
 
         // read all
@@ -301,13 +301,13 @@ public class SnapshotManagerTest {
         long millis = 1L;
         for (long i = 1; i <= 5; i++) {
             Changelog changelog = createChangelogWithMillis(i, millis + i * 1000);
-            localFileIO.writeFileUtf8(
+            localFileIO.tryToWriteAtomic(
                     snapshotManager.longLivedChangelogPath(i), changelog.toJson());
         }
 
         for (long i = 6; i <= 10; i++) {
             Snapshot snapshot = createSnapshotWithMillis(i, millis + i * 1000);
-            localFileIO.writeFileUtf8(snapshotManager.snapshotPath(i), snapshot.toJson());
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
         }
 
         Assertions.assertThat(snapshotManager.earliestLongLivedChangelogId()).isEqualTo(1);
