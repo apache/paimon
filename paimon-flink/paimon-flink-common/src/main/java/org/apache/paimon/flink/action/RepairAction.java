@@ -47,7 +47,6 @@ public class RepairAction extends TableActionBase {
         Preconditions.checkArgument(!tableName.contains("\\."), "tableName can't contain ','");
 
         RepairProcedure repairProcedure = new RepairProcedure();
-        repairProcedure.withCatalog(catalog);
         String identifier = databaseName.concat(".").concat(tableName);
         repairProcedure.call(new DefaultProcedureContext(env), identifier);
     }
