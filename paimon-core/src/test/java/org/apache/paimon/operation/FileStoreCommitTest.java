@@ -725,7 +725,7 @@ public class FileStoreCommitTest {
 
         // assert part1
         List<IndexManifestEntry> part1Index =
-                indexFileHandler.scan(snapshot.id(), HASH_INDEX, part1);
+                indexFileHandler.scanEntries(snapshot.id(), HASH_INDEX, part1);
         assertThat(part1Index.size()).isEqualTo(2);
 
         IndexManifestEntry indexManifestEntry =
@@ -740,7 +740,7 @@ public class FileStoreCommitTest {
 
         // assert part2
         List<IndexManifestEntry> part2Index =
-                indexFileHandler.scan(snapshot.id(), HASH_INDEX, part2);
+                indexFileHandler.scanEntries(snapshot.id(), HASH_INDEX, part2);
         assertThat(part2Index.size()).isEqualTo(1);
         assertThat(part2Index.get(0).bucket()).isEqualTo(2);
         assertThat(indexFileHandler.readHashIndexList(part2Index.get(0).indexFile()))
@@ -752,7 +752,7 @@ public class FileStoreCommitTest {
         snapshot = store.snapshotManager().latestSnapshot();
 
         // assert update part1
-        part1Index = indexFileHandler.scan(snapshot.id(), HASH_INDEX, part1);
+        part1Index = indexFileHandler.scanEntries(snapshot.id(), HASH_INDEX, part1);
         assertThat(part1Index.size()).isEqualTo(2);
 
         indexManifestEntry =

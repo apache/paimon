@@ -148,7 +148,8 @@ public class DeletionVectorsMaintainer {
             List<IndexFileMeta> indexFiles =
                     snapshotId == null
                             ? Collections.emptyList()
-                            : handler.scan(snapshotId, DELETION_VECTORS_INDEX, partition).stream()
+                            : handler.scanEntries(snapshotId, DELETION_VECTORS_INDEX, partition)
+                                    .stream()
                                     .map(IndexManifestEntry::indexFile)
                                     .collect(Collectors.toList());
             Map<String, DeletionVector> deletionVectors =

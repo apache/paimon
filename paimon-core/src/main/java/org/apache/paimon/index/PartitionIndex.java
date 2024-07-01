@@ -111,7 +111,7 @@ public class PartitionIndex {
             long targetBucketRowNumber,
             IntPredicate loadFilter,
             IntPredicate bucketFilter) {
-        List<IndexManifestEntry> files = indexFileHandler.scan(HASH_INDEX, partition);
+        List<IndexManifestEntry> files = indexFileHandler.scanEntries(HASH_INDEX, partition);
         Int2ShortHashMap.Builder mapBuilder = Int2ShortHashMap.builder();
         Map<Integer, Long> buckets = new HashMap<>();
         for (IndexManifestEntry file : files) {

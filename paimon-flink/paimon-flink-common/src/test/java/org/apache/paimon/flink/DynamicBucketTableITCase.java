@@ -122,7 +122,7 @@ public class DynamicBucketTableITCase extends CatalogITCaseBase {
         IndexFileHandler indexFileHandler = table.store().newIndexFileHandler();
         List<BinaryRow> partitions = table.newScan().listPartitions();
         List<IndexManifestEntry> entries = new ArrayList<>();
-        partitions.forEach(p -> entries.addAll(indexFileHandler.scan(HASH_INDEX, p)));
+        partitions.forEach(p -> entries.addAll(indexFileHandler.scanEntries(HASH_INDEX, p)));
 
         Long records =
                 entries.stream().map(entry -> entry.indexFile().rowCount()).reduce(Long::sum).get();

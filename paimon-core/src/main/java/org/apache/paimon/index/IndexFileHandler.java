@@ -28,6 +28,7 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.utils.IntIterator;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PathFactory;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -35,9 +36,11 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
@@ -69,14 +72,6 @@ public class IndexFileHandler {
         return this.deletionVectorsIndex;
     }
 
-    public List<IndexManifestEntry> scan() {
-        Snapshot snapshot = snapshotManager.latestSnapshot();
-        if (snapshot == null || snapshot.indexManifest() == null) {
-            return Collections.emptyList();
-        }
-        return indexManifestFile.read(snapshot.indexManifest());
-    }
-
     public Optional<IndexFileMeta> scanHashIndex(long snapshotId, BinaryRow partition, int bucket) {
         List<IndexFileMeta> result = scan(snapshotId, HASH_INDEX, partition, bucket);
         if (result.size() > 1) {
@@ -88,9 +83,8 @@ public class IndexFileHandler {
 
     public List<IndexFileMeta> scan(
             long snapshotId, String indexType, BinaryRow partition, int bucket) {
-        List<IndexManifestEntry> entries = scan(snapshotId, indexType, partition);
         List<IndexFileMeta> result = new ArrayList<>();
-        for (IndexManifestEntry file : entries) {
+        for (IndexManifestEntry file : scanEntries(snapshotId, indexType, partition)) {
             if (file.bucket() == bucket) {
                 result.add(file.indexFile());
             }
@@ -98,31 +92,54 @@ public class IndexFileHandler {
         return result;
     }
 
-    public List<IndexManifestEntry> scan(String indexType, BinaryRow partition) {
+    public Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> scan(
+            long snapshotId, String indexType, Set<BinaryRow> partitions) {
+        Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> result = new HashMap<>();
+        for (IndexManifestEntry file : scanEntries(snapshotId, indexType, partitions)) {
+            result.computeIfAbsent(Pair.of(file.partition(), file.bucket()), k -> new ArrayList<>())
+                    .add(file.indexFile());
+        }
+        return result;
+    }
+
+    public List<IndexManifestEntry> scanEntries() {
+        Snapshot snapshot = snapshotManager.latestSnapshot();
+        if (snapshot == null || snapshot.indexManifest() == null) {
+            return Collections.emptyList();
+        }
+
+        return indexManifestFile.read(snapshot.indexManifest());
+    }
+
+    public List<IndexManifestEntry> scanEntries(String indexType, BinaryRow partition) {
         Long snapshot = snapshotManager.latestSnapshotId();
         if (snapshot == null) {
             return Collections.emptyList();
         }
 
-        return scan(snapshot, indexType, partition);
+        return scanEntries(snapshot, indexType, partition);
     }
 
-    public List<IndexManifestEntry> scan(long snapshotId, String indexType, BinaryRow partition) {
+    public List<IndexManifestEntry> scanEntries(
+            long snapshotId, String indexType, BinaryRow partition) {
+        return scanEntries(snapshotId, indexType, Collections.singleton(partition));
+    }
+
+    public List<IndexManifestEntry> scanEntries(
+            long snapshotId, String indexType, Set<BinaryRow> partitions) {
         Snapshot snapshot = snapshotManager.snapshot(snapshotId);
         String indexManifest = snapshot.indexManifest();
         if (indexManifest == null) {
             return Collections.emptyList();
         }
 
-        List<IndexManifestEntry> allFiles = indexManifestFile.read(indexManifest);
         List<IndexManifestEntry> result = new ArrayList<>();
-        for (IndexManifestEntry file : allFiles) {
+        for (IndexManifestEntry file : indexManifestFile.read(indexManifest)) {
             if (file.indexFile().indexType().equals(indexType)
-                    && file.partition().equals(partition)) {
+                    && partitions.contains(file.partition())) {
                 result.add(file);
             }
         }
-
         return result;
     }
 
