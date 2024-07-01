@@ -49,6 +49,12 @@ public class RemoveOrphanFilesProcedure extends ProcedureBase {
 
     public String[] call(ProcedureContext procedureContext, String tableId, String olderThan)
             throws Exception {
+        return call(procedureContext, tableId, olderThan, false);
+    }
+
+    public String[] call(
+            ProcedureContext procedureContext, String tableId, String olderThan, boolean dryRun)
+            throws Exception {
         Identifier identifier = Identifier.fromString(tableId);
         Table table = catalog.getTable(identifier);
 
@@ -62,9 +68,11 @@ public class RemoveOrphanFilesProcedure extends ProcedureBase {
             orphanFilesClean.olderThan(olderThan);
         }
 
-        int deleted = orphanFilesClean.clean();
+        orphanFilesClean.dryRun(dryRun);
 
-        return new String[] {"Deleted=" + deleted};
+        return orphanFilesClean.clean().stream()
+                .map(filePath -> filePath.toUri().getPath())
+                .toArray(String[]::new);
     }
 
     @Override

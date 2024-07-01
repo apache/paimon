@@ -305,7 +305,8 @@ submit a `remove_orphan_files` job to clean them:
     --warehouse <warehouse-path> \
     --database <database-name> \ 
     --table <table-name> \
-    [--older_than <timestamp>] 
+    [--older_than <timestamp>] \
+    [--dry_run <false/true>] 
 ```
 
 To avoid deleting files that are newly added by other writing jobs, this action only deletes orphan files older than
