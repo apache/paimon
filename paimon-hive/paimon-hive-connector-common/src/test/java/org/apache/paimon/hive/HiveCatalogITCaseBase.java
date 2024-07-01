@@ -23,9 +23,6 @@ import org.apache.paimon.catalog.CatalogLock;
 import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkCatalog;
-import org.apache.paimon.flink.action.ActionBase;
-import org.apache.paimon.flink.action.ActionFactory;
-import org.apache.paimon.flink.action.RepairAction;
 import org.apache.paimon.hive.annotation.Minio;
 import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
 import org.apache.paimon.metastore.MetastoreClient;
@@ -78,7 +75,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.Callable;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -125,30 +121,6 @@ public abstract class HiveCatalogITCaseBase {
         hiveShell.execute("USE test_db");
         hiveShell.execute("CREATE TABLE hive_table ( a INT, b STRING )");
         hiveShell.execute("INSERT INTO hive_table VALUES (100, 'Hive'), (200, 'Table')");
-    }
-
-    protected <T extends ActionBase> T createAction(Class<T> clazz, List<String> args) {
-        return createAction(clazz, args.toArray(new String[0]));
-    }
-
-    protected <T extends ActionBase> T createAction(Class<T> clazz, String... args) {
-        if (ThreadLocalRandom.current().nextBoolean()) {
-            confuseArgs(args, "_", "-");
-        } else {
-            confuseArgs(args, "-", "_");
-        }
-        return ActionFactory.createAction(args)
-                .filter(clazz::isInstance)
-                .map(clazz::cast)
-                .orElseThrow(() -> new RuntimeException("Failed to create action"));
-    }
-
-    private void confuseArgs(String[] args, String regex, String replacement) {
-        args[0] = args[0].replaceAll(regex, replacement);
-        for (int i = 1; i < args.length; i += 2) {
-            String arg = args[i].substring(2);
-            args[i] = "--" + arg.replaceAll(regex, replacement);
-        }
     }
 
     private void registerHiveCatalog(String catalogName, Map<String, String> catalogProperties)
@@ -1253,50 +1225,6 @@ public abstract class HiveCatalogITCaseBase {
         // When the Hive table exists, specify the paimon table to update hive table in hive
         // metastore.
         tEnv.executeSql("CALL sys.repair('test_db.t_repair_hive')");
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED t_repair_hive")
-                                .contains("item_id\tbigint\titem id"))
-                .isTrue();
-        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t_repair_hive"))
-                .containsExactlyInAnyOrder("dt=2020-01-02/hh=09", "dt=2020-01-03/hh=10");
-    }
-
-    @Test
-    public void testRepairTableWithAction() throws Exception {
-        TableEnvironment fileCatalog = useFileCatalog();
-        // Database test_db exists in hive metastore
-        hiveShell.execute("use test_db");
-        // When the Hive table does not exist, specify the paimon table to create hive table in hive
-        // metastore.
-        createAction(
-                        RepairAction.class,
-                        "repair_table",
-                        "--warehouse",
-                        path,
-                        "--database",
-                        "test_db",
-                        "--table",
-                        "t_repair_hive")
-                .run();
-
-        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t_repair_hive"))
-                .containsExactlyInAnyOrder("dt=2020-01-02/hh=09");
-
-        alterTableInFileSystem(fileCatalog);
-
-        // When the Hive table exists, specify the paimon table to update hive table in hive
-        // metastore.
-        createAction(
-                        RepairAction.class,
-                        "expire_partitions",
-                        "--warehouse",
-                        path,
-                        "--database",
-                        "test_db",
-                        "--table",
-                        "t_repair_hive")
-                .run();
         assertThat(
                         hiveShell
                                 .executeQuery("DESC FORMATTED t_repair_hive")

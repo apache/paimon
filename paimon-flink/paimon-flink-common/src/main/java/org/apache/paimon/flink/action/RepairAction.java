@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.flink.procedure.RepairProcedure;
-import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.table.procedure.DefaultProcedureContext;
@@ -30,10 +29,9 @@ import java.util.Map;
 public class RepairAction extends ActionBase {
 
     private String tableName;
-
     private String databaseName;
 
-    protected RepairAction(
+    public RepairAction(
             String warehouse,
             String databaseName,
             String tableName,
