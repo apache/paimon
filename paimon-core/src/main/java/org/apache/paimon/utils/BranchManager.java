@@ -222,10 +222,10 @@ public class BranchManager {
         }
     }
 
-    public void mergeBranch(String branchName) {
+    public void fastForward(String branchName) {
         checkArgument(
                 !branchName.equals(DEFAULT_MAIN_BRANCH),
-                "Branch name '%s' do not use in merge branch.",
+                "Branch name '%s' do not use in fast-forward.",
                 branchName);
         checkArgument(!StringUtils.isBlank(branchName), "Branch name '%s' is blank.", branchName);
         checkArgument(branchExists(branchName), "Branch name '%s' doesn't exist.", branchName);
@@ -291,7 +291,7 @@ public class BranchManager {
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(
-                            "Exception occurs when merge branch '%s' (directory in %s).",
+                            "Exception occurs when fast forward '%s' (directory in %s).",
                             branchName, branchPath(tablePath, branchName)),
                     e);
         }

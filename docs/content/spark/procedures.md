@@ -175,14 +175,14 @@ This section introduce all available spark procedures about paimon.
       </td>
     </tr>
     <tr>
-      <td>merge_branch</td>
+      <td>fast_forward</td>
       <td>
-         To merge a branch to main branch. Arguments:
+         To fast_forward a branch to main branch. Arguments:
             <li>table: the target table identifier. Cannot be empty.</li>
             <li>branch: name of the branch to be merged.</li>
       </td>
       <td>
-          CALL sys.merge_branch(table => 'test_db.T', branch => 'test_branch')
+          CALL sys.fast_forward(table => 'test_db.T', branch => 'test_branch')
       </td>
     </tr>
    <tr>

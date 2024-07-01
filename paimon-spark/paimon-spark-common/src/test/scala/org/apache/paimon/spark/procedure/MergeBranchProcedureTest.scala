@@ -22,9 +22,9 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.Row
 
-class MergeBranchProcedureTest extends PaimonSparkTestBase {
+class FastForwardProcedureTest extends PaimonSparkTestBase {
 
-  test("Paimon procedure: merge branch test") {
+  test("Paimon procedure: fast forward test") {
     spark.sql(s"""
                  |CREATE TABLE T (id STRING, name STRING)
                  |USING PAIMON
@@ -48,7 +48,7 @@ class MergeBranchProcedureTest extends PaimonSparkTestBase {
       Row(true) :: Nil)
 
     checkAnswer(
-      spark.sql("CALL paimon.sys.merge_branch(table => 'test.T', branch => 'test_branch')"),
+      spark.sql("CALL paimon.sys.fast_forward(table => 'test.T', branch => 'test_branch')"),
       Row(true) :: Nil)
 
     spark.sql(s"INSERT INTO T VALUES ('5', 'e')")
@@ -58,11 +58,11 @@ class MergeBranchProcedureTest extends PaimonSparkTestBase {
       spark.sql("SELECT * FROM T"),
       Row("1", "a") :: Row("2", "b") :: Row("5", "e") :: Row("6", "f") :: Nil)
 
+    // fast_forward again
     checkAnswer(
-      spark.sql("CALL paimon.sys.merge_branch(table => 'test.T', branch => 'test_branch')"),
+      spark.sql("CALL paimon.sys.fast_forward(table => 'test.T', branch => 'test_branch')"),
       Row(true) :: Nil)
 
-    // merge_branch again
     checkAnswer(spark.sql("SELECT * FROM T"), Row("1", "a") :: Row("2", "b") :: Nil)
 
   }

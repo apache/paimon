@@ -113,7 +113,7 @@ public interface Table extends Serializable {
 
     /** Merge a branch to main branch. */
     @Experimental
-    void mergeBranch(String branchName);
+    void fastForward(String branchName);
 
     /** Manually expire snapshots, parameters can be controlled independently of table options. */
     @Experimental

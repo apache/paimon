@@ -20,11 +20,11 @@ package org.apache.paimon.flink.action;
 
 import java.util.Map;
 
-/** Merge branch action for Flink. */
-public class MergeBranchAction extends TableActionBase {
+/** Fast Forward action for Flink. */
+public class FastForwardAction extends TableActionBase {
     private final String branchName;
 
-    public MergeBranchAction(
+    public FastForwardAction(
             String warehouse,
             String databaseName,
             String tableName,
@@ -36,6 +36,6 @@ public class MergeBranchAction extends TableActionBase {
 
     @Override
     public void run() throws Exception {
-        table.mergeBranch(branchName);
+        table.fastForward(branchName);
     }
 }

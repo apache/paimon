@@ -525,8 +525,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public void mergeBranch(String branchName) {
-        branchManager().mergeBranch(branchName);
+    public void fastForward(String branchName) {
+        branchManager().fastForward(branchName);
     }
 
     @Override

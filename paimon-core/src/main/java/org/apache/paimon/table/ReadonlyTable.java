@@ -183,10 +183,10 @@ public interface ReadonlyTable extends InnerTable {
     }
 
     @Override
-    default void mergeBranch(String branchName) {
+    default void fastForward(String branchName) {
         throw new UnsupportedOperationException(
                 String.format(
-                        "Readonly Table %s does not support mergeBranch.",
+                        "Readonly Table %s does not support fastForward.",
                         this.getClass().getSimpleName()));
     }
 

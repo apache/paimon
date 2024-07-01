@@ -337,17 +337,17 @@ All available procedures are listed below.
       </td>
    </tr>
    <tr>
-      <td>merge_branch</td>
+      <td>fast_forward</td>
       <td>
-         CALL [catalog.]sys.merge_branch('identifier', 'branchName')
+         CALL [catalog.]sys.fast_forward('identifier', 'branchName')
       </td>
       <td>
-         To merge a branch to main branch. Arguments:
+         To fast_forward a branch to main branch. Arguments:
             <li>identifier: the target table identifier. Cannot be empty.</li>
             <li>branchName: name of the branch to be merged.</li>
       </td>
       <td>
-         CALL sys.merge_branch('default.T', 'branch1')
+         CALL sys.fast_forward('default.T', 'branch1')
       </td>
    </tr>
    </tbody>
