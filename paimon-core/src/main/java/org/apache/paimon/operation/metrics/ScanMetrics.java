@@ -27,7 +27,7 @@ import org.apache.paimon.metrics.MetricRegistry;
 public class ScanMetrics {
 
     private static final int HISTOGRAM_WINDOW_SIZE = 100;
-    @VisibleForTesting protected static final String GROUP_NAME = "scan";
+    public static final String GROUP_NAME = "scan";
 
     private final MetricGroup metricGroup;
 
@@ -45,26 +45,22 @@ public class ScanMetrics {
 
     private ScanStats latestScan;
 
-    @VisibleForTesting static final String LAST_SCAN_DURATION = "lastScanDuration";
-    @VisibleForTesting static final String SCAN_DURATION = "scanDuration";
-    @VisibleForTesting static final String LAST_SCANNED_MANIFESTS = "lastScannedManifests";
+    public static final String LAST_SCAN_DURATION = "lastScanDuration";
+    public static final String SCAN_DURATION = "scanDuration";
+    public static final String LAST_SCANNED_MANIFESTS = "lastScannedManifests";
 
-    @VisibleForTesting
-    static final String LAST_SKIPPED_BY_PARTITION_AND_STATS = "lastSkippedByPartitionAndStats";
+    public static final String LAST_SKIPPED_BY_PARTITION_AND_STATS =
+            "lastSkippedByPartitionAndStats";
 
-    @VisibleForTesting
-    static final String LAST_SKIPPED_BY_BUCKET_AND_LEVEL_FILTER =
+    public static final String LAST_SKIPPED_BY_BUCKET_AND_LEVEL_FILTER =
             "lastSkippedByBucketAndLevelFilter";
 
-    @VisibleForTesting
-    static final String LAST_SKIPPED_BY_WHOLE_BUCKET_FILES_FILTER =
+    public static final String LAST_SKIPPED_BY_WHOLE_BUCKET_FILES_FILTER =
             "lastSkippedByWholeBucketFilesFilter";
 
-    @VisibleForTesting
-    static final String LAST_SCAN_SKIPPED_TABLE_FILES = "lastScanSkippedTableFiles";
+    public static final String LAST_SCAN_SKIPPED_TABLE_FILES = "lastScanSkippedTableFiles";
 
-    @VisibleForTesting
-    static final String LAST_SCAN_RESULTED_TABLE_FILES = "lastScanResultedTableFiles";
+    public static final String LAST_SCAN_RESULTED_TABLE_FILES = "lastScanResultedTableFiles";
 
     private void registerGenericScanMetrics() {
         metricGroup.gauge(
