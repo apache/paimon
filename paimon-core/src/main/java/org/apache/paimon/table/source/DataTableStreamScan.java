@@ -79,10 +79,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
         this.supportStreamingReadOverwrite = supportStreamingReadOverwrite;
         this.defaultValueAssigner = defaultValueAssigner;
         this.nextSnapshotProvider =
-                new NextSnapshotFetcher(
-                        snapshotManager,
-                        options.changelogLifecycleDecoupled(),
-                        options.changelogProducer() != CoreOptions.ChangelogProducer.NONE);
+                new NextSnapshotFetcher(snapshotManager, options.changelogLifecycleDecoupled());
     }
 
     @Override

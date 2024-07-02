@@ -32,7 +32,6 @@ public class FullStartingScanner extends AbstractStartingScanner {
 
     public FullStartingScanner(SnapshotManager snapshotManager) {
         super(snapshotManager);
-        this.startingSnapshotId = snapshotManager.latestSnapshotId();
     }
 
     @Override
