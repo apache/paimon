@@ -85,8 +85,7 @@ public class RepairActionITCase extends ActionITCaseBase {
         RepairAction repairAction =
                 new RepairAction(
                         System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname),
-                        "test_db",
-                        "t_repair_hive",
+                        "test_db.t_repair_hive",
                         catalogConf);
         repairAction.run();
 

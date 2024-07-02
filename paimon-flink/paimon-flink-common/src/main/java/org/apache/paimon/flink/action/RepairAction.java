@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.flink.procedure.RepairProcedure;
-import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.procedure.DefaultProcedureContext;
 
@@ -28,32 +27,18 @@ import java.util.Map;
 /** Repair action for Flink. */
 public class RepairAction extends ActionBase {
 
-    private String tableName;
+    private String table;
     private String databaseName;
 
-    public RepairAction(
-            String warehouse,
-            String databaseName,
-            String tableName,
-            Map<String, String> catalogConfig) {
+    public RepairAction(String warehouse, String table, Map<String, String> catalogConfig) {
         super(warehouse, catalogConfig);
-        this.databaseName = databaseName;
-        this.tableName = tableName;
+        this.table = table;
     }
 
     @Override
     public void run() throws Exception {
         RepairProcedure repairProcedure = new RepairProcedure();
         repairProcedure.withCatalog(catalog);
-        String identifier;
-        if (StringUtils.isBlank(databaseName)) {
-            identifier = "";
-        } else {
-            identifier =
-                    StringUtils.isBlank(tableName)
-                            ? databaseName
-                            : databaseName.concat(".").concat(tableName);
-        }
-        repairProcedure.call(new DefaultProcedureContext(env), identifier);
+        repairProcedure.call(new DefaultProcedureContext(env), table);
     }
 }

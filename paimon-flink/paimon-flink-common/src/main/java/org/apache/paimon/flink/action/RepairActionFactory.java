@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.utils.StringUtils;
+
 import org.apache.flink.api.java.tuple.Tuple3;
 
 import java.util.Map;
@@ -39,8 +41,19 @@ public class RepairActionFactory implements ActionFactory {
         Tuple3<String, String, String> tablePath = getTablePath(params);
         Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
 
-        RepairAction action =
-                new RepairAction(tablePath.f0, tablePath.f1, tablePath.f2, catalogConfig);
+        String databaseName = tablePath.f1;
+        String tableName = tablePath.f2;
+        String identifier;
+        if (StringUtils.isBlank(databaseName)) {
+            identifier = "";
+        } else {
+            identifier =
+                    StringUtils.isBlank(tableName)
+                            ? databaseName
+                            : databaseName.concat(".").concat(tableName);
+        }
+
+        RepairAction action = new RepairAction(tablePath.f0, identifier, catalogConfig);
 
         return Optional.of(action);
     }
