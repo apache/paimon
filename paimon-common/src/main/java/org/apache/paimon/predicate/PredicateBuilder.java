@@ -156,9 +156,7 @@ public class PredicateBuilder {
         if (predicates.size() == 1) {
             return predicates.get(0);
         }
-        return predicates.stream()
-                .reduce((a, b) -> new CompoundPredicate(And.INSTANCE, Arrays.asList(a, b)))
-                .get();
+        return new CompoundPredicate(And.INSTANCE, predicates);
     }
 
     @Nullable
@@ -184,9 +182,7 @@ public class PredicateBuilder {
         Preconditions.checkArgument(
                 predicates.size() > 0,
                 "There must be at least 1 inner predicate to construct an OR predicate");
-        return predicates.stream()
-                .reduce((a, b) -> new CompoundPredicate(Or.INSTANCE, Arrays.asList(a, b)))
-                .get();
+        return new CompoundPredicate(Or.INSTANCE, predicates);
     }
 
     public static List<Predicate> splitAnd(@Nullable Predicate predicate) {

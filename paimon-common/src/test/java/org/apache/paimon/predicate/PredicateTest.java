@@ -615,14 +615,13 @@ public class PredicateTest {
         PredicateBuilder builder6 = new PredicateBuilder(RowType.of(new IntType()));
         Predicate p6 = builder6.in(0, Arrays.asList(1, null, 3, 4));
         assertThat(p6.toString())
-                .isEqualTo(
-                        "Or([Or([Or([Equal(f0, 1), Equal(f0, null)]), Equal(f0, 3)]), Equal(f0, 4)])");
+                .isEqualTo("Or([Equal(f0, 1), Equal(f0, null), Equal(f0, 3), Equal(f0, 4)])");
 
         PredicateBuilder builder7 = new PredicateBuilder(RowType.of(new IntType()));
         Predicate p7 = builder7.notIn(0, Arrays.asList(1, null, 3, 4));
         assertThat(p7.toString())
                 .isEqualTo(
-                        "And([And([And([NotEqual(f0, 1), NotEqual(f0, null)]), NotEqual(f0, 3)]), NotEqual(f0, 4)])");
+                        "And([NotEqual(f0, 1), NotEqual(f0, null), NotEqual(f0, 3), NotEqual(f0, 4)])");
 
         PredicateBuilder builder8 = new PredicateBuilder(RowType.of(new IntType()));
         List<Object> literals = new ArrayList<>();

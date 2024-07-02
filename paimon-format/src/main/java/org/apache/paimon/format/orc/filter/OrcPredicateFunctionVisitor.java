@@ -122,30 +122,25 @@ public class OrcPredicateFunctionVisitor
 
     @Override
     public Optional<OrcFilters.Predicate> visitAnd(List<Optional<OrcFilters.Predicate>> children) {
-        if (children.size() != 2) {
-            throw new RuntimeException("Illegal and children: " + children.size());
-        }
-
-        Optional<OrcFilters.Predicate> c1 = children.get(0);
-        if (!c1.isPresent()) {
-            return Optional.empty();
-        }
-        Optional<OrcFilters.Predicate> c2 = children.get(1);
-        return c2.map(value -> new OrcFilters.And(c1.get(), value));
+        OrcFilters.Predicate[] predicates = predicates(children);
+        return predicates.length == 0
+                ? Optional.empty()
+                : Optional.of(new OrcFilters.And(predicates));
     }
 
     @Override
     public Optional<OrcFilters.Predicate> visitOr(List<Optional<OrcFilters.Predicate>> children) {
-        if (children.size() != 2) {
-            throw new RuntimeException("Illegal or children: " + children.size());
-        }
+        OrcFilters.Predicate[] predicates = predicates(children);
+        return predicates.length == 0
+                ? Optional.empty()
+                : Optional.of(new OrcFilters.Or(predicates));
+    }
 
-        Optional<OrcFilters.Predicate> c1 = children.get(0);
-        if (!c1.isPresent()) {
-            return Optional.empty();
-        }
-        Optional<OrcFilters.Predicate> c2 = children.get(1);
-        return c2.map(value -> new OrcFilters.Or(c1.get(), value));
+    private OrcFilters.Predicate[] predicates(List<Optional<OrcFilters.Predicate>> children) {
+        return children.stream()
+                .filter(Optional::isPresent)
+                .map(Optional::get)
+                .toArray(OrcFilters.Predicate[]::new);
     }
 
     private Optional<OrcFilters.Predicate> convertBinary(
