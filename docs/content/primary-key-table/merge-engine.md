@@ -58,7 +58,7 @@ For streaming queries, `partial-update` merge engine must be used together with 
 {{< /hint >}}
 
 {{< hint info >}}
-By default, Partial update can not accept delete records, you can choose one of the following solutions:
+By default, Partial update will ignore -U records and remove the entire row when -D records are received. You can also choose one of the following solutions:
 - Configure 'ignore-delete' to ignore delete records.
 - Configure 'sequence-group's to retract partial columns.
   {{< /hint >}}
