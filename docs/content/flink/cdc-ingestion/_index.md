@@ -1,7 +1,7 @@
 ---
 title: CDC Ingestion
 bookCollapseSection: true
-weight: 96
+weight: 95
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one

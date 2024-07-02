@@ -1,9 +1,9 @@
 ---
-title: "Manage Partition"
-weight: 5
+title: "Expire Partition"
+weight: 96
 type: docs
 aliases:
-- /maintenance/manage-partition.html
+- /flink/expire-partition.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -26,7 +26,7 @@ under the License.
 
 ## Expiring Partitions
 
-You can set `partition.expiration-time` when creating a partitioned table. Paimon will periodically check
+You can set `partition.expiration-time` when creating a partitioned table. Paimon streaming sink will periodically check
 the status of partitions and delete expired partitions according to time.
 
 How to determine whether a partition has expired: compare the time extracted from the partition with the current

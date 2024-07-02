@@ -187,7 +187,7 @@ If you need cross partition upsert (primary keys not contain all partition field
 {{< /hint >}}
 
 {{< hint info >}}
-By configuring [partition.expiration-time]({{< ref "maintenance/manage-partition" >}}), expired partitions can be automatically deleted.
+By configuring [partition.expiration-time]({{< ref "flink/expire-partition" >}}), expired partitions can be automatically deleted.
 {{< /hint >}}
 
 ### Specify Statistics Mode

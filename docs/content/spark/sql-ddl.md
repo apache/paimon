@@ -146,10 +146,6 @@ CREATE TABLE my_table (
 );
 ```
 
-{{< hint info >}}
-By configuring [partition.expiration-time]({{< ref "maintenance/manage-partition" >}}), expired partitions can be automatically deleted.
-{{< /hint >}}
-
 ## Create Table As Select
 
 Table can be created and populated by the results of a query, for example, we have a sql like this: `CREATE TABLE table_b AS SELECT id, name FORM table_a`,
