@@ -18,17 +18,15 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.paimon.utils.StringUtils;
-
-import org.apache.flink.api.java.tuple.Tuple3;
-
 import java.util.Map;
 import java.util.Optional;
 
 /** Factory to create {@link RepairAction}. */
 public class RepairActionFactory implements ActionFactory {
 
-    public static final String IDENTIFIER = "repair_table";
+    public static final String IDENTIFIER = "repair";
+
+    private static final String IDENTIFIER_KEY = "identifier";
 
     @Override
     public String identifier() {
@@ -37,34 +35,35 @@ public class RepairActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-
-        Tuple3<String, String, String> tablePath = getTablePath(params);
+        String warehouse = params.get(WAREHOUSE);
         Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
-
-        String databaseName = tablePath.f1;
-        String tableName = tablePath.f2;
-        String identifier;
-        if (StringUtils.isBlank(databaseName)) {
-            identifier = "";
-        } else {
-            identifier =
-                    StringUtils.isBlank(tableName)
-                            ? databaseName
-                            : databaseName.concat(".").concat(tableName);
-        }
-
-        RepairAction action = new RepairAction(tablePath.f0, identifier, catalogConfig);
-
+        String identifier = params.get(IDENTIFIER_KEY);
+        RepairAction action = new RepairAction(warehouse, identifier, catalogConfig);
         return Optional.of(action);
     }
 
     @Override
     public void printHelp() {
-        System.out.println("Action \"repair_table\" repair table with a given table name.");
+        System.out.println(
+                "Action \"repair\" synchronize information from the file system to Metastore.");
         System.out.println();
 
         System.out.println("Syntax:");
-        System.out.println("  repair_table --warehouse <warehouse_path> --table <table> ");
+        System.out.println(
+                "  repair --warehouse <warehouse_path> [--identifier <database.table>] ");
         System.out.println();
+
+        System.out.println(
+                "If --identifier is not provided, all databases and tables in the catalog will be synchronized.");
+        System.out.println(
+                "If --identifier is a database name, all tables in that database will be synchronized.");
+        System.out.println(
+                "If --identifier is a databaseName.tableName, only that specific table will be synchronized.");
+        System.out.println();
+
+        System.out.println("Examples:");
+        System.out.println("  repair --warehouse hdfs:///path/to/warehouse");
+        System.out.println("  repair --warehouse hdfs:///path/to/warehouse --identifier test_db");
+        System.out.println("  repair --warehouse hdfs:///path/to/warehouse --identifier test_db.T");
     }
 }

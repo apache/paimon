@@ -27,7 +27,6 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.types.Row;
 import org.apache.hadoop.hive.conf.HiveConf;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -35,6 +34,8 @@ import org.junit.jupiter.api.Test;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link RepairAction}. */
 public class RepairActionITCase extends ActionITCaseBase {
@@ -91,7 +92,7 @@ public class RepairActionITCase extends ActionITCaseBase {
 
         List<Row> ret =
                 ImmutableList.copyOf(tEnv.executeSql("SHOW PARTITIONS t_repair_hive").collect());
-        Assertions.assertThat(ret.size() == 1);
-        Assertions.assertThat(ret.get(0).toString()).isEqualTo("+I[dt=2020-01-02/hh=09]");
+        assertThat(ret.size() == 1).isTrue();
+        assertThat(ret.get(0).toString()).isEqualTo("+I[dt=2020-01-02/hh=09]");
     }
 }

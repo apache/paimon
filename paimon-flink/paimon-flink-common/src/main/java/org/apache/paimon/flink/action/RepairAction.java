@@ -27,18 +27,17 @@ import java.util.Map;
 /** Repair action for Flink. */
 public class RepairAction extends ActionBase {
 
-    private String table;
-    private String databaseName;
+    private final String identifier;
 
-    public RepairAction(String warehouse, String table, Map<String, String> catalogConfig) {
+    public RepairAction(String warehouse, String identifier, Map<String, String> catalogConfig) {
         super(warehouse, catalogConfig);
-        this.table = table;
+        this.identifier = identifier;
     }
 
     @Override
     public void run() throws Exception {
         RepairProcedure repairProcedure = new RepairProcedure();
         repairProcedure.withCatalog(catalog);
-        repairProcedure.call(new DefaultProcedureContext(env), table);
+        repairProcedure.call(new DefaultProcedureContext(env), identifier);
     }
 }
