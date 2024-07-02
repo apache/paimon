@@ -27,8 +27,8 @@ import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
-import com.ververica.cdc.connectors.mongodb.source.config.MongoDBSourceOptions;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.flink.cdc.connectors.mongodb.source.config.MongoDBSourceOptions;
 import org.apache.flink.configuration.Configuration;
 import org.bson.Document;
 
@@ -40,7 +40,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
-import static com.ververica.cdc.connectors.mongodb.internal.MongoDBEnvelope.encodeValue;
+import static org.apache.flink.cdc.connectors.mongodb.internal.MongoDBEnvelope.encodeValue;
 import static org.apache.flink.util.Preconditions.checkNotNull;
 import static org.apache.paimon.flink.action.cdc.mongodb.MongoDBActionUtils.FIELD_NAME;
 import static org.apache.paimon.flink.action.cdc.mongodb.MongoDBActionUtils.START_MODE;
