@@ -75,8 +75,8 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     protected final Executor ioExecutor;
     protected boolean changelogDecoupled;
 
-    /** Used to record which tag is cached in tagged snapshots list. */
-    private int cachedTagIndex = -1;
+    /** Used to record which tag is cached. */
+    private long cachedTag = 0;
 
     /** Used to cache data files used by current tag. */
     private final Map<BinaryRow, Map<Integer, Set<String>>> cachedTagDataFiles = new HashMap<>();
@@ -326,13 +326,16 @@ public abstract class FileDeletionBase<T extends Snapshot> {
             List<Snapshot> taggedSnapshots, long expiringSnapshotId) throws Exception {
         int index = TagManager.findPreviousTag(taggedSnapshots, expiringSnapshotId);
         // refresh tag data files
-        if (index >= 0 && cachedTagIndex != index) {
-            cachedTagIndex = index;
-            cachedTagDataFiles.clear();
-            addMergedDataFiles(cachedTagDataFiles, taggedSnapshots.get(index));
+        if (index >= 0) {
+            Snapshot previousTag = taggedSnapshots.get(index);
+            if (previousTag.id() != cachedTag) {
+                cachedTag = previousTag.id();
+                cachedTagDataFiles.clear();
+                addMergedDataFiles(cachedTagDataFiles, previousTag);
+            }
+            return entry -> containsDataFile(cachedTagDataFiles, entry);
         }
-
-        return entry -> index >= 0 && containsDataFile(cachedTagDataFiles, entry);
+        return entry -> false;
     }
 
     /**

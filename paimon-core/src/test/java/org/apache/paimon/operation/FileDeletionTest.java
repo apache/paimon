@@ -34,9 +34,12 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.ExpireSnapshots;
+import org.apache.paimon.table.ExpireSnapshotsImpl;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.RecordWriter;
@@ -634,6 +637,65 @@ public class FileDeletionTest {
 
         // check data file
         assertPathExists(fileIO, dataFileA);
+    }
+
+    @Test
+    public void testExpireWithDeletingTags() throws Exception {
+        TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 2);
+        tagManager = new TagManager(fileIO, store.options().path());
+        SnapshotManager snapshotManager = store.snapshotManager();
+        TestKeyValueGenerator gen =
+                new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
+        BinaryRow partition = gen.getPartition(gen.next());
+
+        // step 1: commit A to bucket 0 and create tag1
+        Map<BinaryRow, Map<Integer, RecordWriter<KeyValue>>> writers = new HashMap<>();
+        List<KeyValue> kvs = partitionedData(5, gen);
+        writeData(store, kvs, partition, 0, writers);
+        commitData(store, commitIdentifier++, writers);
+        createTag(snapshotManager.snapshot(1), "tag1", store.options().tagDefaultTimeRetained());
+
+        // step 2: commit B to bucket 1 and create tag2
+        writers.clear();
+        kvs = partitionedData(5, gen);
+        writeData(store, kvs, partition, 1, writers);
+        commitData(store, commitIdentifier++, writers);
+        createTag(snapshotManager.snapshot(2), "tag2", store.options().tagDefaultTimeRetained());
+
+        // step 3: commit -B
+        cleanBucket(store, partition, 1);
+
+        // step 4: commit -A
+        cleanBucket(store, partition, 0);
+
+        // action: expire snapshot 1 -> delete tag1 -> expire snapshot 2
+        // result: exist A & B (because of tag2)
+        ExpireSnapshots expireSnapshots =
+                new ExpireSnapshotsImpl(
+                        snapshotManager, store.newSnapshotDeletion(), tagManager, true);
+        expireSnapshots
+                .config(
+                        ExpireConfig.builder()
+                                .snapshotRetainMax(3)
+                                .snapshotRetainMin(3)
+                                .snapshotTimeRetain(Duration.ofMillis(Long.MAX_VALUE))
+                                .build())
+                .expire();
+        tagManager.deleteTag(
+                "tag1", store.newTagDeletion(), snapshotManager, Collections.emptyList());
+        expireSnapshots
+                .config(
+                        ExpireConfig.builder()
+                                .snapshotRetainMax(2)
+                                .snapshotRetainMin(2)
+                                .snapshotTimeRetain(Duration.ofMillis(Long.MAX_VALUE))
+                                .build())
+                .expire();
+
+        assertThat(snapshotManager.snapshotCount()).isEqualTo(2);
+        FileStorePathFactory pathFactory = store.pathFactory();
+        assertPathExists(fileIO, pathFactory.bucketPath(partition, 0));
+        assertPathExists(fileIO, pathFactory.bucketPath(partition, 1));
     }
 
     private TestFileStore createStore(TestKeyValueGenerator.GeneratorMode mode) throws Exception {
