@@ -26,10 +26,12 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.FileNotFoundException;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -41,6 +43,7 @@ import static org.apache.paimon.catalog.FileSystemCatalogOptions.CASE_SENSITIVE;
 public class FileSystemCatalog extends AbstractCatalog {
 
     private static final Logger LOG = LoggerFactory.getLogger(FileSystemCatalog.class);
+    private static final String DB_PROPERTIES = "db.meta";
 
     private final Path warehouse;
 
@@ -75,12 +78,27 @@ public class FileSystemCatalog extends AbstractCatalog {
                     "Currently filesystem catalog can't store database properties, discard properties: {}",
                     properties);
         }
-        uncheck(() -> fileIO.mkdirs(newDatabasePath(name)));
+        uncheck(
+                () -> {
+                    Path databasePath = newDatabasePath(name);
+                    fileIO.mkdirs(databasePath);
+                    fileIO.writeFileUtf8(
+                            new Path(databasePath, DB_PROPERTIES),
+                            JsonSerdeUtil.toJson(properties));
+                    return true;
+                });
     }
 
     @Override
     public Map<String, String> loadDatabasePropertiesImpl(String name) {
-        return Collections.emptyMap();
+        try {
+            return JsonSerdeUtil.fromJson(
+                    fileIO.readFileUtf8(new Path(newDatabasePath(name), DB_PROPERTIES)), Map.class);
+        } catch (FileNotFoundException e) {
+            return Collections.emptyMap();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
