@@ -175,7 +175,7 @@ public abstract class RecordParser
                 });
     }
 
-    private List<String> extractPrimaryKeys() {
+    protected List<String> extractPrimaryKeys() {
         ArrayNode pkNames = getNodeAs(root, primaryField(), ArrayNode.class);
         if (pkNames == null) {
             return Collections.emptyList();

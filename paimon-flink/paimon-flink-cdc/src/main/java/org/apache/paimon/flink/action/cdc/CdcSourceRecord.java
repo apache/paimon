@@ -41,6 +41,10 @@ public class CdcSourceRecord implements Serializable {
         this.value = value;
     }
 
+    public CdcSourceRecord(Object key, Object value) {
+        this(null, key, value);
+    }
+
     public CdcSourceRecord(Object value) {
         this(null, null, value);
     }

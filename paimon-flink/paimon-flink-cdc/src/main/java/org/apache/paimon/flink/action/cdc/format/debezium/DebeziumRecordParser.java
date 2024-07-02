@@ -28,6 +28,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Preconditions;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ArrayNode;
@@ -82,6 +83,7 @@ public class DebeziumRecordParser extends RecordParser {
     private final Map<String, String> debeziumTypes = new HashMap<>();
     private final Map<String, String> classNames = new HashMap<>();
     private final Map<String, Map<String, String>> parameters = new HashMap<>();
+    private final List<String> primaryKeys = Lists.newArrayList();
 
     public DebeziumRecordParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
         super(typeMapping, computedColumns);
@@ -121,7 +123,7 @@ public class DebeziumRecordParser extends RecordParser {
     @Override
     protected void setRoot(CdcSourceRecord record) {
         JsonNode node = (JsonNode) record.getValue();
-
+        preparePrimaryKeys(record);
         hasSchema = false;
         if (node.has(FIELD_SCHEMA)) {
             root = node.get(FIELD_PAYLOAD);
@@ -133,6 +135,18 @@ public class DebeziumRecordParser extends RecordParser {
         } else {
             root = node;
         }
+    }
+
+    protected void preparePrimaryKeys(CdcSourceRecord record) {
+        primaryKeys.clear();
+        if (record.getKey() == null) {
+            return;
+        }
+        JsonNode node = (JsonNode) record.getKey();
+        if (node.has(FIELD_SCHEMA)) {
+            node = node.get(FIELD_PAYLOAD);
+        }
+        node.fieldNames().forEachRemaining(primaryKeys::add);
     }
 
     private void parseSchema(JsonNode schema) {
@@ -215,6 +229,14 @@ public class DebeziumRecordParser extends RecordParser {
         evalComputedColumns(resultMap, rowTypeBuilder);
 
         return resultMap;
+    }
+
+    @Override
+    protected List<String> extractPrimaryKeys() {
+        if (!primaryKeys.isEmpty()) {
+            return primaryKeys;
+        }
+        return super.extractPrimaryKeys();
     }
 
     @Override

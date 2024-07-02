@@ -21,7 +21,6 @@ package org.apache.paimon.flink.action.cdc.kafka;
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
-import org.apache.paimon.flink.action.cdc.serialization.CdcJsonDeserializationSchema;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.configuration.Configuration;
@@ -85,7 +84,8 @@ public class KafkaActionUtils {
         }
 
         kafkaSourceBuilder
-                .setValueOnlyDeserializer(new CdcJsonDeserializationSchema())
+                .setDeserializer(new KafkaKeyValueDeserializationSchema())
+                //                .setValueOnlyDeserializer(new CdcJsonDeserializationSchema())
                 .setGroupId(kafkaPropertiesGroupId(kafkaConfig));
 
         Properties properties = createKafkaProperties(kafkaConfig);
@@ -325,13 +325,13 @@ public class KafkaActionUtils {
         public List<CdcSourceRecord> getRecords(int pollTimeOutMills) {
             ConsumerRecords<byte[], byte[]> consumerRecords =
                     consumer.poll(Duration.ofMillis(pollTimeOutMills));
-            CdcJsonDeserializationSchema deserializationSchema = new CdcJsonDeserializationSchema();
+            KafkaKeyValueDeserializationSchema deserializationSchema =
+                    new KafkaKeyValueDeserializationSchema();
             return StreamSupport.stream(consumerRecords.records(topic).spliterator(), false)
                     .map(
                             consumerRecord -> {
                                 try {
-                                    return deserializationSchema.deserialize(
-                                            consumerRecord.value());
+                                    return deserializationSchema.deserialize(consumerRecord);
                                 } catch (IOException e) {
                                     throw new RuntimeException(e);
                                 }
