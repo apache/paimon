@@ -21,16 +21,29 @@ package org.apache.paimon.flink.lookup;
 import org.apache.flink.table.connector.source.LookupTableSource.LookupRuntimeProvider;
 import org.apache.flink.table.connector.source.lookup.AsyncLookupFunctionProvider;
 import org.apache.flink.table.connector.source.lookup.LookupFunctionProvider;
+import org.apache.flink.table.connector.source.lookup.PartialCachingAsyncLookupProvider;
+import org.apache.flink.table.connector.source.lookup.PartialCachingLookupProvider;
+import org.apache.flink.table.connector.source.lookup.cache.LookupCache;
+
+import javax.annotation.Nullable;
 
 /** Factory to create {@link LookupRuntimeProvider}. */
 public class LookupRuntimeProviderFactory {
 
     public static LookupRuntimeProvider create(
-            FileStoreLookupFunction function, boolean enableAsync, int asyncThreadNumber) {
+            FileStoreLookupFunction function,
+            @Nullable LookupCache cache,
+            boolean enableAsync,
+            int asyncThreadNumber) {
         NewLookupFunction lookup = new NewLookupFunction(function);
         return enableAsync
-                ? AsyncLookupFunctionProvider.of(
-                        new AsyncLookupFunctionWrapper(lookup, asyncThreadNumber))
-                : LookupFunctionProvider.of(lookup);
+                ? (cache == null
+                        ? AsyncLookupFunctionProvider.of(
+                                new AsyncLookupFunctionWrapper(lookup, asyncThreadNumber))
+                        : PartialCachingAsyncLookupProvider.of(
+                                new AsyncLookupFunctionWrapper(lookup, asyncThreadNumber), cache))
+                : (cache == null
+                        ? LookupFunctionProvider.of(lookup)
+                        : PartialCachingLookupProvider.of(lookup, cache));
     }
 }

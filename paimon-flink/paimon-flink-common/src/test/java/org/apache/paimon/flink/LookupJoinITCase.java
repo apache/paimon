@@ -21,6 +21,7 @@ package org.apache.paimon.flink;
 import org.apache.paimon.flink.FlinkConnectorOptions.LookupCacheMode;
 import org.apache.paimon.utils.BlockingIterator;
 
+import org.apache.flink.table.connector.source.lookup.LookupOptions;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -48,25 +49,36 @@ public class LookupJoinITCase extends CatalogITCaseBase {
     }
 
     private void initTable(LookupCacheMode cacheMode) {
+        initTable(cacheMode, false);
+    }
+
+    private void initTable(LookupCacheMode cacheMode, boolean partialCacheType) {
         String dim =
                 "CREATE TABLE DIM (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
-                        + " ('continuous.discovery-interval'='1 ms' %s)";
+                        + " ('continuous.discovery-interval'='1 ms' %s %s)";
         String partitioned =
                 "CREATE TABLE PARTITIONED_DIM (i INT, j INT, k1 INT, k2 INT, PRIMARY KEY (i, j) NOT ENFORCED)"
-                        + "PARTITIONED BY (`i`) WITH ('continuous.discovery-interval'='1 ms' %s)";
+                        + "PARTITIONED BY (`i`) WITH ('continuous.discovery-interval'='1 ms' %s %s)";
 
-        String fullOption = ", 'lookup.cache' = 'full'";
+        String fullOption = ", 'lookup.cache-mode' = 'full'";
 
         String lruOption = ", 'changelog-producer'='lookup'";
 
+        String cacheTypeOption =
+                String.format(
+                        ", 'lookup.cache' = '%s', 'lookup.partial-cache.max-rows' = '1000', 'lookup.partial-cache.expire-after-write' = '10s'",
+                        partialCacheType
+                                ? LookupOptions.LookupCacheType.PARTIAL
+                                : LookupOptions.LookupCacheType.NONE);
+
         switch (cacheMode) {
             case FULL:
-                tEnv.executeSql(String.format(dim, fullOption));
-                tEnv.executeSql(String.format(partitioned, fullOption));
+                tEnv.executeSql(String.format(dim, fullOption, cacheTypeOption));
+                tEnv.executeSql(String.format(partitioned, fullOption, cacheTypeOption));
                 break;
             case AUTO:
-                tEnv.executeSql(String.format(dim, lruOption));
-                tEnv.executeSql(String.format(partitioned, lruOption));
+                tEnv.executeSql(String.format(dim, lruOption, cacheTypeOption));
+                tEnv.executeSql(String.format(partitioned, lruOption, cacheTypeOption));
                 break;
             default:
                 throw new UnsupportedOperationException();
@@ -831,6 +843,50 @@ public class LookupJoinITCase extends CatalogITCaseBase {
                 .containsExactlyInAnyOrder(
                         Row.of(1, 11, 222, 2222),
                         Row.of(2, 22, 222, 2222),
+                        Row.of(3, 33, 333, 3333),
+                        Row.of(4, null, null, null));
+
+        iterator.close();
+    }
+
+    @ParameterizedTest
+    @EnumSource(LookupCacheMode.class)
+    public void testLookupTableWithCache(LookupCacheMode cacheMode) throws Exception {
+        initTable(cacheMode, true);
+        sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
+
+        String query =
+                "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM for system_time as of T.proctime AS D ON T.i = D.i";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+
+        sql("INSERT INTO T VALUES (1), (2), (3)");
+        List<Row> result = iterator.collect(3);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111, 1111),
+                        Row.of(2, 22, 222, 2222),
+                        Row.of(3, null, null, null));
+
+        sql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
+        Thread.sleep(2000); // wait refresh
+        sql("INSERT INTO T VALUES (1), (2), (3), (4)");
+        result = iterator.collect(4);
+
+        // Get old value for 2, cache missing keys and get null for 3
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111, 1111),
+                        Row.of(2, 22, 222, 2222),
+                        Row.of(3, null, null, null),
+                        Row.of(4, null, null, null));
+
+        Thread.sleep(15000); // wait cache expiration
+        sql("INSERT INTO T VALUES (1), (2), (3), (4)");
+        result = iterator.collect(4);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111, 1111),
+                        Row.of(2, 44, 444, 4444),
                         Row.of(3, 33, 333, 3333),
                         Row.of(4, null, null, null));
 
