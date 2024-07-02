@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action.cdc;
 
 import org.apache.paimon.catalog.AbstractCatalog;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.MultiTablesSinkMode;
 import org.apache.paimon.flink.sink.cdc.EventParser;
@@ -36,8 +37,10 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
@@ -138,10 +141,19 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
                 excludingTables == null ? null : Pattern.compile(excludingTables);
         TableNameConverter tableNameConverter =
                 new TableNameConverter(caseSensitive, mergeShards, tablePrefix, tableSuffix);
-
+        Set<String> createdTables;
+        try {
+            createdTables = new HashSet<>(catalog.listTables(database));
+        } catch (Catalog.DatabaseNotExistException e) {
+            throw new RuntimeException(e);
+        }
         return () ->
                 new RichCdcMultiplexRecordEventParser(
-                        schemaBuilder, includingPattern, excludingPattern, tableNameConverter);
+                        schemaBuilder,
+                        includingPattern,
+                        excludingPattern,
+                        tableNameConverter,
+                        createdTables);
     }
 
     @Override
