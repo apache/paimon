@@ -56,8 +56,12 @@ public class CdcWatermarkStrategy implements WatermarkStrategy<CdcSourceRecord> 
                 } catch (JsonProcessingException e) {
                     throw new RuntimeException(e);
                 }
-                currentMaxTimestamp = Math.max(currentMaxTimestamp, tMs);
-                output.emitWatermark(new Watermark(currentMaxTimestamp - 1));
+                // If the record is a schema-change event ts_ms would be null, just ignore the
+                // record.
+                if (tMs != Long.MIN_VALUE) {
+                    currentMaxTimestamp = Math.max(currentMaxTimestamp, tMs);
+                    output.emitWatermark(new Watermark(currentMaxTimestamp - 1));
+                }
             }
 
             @Override

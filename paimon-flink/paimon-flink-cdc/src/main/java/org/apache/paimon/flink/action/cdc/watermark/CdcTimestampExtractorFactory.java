@@ -22,7 +22,9 @@ import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.DeserializationFeature;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.ververica.cdc.connectors.mongodb.source.MongoDBSource;
 import com.ververica.cdc.connectors.mysql.source.MySqlSource;
@@ -62,13 +64,15 @@ public class CdcTimestampExtractorFactory implements Serializable {
     }
 
     /** Timestamp extractor for MongoDB sources in CDC applications. */
-    public static class MongoDBCdcTimestampExtractor implements CdcTimestampExtractor {
+    public static class MongoDBCdcTimestampExtractor extends CdcDebeziumTimestampExtractor {
 
         private static final long serialVersionUID = 1L;
 
         @Override
         public long extractTimestamp(CdcSourceRecord record) throws JsonProcessingException {
-            return JsonSerdeUtil.extractValue((JsonNode) record.getValue(), Long.class, "ts_ms");
+            JsonNode json = JsonSerdeUtil.fromJson((String) record.getValue(), JsonNode.class);
+            // If the record is a schema-change event return Long.MIN_VALUE as result.
+            return JsonSerdeUtil.extractValueOrDefault(json, Long.class, Long.MIN_VALUE, "ts_ms");
         }
     }
 
@@ -109,12 +113,26 @@ public class CdcTimestampExtractorFactory implements Serializable {
     }
 
     /** Timestamp extractor for MySQL sources in CDC applications. */
-    public static class MysqlCdcTimestampExtractor implements CdcTimestampExtractor {
+    public static class MysqlCdcTimestampExtractor extends CdcDebeziumTimestampExtractor {
 
         @Override
         public long extractTimestamp(CdcSourceRecord record) throws JsonProcessingException {
-            return JsonSerdeUtil.extractValue(
-                    (JsonNode) record.getValue(), Long.class, "payload", "ts_ms");
+            JsonNode json = JsonSerdeUtil.fromJson((String) record.getValue(), JsonNode.class);
+
+            return JsonSerdeUtil.extractValueOrDefault(
+                    json, Long.class, Long.MIN_VALUE, "payload", "ts_ms");
+        }
+    }
+
+    /** Timestamp extractor for Cdc debezium deserialization. */
+    public abstract static class CdcDebeziumTimestampExtractor implements CdcTimestampExtractor {
+
+        protected final ObjectMapper objectMapper = new ObjectMapper();
+
+        public CdcDebeziumTimestampExtractor() {
+            objectMapper
+                    .configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true)
+                    .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         }
     }
 
