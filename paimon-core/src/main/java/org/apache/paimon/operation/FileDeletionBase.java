@@ -332,8 +332,8 @@ public abstract class FileDeletionBase<T extends Snapshot> {
                 cachedTag = previousTag.id();
                 cachedTagDataFiles.clear();
                 addMergedDataFiles(cachedTagDataFiles, previousTag);
-                return entry -> containsDataFile(cachedTagDataFiles, entry);
             }
+            return entry -> containsDataFile(cachedTagDataFiles, entry);
         }
         return entry -> false;
     }
