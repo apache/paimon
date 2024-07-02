@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.flink.procedure.RepairProcedure;
-import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.procedure.DefaultProcedureContext;
@@ -44,8 +43,6 @@ public class RepairAction extends ActionBase {
 
     @Override
     public void run() throws Exception {
-        Preconditions.checkArgument(!tableName.contains("\\."), "tableName can't contain ','");
-
         RepairProcedure repairProcedure = new RepairProcedure();
         repairProcedure.withCatalog(catalog);
         String identifier;
