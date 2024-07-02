@@ -21,7 +21,7 @@ package org.apache.paimon.flink.action.cdc.format.debezium;
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
-import org.apache.paimon.flink.action.cdc.format.RecordParser;
+import org.apache.paimon.flink.action.cdc.format.AbstractJsonRecordParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -43,14 +43,26 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
+import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.FIELD_AFTER;
+import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.FIELD_BEFORE;
+import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.FIELD_DB;
+import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.FIELD_PAYLOAD;
+import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.FIELD_PRIMARY;
+import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.FIELD_SCHEMA;
+import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.FIELD_SOURCE;
+import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.FIELD_TYPE;
+import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.OP_DELETE;
+import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.OP_INSERT;
+import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.OP_READE;
+import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.OP_UPDATE;
 import static org.apache.paimon.utils.JsonSerdeUtil.getNodeAs;
 import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
 
 /**
- * The {@code DebeziumRecordParser} class extends the abstract {@link RecordParser} and is designed
- * to parse records from Debezium's JSON change data capture (CDC) format. Debezium is a CDC
- * solution for MySQL databases that captures row-level changes to database tables and outputs them
- * in JSON format. This parser extracts relevant information from the Debezium-JSON format and
+ * The {@code DebeziumRecordParser} class extends the abstract {@link AbstractJsonRecordParser} and
+ * is designed to parse records from Debezium's JSON change data capture (CDC) format. Debezium is a
+ * CDC solution for MySQL databases that captures row-level changes to database tables and outputs
+ * them in JSON format. This parser extracts relevant information from the Debezium-JSON format and
  * converts it into a list of {@link RichCdcMultiplexRecord} objects.
  *
  * <p>The class supports various database operations such as INSERT, UPDATE, DELETE, and READ
@@ -63,27 +75,14 @@ import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
  * operation type, and primary key field names are used to construct the details of each record
  * event.
  */
-public class DebeziumRecordParser extends RecordParser {
-
-    private static final String FIELD_SCHEMA = "schema";
-    protected static final String FIELD_PAYLOAD = "payload";
-    private static final String FIELD_BEFORE = "before";
-    private static final String FIELD_AFTER = "after";
-    private static final String FIELD_SOURCE = "source";
-    private static final String FIELD_PRIMARY = "pkNames";
-    private static final String FIELD_DB = "db";
-    private static final String FIELD_TYPE = "op";
-    private static final String OP_INSERT = "c";
-    private static final String OP_UPDATE = "u";
-    private static final String OP_DELETE = "d";
-    private static final String OP_READE = "r";
+public class DebeziumJsonRecordParser extends AbstractJsonRecordParser {
 
     private boolean hasSchema;
     private final Map<String, String> debeziumTypes = new HashMap<>();
     private final Map<String, String> classNames = new HashMap<>();
     private final Map<String, Map<String, String>> parameters = new HashMap<>();
 
-    public DebeziumRecordParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
+    public DebeziumJsonRecordParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
         super(typeMapping, computedColumns);
     }
 
@@ -146,10 +145,10 @@ public class DebeziumRecordParser extends RecordParser {
         ArrayNode fields = null;
         for (int i = 0; i < schemaFields.size(); i++) {
             JsonNode node = schemaFields.get(i);
-            if (getString(node, "field").equals("after")) {
+            if ("after".equals(getString(node, "field"))) {
                 fields = getNodeAs(node, "fields", ArrayNode.class);
                 break;
-            } else if (getString(node, "field").equals("before")) {
+            } else if ("before".equals(getString(node, "field"))) {
                 if (fields == null) {
                     fields = getNodeAs(node, "fields", ArrayNode.class);
                 }

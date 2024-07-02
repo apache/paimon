@@ -21,10 +21,7 @@ package org.apache.paimon.flink.action.cdc.format;
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
-import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
-import org.apache.paimon.schema.Schema;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -36,8 +33,6 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ArrayNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 
-import org.apache.flink.api.common.functions.FlatMapFunction;
-import org.apache.flink.util.Collector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -47,7 +42,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
@@ -64,77 +58,27 @@ import static org.apache.paimon.utils.JsonSerdeUtil.writeValueAsString;
  * Subclasses are expected to provide specific implementations for extracting records, validating
  * message formats, and other format-specific operations.
  */
-public abstract class RecordParser
-        implements FlatMapFunction<CdcSourceRecord, RichCdcMultiplexRecord> {
-
-    private static final Logger LOG = LoggerFactory.getLogger(RecordParser.class);
-
-    protected static final String FIELD_TABLE = "table";
-    protected static final String FIELD_DATABASE = "database";
-    protected final TypeMapping typeMapping;
-    protected final List<ComputedColumn> computedColumns;
+public abstract class AbstractJsonRecordParser extends AbstractRecordParser {
+    private static final Logger LOG = LoggerFactory.getLogger(AbstractJsonRecordParser.class);
 
     protected JsonNode root;
 
-    public RecordParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        this.typeMapping = typeMapping;
-        this.computedColumns = computedColumns;
+    public AbstractJsonRecordParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
+        super(typeMapping, computedColumns);
     }
 
-    @Nullable
-    public Schema buildSchema(CdcSourceRecord record) {
-        try {
-            setRoot(record);
-            if (isDDL()) {
-                return null;
-            }
-
-            Optional<RichCdcMultiplexRecord> recordOpt = extractRecords().stream().findFirst();
-            if (!recordOpt.isPresent()) {
-                return null;
-            }
-
-            Schema.Builder builder = Schema.newBuilder();
-            recordOpt
-                    .get()
-                    .fields()
-                    .forEach(
-                            field ->
-                                    builder.column(
-                                            field.name(), field.type(), field.description()));
-            builder.primaryKey(extractPrimaryKeys());
-            return builder.build();
-        } catch (Exception e) {
-            logInvalidSourceRecord(record);
-            throw e;
-        }
+    protected void setRoot(CdcSourceRecord record) {
+        root = (JsonNode) record.getValue();
     }
-
-    protected abstract List<RichCdcMultiplexRecord> extractRecords();
 
     protected abstract String primaryField();
 
     protected abstract String dataField();
 
-    protected boolean isDDL() {
-        return false;
-    }
-
     // use STRING type in default when we cannot get origin data types (most cases)
     protected void fillDefaultTypes(JsonNode record, RowType.Builder rowTypeBuilder) {
         record.fieldNames()
                 .forEachRemaining(name -> rowTypeBuilder.field(name, DataTypes.STRING()));
-    }
-
-    @Override
-    public void flatMap(CdcSourceRecord value, Collector<RichCdcMultiplexRecord> out) {
-        try {
-            setRoot(value);
-            extractRecords().forEach(out::collect);
-        } catch (Exception e) {
-            logInvalidSourceRecord(value);
-            throw e;
-        }
     }
 
     protected Map<String, String> extractRowData(JsonNode record, RowType.Builder rowTypeBuilder) {
@@ -163,19 +107,8 @@ public abstract class RecordParser
         return rowData;
     }
 
-    // generate values for computed columns
-    protected void evalComputedColumns(
-            Map<String, String> rowData, RowType.Builder rowTypeBuilder) {
-        computedColumns.forEach(
-                computedColumn -> {
-                    rowData.put(
-                            computedColumn.columnName(),
-                            computedColumn.eval(rowData.get(computedColumn.fieldReference())));
-                    rowTypeBuilder.field(computedColumn.columnName(), computedColumn.columnType());
-                });
-    }
-
-    private List<String> extractPrimaryKeys() {
+    @Override
+    protected List<String> extractPrimaryKeys() {
         ArrayNode pkNames = getNodeAs(root, primaryField(), ArrayNode.class);
         if (pkNames == null) {
             return Collections.emptyList();
@@ -193,21 +126,6 @@ public abstract class RecordParser
         records.add(createRecord(rowKind, rowData, rowTypeBuilder.build().getFields()));
     }
 
-    /** Handle case sensitivity here. */
-    private RichCdcMultiplexRecord createRecord(
-            RowKind rowKind, Map<String, String> data, List<DataField> paimonFields) {
-        return new RichCdcMultiplexRecord(
-                getDatabaseName(),
-                getTableName(),
-                paimonFields,
-                extractPrimaryKeys(),
-                new CdcRecord(rowKind, data));
-    }
-
-    protected void setRoot(CdcSourceRecord record) {
-        root = (JsonNode) record.getValue();
-    }
-
     protected JsonNode mergeOldRecord(JsonNode data, JsonNode oldNode) {
         JsonNode oldFullRecordNode = data.deepCopy();
         oldNode.fieldNames()
@@ -219,19 +137,17 @@ public abstract class RecordParser
     }
 
     @Nullable
+    @Override
     protected String getTableName() {
         JsonNode node = root.get(FIELD_TABLE);
         return isNull(node) ? null : node.asText();
     }
 
     @Nullable
+    @Override
     protected String getDatabaseName() {
         JsonNode node = root.get(FIELD_DATABASE);
         return isNull(node) ? null : node.asText();
-    }
-
-    private void logInvalidSourceRecord(CdcSourceRecord record) {
-        LOG.error("Invalid source record:\n{}", record.toString());
     }
 
     protected void checkNotNull(JsonNode node, String key) {
@@ -262,6 +178,4 @@ public abstract class RecordParser
         checkNotNull(node, key, conditionKey, conditionValue);
         return node;
     }
-
-    protected abstract String format();
 }

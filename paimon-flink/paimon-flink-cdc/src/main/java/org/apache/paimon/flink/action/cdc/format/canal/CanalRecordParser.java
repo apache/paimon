@@ -20,7 +20,7 @@ package org.apache.paimon.flink.action.cdc.format.canal;
 
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
-import org.apache.paimon.flink.action.cdc.format.RecordParser;
+import org.apache.paimon.flink.action.cdc.format.AbstractJsonRecordParser;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.DataType;
@@ -65,7 +65,7 @@ import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
  * <p>Additionally, the parser supports schema extraction, which can be used to understand the
  * structure of the incoming data and its corresponding field types.
  */
-public class CanalRecordParser extends RecordParser {
+public class CanalRecordParser extends AbstractJsonRecordParser {
 
     private static final Logger LOG = LoggerFactory.getLogger(CanalRecordParser.class);
 
