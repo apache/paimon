@@ -56,7 +56,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.ForkJoinTask;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -254,8 +253,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     public List<SimpleFileEntry> readSimpleEntries() {
         List<ManifestFileMeta> manifests = readManifests().getRight();
         Collection<SimpleFileEntry> mergedEntries =
-                readAndMergeFileEntries(
-                        manifests, this::readSimpleEntries, Filter.alwaysTrue(), new AtomicLong());
+                readAndMergeFileEntries(manifests, this::readSimpleEntries, Filter.alwaysTrue());
         return new ArrayList<>(mergedEntries);
     }
 
@@ -291,19 +289,14 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         List<ManifestFileMeta> manifests = snapshotListPair.getRight();
 
         long startDataFiles =
-                manifests.stream().mapToLong(f -> f.numAddedFiles() + f.numDeletedFiles()).sum();
-
-        AtomicLong cntEntries = new AtomicLong(0);
+                manifests.stream().mapToLong(f -> f.numAddedFiles() - f.numDeletedFiles()).sum();
 
         Collection<ManifestEntry> mergedEntries =
                 readAndMergeFileEntries(
-                        manifests,
-                        this::readManifestFileMeta,
-                        this::filterUnmergedManifestEntry,
-                        cntEntries);
+                        manifests, this::readManifestFileMeta, this::filterUnmergedManifestEntry);
 
         List<ManifestEntry> files = new ArrayList<>();
-        long skippedByPartitionAndStats = startDataFiles - cntEntries.get();
+        long skippedByPartitionAndStats = startDataFiles - mergedEntries.size();
         for (ManifestEntry file : mergedEntries) {
             if (checkNumOfBuckets && file.totalBuckets() != numOfBuckets) {
                 String partInfo =
@@ -355,6 +348,12 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
         long skippedByWholeBucketFiles = afterBucketFilter - files.size();
         long scanDuration = (System.nanoTime() - started) / 1_000_000;
+        checkState(
+                startDataFiles
+                                - skippedByPartitionAndStats
+                                - skippedByBucketAndLevelFilter
+                                - skippedByWholeBucketFiles
+                        == files.size());
         if (scanMetrics != null) {
             scanMetrics.reportScan(
                     new ScanStats(
@@ -371,8 +370,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     public <T extends FileEntry> Collection<T> readAndMergeFileEntries(
             List<ManifestFileMeta> manifests,
             Function<ManifestFileMeta, List<T>> manifestReader,
-            @Nullable Filter<T> filterUnmergedEntry,
-            @Nullable AtomicLong readEntries) {
+            @Nullable Filter<T> filterUnmergedEntry) {
         Iterable<T> entries =
                 ScanParallelExecutor.parallelismBatchIterable(
                         files -> {
@@ -383,11 +381,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                             if (filterUnmergedEntry != null) {
                                 stream = stream.filter(filterUnmergedEntry::test);
                             }
-                            List<T> entryList = stream.collect(Collectors.toList());
-                            if (readEntries != null) {
-                                readEntries.getAndAdd(entryList.size());
-                            }
-                            return entryList;
+                            return stream.collect(Collectors.toList());
                         },
                         manifests,
                         scanManifestParallelism);
