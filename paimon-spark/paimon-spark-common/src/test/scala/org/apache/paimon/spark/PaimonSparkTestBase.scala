@@ -120,7 +120,7 @@ class PaimonSparkTestBase
   }
 
   protected def createRelationV2(tableName: String): LogicalPlan = {
-    val sparkTable = new SparkTable(loadTable(tableName))
+    val sparkTable = new SparkTable(loadTable(tableName), dbName0)
     DataSourceV2Relation.create(
       sparkTable,
       Some(spark.sessionState.catalogManager.currentCatalog),

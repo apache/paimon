@@ -211,7 +211,7 @@ public class SparkCatalog extends SparkBaseCatalog {
     @Override
     public SparkTable loadTable(Identifier ident) throws NoSuchTableException {
         try {
-            return new SparkTable(load(ident));
+            return new SparkTable(load(ident), toIdentifier(ident).getDatabaseName());
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(ident);
         }
@@ -224,7 +224,8 @@ public class SparkCatalog extends SparkBaseCatalog {
         Table table = loadPaimonTable(ident);
         LOG.info("Time travel to version '{}'.", version);
         return new SparkTable(
-                table.copy(Collections.singletonMap(CoreOptions.SCAN_VERSION.key(), version)));
+                table.copy(Collections.singletonMap(CoreOptions.SCAN_VERSION.key(), version)),
+                toIdentifier(ident).getDatabaseName());
     }
 
     /**
@@ -241,7 +242,7 @@ public class SparkCatalog extends SparkBaseCatalog {
         LOG.info("Time travel target timestamp is {} milliseconds.", timestamp);
 
         Options option = new Options().set(CoreOptions.SCAN_TIMESTAMP_MILLIS, timestamp);
-        return new SparkTable(table.copy(option.toMap()));
+        return new SparkTable(table.copy(option.toMap()), toIdentifier(ident).getDatabaseName());
     }
 
     private Table loadPaimonTable(Identifier ident) throws NoSuchTableException {
