@@ -64,9 +64,7 @@ public class RepairActionFactory implements ActionFactory {
         System.out.println();
 
         System.out.println("Syntax:");
-        System.out.println(
-                "  repair_table --warehouse <warehouse_path> --database <database_name> "
-                        + "--table <table_name>");
+        System.out.println("  repair_table --warehouse <warehouse_path> --table <table> ");
         System.out.println();
     }
 }
