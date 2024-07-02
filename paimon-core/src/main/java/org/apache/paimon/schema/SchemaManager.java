@@ -43,7 +43,6 @@ import org.apache.paimon.types.DataTypeVisitor;
 import org.apache.paimon.types.ReassignFieldId;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
-import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.Nullable;
@@ -69,6 +68,7 @@ import static org.apache.paimon.catalog.Identifier.UNKNOWN_DATABASE;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.BranchManager.branchPath;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Schema Manager to manage schema versions. */
@@ -190,6 +190,7 @@ public class SchemaManager implements Serializable {
                                     () ->
                                             new Catalog.TableNotExistException(
                                                     fromPath(tableRoot.toString(), true)));
+            Map<String, String> oldOptions = new HashMap<>(schema.options());
             Map<String, String> newOptions = new HashMap<>(schema.options());
             List<DataField> newFields = new ArrayList<>(schema.fields());
             AtomicInteger highestFieldId = new AtomicInteger(schema.highestFieldId());
@@ -197,11 +198,15 @@ public class SchemaManager implements Serializable {
             for (SchemaChange change : changes) {
                 if (change instanceof SetOption) {
                     SetOption setOption = (SetOption) change;
-                    checkAlterTableOption(setOption.key());
+                    checkAlterTableOption(
+                            setOption.key(),
+                            oldOptions.get(setOption.key()),
+                            setOption.value(),
+                            false);
                     newOptions.put(setOption.key(), setOption.value());
                 } else if (change instanceof RemoveOption) {
                     RemoveOption removeOption = (RemoveOption) change;
-                    checkAlterTableOption(removeOption.key());
+                    checkResetTableOption(removeOption.key());
                     newOptions.remove(removeOption.key());
                 } else if (change instanceof UpdateComment) {
                     UpdateComment updateComment = (UpdateComment) change;
@@ -213,7 +218,7 @@ public class SchemaManager implements Serializable {
                         throw new Catalog.ColumnAlreadyExistException(
                                 fromPath(tableRoot.toString(), true), addColumn.fieldName());
                     }
-                    Preconditions.checkArgument(
+                    checkArgument(
                             addColumn.dataType().isNullable(),
                             "Column %s cannot specify NOT NULL in the %s table.",
                             addColumn.fieldName(),
@@ -517,10 +522,44 @@ public class SchemaManager implements Serializable {
         fileIO.deleteQuietly(toSchemaPath(schemaId));
     }
 
-    public static void checkAlterTableOption(String key) {
+    public static void checkAlterTableOption(
+            String key, @Nullable String oldValue, String newValue, boolean fromDynamicOptions) {
         if (CoreOptions.getImmutableOptionKeys().contains(key)) {
             throw new UnsupportedOperationException(
                     String.format("Change '%s' is not supported yet.", key));
+        }
+
+        if (CoreOptions.BUCKET.key().equals(key)) {
+            int oldBucket =
+                    oldValue == null
+                            ? CoreOptions.BUCKET.defaultValue()
+                            : Integer.parseInt(oldValue);
+            int newBucket = Integer.parseInt(newValue);
+            checkAlterBucket(oldBucket, newBucket, fromDynamicOptions);
+        }
+    }
+
+    private static void checkAlterBucket(int oldValue, int newValue, boolean fromDynamicOptions) {
+        if (fromDynamicOptions) {
+            throw new UnsupportedOperationException(
+                    "Cannot change bucket number through dynamic options. You might need to rescale bucket.");
+        }
+        if (oldValue == -1) {
+            throw new UnsupportedOperationException("Cannot change bucket when it is -1.");
+        }
+        if (newValue == -1) {
+            throw new UnsupportedOperationException("Cannot change bucket to -1.");
+        }
+    }
+
+    public static void checkResetTableOption(String key) {
+        if (CoreOptions.getImmutableOptionKeys().contains(key)) {
+            throw new UnsupportedOperationException(
+                    String.format("Change '%s' is not supported yet.", key));
+        }
+
+        if (CoreOptions.BUCKET.key().equals(key)) {
+            throw new UnsupportedOperationException(String.format("Cannot reset %s.", key));
         }
     }
 

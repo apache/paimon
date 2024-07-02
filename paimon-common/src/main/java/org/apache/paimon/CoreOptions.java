@@ -82,6 +82,8 @@ public class CoreOptions implements Serializable {
 
     public static final String COLUMNS = "columns";
 
+    private static Set<String> immutableOptionKeys;
+
     public static final ConfigOption<Integer> BUCKET =
             key("bucket")
                     .intType()
@@ -2302,19 +2304,22 @@ public class CoreOptions implements Serializable {
     }
 
     public static Set<String> getImmutableOptionKeys() {
-        final Field[] fields = CoreOptions.class.getFields();
-        final Set<String> immutableKeys = new HashSet<>(fields.length);
-        for (Field field : fields) {
-            if (ConfigOption.class.isAssignableFrom(field.getType())
-                    && field.getAnnotation(Immutable.class) != null) {
-                try {
-                    immutableKeys.add(((ConfigOption<?>) field.get(CoreOptions.class)).key());
-                } catch (IllegalAccessException e) {
-                    throw new RuntimeException(e);
+        if (immutableOptionKeys == null) {
+            final Field[] fields = CoreOptions.class.getFields();
+            immutableOptionKeys = new HashSet<>(fields.length);
+            for (Field field : fields) {
+                if (ConfigOption.class.isAssignableFrom(field.getType())
+                        && field.getAnnotation(Immutable.class) != null) {
+                    try {
+                        immutableOptionKeys.add(
+                                ((ConfigOption<?>) field.get(CoreOptions.class)).key());
+                    } catch (IllegalAccessException e) {
+                        throw new RuntimeException(e);
+                    }
                 }
             }
         }
-        return immutableKeys;
+        return immutableOptionKeys;
     }
 
     /** Specifies the sort engine for table with primary key. */
