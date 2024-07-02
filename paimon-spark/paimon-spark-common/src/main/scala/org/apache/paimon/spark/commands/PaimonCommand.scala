@@ -29,6 +29,7 @@ import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.commands.SparkDataFileMeta.convertToSparkDataFileMeta
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.schema.PaimonMetadataColumn._
+import org.apache.paimon.table.BucketMode
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.types.RowType
@@ -183,6 +184,26 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
 
     dvIndexFileMaintainer.writeUnchangedDeletionVector().asScala
   }
+
+  protected def updateDeletionVector(
+      deletionVectors: Dataset[SparkDeletionVectors],
+      dataFilePathToMeta: Map[String, SparkDataFileMeta],
+      writer: PaimonSparkWriter): Seq[CommitMessage] = {
+    // Step1: write the new deletion vectors
+    val newIndexCommitMsg = writer.persistDeletionVectors(deletionVectors)
+
+    // Step2: write the unchanged deletion vectors where store in touched dv index files, and mark these touched index files as DELETE if needed.
+    val rewriteIndexCommitMsg = fileStore.bucketMode() match {
+      case BucketMode.BUCKET_UNAWARE =>
+        val indexEntries = getDeletedIndexFiles(dataFilePathToMeta, deletionVectors)
+        writer.buildCommitMessageFromIndexManifestEntry(indexEntries)
+      case _ =>
+        Seq.empty[CommitMessage]
+    }
+
+    newIndexCommitMsg ++ rewriteIndexCommitMsg
+  }
+
   protected def collectDeletionVectors(
       candidateDataSplits: Seq[DataSplit],
       dataFilePathToMeta: Map[String, SparkDataFileMeta],

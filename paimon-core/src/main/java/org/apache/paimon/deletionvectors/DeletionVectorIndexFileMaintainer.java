@@ -76,10 +76,6 @@ public class DeletionVectorIndexFileMaintainer {
             touchedIndexFiles.add(indexFileName);
             if (indexFileToDeletionFiles.containsKey(indexFileName)) {
                 indexFileToDeletionFiles.get(indexFileName).remove(dataFile);
-                if (indexFileToDeletionFiles.get(indexFileName).isEmpty()) {
-                    indexFileToDeletionFiles.remove(indexFileName);
-                    indexNameToEntry.remove(indexFileName);
-                }
             }
         }
     }

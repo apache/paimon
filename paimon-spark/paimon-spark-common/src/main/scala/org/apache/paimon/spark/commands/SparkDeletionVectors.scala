@@ -18,7 +18,11 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.fs.Path
+import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.utils.{FileStorePathFactory, SerializationUtils}
+
+import scala.collection.JavaConverters._
 
 /**
  * This class will be used as Dataset's pattern type. So here use Array[Byte] instead of BinaryRow
@@ -36,5 +40,31 @@ case class SparkDeletionVectors(
       .toUri
       .toString + "/"
     dataFileAndDeletionVector.map(prefix + _._1)
+  }
+}
+
+object SparkDeletionVectors {
+  def toDataSplit(
+      sparkDeletionVectors: SparkDeletionVectors,
+      root: Path,
+      pathFactory: FileStorePathFactory,
+      dataFilePathToMeta: Map[String, SparkDataFileMeta]): DataSplit = {
+    val (dataFiles, deletionFiles) = sparkDeletionVectors
+      .relativePaths(pathFactory)
+      .map {
+        dataFile =>
+          val meta = dataFilePathToMeta(dataFile)
+          (meta.dataFileMeta, meta.deletionFile.orNull)
+      }
+      .unzip
+    DataSplit
+      .builder()
+      .withBucketPath(root + "/" + sparkDeletionVectors.partitionAndBucket)
+      .withPartition(SerializationUtils.deserializeBinaryRow(sparkDeletionVectors.partition))
+      .withBucket(sparkDeletionVectors.bucket)
+      .withDataFiles(dataFiles.toList.asJava)
+      .withDataDeletionFiles(deletionFiles.toList.asJava)
+      .rawConvertible(true)
+      .build()
   }
 }
