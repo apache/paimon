@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
@@ -59,15 +58,9 @@ public final class KeyValueTableRead extends AbstractDataTableRead<KeyValue> {
             Supplier<RawFileSplitRead> batchRawReadSupplier,
             TableSchema schema) {
         super(schema);
-        boolean isLookupChangelogProducer =
-                new CoreOptions(schema.options()).changelogProducer()
-                        == CoreOptions.ChangelogProducer.LOOKUP;
         this.readProviders =
                 Arrays.asList(
-                        new RawFileSplitReadProvider(
-                                batchRawReadSupplier,
-                                isLookupChangelogProducer,
-                                this::assignValues),
+                        new RawFileSplitReadProvider(batchRawReadSupplier, this::assignValues),
                         new MergeFileSplitReadProvider(mergeReadSupplier, this::assignValues),
                         new IncrementalChangelogReadProvider(mergeReadSupplier, this::assignValues),
                         new IncrementalDiffReadProvider(mergeReadSupplier, this::assignValues));

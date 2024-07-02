@@ -32,13 +32,9 @@ import java.util.function.Supplier;
 public class RawFileSplitReadProvider implements SplitReadProvider {
 
     private final LazyField<RawFileSplitRead> splitRead;
-    private final boolean isLookupChangelogProducer;
 
     public RawFileSplitReadProvider(
-            Supplier<RawFileSplitRead> supplier,
-            boolean isLookupChangelogProducer,
-            Consumer<SplitRead<InternalRow>> valuesAssigner) {
-        this.isLookupChangelogProducer = isLookupChangelogProducer;
+            Supplier<RawFileSplitRead> supplier, Consumer<SplitRead<InternalRow>> valuesAssigner) {
         this.splitRead =
                 new LazyField<>(
                         () -> {
@@ -52,12 +48,13 @@ public class RawFileSplitReadProvider implements SplitReadProvider {
     public boolean match(DataSplit split, boolean forceKeepDelete) {
         boolean matched = !forceKeepDelete && !split.isStreaming() && split.rawConvertible();
         if (matched) {
-            // for legacy version
-            if (isLookupChangelogProducer) {
-                for (DataFileMeta file : split.dataFiles()) {
-                    if (!file.deleteRowCount().isPresent()) {
-                        return false;
-                    }
+            // for legacy version, we are not sure if there are delete rows, but in order to be
+            // compatible with the query acceleration of the OLAP engine, we have generated raw
+            // files.
+            // Here, for the sake of correctness, we still need to perform drop delete filtering.
+            for (DataFileMeta file : split.dataFiles()) {
+                if (!file.deleteRowCount().isPresent()) {
+                    return false;
                 }
             }
         }
