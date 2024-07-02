@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.query;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
@@ -35,6 +36,7 @@ import org.apache.paimon.utils.TypeUtils;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 
 import static org.apache.paimon.service.ServiceManager.PRIMARY_KEY_LOOKUP;
@@ -108,5 +110,10 @@ public class RemoteTableQuery implements TableQuery {
     @Override
     public void close() throws IOException {
         client.shutdown();
+    }
+
+    @VisibleForTesting
+    public CompletableFuture<Void> cancel() {
+        return client.shutdownFuture();
     }
 }
