@@ -20,6 +20,7 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.flink.procedure.RepairProcedure;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.procedure.DefaultProcedureContext;
 
@@ -47,7 +48,15 @@ public class RepairAction extends ActionBase {
 
         RepairProcedure repairProcedure = new RepairProcedure();
         repairProcedure.withCatalog(catalog);
-        String identifier = databaseName.concat(".").concat(tableName);
+        String identifier;
+        if (StringUtils.isBlank(databaseName)) {
+            identifier = "";
+        } else {
+            identifier =
+                    StringUtils.isBlank(tableName)
+                            ? databaseName
+                            : databaseName.concat(".").concat(tableName);
+        }
         repairProcedure.call(new DefaultProcedureContext(env), identifier);
     }
 }
