@@ -71,8 +71,8 @@ public class BranchesTable implements ReadonlyTable {
                             new DataField(
                                     0, "branch_name", SerializationUtils.newStringType(false)),
                             new DataField(
-                                    1, "created_from_tag", SerializationUtils.newStringType(false)),
-                            new DataField(2, "created_from_snapshot", new BigIntType(false)),
+                                    1, "created_from_tag", SerializationUtils.newStringType(true)),
+                            new DataField(2, "created_from_snapshot", new BigIntType(true)),
                             new DataField(3, "create_time", new TimestampType(false, 3))));
 
     private final FileIO fileIO;
