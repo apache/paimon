@@ -3,7 +3,7 @@ title: "Table Mode"
 weight: 3
 type: docs
 aliases:
-- /primary-key-table/read-optimized.html
+- /primary-key-table/table-mode.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
