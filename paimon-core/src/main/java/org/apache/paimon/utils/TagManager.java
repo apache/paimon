@@ -134,6 +134,28 @@ public class TagManager {
         }
     }
 
+    /** Update a given tag. */
+    public void updateTag(String tagName, Snapshot snapshot, @Nullable Duration timeRetained) {
+        checkArgument(!StringUtils.isBlank(tagName), "Tag name '%s' is blank.", tagName);
+        checkArgument(tagExists(tagName), "Tag '%s' doesn't exist.", tagName);
+
+        String content =
+                timeRetained != null
+                        ? Tag.fromSnapshotAndTagTtl(snapshot, timeRetained, LocalDateTime.now())
+                                .toJson()
+                        : snapshot.toJson();
+        Path tagPath = tagPath(tagName);
+
+        try {
+            fileIO.overwriteFileUtf8(tagPath, content);
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Exception occurs when update tag '%s' (path %s). ", tagName, tagPath),
+                    e);
+        }
+    }
+
     /** Make sure the tagNames are ALL tags of one snapshot. */
     public void deleteAllTagsOfOneSnapshot(
             List<String> tagNames, TagDeletion tagDeletion, SnapshotManager snapshotManager) {
