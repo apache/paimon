@@ -20,6 +20,7 @@ package org.apache.paimon.flink.action.cdc.format.debezium;
 
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
+import org.apache.paimon.flink.action.cdc.DatabaseSyncTableFilter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.format.RecordParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
@@ -83,8 +84,11 @@ public class DebeziumRecordParser extends RecordParser {
     private final Map<String, String> classNames = new HashMap<>();
     private final Map<String, Map<String, String>> parameters = new HashMap<>();
 
-    public DebeziumRecordParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        super(typeMapping, computedColumns);
+    public DebeziumRecordParser(
+            TypeMapping typeMapping,
+            List<ComputedColumn> computedColumns,
+            DatabaseSyncTableFilter databaseSyncTableFilter) {
+        super(typeMapping, computedColumns, databaseSyncTableFilter);
     }
 
     @Override
@@ -121,7 +125,6 @@ public class DebeziumRecordParser extends RecordParser {
     @Override
     protected void setRoot(CdcSourceRecord record) {
         JsonNode node = (JsonNode) record.getValue();
-
         hasSchema = false;
         if (node.has(FIELD_SCHEMA)) {
             root = node.get(FIELD_PAYLOAD);

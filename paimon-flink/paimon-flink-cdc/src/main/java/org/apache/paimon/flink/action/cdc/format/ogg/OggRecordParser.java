@@ -20,6 +20,7 @@ package org.apache.paimon.flink.action.cdc.format.ogg;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
+import org.apache.paimon.flink.action.cdc.DatabaseSyncTableFilter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.format.RecordParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
@@ -58,8 +59,11 @@ public class OggRecordParser extends RecordParser {
     private static final String OP_INSERT = "I";
     private static final String OP_DELETE = "D";
 
-    public OggRecordParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        super(typeMapping, computedColumns);
+    public OggRecordParser(
+            TypeMapping typeMapping,
+            List<ComputedColumn> computedColumns,
+            DatabaseSyncTableFilter databaseSyncTableFilter) {
+        super(typeMapping, computedColumns, databaseSyncTableFilter);
     }
 
     @Override
