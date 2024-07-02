@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source.splitread;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.table.source.DataSplit;
@@ -31,9 +32,13 @@ import java.util.function.Supplier;
 public class RawFileSplitReadProvider implements SplitReadProvider {
 
     private final LazyField<RawFileSplitRead> splitRead;
+    private final boolean isLookupChangelogProducer;
 
     public RawFileSplitReadProvider(
-            Supplier<RawFileSplitRead> supplier, Consumer<SplitRead<InternalRow>> valuesAssigner) {
+            Supplier<RawFileSplitRead> supplier,
+            boolean isLookupChangelogProducer,
+            Consumer<SplitRead<InternalRow>> valuesAssigner) {
+        this.isLookupChangelogProducer = isLookupChangelogProducer;
         this.splitRead =
                 new LazyField<>(
                         () -> {
@@ -45,7 +50,18 @@ public class RawFileSplitReadProvider implements SplitReadProvider {
 
     @Override
     public boolean match(DataSplit split, boolean forceKeepDelete) {
-        return !forceKeepDelete && !split.isStreaming() && split.rawConvertible();
+        boolean matched = !forceKeepDelete && !split.isStreaming() && split.rawConvertible();
+        if (matched) {
+            // for legacy version
+            if (isLookupChangelogProducer) {
+                for (DataFileMeta file : split.dataFiles()) {
+                    if (!file.deleteRowCount().isPresent()) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return matched;
     }
 
     @Override
