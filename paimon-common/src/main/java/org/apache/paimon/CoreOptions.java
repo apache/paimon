@@ -1069,6 +1069,12 @@ public class CoreOptions implements Serializable {
                             "The default maximum time retained for newly created tags. "
                                     + "It affects both auto-created tags and manually created (by procedure) tags.");
 
+    public static final ConfigOption<Boolean> TAG_AUTOMATIC_COMPLETION =
+            key("tag.automatic-completion")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to automatically complete missing tags.");
+
     public static final ConfigOption<Duration> SNAPSHOT_WATERMARK_IDLE_TIMEOUT =
             key("snapshot.watermark-idle-timeout")
                     .durationType()
@@ -1823,6 +1829,10 @@ public class CoreOptions implements Serializable {
 
     public Duration tagDefaultTimeRetained() {
         return options.get(TAG_DEFAULT_TIME_RETAINED);
+    }
+
+    public boolean tagAutomaticCompletion() {
+        return options.get(TAG_AUTOMATIC_COMPLETION);
     }
 
     public Duration snapshotWatermarkIdleTimeout() {

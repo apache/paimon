@@ -40,6 +40,7 @@ import static org.apache.paimon.CoreOptions.SINK_WATERMARK_TIME_ZONE;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_WATERMARK_IDLE_TIMEOUT;
+import static org.apache.paimon.CoreOptions.TAG_AUTOMATIC_COMPLETION;
 import static org.apache.paimon.CoreOptions.TAG_AUTOMATIC_CREATION;
 import static org.apache.paimon.CoreOptions.TAG_CREATION_DELAY;
 import static org.apache.paimon.CoreOptions.TAG_CREATION_PERIOD;
@@ -422,6 +423,36 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
         commit.commit(new ManifestCommittable(6, utcMills("2023-07-18T19:00:00")));
         assertThat(tagManager.allTagNames())
                 .containsOnly("2023-07-18 18", "non-auto-create-tag-shoule-not-expire");
+        commit.close();
+    }
+
+    @Test
+    public void testAutoCompleteTags() throws Exception {
+        Options options = new Options();
+        options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
+        options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
+        options.set(TAG_NUM_RETAINED_MAX, 3);
+        options.set(TAG_AUTOMATIC_COMPLETION, true);
+        FileStoreTable table = this.table.copy(options.toMap());
+        TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        TagManager tagManager = table.store().newTagManager();
+
+        // test normal creation
+        commit.commit(new ManifestCommittable(0, utcMills("2024-06-26T16:12:00")));
+        assertThat(tagManager.allTagNames()).containsOnly("2024-06-26 15");
+
+        // task stop 2h...
+
+        // task restart after 18:00
+        // first commit, add tag 2024-06-26 16
+        commit.commit(new ManifestCommittable(1, utcMills("2024-06-26T18:05:00")));
+        assertThat(tagManager.allTagNames()).containsOnly("2024-06-26 15", "2024-06-26 16");
+
+        // second commit, add tag 2024-06-26 17
+        commit.commit(new ManifestCommittable(2, utcMills("2024-06-26T18:10:00")));
+        assertThat(tagManager.allTagNames())
+                .containsOnly("2024-06-26 15", "2024-06-26 16", "2024-06-26 17");
+
         commit.close();
     }
 
