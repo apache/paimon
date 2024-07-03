@@ -746,6 +746,8 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
         batchSql("INSERT INTO T VALUES (5, 6), (7, 8)");
         assertThat(iterator.collect(2)).containsExactlyInAnyOrder(Row.of(1, 2), Row.of(3, 4));
+        Thread.sleep(1000);
+
         iterator.close();
 
         List<Row> result = sql("SELECT * FROM T$consumers");
