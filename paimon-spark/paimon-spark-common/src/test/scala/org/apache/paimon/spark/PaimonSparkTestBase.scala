@@ -30,7 +30,7 @@ import org.apache.spark.paimon.Utils
 import org.apache.spark.sql.QueryTest
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.connector.catalog.{Identifier => SparkIdentifier}
-import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
+import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2ScanRelation}
 import org.apache.spark.sql.test.SharedSparkSession
 import org.scalactic.source.Position
 import org.scalatest.Tag
@@ -120,11 +120,19 @@ class PaimonSparkTestBase
   }
 
   protected def createRelationV2(tableName: String): LogicalPlan = {
-    val sparkTable = new SparkTable(loadTable(tableName))
+    val sparkTable = SparkTable(loadTable(tableName))
     DataSourceV2Relation.create(
       sparkTable,
       Some(spark.sessionState.catalogManager.currentCatalog),
       Some(SparkIdentifier.of(Array(this.dbName0), tableName))
     )
+  }
+
+  protected def getPaimonScan(sqlText: String): PaimonScan = {
+    sql(sqlText).queryExecution.optimizedPlan
+      .collectFirst { case relation: DataSourceV2ScanRelation => relation }
+      .get
+      .scan
+      .asInstanceOf[PaimonScan]
   }
 }

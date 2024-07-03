@@ -26,7 +26,6 @@ import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.expressions.{Attribute, CreateNamedStruct, Literal, NamedExpression}
 import org.apache.spark.sql.catalyst.plans.logical.{CTERelationDef, LogicalPlan, OneRowRelation, WithCTE}
 import org.apache.spark.sql.catalyst.rules.RuleExecutor
-import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
 import org.apache.spark.sql.functions._
 import org.junit.jupiter.api.Assertions
 
@@ -101,15 +100,6 @@ abstract class PaimonOptimizationTestBase extends PaimonSparkTestBase {
       spark.sql(s"INSERT INTO T VALUES (1, 'a', 'p1'), (2, 'b', 'p1'), (3, 'c', 'p2')")
 
       val sqlText = "SELECT * FROM T WHERE id = 1 AND pt = 'p1' LIMIT 1"
-      def getPaimonScan(sqlText: String) = {
-        spark
-          .sql(sqlText)
-          .queryExecution
-          .optimizedPlan
-          .collectFirst { case relation: DataSourceV2ScanRelation => relation }
-          .get
-          .scan
-      }
       Assertions.assertEquals(getPaimonScan(sqlText), getPaimonScan(sqlText))
     }
   }
