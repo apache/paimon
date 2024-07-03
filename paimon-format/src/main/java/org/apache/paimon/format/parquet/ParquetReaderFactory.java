@@ -28,6 +28,7 @@ import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.parquet.reader.ColumnReader;
 import org.apache.paimon.format.parquet.reader.ParquetDecimalVector;
 import org.apache.paimon.format.parquet.reader.ParquetTimestampVector;
+import org.apache.paimon.format.parquet.type.ParquetField;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
@@ -42,6 +43,8 @@ import org.apache.parquet.column.page.PageReadStore;
 import org.apache.parquet.filter2.compat.FilterCompat;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.ParquetInputFormat;
+import org.apache.parquet.io.ColumnIOFactory;
+import org.apache.parquet.io.MessageColumnIO;
 import org.apache.parquet.schema.GroupType;
 import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.Type;
@@ -57,6 +60,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import static org.apache.paimon.format.parquet.reader.ParquetSplitReaderUtil.buildFieldsList;
 import static org.apache.paimon.format.parquet.reader.ParquetSplitReaderUtil.createColumnReader;
 import static org.apache.paimon.format.parquet.reader.ParquetSplitReaderUtil.createWritableColumnVector;
 import static org.apache.parquet.hadoop.UnmaterializableRecordCounter.BAD_RECORD_THRESHOLD_CONF_KEY;
@@ -72,6 +76,8 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     private static final String ALLOCATION_SIZE = "parquet.read.allocation.size";
 
     private final Options conf;
+
+    private final RowType projectedType;
     private final String[] projectedFields;
     private final DataType[] projectedTypes;
     private final int batchSize;
@@ -81,6 +87,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     public ParquetReaderFactory(
             Options conf, RowType projectedType, int batchSize, FilterCompat.Filter filter) {
         this.conf = conf;
+        this.projectedType = projectedType;
         this.projectedFields = projectedType.getFieldNames().toArray(new String[0]);
         this.projectedTypes = projectedType.getFieldTypes().toArray(new DataType[0]);
         this.batchSize = batchSize;
@@ -106,7 +113,12 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         Pool<ParquetReaderBatch> poolOfBatches =
                 createPoolOfBatches(context.filePath(), requestedSchema);
 
-        return new ParquetReader(reader, requestedSchema, reader.getRecordCount(), poolOfBatches);
+        MessageColumnIO columnIO = new ColumnIOFactory().getColumnIO(requestedSchema);
+        List<ParquetField> fields =
+                buildFieldsList(projectedType.getFields(), projectedType.getFieldNames(), columnIO);
+
+        return new ParquetReader(
+                reader, requestedSchema, reader.getRecordCount(), poolOfBatches, fields);
     }
 
     private void setReadOptions(ParquetReadOptions.Builder builder) {
@@ -270,11 +282,14 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         @SuppressWarnings("rawtypes")
         private ColumnReader[] columnReaders;
 
+        private final List<ParquetField> fields;
+
         private ParquetReader(
                 ParquetFileReader reader,
                 MessageType requestedSchema,
                 long totalRowCount,
-                Pool<ParquetReaderBatch> pool) {
+                Pool<ParquetReaderBatch> pool,
+                List<ParquetField> fields) {
             this.reader = reader;
             this.requestedSchema = requestedSchema;
             this.totalRowCount = totalRowCount;
@@ -283,6 +298,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             this.totalCountLoadedSoFar = 0;
             this.currentRowPosition = 0;
             this.nextRowPosition = 0;
+            this.fields = fields;
         }
 
         @Nullable
@@ -348,6 +364,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                                     types.get(i),
                                     requestedSchema.getColumns(),
                                     rowGroup,
+                                    fields.get(i),
                                     0);
                 }
             }
