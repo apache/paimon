@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source.splitread;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.table.source.DataSplit;
@@ -45,7 +46,19 @@ public class RawFileSplitReadProvider implements SplitReadProvider {
 
     @Override
     public boolean match(DataSplit split, boolean forceKeepDelete) {
-        return !forceKeepDelete && !split.isStreaming() && split.rawConvertible();
+        boolean matched = !forceKeepDelete && !split.isStreaming() && split.rawConvertible();
+        if (matched) {
+            // for legacy version, we are not sure if there are delete rows, but in order to be
+            // compatible with the query acceleration of the OLAP engine, we have generated raw
+            // files.
+            // Here, for the sake of correctness, we still need to perform drop delete filtering.
+            for (DataFileMeta file : split.dataFiles()) {
+                if (!file.deleteRowCount().isPresent()) {
+                    return false;
+                }
+            }
+        }
+        return matched;
     }
 
     @Override
