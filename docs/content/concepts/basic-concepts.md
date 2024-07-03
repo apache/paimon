@@ -54,7 +54,7 @@ A manifest file is a file containing changes about LSM data files and changelog 
 
 ## Data Files
 
-Data files are grouped by partitions. Currently, Paimon supports using orc (default), parquet and avro as data file's format.
+Data files are grouped by partitions. Currently, Paimon supports using parquet (default), orc and avro as data file's format.
 
 ## Partition
 

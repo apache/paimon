@@ -28,7 +28,7 @@ under the License.
 
 ## Native Format IO
 
-Integrate native ORC & Parquet reader & writer.
+Integrate native Parquet & ORC reader & writer.
 
 ## Deletion Vectors (Merge On Write)
 
