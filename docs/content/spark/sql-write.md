@@ -67,8 +67,8 @@ Spark's default overwrite mode is `static` partition overwrite. To enable dynami
 For example:
 
 ```sql
-CREATE TABLE T (id INT, pt STRING) PARTITIONED BY (pt);
-INSERT INTO T VALUES (1, 'p1'), (2, 'p2')
+CREATE TABLE my_table (id INT, pt STRING) PARTITIONED BY (pt);
+INSERT INTO my_table VALUES (1, 'p1'), (2, 'p2');
 
 -- Static overwrite (Overwrite the whole table)
 INSERT OVERWRITE my_table VALUES (3, 'p1');
