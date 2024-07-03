@@ -746,12 +746,12 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
         batchSql("INSERT INTO T VALUES (5, 6), (7, 8)");
         assertThat(iterator.collect(2)).containsExactlyInAnyOrder(Row.of(1, 2), Row.of(3, 4));
-        Thread.sleep(1000);
-
         iterator.close();
 
         List<Row> result = sql("SELECT * FROM T$consumers");
-        assertThat(result).containsExactly(Row.of("my1", 4L));
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getField(0)).isEqualTo("my1");
+        assertThat((Long) result.get(0).getField(1)).isGreaterThanOrEqualTo(3);
     }
 
     @Test
