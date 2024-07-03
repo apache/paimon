@@ -72,6 +72,9 @@ public interface ParquetDataColumnReader {
     /** @return the next Timestamp with microsecond precision. */
     Timestamp readMicrosTimestamp();
 
+    /** @return the next Timestamp with nanos precision. */
+    Timestamp readNanosTimestamp();
+
     /** @return the underlying dictionary if current reader is dictionary encoded */
     Dictionary getDictionary();
 
@@ -127,5 +130,17 @@ public interface ParquetDataColumnReader {
      * @param id in dictionary
      * @return the TimestampData from the dictionary by id
      */
-    Timestamp readTimestamp(int id);
+    Timestamp readMillsTimestamp(int id);
+
+    /**
+     * @param id in dictionary
+     * @return the TimestampData from the dictionary by id
+     */
+    Timestamp readMicrosTimestamp(int id);
+
+    /**
+     * @param id in dictionary
+     * @return the TimestampData from the dictionary by id
+     */
+    Timestamp readNanosTimestamp(int id);
 }

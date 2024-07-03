@@ -81,6 +81,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -135,7 +136,9 @@ public class ParquetReadWriteTest {
                             new MultisetType(new VarCharType(VarCharType.MAX_LENGTH)),
                             RowType.builder()
                                     .fields(new VarCharType(VarCharType.MAX_LENGTH), new IntType())
-                                    .build())
+                                    .build(),
+                            new MapType(
+                                    new TimestampType(6), new VarCharType(VarCharType.MAX_LENGTH)))
                     .build();
 
     private static final RowType NESTED_ARRAY_MAP_TYPE =
@@ -469,6 +472,9 @@ public class ParquetReadWriteTest {
         Path path = new Path(folder.getPath(), UUID.randomUUID().toString());
         Options conf = new Options();
         conf.setInteger("parquet.block.size", rowGroupSize);
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            conf.set("parquet.enable.dictionary", "false");
+        }
         ParquetWriterFactory factory =
                 new ParquetWriterFactory(new RowDataParquetBuilder(rowType, conf));
         String[] candidates = new String[] {"snappy", "zstd", "gzip"};
@@ -611,17 +617,22 @@ public class ParquetReadWriteTest {
             return new GenericRow(ROW_TYPE.getFieldCount());
         }
 
+        BinaryString str = BinaryString.fromString("" + v);
+
         Map<BinaryString, BinaryString> f30 = new HashMap<>();
-        f30.put(BinaryString.fromString("" + v), BinaryString.fromString("" + v));
+        f30.put(str, str);
 
         Map<Integer, Boolean> f31 = new HashMap<>();
         f31.put(v, v % 2 == 0);
 
         Map<BinaryString, Integer> f32 = new HashMap<>();
-        f32.put(BinaryString.fromString("" + v), v);
+        f32.put(str, v);
+
+        Map<Timestamp, BinaryString> f34 = new HashMap<>();
+        f34.put(toMicros(v), str);
 
         return GenericRow.of(
-                BinaryString.fromString("" + v),
+                str,
                 v % 2 == 0,
                 v.byteValue(),
                 v.shortValue(),
@@ -638,7 +649,7 @@ public class ParquetReadWriteTest {
                 Decimal.fromBigDecimal(BigDecimal.valueOf(v), 5, 0),
                 Decimal.fromBigDecimal(BigDecimal.valueOf(v), 15, 0),
                 Decimal.fromBigDecimal(BigDecimal.valueOf(v), 20, 0),
-                new GenericArray(new Object[] {BinaryString.fromString("" + v), null}),
+                new GenericArray(new Object[] {str, null}),
                 new GenericArray(new Object[] {v % 2 == 0, null}),
                 new GenericArray(new Object[] {v.byteValue(), null}),
                 new GenericArray(new Object[] {v.shortValue(), null}),
@@ -670,7 +681,8 @@ public class ParquetReadWriteTest {
                 new GenericMap(f30),
                 new GenericMap(f31),
                 new GenericMap(f32),
-                GenericRow.of(BinaryString.fromString("" + v), v));
+                GenericRow.of(str, v),
+                new GenericMap(f34));
     }
 
     private Timestamp toMills(Integer v) {

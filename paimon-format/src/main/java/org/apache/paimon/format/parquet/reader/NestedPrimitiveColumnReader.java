@@ -31,6 +31,8 @@ import org.apache.paimon.data.columnar.heap.HeapTimestampVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.format.parquet.position.LevelDelegation;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.LocalZonedTimestampType;
+import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.utils.IntArrayList;
 
 import org.apache.parquet.bytes.ByteBufferInputStream;
@@ -128,7 +130,6 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
             try {
                 this.dictionary =
                         ParquetDataColumnReaderFactory.getDataColumnReaderByTypeOnDictionary(
-                                parquetType.asPrimitiveType(),
                                 dictionaryPage
                                         .getEncoding()
                                         .initDictionary(descriptor, dictionaryPage),
@@ -263,10 +264,21 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
                         return dataColumn.readBytes();
                 }
             case TIMESTAMP_WITHOUT_TIME_ZONE:
+                return readTimestamp(((TimestampType) category).getPrecision());
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                return dataColumn.readMillsTimestamp();
+                return readTimestamp(((LocalZonedTimestampType) category).getPrecision());
             default:
                 throw new RuntimeException("Unsupported type in the list: " + type);
+        }
+    }
+
+    private Timestamp readTimestamp(int precision) {
+        if (precision <= 3) {
+            return dataColumn.readMillsTimestamp();
+        } else if (precision <= 6) {
+            return dataColumn.readMicrosTimestamp();
+        } else {
+            return dataColumn.readNanosTimestamp();
         }
     }
 
@@ -308,10 +320,23 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
                         return dictionary.readBytes(dictionaryValue);
                 }
             case TIMESTAMP_WITHOUT_TIME_ZONE:
+                return dictionaryReadTimestamp(
+                        ((TimestampType) category).getPrecision(), dictionaryValue);
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                return dictionary.readTimestamp(dictionaryValue);
+                return dictionaryReadTimestamp(
+                        ((LocalZonedTimestampType) category).getPrecision(), dictionaryValue);
             default:
                 throw new RuntimeException("Unsupported type in the list: " + type);
+        }
+    }
+
+    private Timestamp dictionaryReadTimestamp(int precision, int dictionaryValue) {
+        if (precision <= 3) {
+            return dictionary.readMillsTimestamp(dictionaryValue);
+        } else if (precision <= 6) {
+            return dictionary.readMicrosTimestamp(dictionaryValue);
+        } else {
+            return dictionary.readNanosTimestamp(dictionaryValue);
         }
     }
 
@@ -499,7 +524,6 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
             }
             dataColumn =
                     ParquetDataColumnReaderFactory.getDataColumnReaderByType(
-                            type.asPrimitiveType(),
                             dataEncoding.getDictionaryBasedValuesReader(
                                     descriptor, VALUES, dictionary.getDictionary()),
                             isUtcTimestamp);
@@ -507,9 +531,7 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
         } else {
             dataColumn =
                     ParquetDataColumnReaderFactory.getDataColumnReaderByType(
-                            type.asPrimitiveType(),
-                            dataEncoding.getValuesReader(descriptor, VALUES),
-                            isUtcTimestamp);
+                            dataEncoding.getValuesReader(descriptor, VALUES), isUtcTimestamp);
             this.isCurrentPageDictionaryEncoded = false;
         }
 
