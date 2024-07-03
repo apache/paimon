@@ -78,11 +78,6 @@ You can also force specifying `'incremental-between-scan-mode'`.
 Requires Spark 3.2+.
 
 Paimon supports that use Spark SQL to do the incremental query that implemented by Spark Table Valued Function.
-To enable this needs these configs below:
-
-```text
---conf spark.sql.extensions=org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
-```
 
 you can use `paimon_incremental_query` in query to extract the incremental data:
 
