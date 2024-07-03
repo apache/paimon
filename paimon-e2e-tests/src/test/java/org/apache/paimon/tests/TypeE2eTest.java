@@ -41,8 +41,8 @@ public class TypeE2eTest extends E2eTestBase {
                                 "f6 DOUBLE,",
                                 "f7 DECIMAL(5, 3),",
                                 "f8 DECIMAL(26, 8),",
-                                "f9 CHAR(10),",
-                                "f10 VARCHAR(10),",
+                                "f9 string,",
+                                "f10 string,",
                                 "f11 STRING,",
                                 "f12 BYTES,",
                                 "f13 DATE,",
@@ -68,7 +68,7 @@ public class TypeE2eTest extends E2eTestBase {
                         + "true, cast(1 as tinyint), cast(10 as smallint), "
                         + "100, 1000, cast(1.1 as float), 1.11, 12.456, "
                         + "cast('123456789123456789.12345678' as decimal(26, 8)), "
-                        + "cast('hi' as char(10)), 'hello', 'table桌子store商店', "
+                        + "cast('hi' as string), 'hello', 'table桌子store商店', "
                         + "ENCODE('table桌子store商店', 'UTF-8'), "
                         + "DATE '2022-04-28', TIMESTAMP '2022-04-28 15:35:45.123', "
                         + "ARRAY['hi', 'hello', cast(null as string), 'test'], (1, 10, '测试')"
@@ -76,7 +76,7 @@ public class TypeE2eTest extends E2eTestBase {
                         + "cast(null as boolean), cast(null as tinyint), cast(null as smallint), "
                         + "cast(null as int), cast(null as bigint), cast(null as float), "
                         + "cast(null as double), cast(null as decimal(5, 3)), cast(null as decimal(26, 8)), "
-                        + "cast(null as char(10)), cast(null as varchar(10)), cast(null as string), "
+                        + "cast(null as string), cast(null as string), cast(null as string), "
                         + "cast(null as bytes), cast(null as date), cast(null as timestamp(3)), "
                         + "cast(null as array<string>), cast(null as row<a int, b bigint, c string>)"
                         + ");",
@@ -117,8 +117,8 @@ public class TypeE2eTest extends E2eTestBase {
                                 "f6 DOUBLE,",
                                 "f7 DECIMAL(5, 3),",
                                 "f8 DECIMAL(26, 8),",
-                                "f9 CHAR(10),",
-                                "f10 VARCHAR(10),",
+                                "f9 STRING,",
+                                "f10 STRING,",
                                 "f11 STRING,",
                                 "f12 BYTES,",
                                 "f13 DATE,",
@@ -153,7 +153,7 @@ public class TypeE2eTest extends E2eTestBase {
                         + "true, cast(1 as tinyint), cast(10 as smallint), "
                         + "100, 1000, cast(1.1 as float), 1.11, 12.456, "
                         + "cast('123456789123456789.12345678' as decimal(26, 8)), "
-                        + "cast('hi' as char(10)), 'hello', 'table桌子store商店', "
+                        + "cast('hi' as string), 'hello', 'table桌子store商店', "
                         + "ENCODE('table桌子store商店', 'UTF-8'), "
                         + "DATE '2022-04-28', TIMESTAMP '2022-04-28 15:35:45.123', "
                         + "ARRAY['hi', 'hello', cast(null as string), 'test'], (1, 10, '测试'), "
@@ -162,7 +162,7 @@ public class TypeE2eTest extends E2eTestBase {
                         + "cast(null as boolean), cast(null as tinyint), cast(null as smallint), "
                         + "cast(null as int), cast(null as bigint), cast(null as float), "
                         + "cast(null as double), cast(null as decimal(5, 3)), cast(null as decimal(26, 8)), "
-                        + "cast(null as char(10)), cast(null as varchar(10)), cast(null as string), "
+                        + "cast(null as string), cast(null as string), cast(null as string), "
                         + "cast(null as bytes), cast(null as date), cast(null as timestamp(3)), "
                         + "cast(null as array<string>), cast(null as row<a int, b bigint, c string>), "
                         + "cast(null as map<string, bigint>)"

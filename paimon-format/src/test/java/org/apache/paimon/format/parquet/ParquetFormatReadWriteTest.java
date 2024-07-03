@@ -31,11 +31,6 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
     }
 
     @Override
-    protected boolean supportNestedNested() {
-        return false;
-    }
-
-    @Override
     protected FileFormat fileFormat() {
         return new ParquetFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024));
     }

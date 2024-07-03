@@ -302,8 +302,9 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
         assertThat(min.getInt(0)).isEqualTo(2);
         assertThat(max.getInt(0)).isEqualTo(2);
 
-        assertThat(min.getString(1)).isEqualTo(BinaryString.fromString("200       "));
-        assertThat(max.getString(1)).isEqualTo(BinaryString.fromString("300       "));
+        // parquet does not support padding
+        assertThat(min.getString(1).toString()).startsWith("200");
+        assertThat(max.getString(1).toString()).startsWith("300");
 
         assertThat(min.getString(2)).isEqualTo(BinaryString.fromString("201"));
         assertThat(max.getString(2)).isEqualTo(BinaryString.fromString("301"));

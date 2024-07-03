@@ -139,7 +139,7 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
                 .createReader(dataSplit)
                 .forEachRemaining(
                         a -> {
-                            Integer current = a.getInt(2);
+                            int current = a.getShort(2);
                             Assertions.assertThat(current).isGreaterThanOrEqualTo(i.get());
                             i.set(current);
                         });

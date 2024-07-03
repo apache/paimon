@@ -130,8 +130,9 @@ public class PrimaryKeyTableColumnTypeFileMetaTest extends ColumnTypeFileMetaTes
             InternalRow max = serializer.evolution(stats.maxValues());
             assertThat(min.getFieldCount()).isEqualTo(4);
             if (filesName.contains(fileMeta.fileName())) {
-                assertThat(min.getString(0)).isEqualTo(BinaryString.fromString("200       "));
-                assertThat(max.getString(0)).isEqualTo(BinaryString.fromString("300       "));
+                // parquet does not support padding
+                assertThat(min.getString(0).toString()).startsWith("200");
+                assertThat(max.getString(0).toString()).startsWith("300");
 
                 assertThat(min.getString(1)).isEqualTo(BinaryString.fromString("201"));
                 assertThat(max.getString(1)).isEqualTo(BinaryString.fromString("301"));

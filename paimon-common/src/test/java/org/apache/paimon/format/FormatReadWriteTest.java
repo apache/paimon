@@ -75,10 +75,6 @@ public abstract class FormatReadWriteTest {
 
     protected abstract FileFormat fileFormat();
 
-    protected boolean supportNestedNested() {
-        return true;
-    }
-
     @Test
     public void testSimpleTypes() throws IOException {
         RowType rowType = DataTypes.ROW(DataTypes.INT().notNull(), DataTypes.BIGINT());
@@ -162,24 +158,22 @@ public abstract class FormatReadWriteTest {
                         .field("date", DataTypes.DATE())
                         .field("decimal", DataTypes.DECIMAL(2, 2))
                         .field("decimal2", DataTypes.DECIMAL(38, 2))
-                        .field("decimal3", DataTypes.DECIMAL(10, 1));
+                        .field("decimal3", DataTypes.DECIMAL(10, 1))
+                        .field(
+                                "rowArray",
+                                DataTypes.ARRAY(
+                                        DataTypes.ROW(
+                                                DataTypes.FIELD(
+                                                        0,
+                                                        "int0",
+                                                        DataTypes.INT().notNull(),
+                                                        "nested row int field 0"),
+                                                DataTypes.FIELD(
+                                                        1,
+                                                        "double1",
+                                                        DataTypes.DOUBLE().notNull(),
+                                                        "nested row double field 1"))));
 
-        if (supportNestedNested()) {
-            builder.field(
-                    "rowArray",
-                    DataTypes.ARRAY(
-                            DataTypes.ROW(
-                                    DataTypes.FIELD(
-                                            0,
-                                            "int0",
-                                            DataTypes.INT().notNull(),
-                                            "nested row int field 0"),
-                                    DataTypes.FIELD(
-                                            1,
-                                            "double1",
-                                            DataTypes.DOUBLE().notNull(),
-                                            "nested row double field 1"))));
-        }
         RowType rowType = builder.build();
 
         if (ThreadLocalRandom.current().nextBoolean()) {
@@ -217,14 +211,9 @@ public abstract class FormatReadWriteTest {
                         2456,
                         Decimal.fromBigDecimal(new BigDecimal("0.22"), 2, 2),
                         Decimal.fromBigDecimal(new BigDecimal("12312455.22"), 38, 2),
-                        Decimal.fromBigDecimal(new BigDecimal("12455.1"), 10, 1));
-
-        if (supportNestedNested()) {
-            values = new ArrayList<>(values);
-            values.add(
-                    new GenericArray(
-                            new Object[] {GenericRow.of(1, 0.1D), GenericRow.of(2, 0.2D)}));
-        }
+                        Decimal.fromBigDecimal(new BigDecimal("12455.1"), 10, 1),
+                        new GenericArray(
+                                new Object[] {GenericRow.of(1, 0.1D), GenericRow.of(2, 0.2D)}));
         return GenericRow.of(values.toArray());
     }
 
