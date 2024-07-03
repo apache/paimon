@@ -628,7 +628,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase {
 
       sql(s"""
              |CREATE TABLE target (a INT, b INT, c STRING)
-             |TBLPROPERTIES ('primary-key'='a', 'bucket'='2')
+             |TBLPROPERTIES ('primary-key'='a')
              |""".stripMargin)
       sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
 
