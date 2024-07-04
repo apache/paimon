@@ -58,7 +58,9 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
     }
 
     public RichCdcMultiplexRecordEventParser(
-            @Nullable NewTableSchemaBuilder schemaBuilder, TableNameConverter tableNameConverter, Set<String> createdTables) {
+            @Nullable NewTableSchemaBuilder schemaBuilder,
+            TableNameConverter tableNameConverter,
+            Set<String> createdTables) {
         this.schemaBuilder = schemaBuilder;
         this.tableNameConverter = tableNameConverter;
         this.createdTables = createdTables;

@@ -41,7 +41,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Pattern;
 
 import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
 
@@ -146,7 +145,9 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
         } catch (Catalog.DatabaseNotExistException e) {
             throw new RuntimeException(e);
         }
-        return () -> new RichCdcMultiplexRecordEventParser(schemaBuilder, tableNameConverter, createdTables);
+        return () ->
+                new RichCdcMultiplexRecordEventParser(
+                        schemaBuilder, tableNameConverter, createdTables);
     }
 
     @Override
