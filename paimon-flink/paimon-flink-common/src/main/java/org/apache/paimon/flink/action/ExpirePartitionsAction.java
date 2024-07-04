@@ -28,13 +28,10 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
 
-import static org.apache.paimon.catalog.CatalogUtils.table;
-
 /** Expire partitions action for Flink. */
 public class ExpirePartitionsAction extends TableActionBase {
-    private final String expirationTime;
-    private final String timestampFormatter;
-    private PartitionExpire partitionExpire;
+
+    private final PartitionExpire partitionExpire;
 
     public ExpirePartitionsAction(
             String warehouse,
@@ -50,11 +47,9 @@ public class ExpirePartitionsAction extends TableActionBase {
                             "Only FileStoreTable supports expire_partitions action. The table type is '%s'.",
                             table.getClass().getName()));
         }
-        this.expirationTime = expirationTime;
-        this.timestampFormatter = timestampFormatter;
 
         FileStoreTable fileStoreTable = (FileStoreTable) table;
-        FileStore fileStore = fileStoreTable.store();
+        FileStore<?> fileStore = fileStoreTable.store();
         this.partitionExpire =
                 new PartitionExpire(
                         fileStore.partitionType(),

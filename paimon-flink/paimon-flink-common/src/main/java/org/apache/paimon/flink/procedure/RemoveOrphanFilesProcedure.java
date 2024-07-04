@@ -20,13 +20,14 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.operation.OrphanFilesClean;
-import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.procedure.ProcedureContext;
 
-import static org.apache.paimon.utils.Preconditions.checkArgument;
+import java.util.List;
+
+import static org.apache.paimon.flink.action.RemoveOrphanFilesAction.executeOrphanFilesClean;
 
 /**
  * Remove orphan files procedure. Usage:
@@ -37,6 +38,9 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  *
  *  -- use custom file delete interval
  *  CALL sys.remove_orphan_files('tableId', '2023-12-31 23:59:59')
+ *
+ *  -- remove all tables' orphan files in db
+ *  CALL sys.remove_orphan_files('databaseName.*', '2023-12-31 23:59:59')
  * </code></pre>
  */
 public class RemoveOrphanFilesProcedure extends ProcedureBase {
@@ -56,24 +60,21 @@ public class RemoveOrphanFilesProcedure extends ProcedureBase {
             ProcedureContext procedureContext, String tableId, String olderThan, boolean dryRun)
             throws Exception {
         Identifier identifier = Identifier.fromString(tableId);
-        Table table = catalog.getTable(identifier);
+        String databaseName = identifier.getDatabaseName();
+        String tableName = identifier.getObjectName();
 
-        checkArgument(
-                table instanceof FileStoreTable,
-                "Only FileStoreTable supports remove-orphan-files action. The table type is '%s'.",
-                table.getClass().getName());
+        List<Pair<String, OrphanFilesClean>> tableOrphanFilesCleans =
+                OrphanFilesClean.constructOrphanFilesCleans(catalog, databaseName, tableName);
 
-        OrphanFilesClean orphanFilesClean = new OrphanFilesClean((FileStoreTable) table);
         if (!StringUtils.isBlank(olderThan)) {
-            orphanFilesClean.olderThan(olderThan);
+            OrphanFilesClean.initOlderThan(olderThan, tableOrphanFilesCleans);
         }
 
         if (dryRun) {
-            orphanFilesClean.fileCleaner(path -> {});
+            OrphanFilesClean.initDryRun(tableOrphanFilesCleans);
         }
 
-        return OrphanFilesClean.showDeletedFiles(orphanFilesClean.clean(), 200)
-                .toArray(new String[0]);
+        return executeOrphanFilesClean(tableOrphanFilesCleans);
     }
 
     @Override

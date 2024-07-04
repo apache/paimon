@@ -18,51 +18,92 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.OrphanFilesClean;
-import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.ExecutorThreadFactory;
+import org.apache.paimon.utils.Pair;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
-import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.operation.OrphanFilesClean.SHOW_LIMIT;
 
 /** Action to remove the orphan data files and metadata files. */
-public class RemoveOrphanFilesAction extends TableActionBase {
-    private static final Logger LOG = LoggerFactory.getLogger(RemoveOrphanFilesAction.class);
+public class RemoveOrphanFilesAction extends ActionBase {
 
-    private final OrphanFilesClean orphanFilesClean;
+    private final List<Pair<String, OrphanFilesClean>> tableOrphanFilesCleans;
 
     public RemoveOrphanFilesAction(
             String warehouse,
             String databaseName,
-            String tableName,
-            Map<String, String> catalogConfig) {
-        super(warehouse, databaseName, tableName, catalogConfig);
-
-        checkArgument(
-                table instanceof FileStoreTable,
-                "Only FileStoreTable supports remove-orphan-files action. The table type is '%s'.",
-                table.getClass().getName());
-        this.orphanFilesClean = new OrphanFilesClean((FileStoreTable) table);
+            @Nullable String tableName,
+            Map<String, String> catalogConfig)
+            throws Catalog.TableNotExistException, Catalog.DatabaseNotExistException {
+        super(warehouse, catalogConfig);
+        this.tableOrphanFilesCleans =
+                OrphanFilesClean.constructOrphanFilesCleans(catalog, databaseName, tableName);
     }
 
-    public RemoveOrphanFilesAction olderThan(String timestamp) {
-        this.orphanFilesClean.olderThan(timestamp);
-        return this;
+    public void olderThan(String olderThan) {
+        OrphanFilesClean.initOlderThan(olderThan, this.tableOrphanFilesCleans);
     }
 
-    public RemoveOrphanFilesAction dryRun() {
-        this.orphanFilesClean.fileCleaner(path -> {});
-        return this;
+    public void dryRun() {
+        OrphanFilesClean.initDryRun(this.tableOrphanFilesCleans);
+    }
+
+    public static String[] executeOrphanFilesClean(
+            List<Pair<String, OrphanFilesClean>> tableOrphanFilesCleans)
+            throws ExecutionException, InterruptedException {
+        int availableProcessors = Runtime.getRuntime().availableProcessors();
+        ExecutorService executePool =
+                new ThreadPoolExecutor(
+                        availableProcessors,
+                        availableProcessors,
+                        1,
+                        TimeUnit.SECONDS,
+                        new LinkedBlockingQueue<>(),
+                        new ExecutorThreadFactory(
+                                Thread.currentThread().getName() + "-RemoveOrphanFiles"));
+
+        List<Future<List<Path>>> tasks = new ArrayList<>();
+        for (Pair<String, OrphanFilesClean> tableOrphanFilesClean : tableOrphanFilesCleans) {
+            OrphanFilesClean orphanFilesClean = tableOrphanFilesClean.getRight();
+            Future<List<Path>> task =
+                    executePool.submit(
+                            () -> {
+                                try {
+                                    return orphanFilesClean.clean();
+                                } catch (Exception e) {
+                                    throw new RuntimeException(e);
+                                }
+                            });
+            tasks.add(task);
+        }
+
+        List<Path> cleanOrphanFiles = new ArrayList<>();
+        for (Future<List<Path>> task : tasks) {
+            cleanOrphanFiles.addAll(task.get());
+        }
+
+        executePool.shutdownNow();
+
+        return OrphanFilesClean.showDeletedFiles(cleanOrphanFiles, SHOW_LIMIT)
+                .toArray(new String[0]);
     }
 
     @Override
     public void run() throws Exception {
-        List<String> result = OrphanFilesClean.showDeletedFiles(orphanFilesClean.clean(), 200);
-        String files = String.join(", ", result);
-        LOG.info("orphan files: [{}]", files);
+        executeOrphanFilesClean(tableOrphanFilesCleans);
     }
 }
