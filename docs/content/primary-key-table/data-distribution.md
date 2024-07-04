@@ -26,11 +26,6 @@ under the License.
 
 # Data Distribution
 
-{{< hint info >}}
-By default, Paimon table only has one bucket, which means it only provides single parallelism read and write.
-Please configure the bucket strategy to your table.
-{{< /hint >}}
-
 A bucket is the smallest storage unit for reads and writes, each bucket directory contains an [LSM tree]({{< ref "primary-key-table/overview#lsm-trees" >}}).
 
 ## Fixed Bucket
@@ -43,9 +38,11 @@ A too large number of buckets leads to too many small files, and a too small num
 
 ## Dynamic Bucket
 
-Configure `'bucket' = '-1'`. The keys that arrive first will fall into the old buckets, and the new keys will fall into
-the new buckets, the distribution of buckets and keys depends on the order in which the data arrives. Paimon maintains
-an index to determine which key corresponds to which bucket.
+Default mode for primary key table, or configure `'bucket' = '-1'`.
+
+The keys that arrive first will fall into the old buckets, and the new keys will fall into the new buckets, the
+distribution of buckets and keys depends on the order in which the data arrives. Paimon maintains an index to determine
+which key corresponds to which bucket.
 
 Paimon will automatically expand the number of buckets.
 
