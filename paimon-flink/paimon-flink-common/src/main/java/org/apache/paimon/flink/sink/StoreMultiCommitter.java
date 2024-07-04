@@ -208,5 +208,8 @@ public class StoreMultiCommitter
         for (StoreCommitter committer : tableCommitters.values()) {
             committer.close();
         }
+        if (catalog != null) {
+            catalog.close();
+        }
     }
 }

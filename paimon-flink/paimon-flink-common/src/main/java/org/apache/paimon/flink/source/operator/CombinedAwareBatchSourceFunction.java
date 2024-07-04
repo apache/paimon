@@ -114,4 +114,12 @@ public class CombinedAwareBatchSourceFunction
                         split -> ((DataSplit) split.f0).bucket())
                 .transform(name, typeInfo, new MultiTablesReadOperator(catalogLoader, false));
     }
+
+    @Override
+    public void close() throws Exception {
+        super.close();
+        if (tableScan != null) {
+            tableScan.close();
+        }
+    }
 }

@@ -203,6 +203,10 @@ public class MultiTablesStoreCompactOperator
         for (StoreSinkWrite write : writes.values()) {
             write.close();
         }
+        if (catalog != null) {
+            catalog.close();
+            catalog = null;
+        }
     }
 
     private FileStoreTable getTable(Identifier tableId) throws InterruptedException {

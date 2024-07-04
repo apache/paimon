@@ -43,7 +43,6 @@ public class CdcMultiplexRecordChannelComputer implements ChannelComputer<CdcMul
     private transient int numChannels;
 
     private Map<Identifier, CdcRecordChannelComputer> channelComputers;
-    private Catalog catalog;
 
     public CdcMultiplexRecordChannelComputer(Catalog.Loader catalogLoader) {
         this.catalogLoader = catalogLoader;
@@ -52,7 +51,6 @@ public class CdcMultiplexRecordChannelComputer implements ChannelComputer<CdcMul
     @Override
     public void setup(int numChannels) {
         this.numChannels = numChannels;
-        this.catalog = catalogLoader.load();
         this.channelComputers = new HashMap<>();
     }
 
@@ -72,11 +70,13 @@ public class CdcMultiplexRecordChannelComputer implements ChannelComputer<CdcMul
                 Identifier.create(record.databaseName(), record.tableName()),
                 id -> {
                     FileStoreTable table;
-                    try {
+                    try (Catalog catalog = catalogLoader.load()) {
                         table = (FileStoreTable) catalog.getTable(id);
                     } catch (Catalog.TableNotExistException e) {
-                        LOG.error("Failed to get table " + id.getFullName());
+                        LOG.error("Failed to get table {}", id.getFullName(), e);
                         return null;
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
                     }
 
                     if (table.bucketMode() != BucketMode.HASH_FIXED) {

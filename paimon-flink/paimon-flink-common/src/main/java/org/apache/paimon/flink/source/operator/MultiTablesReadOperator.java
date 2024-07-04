@@ -129,5 +129,8 @@ public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
         if (ioManager != null) {
             ioManager.close();
         }
+        if (catalog != null) {
+            catalog.close();
+        }
     }
 }

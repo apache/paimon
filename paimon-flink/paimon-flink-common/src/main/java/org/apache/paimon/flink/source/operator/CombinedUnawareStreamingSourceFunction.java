@@ -113,4 +113,12 @@ public class CombinedUnawareStreamingSourceFunction
                 .forceNonParallel()
                 .rebalance();
     }
+
+    @Override
+    public void close() throws Exception {
+        super.close();
+        if (tableScan != null) {
+            tableScan.close();
+        }
+    }
 }

@@ -145,11 +145,15 @@ public class CdcRecordStoreMultiWriteOperatorTest {
     }
 
     @AfterEach
-    public void after() {
+    public void after() throws Exception {
         // assert all connections are closed
         Predicate<Path> pathPredicate = path -> path.toString().contains(tempDir.toString());
         assertThat(TraceableFileIO.openInputStreams(pathPredicate)).isEmpty();
         assertThat(TraceableFileIO.openOutputStreams(pathPredicate)).isEmpty();
+
+        if (catalog != null) {
+            catalog.close();
+        }
     }
 
     @Test
