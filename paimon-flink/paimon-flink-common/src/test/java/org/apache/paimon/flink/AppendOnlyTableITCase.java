@@ -254,6 +254,9 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
                         CoreOptions.StartupMode.LATEST.toString());
         BlockingIterator<Row, Row> iterator = streamSqlBlockIter("SELECT * FROM T");
 
+        // wait streaming job start
+        Thread.sleep(2000);
+
         sql("INSERT INTO T VALUES (2)");
         // Only fetch latest snapshot is, dynamic option worked
         assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of(2));
