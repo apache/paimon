@@ -52,7 +52,7 @@ public class DeletionVectorIndexFileMaintainer {
                         .map(deletionFile -> new Path(deletionFile.path()).getName())
                         .distinct()
                         .collect(Collectors.toList());
-        indexFileHandler.scan().stream()
+        indexFileHandler.scanEntries().stream()
                 .filter(
                         indexManifestEntry ->
                                 touchedIndexFileNames.contains(

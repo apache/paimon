@@ -26,7 +26,6 @@ import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.catalyst.analysis.NoSuchTableException;
 import org.apache.spark.sql.catalyst.expressions.GenericInternalRow;
-import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan;
 import org.apache.spark.sql.connector.catalog.CatalogPlugin;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.Table;
@@ -109,7 +108,7 @@ abstract class BaseProcedure implements Procedure {
         }
     }
 
-    protected LogicalPlan createRelation(Identifier ident) {
+    protected DataSourceV2Relation createRelation(Identifier ident) {
         return DataSourceV2Relation.create(
                 loadSparkTable(ident), Option.apply(tableCatalog), Option.apply(ident));
     }

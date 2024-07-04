@@ -109,7 +109,7 @@ public class FlinkBatchJobPartitionMarkdoneITCase extends CatalogITCaseBase {
                         + ") PARTITIONED BY (p) WITH ()");
     }
 
-    public void validateResult(FileStoreTable table) throws Exception {
+    private void validateResult(FileStoreTable table) throws Exception {
         LocalFileIO fileIO = new LocalFileIO();
         Path successPath1 = new Path(table.location(), "p=p1/_SUCCESS");
         SuccessFile successFile1 = SuccessFile.safelyFromPath(fileIO, successPath1);

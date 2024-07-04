@@ -38,6 +38,8 @@ import org.apache.paimon.types.RowType;
 
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.config.TableConfigOptions;
+import org.apache.flink.types.Row;
+import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 
@@ -185,12 +187,13 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
         }
     }
 
-    protected void callProcedure(String procedureStatement) {
+    protected CloseableIterator<Row> callProcedure(String procedureStatement) {
         // default execution mode
-        callProcedure(procedureStatement, true, false);
+        return callProcedure(procedureStatement, true, false);
     }
 
-    protected void callProcedure(String procedureStatement, boolean isStreaming, boolean dmlSync) {
+    protected CloseableIterator<Row> callProcedure(
+            String procedureStatement, boolean isStreaming, boolean dmlSync) {
         TableEnvironment tEnv;
         if (isStreaming) {
             tEnv = tableEnvironmentBuilder().streamingMode().checkpointIntervalMs(500).build();
@@ -206,6 +209,6 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
                         warehouse));
         tEnv.useCatalog("PAIMON");
 
-        tEnv.executeSql(procedureStatement);
+        return tEnv.executeSql(procedureStatement).collect();
     }
 }

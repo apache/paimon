@@ -270,6 +270,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
             SplitGenerator splitGenerator,
             Map<BinaryRow, Map<Integer, List<DataFileMeta>>> groupedDataFiles) {
         List<DataSplit> splits = new ArrayList<>();
+        // Read deletion indexes at once to reduce file IO
+        Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> deletionIndexFilesMap =
+                deletionVectors
+                        ? indexFileHandler.scan(
+                                snapshotId, DELETION_VECTORS_INDEX, groupedDataFiles.keySet())
+                        : Collections.emptyMap();
         for (Map.Entry<BinaryRow, Map<Integer, List<DataFileMeta>>> entry :
                 groupedDataFiles.entrySet()) {
             BinaryRow partition = entry.getKey();
@@ -287,12 +293,9 @@ public class SnapshotReaderImpl implements SnapshotReader {
                         isStreaming
                                 ? splitGenerator.splitForStreaming(bucketFiles)
                                 : splitGenerator.splitForBatch(bucketFiles);
-
                 List<IndexFileMeta> deletionIndexFiles =
-                        deletionVectors
-                                ? indexFileHandler.scan(
-                                        snapshotId, DELETION_VECTORS_INDEX, partition, bucket)
-                                : Collections.emptyList();
+                        deletionIndexFilesMap.getOrDefault(
+                                Pair.of(partition, bucket), Collections.emptyList());
                 for (SplitGenerator.SplitGroup splitGroup : splitGroups) {
                     List<DataFileMeta> dataFiles = splitGroup.files;
                     String bucketPath = pathFactory.bucketPath(partition, bucket).toString();
@@ -350,6 +353,17 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 (part, bucketMap) ->
                         buckets.computeIfAbsent(part, k -> new HashSet<>())
                                 .addAll(bucketMap.keySet()));
+        // Read deletion indexes at once to reduce file IO
+        Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> beforDeletionIndexFilesMap =
+                deletionVectors
+                        ? indexFileHandler.scan(
+                                beforeSnapshotId, DELETION_VECTORS_INDEX, beforeFiles.keySet())
+                        : Collections.emptyMap();
+        Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> deletionIndexFilesMap =
+                deletionVectors
+                        ? indexFileHandler.scan(
+                                plan.snapshotId(), DELETION_VECTORS_INDEX, dataFiles.keySet())
+                        : Collections.emptyMap();
 
         for (Map.Entry<BinaryRow, Set<Integer>> entry : buckets.entrySet()) {
             BinaryRow part = entry.getKey();
@@ -376,15 +390,16 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                 .isStreaming(isStreaming)
                                 .withBucketPath(pathFactory.bucketPath(part, bucket).toString());
                 if (deletionVectors) {
-                    List<IndexFileMeta> beforeDeletionIndexes =
-                            indexFileHandler.scan(
-                                    beforeSnapshotId, DELETION_VECTORS_INDEX, part, bucket);
-                    List<IndexFileMeta> deletionIndexes =
-                            indexFileHandler.scan(
-                                    plan.snapshotId(), DELETION_VECTORS_INDEX, part, bucket);
                     builder.withBeforeDeletionFiles(
-                            getDeletionFiles(before, beforeDeletionIndexes));
-                    builder.withDataDeletionFiles(getDeletionFiles(data, deletionIndexes));
+                            getDeletionFiles(
+                                    before,
+                                    beforDeletionIndexFilesMap.getOrDefault(
+                                            Pair.of(part, bucket), Collections.emptyList())));
+                    builder.withDataDeletionFiles(
+                            getDeletionFiles(
+                                    data,
+                                    deletionIndexFilesMap.getOrDefault(
+                                            Pair.of(part, bucket), Collections.emptyList())));
                 }
                 splits.add(builder.build());
             }

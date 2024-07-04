@@ -1114,7 +1114,7 @@ public abstract class FileStoreTableTestBase {
                 .satisfies(
                         anyCauseMatches(
                                 IllegalArgumentException.class,
-                                "Branch name 'main' is the default branch and cannot be used."));
+                                "Branch name 'main' is the default branch and cannot be created."));
 
         assertThatThrownBy(() -> table.createBranch("branch-1", "tag1"))
                 .satisfies(
@@ -1166,7 +1166,7 @@ public abstract class FileStoreTableTestBase {
     }
 
     @Test
-    public void testMergeBranch() throws Exception {
+    public void testfastForward() throws Exception {
         FileStoreTable table = createFileStoreTable();
         generateBranch(table);
         FileStoreTable tableBranch = createFileStoreTable(BRANCH_NAME);
@@ -1180,17 +1180,17 @@ public abstract class FileStoreTableTestBase {
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
         // Test for unsupported branch name
-        assertThatThrownBy(() -> table.mergeBranch("test-branch"))
+        assertThatThrownBy(() -> table.fastForward("test-branch"))
                 .satisfies(
                         anyCauseMatches(
                                 IllegalArgumentException.class,
                                 "Branch name 'test-branch' doesn't exist."));
 
-        assertThatThrownBy(() -> table.mergeBranch("main"))
+        assertThatThrownBy(() -> table.fastForward("main"))
                 .satisfies(
                         anyCauseMatches(
                                 IllegalArgumentException.class,
-                                "Branch name 'main' do not use in merge branch."));
+                                "Branch name 'main' do not use in fast-forward."));
 
         // Write data to branch1
         try (StreamTableWrite write = tableBranch.newWrite(commitUser);
@@ -1217,10 +1217,10 @@ public abstract class FileStoreTableTestBase {
                                 BATCH_ROW_TO_STRING))
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
-        // Merge branch1 to main branch
-        table.mergeBranch(BRANCH_NAME);
+        // Fast-forward branch1 to main branch
+        table.fastForward(BRANCH_NAME);
 
-        // After merge branch1, verify branch1 and the main branch have the same data
+        // After fast-forward branch1, verify branch1 and the main branch have the same data
         assertThat(
                         getResult(
                                 table.newRead(),
@@ -1279,8 +1279,8 @@ public abstract class FileStoreTableTestBase {
                         "0|0|0|binary|varbinary|mapKey:mapVal|multiset",
                         "2|20|200|binary|varbinary|mapKey:mapVal|multiset");
 
-        // Merge branch1 to main branch again
-        table.mergeBranch("branch1");
+        // Fast-forward branch1 to main branch again
+        table.fastForward("branch1");
 
         // Verify data in main branch is same to branch1
         assertThat(

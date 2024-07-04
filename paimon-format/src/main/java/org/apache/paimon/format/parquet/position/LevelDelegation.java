@@ -16,23 +16,23 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink;
+package org.apache.paimon.format.parquet.position;
 
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.flink.FlinkRowWrapper;
-import org.apache.paimon.flink.utils.InternalTypeInfo;
-import org.apache.paimon.types.RowType;
+/** To delegate repetition level and definition level. */
+public class LevelDelegation {
+    private final int[] repetitionLevel;
+    private final int[] definitionLevel;
 
-import org.apache.flink.api.common.functions.MapFunction;
-import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.table.data.RowData;
+    public LevelDelegation(int[] repetitionLevel, int[] definitionLevel) {
+        this.repetitionLevel = repetitionLevel;
+        this.definitionLevel = definitionLevel;
+    }
 
-/** An util to convert {@link RowData} stream to {@link InternalRow} stream. */
-public class MapToInternalRow {
+    public int[] getRepetitionLevel() {
+        return repetitionLevel;
+    }
 
-    public static DataStream<InternalRow> map(DataStream<RowData> input, RowType rowType) {
-        return input.map((MapFunction<RowData, InternalRow>) FlinkRowWrapper::new)
-                .setParallelism(input.getParallelism())
-                .returns(InternalTypeInfo.fromRowType(rowType));
+    public int[] getDefinitionLevel() {
+        return definitionLevel;
     }
 }

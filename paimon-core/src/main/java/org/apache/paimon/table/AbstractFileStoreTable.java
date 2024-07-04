@@ -525,13 +525,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public void mergeBranch(String branchName) {
-        branchManager().mergeBranch(branchName);
-    }
-
-    @Override
-    public void replaceBranch(String fromBranch) {
-        branchManager().replaceBranch(fromBranch);
+    public void fastForward(String branchName) {
+        branchManager().fastForward(branchName);
     }
 
     @Override
@@ -549,9 +544,10 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             // earliest hint
             SnapshotManager snapshotManager = snapshotManager();
             if (!snapshotManager.snapshotExists(taggedSnapshot.id())) {
-                fileIO.writeFileUtf8(
+                fileIO.writeFile(
                         snapshotManager().snapshotPath(taggedSnapshot.id()),
-                        fileIO.readFileUtf8(tagManager.tagPath(tagName)));
+                        fileIO.readFileUtf8(tagManager.tagPath(tagName)),
+                        false);
                 snapshotManager.commitEarliestHint(taggedSnapshot.id());
             }
         } catch (IOException e) {

@@ -30,6 +30,7 @@ import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
 import org.apache.hadoop.hive.metastore.api.Partition;
+import org.apache.hadoop.hive.metastore.api.PartitionEventType;
 import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 
 import java.util.ArrayList;
@@ -106,8 +107,25 @@ public class HiveMetastoreClient implements MetastoreClient {
     }
 
     @Override
+    public void markDone(LinkedHashMap<String, String> partitionSpec) throws Exception {
+        try {
+            client.markPartitionForEvent(
+                    identifier.getDatabaseName(),
+                    identifier.getObjectName(),
+                    partitionSpec,
+                    PartitionEventType.LOAD_DONE);
+        } catch (NoSuchObjectException e) {
+            // do nothing if the partition not exists
+        }
+    }
+
+    @Override
     public void close() throws Exception {
         client.close();
+    }
+
+    public IMetaStoreClient client() {
+        return this.client;
     }
 
     /** Factory to create {@link HiveMetastoreClient}. */

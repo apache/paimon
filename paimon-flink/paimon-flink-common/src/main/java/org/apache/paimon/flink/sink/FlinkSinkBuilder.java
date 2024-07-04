@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.sink.index.GlobalDynamicBucketSink;
 import org.apache.paimon.flink.sorter.TableSortInfo;
 import org.apache.paimon.flink.sorter.TableSorter;
@@ -70,11 +71,11 @@ public class FlinkSinkBuilder {
 
     private static final Logger LOG = LoggerFactory.getLogger(FlinkSinkBuilder.class);
 
-    private final FileStoreTable table;
+    protected final FileStoreTable table;
 
     private DataStream<RowData> input;
-    @Nullable private Map<String, String> overwritePartition;
-    @Nullable private Integer parallelism;
+    @Nullable protected Map<String, String> overwritePartition;
+    @Nullable protected Integer parallelism;
     private Boolean boundedInput = null;
     @Nullable private TableSortInfo tableSortInfo;
 
@@ -221,7 +222,7 @@ public class FlinkSinkBuilder {
     /** Build {@link DataStreamSink}. */
     public DataStreamSink<?> build() {
         input = trySortInput(input);
-        DataStream<InternalRow> input = MapToInternalRow.map(this.input, table.rowType());
+        DataStream<InternalRow> input = mapToInternalRow(this.input, table.rowType());
         if (table.coreOptions().localMergeEnabled() && table.schema().primaryKeys().size() > 0) {
             input =
                     input.forward()
@@ -247,7 +248,14 @@ public class FlinkSinkBuilder {
         }
     }
 
-    private DataStreamSink<?> buildDynamicBucketSink(
+    protected DataStream<InternalRow> mapToInternalRow(
+            DataStream<RowData> input, org.apache.paimon.types.RowType rowType) {
+        return input.map((MapFunction<RowData, InternalRow>) FlinkRowWrapper::new)
+                .setParallelism(input.getParallelism())
+                .returns(org.apache.paimon.flink.utils.InternalTypeInfo.fromRowType(rowType));
+    }
+
+    protected DataStreamSink<?> buildDynamicBucketSink(
             DataStream<InternalRow> input, boolean globalIndex) {
         checkArgument(logSinkFunction == null, "Dynamic bucket mode can not work with log system.");
         return compactSink && !globalIndex
@@ -260,7 +268,7 @@ public class FlinkSinkBuilder {
                                 .build(input, parallelism);
     }
 
-    private DataStreamSink<?> buildForFixedBucket(DataStream<InternalRow> input) {
+    protected DataStreamSink<?> buildForFixedBucket(DataStream<InternalRow> input) {
         DataStream<InternalRow> partitioned =
                 partition(
                         input,

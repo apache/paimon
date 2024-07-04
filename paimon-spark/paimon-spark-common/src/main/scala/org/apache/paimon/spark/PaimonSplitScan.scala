@@ -40,8 +40,14 @@ case class PaimonSplitScan(
 
   override def toBatch: Batch = {
     PaimonBatch(
-      reshuffleSplits(dataSplits.asInstanceOf[Array[Split]]),
+      getInputPartitions(dataSplits.asInstanceOf[Array[Split]]),
       table.newReadBuilder,
       metadataColumns)
+  }
+}
+
+object PaimonSplitScan {
+  def apply(table: Table, dataSplits: Array[DataSplit]): PaimonSplitScan = {
+    new PaimonSplitScan(table, dataSplits)
   }
 }

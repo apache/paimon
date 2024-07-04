@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 
 /** Statistics for a scan operation. */
 public class ScanStats {
+    // the unit is milliseconds
     private final long duration;
     private final long scannedManifests;
     private final long skippedByPartitionAndStats;

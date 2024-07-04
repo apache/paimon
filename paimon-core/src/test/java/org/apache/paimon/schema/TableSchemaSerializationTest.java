@@ -34,6 +34,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.schema.TableSchema.PAIMON_07_VERSION;
+import static org.apache.paimon.schema.TableSchema.PAIMON_08_VERSION;
 import static org.apache.paimon.schema.TableSchemaTest.newRowType;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -61,6 +62,22 @@ public class TableSchemaSerializationTest {
         assertSerDeser(
                 new TableSchema(1, fields, 10, partitionKeys, primaryKeys, options, "my_comment"),
                 Collections.emptyMap());
+        Map<String, String> additionalOptions = new HashMap<>();
+        additionalOptions.put("file.format", "orc");
+        assertSerDeser(
+                new TableSchema(
+                        PAIMON_08_VERSION,
+                        1,
+                        fields,
+                        10,
+                        partitionKeys,
+                        primaryKeys,
+                        options,
+                        "my_comment",
+                        System.currentTimeMillis()),
+                additionalOptions);
+
+        additionalOptions.put("bucket", "1");
         assertSerDeser(
                 new TableSchema(
                         PAIMON_07_VERSION,
@@ -72,7 +89,7 @@ public class TableSchemaSerializationTest {
                         options,
                         "my_comment",
                         System.currentTimeMillis()),
-                Collections.singletonMap("bucket", "1"));
+                additionalOptions);
     }
 
     private void assertSerDeser(TableSchema tableSchema, Map<String, String> additionalOptions) {

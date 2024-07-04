@@ -46,7 +46,7 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
-import static org.apache.paimon.utils.BranchManager.getBranchPath;
+import static org.apache.paimon.utils.BranchManager.branchPath;
 import static org.apache.paimon.utils.FileUtils.listVersionedFileStatus;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -78,12 +78,12 @@ public class TagManager {
 
     /** Return the root Directory of tags. */
     public Path tagDirectory() {
-        return new Path(getBranchPath(fileIO, tablePath, branch) + "/tag");
+        return new Path(branchPath(tablePath, branch) + "/tag");
     }
 
     /** Return the path of a tag. */
     public Path tagPath(String tagName) {
-        return new Path(getBranchPath(fileIO, tablePath, branch) + "/tag/" + TAG_PREFIX + tagName);
+        return new Path(branchPath(tablePath, branch) + "/tag/" + TAG_PREFIX + tagName);
     }
 
     /** Create a tag from given snapshot and save it in the storage. */
@@ -94,34 +94,35 @@ public class TagManager {
             List<TagCallback> callbacks) {
         checkArgument(!StringUtils.isBlank(tagName), "Tag name '%s' is blank.", tagName);
 
-        // skip create tag for the same snapshot of the same name.
-        if (tagExists(tagName)) {
-            Snapshot tagged = taggedSnapshot(tagName);
-            Preconditions.checkArgument(
-                    tagged.id() == snapshot.id(), "Tag name '%s' already exists.", tagName);
-        } else {
-            Path newTagPath = tagPath(tagName);
-            try {
-                // When timeRetained is not defined, please do not write the tagCreatorTime field,
-                // as this will cause older versions (<= 0.7) of readers to be unable to read this
-                // tag.
-                // When timeRetained is defined, it is fine, because timeRetained is the new
-                // feature.
-                fileIO.writeFileUtf8(
-                        newTagPath,
-                        timeRetained != null
-                                ? Tag.fromSnapshotAndTagTtl(
-                                                snapshot, timeRetained, LocalDateTime.now())
-                                        .toJson()
-                                : snapshot.toJson());
-            } catch (IOException e) {
-                throw new RuntimeException(
-                        String.format(
-                                "Exception occurs when committing tag '%s' (path %s). "
-                                        + "Cannot clean up because we can't determine the success.",
-                                tagName, newTagPath),
-                        e);
+        // When timeRetained is not defined, please do not write the tagCreatorTime field,
+        // as this will cause older versions (<= 0.7) of readers to be unable to read this
+        // tag.
+        // When timeRetained is defined, it is fine, because timeRetained is the new
+        // feature.
+        String content =
+                timeRetained != null
+                        ? Tag.fromSnapshotAndTagTtl(snapshot, timeRetained, LocalDateTime.now())
+                                .toJson()
+                        : snapshot.toJson();
+        Path tagPath = tagPath(tagName);
+
+        try {
+            if (tagExists(tagName)) {
+                Snapshot tagged = taggedSnapshot(tagName);
+                Preconditions.checkArgument(
+                        tagged.id() == snapshot.id(), "Tag name '%s' already exists.", tagName);
+                // update tag metadata into for the same snapshot of the same tag name.
+                fileIO.overwriteFileUtf8(tagPath, content);
+            } else {
+                fileIO.writeFile(tagPath, content, false);
             }
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Exception occurs when committing tag '%s' (path %s). "
+                                    + "Cannot clean up because we can't determine the success.",
+                            tagName, tagPath),
+                    e);
         }
 
         try {

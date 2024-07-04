@@ -26,13 +26,18 @@ under the License.
 
 # MySQL CDC
 
-Paimon supports synchronizing changes from different databases using change data capture (CDC). This feature requires Flink and its [CDC connectors](https://ververica.github.io/flink-cdc-connectors/).
+Paimon supports synchronizing changes from different databases using change data capture (CDC). This feature requires Flink and its [CDC connectors](https://nightlies.apache.org/flink/flink-cdc-docs-stable/).
 
 ## Prepare CDC Bundled Jar
 
-```
-flink-sql-connector-mysql-cdc-*.jar
-```
+Download `CDC Bundled Jar` and put them under <FLINK_HOME>/lib/.
+
+| Version | Bundled Jar                                                                  |
+|---------|------------------------------------------------------------------------------|
+| 2.3.x   | flink-sql-connector-mysql-cdc-2.3.x.jar                                      |
+| 2.4.x   | flink-sql-connector-mysql-cdc-2.4.x.jar                                      |
+| 3.0.x   | <li> flink-sql-connector-mysql-cdc-3.0.x.jar <li> flink-cdc-common-3.0.x.jar |
+| 3.1.x   | Not supported yet                                                            |
 
 ## Synchronizing Tables
 

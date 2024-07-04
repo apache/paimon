@@ -204,6 +204,15 @@ public final class IOUtils {
     }
 
     /**
+     * Closes all {@link AutoCloseable} objects in the parameter quietly.
+     *
+     * <p><b>Important:</b> This method is expected to never throw an exception.
+     */
+    public static void closeAllQuietly(Iterable<? extends AutoCloseable> closeables) {
+        closeables.forEach(IOUtils::closeQuietly);
+    }
+
+    /**
      * Closes the given AutoCloseable.
      *
      * <p><b>Important:</b> This method is expected to never throw an exception.

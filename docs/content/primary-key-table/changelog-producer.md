@@ -1,6 +1,6 @@
 ---
 title: "Changelog Producer"
-weight: 4
+weight: 5
 type: docs
 aliases:
 - /primary-key-table/changelog-producer.html
@@ -31,9 +31,7 @@ Streaming write can continuously produce the latest changes for streaming read.
 By specifying the `changelog-producer` table property when creating the table, users can choose the pattern of changes produced from table files.
 
 {{< hint info >}}
-
-The `changelog-producer` table property only affects changelog from table files. It does not affect the external log system.
-
+`changelog-producer` may significantly reduce compaction performance, please do not enable it unless necessary.
 {{< /hint >}}
 
 ## None

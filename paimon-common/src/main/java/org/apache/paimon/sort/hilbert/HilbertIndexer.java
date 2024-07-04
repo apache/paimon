@@ -231,12 +231,12 @@ public class HilbertIndexer implements Serializable {
 
         @Override
         public HProcessFunction visit(DateType dateType) {
-            return (row) -> row.isNullAt(fieldIndex) ? PRIMITIVE_EMPTY : row.getLong(fieldIndex);
+            return (row) -> row.isNullAt(fieldIndex) ? PRIMITIVE_EMPTY : row.getInt(fieldIndex);
         }
 
         @Override
         public HProcessFunction visit(TimeType timeType) {
-            return (row) -> row.isNullAt(fieldIndex) ? PRIMITIVE_EMPTY : row.getLong(fieldIndex);
+            return (row) -> row.isNullAt(fieldIndex) ? PRIMITIVE_EMPTY : row.getInt(fieldIndex);
         }
 
         @Override

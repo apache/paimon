@@ -81,6 +81,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.io.DataFilePathFactory.CHANGELOG_FILE_PREFIX;
 import static org.apache.paimon.io.DataFilePathFactory.DATA_FILE_PREFIX;
+import static org.apache.paimon.utils.BranchManager.branchPath;
 import static org.apache.paimon.utils.FileStorePathFactory.BUCKET_PATH_PREFIX;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -148,6 +149,9 @@ public class OrphanFilesCleanTest {
             }
         }
 
+        // create branch1 by tag
+        table.createBranch("branch1", allTags.get(0));
+
         // generate non used files
         int shouldBeDeleted = generateUnUsedFile();
         assertThat(manuallyAddedFiles.size()).isEqualTo(shouldBeDeleted);
@@ -172,14 +176,14 @@ public class OrphanFilesCleanTest {
 
         // first check, nothing will be deleted because the default olderThan interval is 1 day
         OrphanFilesClean orphanFilesClean = new OrphanFilesClean(table);
-        assertThat(orphanFilesClean.clean()).isEqualTo(0);
+        assertThat(orphanFilesClean.clean().size()).isEqualTo(0);
 
         // second check
         orphanFilesClean = new OrphanFilesClean(table);
         setOlderThan(orphanFilesClean);
-        orphanFilesClean.clean();
+        List<Path> deleted = orphanFilesClean.clean();
         try {
-            validate(orphanFilesClean.getDeleteFiles(), snapshotData, new HashMap<>());
+            validate(deleted, snapshotData, new HashMap<>());
         } catch (Throwable t) {
             String tableOptions = "Table options:\n" + table.options();
 
@@ -362,14 +366,13 @@ public class OrphanFilesCleanTest {
 
         // first check, nothing will be deleted because the default olderThan interval is 1 day
         OrphanFilesClean orphanFilesClean = new OrphanFilesClean(table);
-        assertThat(orphanFilesClean.clean()).isEqualTo(0);
+        assertThat(orphanFilesClean.clean().size()).isEqualTo(0);
 
         // second check
         orphanFilesClean = new OrphanFilesClean(table);
         setOlderThan(orphanFilesClean);
-        orphanFilesClean.clean();
-        List<Path> cleanFiles = orphanFilesClean.getDeleteFiles();
-        validate(cleanFiles, snapshotData, changelogData);
+        List<Path> deleted = orphanFilesClean.clean();
+        validate(deleted, snapshotData, changelogData);
     }
 
     /** Manually make a FileNotFoundException to simulate snapshot expire while clean. */
@@ -397,7 +400,7 @@ public class OrphanFilesCleanTest {
 
         OrphanFilesClean orphanFilesClean = new OrphanFilesClean(table);
         setOlderThan(orphanFilesClean);
-        assertThat(orphanFilesClean.clean()).isGreaterThan(0);
+        assertThat(orphanFilesClean.clean().size()).isGreaterThan(0);
     }
 
     private void writeData(
@@ -466,6 +469,14 @@ public class OrphanFilesCleanTest {
                 fileNum,
                 Arrays.asList("manifest-list-", "manifest-", "index-manifest-", "UNKNOWN-"));
         shouldBeDeleted += fileNum;
+
+        // branch snapshot
+        addNonUsedFiles(
+                new Path(branchPath(tablePath, "branch1") + "/snapshot"),
+                fileNum,
+                Collections.singletonList("UNKNOWN"));
+        shouldBeDeleted += fileNum;
+
         return shouldBeDeleted;
     }
 
@@ -595,7 +606,7 @@ public class OrphanFilesCleanTest {
                     fileNamePrefix.get(RANDOM.nextInt(fileNamePrefix.size())) + UUID.randomUUID();
             Path file = new Path(dir, fileName);
             if (RANDOM.nextBoolean()) {
-                fileIO.writeFileUtf8(file, "");
+                fileIO.tryToWriteAtomic(file, "");
             } else {
                 fileIO.mkdirs(file);
             }

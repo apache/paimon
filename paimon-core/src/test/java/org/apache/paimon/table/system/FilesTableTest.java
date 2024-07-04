@@ -193,7 +193,7 @@ public class FilesTableTest extends TableTestBase {
                                     Arrays.toString(new String[] {partition1, partition2})),
                             fileEntry.bucket(),
                             BinaryString.fromString(file.fileName()),
-                            BinaryString.fromString("orc"),
+                            BinaryString.fromString(file.fileFormat()),
                             file.schemaId(),
                             file.level(),
                             file.rowCount(),

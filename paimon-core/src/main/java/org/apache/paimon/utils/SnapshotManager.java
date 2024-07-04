@@ -47,7 +47,8 @@ import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
-import static org.apache.paimon.utils.BranchManager.getBranchPath;
+import static org.apache.paimon.utils.BranchManager.branchNames;
+import static org.apache.paimon.utils.BranchManager.branchPath;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 
 /** Manager for {@link Snapshot}, providing utility methods related to paths and snapshot hints. */
@@ -90,27 +91,25 @@ public class SnapshotManager implements Serializable {
     }
 
     public Path changelogDirectory() {
-        return new Path(getBranchPath(fileIO, tablePath, branch) + "/changelog");
+        return new Path(branchPath(tablePath, branch) + "/changelog");
     }
 
     public Path longLivedChangelogPath(long snapshotId) {
         return new Path(
-                getBranchPath(fileIO, tablePath, branch)
-                        + "/changelog/"
-                        + CHANGELOG_PREFIX
-                        + snapshotId);
+                branchPath(tablePath, branch) + "/changelog/" + CHANGELOG_PREFIX + snapshotId);
     }
 
     public Path snapshotPath(long snapshotId) {
         return new Path(
-                getBranchPath(fileIO, tablePath, branch)
-                        + "/snapshot/"
-                        + SNAPSHOT_PREFIX
-                        + snapshotId);
+                branchPath(tablePath, branch) + "/snapshot/" + SNAPSHOT_PREFIX + snapshotId);
     }
 
     public Path snapshotDirectory() {
-        return new Path(getBranchPath(fileIO, tablePath, branch) + "/snapshot");
+        return new Path(branchPath(tablePath, branch) + "/snapshot");
+    }
+
+    public static Path snapshotDirectory(Path tablePath, String branch) {
+        return new Path(branchPath(tablePath, branch) + "/snapshot");
     }
 
     public Snapshot snapshot(long snapshotId) {
@@ -291,7 +290,9 @@ public class SnapshotManager implements Serializable {
     public @Nullable Snapshot laterOrEqualWatermark(long watermark) {
         Long earliest = earliestSnapshotId();
         Long latest = latestSnapshotId();
-        if (earliest == null || latest == null) {
+        // If latest == Long.MIN_VALUE don't need next binary search for watermark
+        // which can reduce IO cost with snapshot
+        if (earliest == null || latest == null || snapshot(latest).watermark() == Long.MIN_VALUE) {
             return null;
         }
         Long earliestWatermark = null;
@@ -394,10 +395,24 @@ public class SnapshotManager implements Serializable {
      * be deleted by other processes, so just skip this snapshot.
      */
     public List<Snapshot> safelyGetAllSnapshots() throws IOException {
+        // For main branch
         List<Path> paths =
                 listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX)
                         .map(id -> snapshotPath(id))
                         .collect(Collectors.toList());
+
+        // For other branch
+        List<String> allBranchNames = branchNames(fileIO, tablePath);
+        for (String branchName : allBranchNames) {
+            List<Path> branchPaths =
+                    listVersionedFiles(
+                                    fileIO,
+                                    snapshotDirectory(tablePath, branchName),
+                                    SNAPSHOT_PREFIX)
+                            .map(this::snapshotPath)
+                            .collect(Collectors.toList());
+            paths.addAll(branchPaths);
+        }
 
         List<Snapshot> snapshots = new ArrayList<>();
         for (Path path : paths) {
@@ -432,8 +447,23 @@ public class SnapshotManager implements Serializable {
      * Try to get non snapshot files. If any error occurred, just ignore it and return an empty
      * result.
      */
-    public List<Path> tryGetNonSnapshotFiles(Predicate<FileStatus> fileStatusFilter) {
-        return listPathWithFilter(snapshotDirectory(), fileStatusFilter, nonSnapshotFileFilter());
+    public List<Path> tryGetNonSnapshotFiles(Predicate<FileStatus> fileStatusFilter)
+            throws IOException {
+        // For main branch
+        List<Path> nonSnapshotFiles =
+                listPathWithFilter(snapshotDirectory(), fileStatusFilter, nonSnapshotFileFilter());
+
+        // For other branch
+        List<String> allBranchNames = branchNames(fileIO, tablePath);
+        allBranchNames.stream()
+                .map(
+                        branchName ->
+                                listPathWithFilter(
+                                        snapshotDirectory(tablePath, branchName),
+                                        fileStatusFilter,
+                                        nonSnapshotFileFilter()))
+                .forEach(nonSnapshotFiles::addAll);
+        return nonSnapshotFiles;
     }
 
     public List<Path> tryGetNonChangelogFiles(Predicate<FileStatus> fileStatusFilter) {
@@ -530,7 +560,7 @@ public class SnapshotManager implements Serializable {
     }
 
     public void commitChangelog(Changelog changelog, long id) throws IOException {
-        fileIO.writeFileUtf8(longLivedChangelogPath(id), changelog.toJson());
+        fileIO.writeFile(longLivedChangelogPath(id), changelog.toJson(), false);
     }
 
     /**

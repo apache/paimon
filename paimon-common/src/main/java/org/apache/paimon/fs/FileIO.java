@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.hadoop.HadoopFileIOLoader;
 import org.apache.paimon.fs.local.LocalFileIO;
 
+import org.apache.commons.io.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -231,20 +232,11 @@ public interface FileIO extends Serializable {
      *
      * @return false if target file exists
      */
-    default boolean writeFileUtf8(Path path, String content) throws IOException {
-        if (exists(path)) {
-            return false;
-        }
-
+    default boolean tryToWriteAtomic(Path path, String content) throws IOException {
         Path tmp = path.createTempPath();
         boolean success = false;
         try {
-            try (PositionOutputStream out = newOutputStream(tmp, false)) {
-                OutputStreamWriter writer = new OutputStreamWriter(out, StandardCharsets.UTF_8);
-                writer.write(content);
-                writer.flush();
-            }
-
+            writeFile(tmp, content, false);
             success = rename(tmp, path);
         } finally {
             if (!success) {
@@ -253,6 +245,14 @@ public interface FileIO extends Serializable {
         }
 
         return success;
+    }
+
+    default void writeFile(Path path, String content, boolean overwrite) throws IOException {
+        try (PositionOutputStream out = newOutputStream(path, overwrite)) {
+            OutputStreamWriter writer = new OutputStreamWriter(out, StandardCharsets.UTF_8);
+            writer.write(content);
+            writer.flush();
+        }
     }
 
     /**
@@ -268,27 +268,29 @@ public interface FileIO extends Serializable {
     }
 
     /**
-     * Read file to UTF_8 decoding, then write content to one file atomically, initially writes to
-     * temp hidden file and only renames to the target file once temp file is closed.
+     * Copy content of one file into another.
      *
-     * @return false if targetPath file exists
+     * @throws IOException Thrown, if the stream could not be opened because of an I/O, or because
+     *     target file already exists at that path and the write mode indicates to not overwrite the
+     *     file.
      */
-    default boolean copyFileUtf8(Path sourcePath, Path targetPath) throws IOException {
-        String content = readFileUtf8(sourcePath);
-        return writeFileUtf8(targetPath, content);
+    default void copyFile(Path sourcePath, Path targetPath, boolean overwrite) throws IOException {
+        try (SeekableInputStream is = newInputStream(sourcePath);
+                PositionOutputStream os = newOutputStream(targetPath, overwrite)) {
+            IOUtils.copy(is, os);
+        }
     }
 
     /** Copy all files in sourceDirectory to directory targetDirectory. */
-    default void copyFilesUtf8(Path sourceDirectory, Path targetDirectory) throws IOException {
+    default void copyFiles(Path sourceDirectory, Path targetDirectory, boolean overwrite)
+            throws IOException {
         FileStatus[] fileStatuses = listStatus(sourceDirectory);
         List<Path> copyFiles =
-                Arrays.stream(fileStatuses)
-                        .map(fileStatus -> fileStatus.getPath())
-                        .collect(Collectors.toList());
+                Arrays.stream(fileStatuses).map(FileStatus::getPath).collect(Collectors.toList());
         for (Path file : copyFiles) {
             String fileName = file.getName();
             Path targetPath = new Path(targetDirectory.toString() + "/" + fileName);
-            copyFileUtf8(file, targetPath);
+            copyFile(file, targetPath, overwrite);
         }
     }
 
@@ -333,6 +335,10 @@ public interface FileIO extends Serializable {
      */
     static FileIO get(Path path, CatalogContext config) throws IOException {
         URI uri = path.toUri();
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Getting FileIO by scheme {}.", uri.getScheme());
+        }
+
         if (uri.getScheme() == null) {
             return new LocalFileIO();
         }
@@ -360,6 +366,12 @@ public interface FileIO extends Serializable {
         FileIOLoader preferIOLoader = config.preferIO();
         try {
             loader = checkAccess(preferIOLoader, path, config);
+            if (loader != null && LOG.isDebugEnabled()) {
+                LOG.debug(
+                        "Found preferIOLoader {} with scheme {}.",
+                        loader.getClass().getName(),
+                        loader.getScheme());
+            }
         } catch (IOException ioException) {
             ioExceptionList.add(ioException);
         }
@@ -367,6 +379,18 @@ public interface FileIO extends Serializable {
         if (loader == null) {
             Map<String, FileIOLoader> loaders = discoverLoaders();
             loader = loaders.get(uri.getScheme());
+            if (!loaders.isEmpty() && LOG.isDebugEnabled()) {
+                LOG.debug(
+                        "Discovered FileIOLoaders: {}.",
+                        loaders.entrySet().stream()
+                                .map(
+                                        e ->
+                                                String.format(
+                                                        "{%s,%s}",
+                                                        e.getKey(),
+                                                        e.getValue().getClass().getName()))
+                                .collect(Collectors.joining(",")));
+            }
         }
 
         // load fallbackIO
@@ -399,6 +423,11 @@ public interface FileIO extends Serializable {
                                                 + "%s",
                                         String.join("\n", missOptions)));
                 ioExceptionList.add(exception);
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug(
+                            "Got {} but miss options. Will try to get fallback IO and Hadoop IO respectively.",
+                            loader.getClass().getName());
+                }
                 loader = null;
             }
         }
@@ -406,6 +435,9 @@ public interface FileIO extends Serializable {
         if (loader == null) {
             try {
                 loader = checkAccess(fallbackIO, path, config);
+                if (loader != null && LOG.isDebugEnabled()) {
+                    LOG.debug("Got fallback FileIOLoader: {}.", loader.getClass().getName());
+                }
             } catch (IOException ioException) {
                 ioExceptionList.add(ioException);
             }
@@ -415,6 +447,9 @@ public interface FileIO extends Serializable {
         if (loader == null) {
             try {
                 loader = checkAccess(new HadoopFileIOLoader(), path, config);
+                if (loader != null && LOG.isDebugEnabled()) {
+                    LOG.debug("Got hadoop FileIOLoader: {}.", loader.getClass().getName());
+                }
             } catch (IOException ioException) {
                 ioExceptionList.add(ioException);
             }

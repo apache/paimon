@@ -1,6 +1,6 @@
 ---
 title: "Sequence & Rowkind"
-weight: 5
+weight: 6
 type: docs
 aliases:
 - /primary-key-table/sequence-rowkind.html
@@ -53,6 +53,10 @@ The record with the largest `sequence.field` value will be the last to merge, if
 order will be used to determine which one is the last one.
 
 You can define multiple fields for `sequence.field`, for example `'update_time,flag'`, multiple fields will be compared in order.
+
+{{< hint info >}}
+User defined sequence fields conflict with features such as `first_row` and `first_value`, which may result in unexpected results.
+{{< /hint >}}
 
 ## Row Kind Field
 

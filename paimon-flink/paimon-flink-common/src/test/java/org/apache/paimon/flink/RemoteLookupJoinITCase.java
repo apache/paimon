@@ -94,7 +94,7 @@ public class RemoteLookupJoinITCase extends CatalogITCaseBase {
         assertThat(query.lookup(row(), 0, row(5))).isNull();
 
         service.close();
-        query.close();
+        query.cancel().get();
     }
 
     @Test
@@ -151,7 +151,7 @@ public class RemoteLookupJoinITCase extends CatalogITCaseBase {
                 .isEqualTo(11);
 
         client.cancel().get();
-        query.close();
+        query.cancel().get();
         ServiceManager serviceManager = paimonTable("DIM").store().newServiceManager();
         assertThat(serviceManager.service(PRIMARY_KEY_LOOKUP).isPresent()).isFalse();
     }

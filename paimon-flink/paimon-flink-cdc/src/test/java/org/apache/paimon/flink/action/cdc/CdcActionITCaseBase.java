@@ -151,6 +151,8 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
             if (sortedExpected.equals(sortedActual)) {
                 break;
             }
+            LOG.info("actual: " + sortedActual);
+            LOG.info("expected: " + sortedExpected);
             Thread.sleep(1000);
         }
     }

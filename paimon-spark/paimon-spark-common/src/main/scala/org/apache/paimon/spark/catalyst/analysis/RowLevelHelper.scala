@@ -66,8 +66,8 @@ trait RowLevelHelper extends SQLConfHelper {
         case Assignment(key, value) => key == value
       }
       .exists {
-        case EqualTo(left: AttributeReference, _) =>
-          isTargetPrimaryKey(left)
+        case EqualTo(left: AttributeReference, right: AttributeReference) =>
+          isTargetPrimaryKey(left) || isTargetPrimaryKey(right)
         case Assignment(key: AttributeReference, _) =>
           isTargetPrimaryKey(key)
         case _ => false

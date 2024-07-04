@@ -46,6 +46,7 @@ This section introduce all available spark procedures about paimon.
             <li>where: partition predicate. Left empty for all partitions. (Can't be used together with "partitions")</li>          
             <li>order_strategy: 'order' or 'zorder' or 'hilbert' or 'none'. Left empty for 'none'.</li>
             <li>order_columns: the columns need to be sort. Left empty if 'order_strategy' is 'none'.</li>
+            <li>max_concurrent_jobs: when sort compact is used, files in one partition are grouped and submitted as a single spark compact job. This parameter controls the maximum number of jobs that can be submitted simultaneously. The default value is 15.</li>
       </td>
       <td>
          SET spark.sql.shuffle.partitions=10; --set the compact parallelism <br/>
@@ -130,9 +131,11 @@ This section introduce all available spark procedures about paimon.
          To remove the orphan data files and metadata files. Arguments:
             <li>table: the target table identifier. Cannot be empty.</li>
             <li>older_than: to avoid deleting newly written files, this procedure only deletes orphan files older than 1 day by default. This argument can modify the interval.</li>
+            <li>dry_run: when true, view only orphan files, don't actually remove files. Default is false.</li>
       </td>
       <td>
-          CALL sys.remove_orphan_files(table => 'default.T', older_than => '2023-10-31 12:00:00')
+          CALL sys.remove_orphan_files(table => 'default.T', older_than => '2023-10-31 12:00:00')<br/><br/>
+          CALL sys.remove_orphan_files(table => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => true)
       </td>
     </tr>
     <tr>
@@ -146,26 +149,56 @@ This section introduce all available spark procedures about paimon.
       </td>
     </tr>
     <tr>
-      <td>merge_branch</td>
+      <td>create_branch</td>
+      <td>
+         To merge a branch to main branch. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>branch: name of the branch to be merged.</li>
+            <li>tag: name of the new tag. Cannot be empty.</li>
+            <li>snapshot(Long):  id of the snapshot which the new tag is based on.</li>
+      </td>
+      <td>
+          CALL sys.create_branch(table => 'test_db.T', branch => 'test_branch')<br/>
+          CALL sys.create_branch(table => 'test_db.T', branch => 'test_branch', tag => 'my_tag')<br/>
+          CALL sys.create_branch(table => 'test_db.T', branch => 'test_branch', snapshot => 10)
+      </td>
+    </tr>
+    <tr>
+      <td>delete_branch</td>
       <td>
          To merge a branch to main branch. Arguments:
             <li>table: the target table identifier. Cannot be empty.</li>
             <li>branch: name of the branch to be merged.</li>
       </td>
       <td>
-          CALL sys.merge_branch(table => 'test_db.T', branch => 'test_branch')
+          CALL sys.delete_branch(table => 'test_db.T', branch => 'test_branch')
       </td>
     </tr>
     <tr>
-      <td>replace_branch</td>
+      <td>fast_forward</td>
       <td>
-         To replace main branch with specified branch. Arguments:
+         To fast_forward a branch to main branch. Arguments:
             <li>table: the target table identifier. Cannot be empty.</li>
-            <li>branch: name of the branch to be replaced.</li>
+            <li>branch: name of the branch to be merged.</li>
       </td>
       <td>
-          CALL sys.replace_branch(table => 'test_db.T', branch => 'test_branch')
+          CALL sys.fast_forward(table => 'test_db.T', branch => 'test_branch')
       </td>
     </tr>
+   <tr>
+      <td>reset_consumer</td>
+      <td>
+         To reset or delete consumer. Arguments:
+            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>consumerId: consumer to be reset or deleted.</li>
+            <li>nextSnapshotId (Long): the new next snapshot id of the consumer.</li>
+      </td>
+      <td>
+         -- reset the new next snapshot id in the consumer<br/>
+         CALL sys.reset_consumer(table => 'default.T', consumerId => 'myid', nextSnapshotId => 10)<br/><br/>
+         -- delete consumer<br/>
+         CALL sys.reset_consumer(table => 'default.T', consumerId => 'myid')
+      </td>
+   </tr>
     </tbody>
 </table>

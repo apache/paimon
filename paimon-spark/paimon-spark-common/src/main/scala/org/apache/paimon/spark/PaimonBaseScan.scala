@@ -19,15 +19,17 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.{stats, CoreOptions}
+import org.apache.paimon.annotation.VisibleForTesting
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
+import org.apache.paimon.spark.metric.SparkMetricRegistry
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
 import org.apache.paimon.spark.statistics.StatisticsHelper
 import org.apache.paimon.table.{DataTable, FileStoreTable, Table}
-import org.apache.paimon.table.source.{ReadBuilder, Split}
+import org.apache.paimon.table.source.{InnerTableScan, ReadBuilder, Split}
 import org.apache.paimon.types.RowType
 
-import org.apache.spark.sql.connector.metric.CustomMetric
+import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
 import org.apache.spark.sql.connector.read.{Batch, Scan, Statistics, SupportsReportStatistics}
 import org.apache.spark.sql.connector.read.streaming.MicroBatchStream
 import org.apache.spark.sql.sources.Filter
@@ -64,11 +66,13 @@ abstract class PaimonBaseScan(
 
   protected var runtimeFilters: Array[Filter] = Array.empty
 
-  protected var splits: Array[Split] = _
+  protected var inputPartitions: Seq[PaimonInputPartition] = _
 
   override val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
 
   lazy val statistics: Optional[stats.Statistics] = table.statistics()
+
+  private lazy val paimonMetricsRegistry: SparkMetricRegistry = SparkMetricRegistry()
 
   lazy val requiredStatsSchema: StructType = {
     val fieldNames = tableFields.map(_.name) ++ reservedFilters.flatMap(_.references)
@@ -89,15 +93,23 @@ abstract class PaimonBaseScan(
     _readBuilder
   }
 
+  @VisibleForTesting
   def getOriginSplits: Array[Split] = {
-    readBuilder.newScan().plan().splits().asScala.toArray
+    readBuilder
+      .newScan()
+      .asInstanceOf[InnerTableScan]
+      .withMetricsRegistry(paimonMetricsRegistry)
+      .plan()
+      .splits()
+      .asScala
+      .toArray
   }
 
-  def getSplits: Array[Split] = {
-    if (splits == null) {
-      splits = reshuffleSplits(getOriginSplits)
+  def getInputPartitions: Seq[PaimonInputPartition] = {
+    if (inputPartitions == null) {
+      inputPartitions = getInputPartitions(getOriginSplits)
     }
-    splits
+    inputPartitions
   }
 
   override def readSchema(): StructType = {
@@ -106,7 +118,7 @@ abstract class PaimonBaseScan(
 
   override def toBatch: Batch = {
     val metadataColumns = metadataFields.map(field => PaimonMetadataColumn.get(field.name))
-    PaimonBatch(getSplits, readBuilder, metadataColumns)
+    PaimonBatch(getInputPartitions, readBuilder, metadataColumns)
   }
 
   override def toMicroBatchStream(checkpointLocation: String): MicroBatchStream = {
@@ -128,12 +140,25 @@ abstract class PaimonBaseScan(
         Array(
           PaimonNumSplitMetric(),
           PaimonSplitSizeMetric(),
-          PaimonAvgSplitSizeMetric()
+          PaimonAvgSplitSizeMetric(),
+          PaimonPlanningDurationMetric(),
+          PaimonScannedManifestsMetric(),
+          PaimonSkippedTableFilesMetric(),
+          PaimonResultedTableFilesMetric()
         )
       case _ =>
         Array.empty[CustomMetric]
     }
     super.supportedCustomMetrics() ++ paimonMetrics
+  }
+
+  override def reportDriverMetrics(): Array[CustomTaskMetric] = {
+    table match {
+      case _: FileStoreTable =>
+        paimonMetricsRegistry.buildSparkScanMetrics()
+      case _ =>
+        Array.empty[CustomTaskMetric]
+    }
   }
 
   override def description(): String = {

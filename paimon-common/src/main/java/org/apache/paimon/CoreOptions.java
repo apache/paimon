@@ -129,7 +129,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<String> FILE_FORMAT =
             key("file.format")
                     .stringType()
-                    .defaultValue(FILE_FORMAT_ORC)
+                    .defaultValue(FILE_FORMAT_PARQUET)
                     .withDescription(
                             "Specify the message format of data files, currently orc, parquet and avro are supported.");
 
@@ -310,6 +310,7 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MergeEngine.DEDUPLICATE)
                     .withDescription("Specify the merge engine for table with primary key.");
 
+    @Immutable
     public static final ConfigOption<Boolean> IGNORE_DELETE =
             key("ignore-delete")
                     .booleanType()

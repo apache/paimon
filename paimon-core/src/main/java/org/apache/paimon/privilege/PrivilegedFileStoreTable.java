@@ -205,15 +205,9 @@ public class PrivilegedFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public void mergeBranch(String branchName) {
+    public void fastForward(String branchName) {
         privilegeChecker.assertCanInsert(identifier);
-        wrapped.mergeBranch(branchName);
-    }
-
-    @Override
-    public void replaceBranch(String fromBranch) {
-        privilegeChecker.assertCanInsert(identifier);
-        wrapped.replaceBranch(fromBranch);
+        wrapped.fastForward(branchName);
     }
 
     @Override

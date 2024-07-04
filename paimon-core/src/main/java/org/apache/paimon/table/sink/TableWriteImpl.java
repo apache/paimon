@@ -109,6 +109,11 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     }
 
     @Override
+    public void withInsertOnly(boolean insertOnly) {
+        write.withInsertOnly(insertOnly);
+    }
+
+    @Override
     public BinaryRow getPartition(InternalRow row) {
         keyAndBucketExtractor.setRecord(row);
         return keyAndBucketExtractor.partition();

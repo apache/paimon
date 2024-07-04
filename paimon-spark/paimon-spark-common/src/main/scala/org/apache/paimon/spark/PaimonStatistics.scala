@@ -34,7 +34,7 @@ import scala.collection.JavaConverters._
 
 case class PaimonStatistics[T <: PaimonBaseScan](scan: T) extends Statistics {
 
-  private lazy val rowCount: Long = scan.getSplits.map(_.rowCount).sum
+  private lazy val rowCount: Long = scan.getInputPartitions.map(_.rowCount()).sum
 
   private lazy val scannedTotalSize: Long = rowCount * scan.readSchema().defaultSize
 
