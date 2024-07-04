@@ -188,18 +188,17 @@ This section introduce all available spark procedures about paimon.
    <tr>
       <td>reset_consumer</td>
       <td>
-         -- reset the new next snapshot id in the consumer<br/>
-         CALL sys.reset_consumer('identifier', 'consumerId', nextSnapshotId)<br/><br/>
-         -- delete consumer<br/>
-         CALL sys.reset_consumer(table => 'identifier', consumerId => 'consumerId')
-      </td>
-      <td>
          To reset or delete consumer. Arguments:
             <li>identifier: the target table identifier. Cannot be empty.</li>
             <li>consumerId: consumer to be reset or deleted.</li>
             <li>nextSnapshotId (Long): the new next snapshot id of the consumer.</li>
       </td>
-      <td>CALL sys.reset_consumer(table => 'default.T', consumerId => 'myid', nextSnapshotId=> 10)</td>
+      <td>
+         -- reset the new next snapshot id in the consumer<br/>
+         CALL sys.reset_consumer(table => 'default.T', consumerId => 'myid', nextSnapshotId => 10)<br/><br/>
+         -- delete consumer<br/>
+         CALL sys.reset_consumer(table => 'default.T', consumerId => 'myid')
+      </td>
    </tr>
     </tbody>
 </table>
