@@ -528,6 +528,39 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     Assertions.assertThat(where).isEqualTo(whereExpected)
   }
 
+  test("Paimon Procedure: compact unaware bucket append table with option") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, value STRING, pt STRING)
+                 |TBLPROPERTIES ('bucket'='-1', 'write-only'='true')
+                 |PARTITIONED BY (pt)
+                 |""".stripMargin)
+
+    val table = loadTable("T")
+
+    spark.sql(s"INSERT INTO T VALUES (1, 'a', 'p1'), (2, 'b', 'p2')")
+    spark.sql(s"INSERT INTO T VALUES (3, 'c', 'p1'), (4, 'd', 'p2')")
+    spark.sql(s"INSERT INTO T VALUES (5, 'e', 'p1'), (6, 'f', 'p2')")
+
+    spark.sql(
+      "CALL sys.compact(table => 'T', partitions => 'pt=\"p1\"', options => 'compaction.min.file-num=2,compaction.max.file-num = 3')")
+    Assertions.assertThat(lastSnapshotCommand(table).equals(CommitKind.COMPACT)).isTrue
+    Assertions.assertThat(lastSnapshotId(table)).isEqualTo(4)
+
+    spark.sql(
+      "CALL sys.compact(table => 'T', options => 'compaction.min.file-num=2,compaction.max.file-num = 3')")
+    Assertions.assertThat(lastSnapshotCommand(table).equals(CommitKind.COMPACT)).isTrue
+    Assertions.assertThat(lastSnapshotId(table)).isEqualTo(5)
+
+    // compact condition no longer met
+    spark.sql(s"CALL sys.compact(table => 'T')")
+    Assertions.assertThat(lastSnapshotId(table)).isEqualTo(5)
+
+    checkAnswer(
+      spark.sql(s"SELECT * FROM T ORDER BY id"),
+      Row(1, "a", "p1") :: Row(2, "b", "p2") :: Row(3, "c", "p1") :: Row(4, "d", "p2") ::
+        Row(5, "e", "p1") :: Row(6, "f", "p2") :: Nil)
+  }
+
   def lastSnapshotCommand(table: FileStoreTable): CommitKind = {
     table.snapshotManager().latestSnapshot().commitKind()
   }

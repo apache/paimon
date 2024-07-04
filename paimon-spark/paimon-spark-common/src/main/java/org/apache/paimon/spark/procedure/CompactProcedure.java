@@ -74,6 +74,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
@@ -110,7 +111,8 @@ public class CompactProcedure extends BaseProcedure {
                 ProcedureParameter.optional("order_strategy", StringType),
                 ProcedureParameter.optional("order_by", StringType),
                 ProcedureParameter.optional("where", StringType),
-                ProcedureParameter.optional("max_concurrent_jobs", IntegerType)
+                ProcedureParameter.optional("max_concurrent_jobs", IntegerType),
+                ProcedureParameter.optional("options", StringType),
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -144,6 +146,7 @@ public class CompactProcedure extends BaseProcedure {
                         : Arrays.asList(args.getString(3).split(","));
         String where = blank(args, 4) ? null : args.getString(4);
         int maxConcurrentJobs = args.isNullAt(5) ? 15 : args.getInt(5);
+        String options = args.isNullAt(6) ? null : args.getString(6);
         if (TableSorter.OrderType.NONE.name().equals(sortType) && !sortColumns.isEmpty()) {
             throw new IllegalArgumentException(
                     "order_strategy \"none\" cannot work with order_by columns.");
@@ -174,6 +177,14 @@ public class CompactProcedure extends BaseProcedure {
                                 condition,
                                 table.partitionKeys());
                     }
+
+                    Map<String, String> dynamicOptions = new HashMap<>();
+                    dynamicOptions.put(CoreOptions.WRITE_ONLY.key(), "false");
+                    if (!StringUtils.isBlank(options)) {
+                        dynamicOptions.putAll(ParameterUtils.parseCommaSeparatedKeyValues(options));
+                    }
+                    table = table.copy(dynamicOptions);
+
                     InternalRow internalRow =
                             newInternalRow(
                                     execute(
@@ -203,7 +214,6 @@ public class CompactProcedure extends BaseProcedure {
             DataSourceV2Relation relation,
             @Nullable Expression condition,
             int maxConcurrentJobs) {
-        table = table.copy(Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "false"));
         BucketMode bucketMode = table.bucketMode();
         TableSorter.OrderType orderType = TableSorter.OrderType.of(sortType);
         Predicate filter =
