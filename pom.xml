@@ -95,7 +95,7 @@ under the License.
         <javax.annotation-api.version>1.3.2</javax.annotation-api.version>
         <flink.forkCount>1C</flink.forkCount>
         <flink.reuseForks>true</flink.reuseForks>
-        <testcontainers.version>1.19.1</testcontainers.version>
+        <testcontainers.version>1.19.8</testcontainers.version>
 
         <!-- Can be set to any value to reproduce a specific build. -->
         <test.randomization.seed/>
