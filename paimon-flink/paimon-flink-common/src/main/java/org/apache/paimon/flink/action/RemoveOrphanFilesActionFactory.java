@@ -18,16 +18,15 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.flink.api.java.tuple.Tuple3;
-
 import java.util.Map;
 import java.util.Optional;
+
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Factory to create {@link RemoveOrphanFilesAction}. */
 public class RemoveOrphanFilesActionFactory implements ActionFactory {
 
     public static final String IDENTIFIER = "remove_orphan_files";
-
     private static final String OLDER_THAN = "older_than";
     private static final String DRY_RUN = "dry_run";
 
@@ -38,12 +37,20 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-        Tuple3<String, String, String> tablePath = getTablePath(params);
+        String warehouse = params.get(WAREHOUSE);
+        checkNotNull(warehouse);
+        String database = params.get(DATABASE);
+        checkNotNull(database);
+        String table = params.get(TABLE);
+
         Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
 
-        RemoveOrphanFilesAction action =
-                new RemoveOrphanFilesAction(
-                        tablePath.f0, tablePath.f1, tablePath.f2, catalogConfig);
+        RemoveOrphanFilesAction action;
+        try {
+            action = new RemoveOrphanFilesAction(warehouse, database, table, catalogConfig);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
 
         if (params.has(OLDER_THAN)) {
             action.olderThan(params.get(OLDER_THAN));
@@ -75,6 +82,10 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
         System.out.println();
         System.out.println(
                 "When '--dry_run true', view only orphan files, don't actually remove files. Default is false.");
+        System.out.println();
+
+        System.out.println(
+                "If the table is null or *, all orphan files in all tables under the db will be cleaned up.");
         System.out.println();
     }
 }
