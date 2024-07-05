@@ -63,6 +63,7 @@ import org.apache.parquet.hadoop.util.HadoopOutputFile;
 import org.apache.parquet.schema.MessageType;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.RepeatedTest;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -88,6 +89,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link ParquetReaderFactory}. */
 public class ParquetReadWriteTest {
@@ -457,6 +459,18 @@ public class ParquetReadWriteTest {
         compareNestedRow(rows, results);
     }
 
+    @Test
+    public void testNestedNullMapKey() {
+        List<InternalRow> rows = prepareNestedData(1283, true);
+        assertThatThrownBy(
+                        () ->
+                                createTempParquetFileByPaimon(
+                                        folder, rows, 10, NESTED_ARRAY_MAP_TYPE),
+                        "Parquet does not support null keys in a map. "
+                                + "See https://github.com/apache/parquet-format/blob/master/LogicalTypes.md#maps for more details.")
+                .isInstanceOf(RuntimeException.class);
+    }
+
     private void innerTestTypes(File folder, List<Integer> records, int rowGroupSize)
             throws IOException {
         List<InternalRow> rows = records.stream().map(this::newRow).collect(Collectors.toList());
@@ -708,12 +722,18 @@ public class ParquetReadWriteTest {
     }
 
     private List<InternalRow> prepareNestedData(int rowNum) {
+        return prepareNestedData(rowNum, false);
+    }
+
+    private List<InternalRow> prepareNestedData(int rowNum, boolean nullMapKey) {
         List<InternalRow> rows = new ArrayList<>(rowNum);
 
         for (int i = 0; i < rowNum; i++) {
             Integer v = i;
             Map<BinaryString, BinaryString> mp1 = new HashMap<>();
-            mp1.put(null, BinaryString.fromString("val_" + i));
+            mp1.put(
+                    nullMapKey ? null : BinaryString.fromString("key_" + i),
+                    BinaryString.fromString("val_" + i));
             Map<BinaryString, BinaryString> mp2 = new HashMap<>();
             mp2.put(BinaryString.fromString("key_" + i), null);
             mp2.put(BinaryString.fromString("key@" + i), BinaryString.fromString("val@" + i));
@@ -794,7 +814,7 @@ public class ParquetReadWriteTest {
                 f3.addGroup(0);
                 Group mapList = f3.addGroup(0);
                 Group map1 = mapList.addGroup(0);
-                createParquetMapGroup(map1, null, "val_" + i);
+                createParquetMapGroup(map1, "key_" + i, "val_" + i);
                 Group map2 = mapList.addGroup(0);
                 createParquetMapGroup(map2, "key_" + i, null);
                 createParquetMapGroup(map2, "key@" + i, "val@" + i);
@@ -847,9 +867,7 @@ public class ParquetReadWriteTest {
 
     private void createParquetMapGroup(Group map, String key, String value) {
         Group entry = map.addGroup(0);
-        if (key != null) {
-            entry.append("key", key);
-        }
+        entry.append("key", key);
         if (value != null) {
             entry.append("value", value);
         }
@@ -889,7 +907,7 @@ public class ParquetReadWriteTest {
 
             // map[]
             Assertions.assertTrue(result.getArray(3).isNullAt(0));
-            Assertions.assertTrue(result.getArray(3).getMap(1).keyArray().isNullAt(0));
+            Assertions.assertFalse(result.getArray(3).getMap(1).keyArray().isNullAt(0));
 
             Assertions.assertEquals(
                     origin.getArray(3).getMap(1).valueArray().getString(0),

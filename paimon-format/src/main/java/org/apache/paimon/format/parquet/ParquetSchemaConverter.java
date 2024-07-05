@@ -59,7 +59,9 @@ public class ParquetSchemaConverter {
     }
 
     public static Type convertToParquetType(String name, DataType type) {
-        return convertToParquetType(name, type, Type.Repetition.OPTIONAL);
+        Type.Repetition repetition =
+                type.isNullable() ? Type.Repetition.OPTIONAL : Type.Repetition.REQUIRED;
+        return convertToParquetType(name, type, repetition);
     }
 
     private static Type convertToParquetType(
@@ -128,19 +130,31 @@ public class ParquetSchemaConverter {
                         convertToParquetType(LIST_ELEMENT_NAME, arrayType.getElementType()));
             case MAP:
                 MapType mapType = (MapType) type;
+                DataType keyType = mapType.getKeyType();
+                if (keyType.isNullable()) {
+                    // key is nullable, but Parquet does not support nullable keys, so we configure
+                    // it as not nullable
+                    keyType = keyType.copy(false);
+                }
                 return ConversionPatterns.mapType(
                         repetition,
                         name,
                         MAP_REPEATED_NAME,
-                        convertToParquetType("key", mapType.getKeyType()),
+                        convertToParquetType("key", keyType),
                         convertToParquetType("value", mapType.getValueType()));
             case MULTISET:
                 MultisetType multisetType = (MultisetType) type;
+                DataType elementType = multisetType.getElementType();
+                if (elementType.isNullable()) {
+                    // element type is nullable, but Parquet does not support nullable map keys,
+                    // so we configure it as not nullable
+                    elementType = elementType.copy(false);
+                }
                 return ConversionPatterns.mapType(
                         repetition,
                         name,
                         MAP_REPEATED_NAME,
-                        convertToParquetType("key", multisetType.getElementType()),
+                        convertToParquetType("key", elementType),
                         convertToParquetType("value", new IntType(false)));
             case ROW:
                 RowType rowType = (RowType) type;
