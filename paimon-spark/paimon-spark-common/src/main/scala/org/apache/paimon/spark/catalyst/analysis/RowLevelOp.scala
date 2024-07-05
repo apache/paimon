@@ -18,28 +18,58 @@
 
 package org.apache.paimon.spark.catalyst.analysis
 
-import org.apache.paimon.CoreOptions.MergeEngine
+import org.apache.paimon.CoreOptions.{MERGE_ENGINE, MergeEngine}
+import org.apache.paimon.options.Options
+import org.apache.paimon.table.Table
 
 sealed trait RowLevelOp {
-  val supportedMergeEngine: Seq[MergeEngine]
+
+  val name: String = this.getClass.getSimpleName.stripSuffix("$")
+
+  protected val supportedMergeEngine: Seq[MergeEngine]
+
+  protected val supportAppendOnlyTable: Boolean
+
+  def checkValidity(table: Table): Unit = {
+    if (!supportAppendOnlyTable && table.primaryKeys().isEmpty) {
+      throw new UnsupportedOperationException(s"Only support to $name table with primary keys.")
+    }
+
+    val mergeEngine = Options.fromMap(table.options).get(MERGE_ENGINE)
+    if (!supportedMergeEngine.contains(mergeEngine)) {
+      throw new UnsupportedOperationException(
+        s"merge engine $mergeEngine can not support $name, currently only ${supportedMergeEngine
+            .mkString(", ")} can support $name.")
+    }
+  }
 }
 
 case object Delete extends RowLevelOp {
-  override def toString: String = "delete"
 
-  override val supportedMergeEngine: Seq[MergeEngine] = Seq(MergeEngine.DEDUPLICATE)
+  override val supportedMergeEngine: Seq[MergeEngine] = Seq(
+    MergeEngine.DEDUPLICATE,
+    MergeEngine.PARTIAL_UPDATE,
+    MergeEngine.AGGREGATE,
+    MergeEngine.FIRST_ROW)
+
+  override val supportAppendOnlyTable: Boolean = true
+
 }
 
 case object Update extends RowLevelOp {
-  override def toString: String = "update"
 
   override val supportedMergeEngine: Seq[MergeEngine] =
     Seq(MergeEngine.DEDUPLICATE, MergeEngine.PARTIAL_UPDATE)
+
+  override val supportAppendOnlyTable: Boolean = true
+
 }
 
 case object MergeInto extends RowLevelOp {
-  override def toString: String = "merge into"
 
   override val supportedMergeEngine: Seq[MergeEngine] =
     Seq(MergeEngine.DEDUPLICATE, MergeEngine.PARTIAL_UPDATE)
+
+  override val supportAppendOnlyTable: Boolean = false
+
 }

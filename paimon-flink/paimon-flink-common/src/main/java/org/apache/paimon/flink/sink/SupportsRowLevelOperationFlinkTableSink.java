@@ -18,19 +18,18 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.flink.PredicateConverter;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.predicate.AllPrimaryKeyEqualVisitor;
 import org.apache.paimon.predicate.OnlyPartitionKeyEqualVisitor;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.TableUtils;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 
 import org.apache.flink.table.catalog.Column;
@@ -54,10 +53,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
+import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
+import static org.apache.paimon.CoreOptions.MergeEngine.PARTIAL_UPDATE;
+import static org.apache.paimon.CoreOptions.createCommitUser;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Flink table sink that supports row level update and delete. */
 public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTableSinkBase
@@ -89,47 +91,44 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
         // Since only UPDATE_AFTER type messages can be received at present,
         // AppendOnlyFileStoreTable cannot correctly handle old data, so they are marked as
         // unsupported. Similarly, it is not allowed to update the primary key column when updating
-        // the column of PrimaryKeyFileStoreTable, because the old data cannot be handled
-        // correctly.
-        if (table.primaryKeys().size() > 0) {
-            Options options = Options.fromMap(table.options());
-            Set<String> primaryKeys = new HashSet<>(table.primaryKeys());
-            updatedColumns.forEach(
-                    column -> {
-                        if (primaryKeys.contains(column.getName())) {
-                            String errMsg =
-                                    String.format(
-                                            "Updates to primary keys are not supported, primaryKeys (%s), updatedColumns (%s)",
-                                            primaryKeys,
-                                            updatedColumns.stream()
-                                                    .map(Column::getName)
-                                                    .collect(Collectors.toList()));
-                            throw new UnsupportedOperationException(errMsg);
-                        }
-                    });
-            if (options.get(MERGE_ENGINE) == MergeEngine.DEDUPLICATE
-                    || options.get(MERGE_ENGINE) == MergeEngine.PARTIAL_UPDATE) {
-                // Even with partial-update we still need all columns. Because the topology
-                // structure is source -> cal -> constraintEnforcer -> sink, in the
-                // constraintEnforcer operator, the constraint check will be performed according to
-                // the index, not according to the column. So we can't return only some columns,
-                // which will cause problems like ArrayIndexOutOfBoundsException.
-                // TODO: return partial columns after FLINK-32001 is resolved.
-                return new RowLevelUpdateInfo() {};
-            }
-            throw new UnsupportedOperationException(
-                    String.format(
-                            "%s can not support update, currently only %s of %s and %s can support update.",
-                            options.get(MERGE_ENGINE),
-                            MERGE_ENGINE.key(),
-                            MergeEngine.DEDUPLICATE,
-                            MergeEngine.PARTIAL_UPDATE));
-        } else {
+        // the column of PrimaryKeyFileStoreTable, because the old data cannot be handled correctly.
+        if (table.primaryKeys().isEmpty()) {
             throw new UnsupportedOperationException(
                     String.format(
                             "%s can not support update, because there is no primary key.",
                             table.getClass().getName()));
         }
+
+        Options options = Options.fromMap(table.options());
+        Set<String> primaryKeys = new HashSet<>(table.primaryKeys());
+        updatedColumns.forEach(
+                column -> {
+                    if (primaryKeys.contains(column.getName())) {
+                        String errMsg =
+                                String.format(
+                                        "Updates to primary keys are not supported, primaryKeys (%s), updatedColumns (%s)",
+                                        primaryKeys,
+                                        updatedColumns.stream()
+                                                .map(Column::getName)
+                                                .collect(Collectors.toList()));
+                        throw new UnsupportedOperationException(errMsg);
+                    }
+                });
+
+        MergeEngine mergeEngine = options.get(MERGE_ENGINE);
+        boolean supportUpdate = mergeEngine == DEDUPLICATE || mergeEngine == PARTIAL_UPDATE;
+        if (!supportUpdate) {
+            throw new UnsupportedOperationException(
+                    String.format("Merge engine %s can not support batch update.", mergeEngine));
+        }
+
+        // Even with partial-update we still need all columns. Because the topology
+        // structure is source -> cal -> constraintEnforcer -> sink, in the
+        // constraintEnforcer operator, the constraint check will be performed according to
+        // the index, not according to the column. So we can't return only some columns,
+        // which will cause problems like ArrayIndexOutOfBoundsException.
+        // TODO: return partial columns after FLINK-32001 is resolved.
+        return new RowLevelUpdateInfo() {};
     }
 
     @Override
@@ -161,41 +160,42 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
 
     @Override
     public Optional<Long> executeDeletion() {
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
         FileStoreCommit commit =
-                ((FileStoreTable) table).store().newCommit(UUID.randomUUID().toString());
+                fileStoreTable
+                        .store()
+                        .newCommit(
+                                createCommitUser(fileStoreTable.coreOptions().toConfiguration()));
         long identifier = BatchWriteBuilder.COMMIT_IDENTIFIER;
         if (deletePredicate == null) {
             commit.truncateTable(identifier);
             return Optional.empty();
-        } else if (deleteIsDropPartition()) {
+        } else {
+            checkArgument(deleteIsDropPartition());
             commit.dropPartitions(Collections.singletonList(deletePartitions()), identifier);
             return Optional.empty();
-        } else {
-            return Optional.of(
-                    TableUtils.deleteWhere(table, Collections.singletonList(deletePredicate)));
         }
     }
 
     private void validateDeletable() {
-        if (table.primaryKeys().size() > 0) {
-            Options options = Options.fromMap(table.options());
-            if (options.get(MERGE_ENGINE) == MergeEngine.DEDUPLICATE) {
-                return;
-            }
-            throw new UnsupportedOperationException(
-                    String.format(
-                            "merge engine '%s' can not support delete, currently only %s can support delete.",
-                            options.get(MERGE_ENGINE), MergeEngine.DEDUPLICATE));
-        } else {
+        if (table.primaryKeys().isEmpty()) {
             throw new UnsupportedOperationException(
                     String.format(
                             "table '%s' can not support delete, because there is no primary key.",
                             table.getClass().getName()));
         }
+
+        MergeEngine mergeEngine = CoreOptions.fromMap(table.options()).mergeEngine();
+        if (mergeEngine != DEDUPLICATE) {
+            throw new UnsupportedOperationException(
+                    String.format("Merge engine %s can not support batch delete.", mergeEngine));
+        }
     }
 
     private boolean canPushDownDeleteFilter() {
-        return deletePredicate == null || deleteIsDropPartition() || deleteInSingleNode();
+        CoreOptions options = CoreOptions.fromMap(table.options());
+        return (deletePredicate == null || deleteIsDropPartition())
+                && !options.deleteForceProduceChangelog();
     }
 
     private boolean deleteIsDropPartition() {
@@ -213,14 +213,5 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
                 new OnlyPartitionKeyEqualVisitor(table.partitionKeys());
         deletePredicate.visit(visitor);
         return visitor.partitions();
-    }
-
-    private boolean deleteInSingleNode() {
-        if (deletePredicate == null) {
-            return false;
-        }
-        return deletePredicate
-                .visit(new AllPrimaryKeyEqualVisitor(table.primaryKeys()))
-                .containsAll(table.primaryKeys());
     }
 }

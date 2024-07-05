@@ -21,7 +21,7 @@ package org.apache.paimon.manifest;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.stats.BinaryTableStats;
+import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.utils.VersionedObjectSerializer;
 
 /** Serializer for {@link ManifestFileMeta}. */
@@ -65,7 +65,7 @@ public class ManifestFileMetaSerializer extends VersionedObjectSerializer<Manife
                 row.getLong(1),
                 row.getLong(2),
                 row.getLong(3),
-                BinaryTableStats.fromRow(row.getRow(4, 3)),
+                SimpleStats.fromRow(row.getRow(4, 3)),
                 row.getLong(5));
     }
 }

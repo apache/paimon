@@ -36,7 +36,7 @@ object MergePaimonScalarSubqueriers extends MergePaimonScalarSubqueriersBase {
             DataSourceV2ScanRelation(
               cachedRelation,
               cachedScan: PaimonScan,
-              cachedOutput,
+              _,
               cachedPartitioning)) =>
         checkIdenticalPlans(newRelation, cachedRelation).flatMap {
           outputMap =>
@@ -46,7 +46,7 @@ object MergePaimonScalarSubqueriers extends MergePaimonScalarSubqueriersBase {
                   val mergedAttributes = mergedScan
                     .readSchema()
                     .map(f => AttributeReference(f.name, f.dataType, f.nullable, f.metadata)())
-                  val cachedOutputNameMap = cachedOutput.map(a => a.name -> a).toMap
+                  val cachedOutputNameMap = cachedRelation.output.map(a => a.name -> a).toMap
                   val mergedOutput =
                     mergedAttributes.map(a => cachedOutputNameMap.getOrElse(a.name, a))
                   val newV2ScanRelation = DataSourceV2ScanRelation(

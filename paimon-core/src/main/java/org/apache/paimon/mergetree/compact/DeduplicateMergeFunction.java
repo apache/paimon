@@ -34,7 +34,7 @@ public class DeduplicateMergeFunction implements MergeFunction<KeyValue> {
 
     private KeyValue latestKv;
 
-    protected DeduplicateMergeFunction(boolean ignoreDelete) {
+    private DeduplicateMergeFunction(boolean ignoreDelete) {
         this.ignoreDelete = ignoreDelete;
     }
 
@@ -45,6 +45,8 @@ public class DeduplicateMergeFunction implements MergeFunction<KeyValue> {
 
     @Override
     public void add(KeyValue kv) {
+        // In 0.7- versions, the delete records might be written into data file even when
+        // ignore-delete configured, so ignoreDelete still needs to be checked
         if (ignoreDelete && kv.valueKind().isRetract()) {
             return;
         }
@@ -52,32 +54,31 @@ public class DeduplicateMergeFunction implements MergeFunction<KeyValue> {
     }
 
     @Override
-    @Nullable
     public KeyValue getResult() {
         return latestKv;
     }
 
     public static MergeFunctionFactory<KeyValue> factory() {
-        return new Factory(new Options());
+        return new Factory(false);
     }
 
     public static MergeFunctionFactory<KeyValue> factory(Options options) {
-        return new Factory(options);
+        return new Factory(options.get(CoreOptions.IGNORE_DELETE));
     }
 
     private static class Factory implements MergeFunctionFactory<KeyValue> {
 
         private static final long serialVersionUID = 1L;
 
-        private final Options options;
+        private final boolean ignoreDelete;
 
-        private Factory(Options options) {
-            this.options = options;
+        private Factory(boolean ignoreDelete) {
+            this.ignoreDelete = ignoreDelete;
         }
 
         @Override
         public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
-            return new DeduplicateMergeFunction(options.get(CoreOptions.DEDUPLICATE_IGNORE_DELETE));
+            return new DeduplicateMergeFunction(ignoreDelete);
         }
     }
 }

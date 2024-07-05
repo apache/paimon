@@ -30,7 +30,10 @@ import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite.State;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.Restorable;
+
+import javax.annotation.Nullable;
 
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -47,6 +50,8 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     private final FileStoreWrite<T> write;
     private final KeyAndBucketExtractor<InternalRow> keyAndBucketExtractor;
     private final RecordExtractor<T> recordExtractor;
+    @Nullable private final RowKindGenerator rowKindGenerator;
+    private final boolean ignoreDelete;
 
     private boolean batchCommitted = false;
     private BucketMode bucketMode;
@@ -54,10 +59,14 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     public TableWriteImpl(
             FileStoreWrite<T> write,
             KeyAndBucketExtractor<InternalRow> keyAndBucketExtractor,
-            RecordExtractor<T> recordExtractor) {
+            RecordExtractor<T> recordExtractor,
+            @Nullable RowKindGenerator rowKindGenerator,
+            boolean ignoreDelete) {
         this.write = write;
         this.keyAndBucketExtractor = keyAndBucketExtractor;
         this.recordExtractor = recordExtractor;
+        this.rowKindGenerator = rowKindGenerator;
+        this.ignoreDelete = ignoreDelete;
     }
 
     @Override
@@ -100,6 +109,11 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     }
 
     @Override
+    public void withInsertOnly(boolean insertOnly) {
+        write.withInsertOnly(insertOnly);
+    }
+
+    @Override
     public BinaryRow getPartition(InternalRow row) {
         keyAndBucketExtractor.setRecord(row);
         return keyAndBucketExtractor.partition();
@@ -121,15 +135,25 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         writeAndReturn(row, bucket);
     }
 
+    @Nullable
     public SinkRecord writeAndReturn(InternalRow row) throws Exception {
+        RowKind rowKind = RowKindGenerator.getRowKind(rowKindGenerator, row);
+        if (ignoreDelete && rowKind.isRetract()) {
+            return null;
+        }
         SinkRecord record = toSinkRecord(row);
-        write.write(record.partition(), record.bucket(), recordExtractor.extract(record));
+        write.write(record.partition(), record.bucket(), recordExtractor.extract(record, rowKind));
         return record;
     }
 
+    @Nullable
     public SinkRecord writeAndReturn(InternalRow row, int bucket) throws Exception {
+        RowKind rowKind = RowKindGenerator.getRowKind(rowKindGenerator, row);
+        if (ignoreDelete && rowKind.isRetract()) {
+            return null;
+        }
         SinkRecord record = toSinkRecord(row, bucket);
-        write.write(record.partition(), bucket, recordExtractor.extract(record));
+        write.write(record.partition(), bucket, recordExtractor.extract(record, rowKind));
         return record;
     }
 
@@ -155,7 +179,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         keyAndBucketExtractor.setRecord(record.row());
         return new SinkRecord(
                 record.partition(),
-                bucketMode == BucketMode.UNAWARE ? -1 : record.bucket(),
+                bucketMode == BucketMode.BUCKET_UNAWARE ? -1 : record.bucket(),
                 keyAndBucketExtractor.logPrimaryKey(),
                 record.row());
     }
@@ -218,6 +242,6 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     /** Extractor to extract {@link T} from the {@link SinkRecord}. */
     public interface RecordExtractor<T> {
 
-        T extract(SinkRecord record);
+        T extract(SinkRecord record, RowKind rowKind);
     }
 }

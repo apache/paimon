@@ -23,7 +23,7 @@ import org.apache.paimon.spark.DynamicOverWrite
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.{Row, SparkSession}
-import org.apache.spark.sql.Utils.createDataset
+import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.catalyst.analysis.NamedRelation
 import org.apache.spark.sql.catalyst.plans.logical.{Command, LogicalPlan, V2WriteCommand}
 import org.apache.spark.sql.execution.command.RunnableCommand

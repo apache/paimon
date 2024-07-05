@@ -21,7 +21,7 @@ package org.apache.paimon.append;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.io.NewFilesIncrement;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
@@ -68,7 +68,7 @@ public class AppendOnlyCompactionTask {
                 partition,
                 0, // bucket 0 is bucket for unaware-bucket table for compatibility with the old
                 // design
-                NewFilesIncrement.emptyIncrement(),
+                DataIncrement.emptyIncrement(),
                 compactIncrement);
     }
 

@@ -24,13 +24,14 @@ import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.io.KeyValueFileReaderFactory;
+import org.apache.paimon.io.FileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.mergetree.LookupLevels;
 import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.SortedRun;
 import org.apache.paimon.utils.FieldsComparator;
+import org.apache.paimon.utils.UserDefinedSeqComparator;
 
 import javax.annotation.Nullable;
 
@@ -57,7 +58,7 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
             int maxLevel,
             MergeEngine mergeEngine,
             LookupLevels<T> lookupLevels,
-            KeyValueFileReaderFactory readerFactory,
+            FileReaderFactory<KeyValue> readerFactory,
             KeyValueFileWriterFactory writerFactory,
             Comparator<InternalRow> keyComparator,
             @Nullable FieldsComparator userDefinedSeqComparator,
@@ -150,14 +151,17 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
         private final RecordEqualiser valueEqualiser;
         private final boolean changelogRowDeduplicate;
         private final LookupStrategy lookupStrategy;
+        @Nullable private final UserDefinedSeqComparator userDefinedSeqComparator;
 
         public LookupMergeFunctionWrapperFactory(
                 RecordEqualiser valueEqualiser,
                 boolean changelogRowDeduplicate,
-                LookupStrategy lookupStrategy) {
+                LookupStrategy lookupStrategy,
+                @Nullable UserDefinedSeqComparator userDefinedSeqComparator) {
             this.valueEqualiser = valueEqualiser;
             this.changelogRowDeduplicate = changelogRowDeduplicate;
             this.lookupStrategy = lookupStrategy;
+            this.userDefinedSeqComparator = userDefinedSeqComparator;
         }
 
         @Override
@@ -178,7 +182,8 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
                     valueEqualiser,
                     changelogRowDeduplicate,
                     lookupStrategy,
-                    deletionVectorsMaintainer);
+                    deletionVectorsMaintainer,
+                    userDefinedSeqComparator);
         }
     }
 
@@ -192,7 +197,7 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
                 int outputLevel,
                 LookupLevels<Boolean> lookupLevels,
                 @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer) {
-            return new FistRowMergeFunctionWrapper(
+            return new FirstRowMergeFunctionWrapper(
                     mfFactory,
                     key -> {
                         try {

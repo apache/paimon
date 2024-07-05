@@ -36,20 +36,14 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowType;
 
-import org.apache.flink.api.common.RuntimeExecutionMode;
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
-import org.apache.flink.streaming.api.CheckpointingMode;
-import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
-import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.api.config.TableConfigOptions;
+import org.apache.flink.types.Row;
+import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 
 import java.io.IOException;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -96,9 +90,11 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
             RowType rowType,
             List<String> partitionKeys,
             List<String> primaryKeys,
+            List<String> bucketKeys,
             Map<String, String> options)
             throws Exception {
-        return createFileStoreTable(tableName, rowType, partitionKeys, primaryKeys, options);
+        return createFileStoreTable(
+                tableName, rowType, partitionKeys, primaryKeys, bucketKeys, options);
     }
 
     protected FileStoreTable createFileStoreTable(
@@ -106,6 +102,7 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
             RowType rowType,
             List<String> partitionKeys,
             List<String> primaryKeys,
+            List<String> bucketKeys,
             Map<String, String> options)
             throws Exception {
         Identifier identifier = Identifier.create(database, tableName);
@@ -113,6 +110,9 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
         Map<String, String> newOptions = new HashMap<>(options);
         if (!newOptions.containsKey("bucket")) {
             newOptions.put("bucket", "1");
+        }
+        if (!bucketKeys.isEmpty()) {
+            newOptions.put("bucket-key", String.join(",", bucketKeys));
         }
         catalog.createTable(
                 identifier,
@@ -148,20 +148,18 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
         }
     }
 
-    protected StreamExecutionEnvironment buildDefaultEnv(boolean isStreaming) {
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.getConfig().setRestartStrategy(RestartStrategies.noRestart());
-        env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
+    @Override
+    protected TableEnvironmentBuilder tableEnvironmentBuilder() {
+        return super.tableEnvironmentBuilder()
+                .checkpointIntervalMs(500)
+                .parallelism(ThreadLocalRandom.current().nextInt(2) + 1);
+    }
 
-        if (isStreaming) {
-            env.setRuntimeMode(RuntimeExecutionMode.STREAMING);
-            env.getCheckpointConfig().setCheckpointingMode(CheckpointingMode.EXACTLY_ONCE);
-            env.getCheckpointConfig().setCheckpointInterval(500);
-        } else {
-            env.setRuntimeMode(RuntimeExecutionMode.BATCH);
-        }
-
-        return env;
+    @Override
+    protected StreamExecutionEnvironmentBuilder streamExecutionEnvironmentBuilder() {
+        return super.streamExecutionEnvironmentBuilder()
+                .checkpointIntervalMs(500)
+                .parallelism(ThreadLocalRandom.current().nextInt(2) + 1);
     }
 
     protected <T extends ActionBase> T createAction(Class<T> clazz, List<String> args) {
@@ -189,23 +187,18 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
         }
     }
 
-    protected void callProcedure(String procedureStatement) {
+    protected CloseableIterator<Row> callProcedure(String procedureStatement) {
         // default execution mode
-        callProcedure(procedureStatement, true, false);
+        return callProcedure(procedureStatement, true, false);
     }
 
-    protected void callProcedure(String procedureStatement, boolean isStreaming, boolean dmlSync) {
-        StreamExecutionEnvironment env = buildDefaultEnv(isStreaming);
-
+    protected CloseableIterator<Row> callProcedure(
+            String procedureStatement, boolean isStreaming, boolean dmlSync) {
         TableEnvironment tEnv;
         if (isStreaming) {
-            tEnv = StreamTableEnvironment.create(env, EnvironmentSettings.inStreamingMode());
-            tEnv.getConfig()
-                    .set(
-                            ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL,
-                            Duration.ofMillis(500));
+            tEnv = tableEnvironmentBuilder().streamingMode().checkpointIntervalMs(500).build();
         } else {
-            tEnv = StreamTableEnvironment.create(env, EnvironmentSettings.inBatchMode());
+            tEnv = tableEnvironmentBuilder().batchMode().build();
         }
 
         tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, dmlSync);
@@ -216,6 +209,6 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
                         warehouse));
         tEnv.useCatalog("PAIMON");
 
-        tEnv.executeSql(procedureStatement);
+        return tEnv.executeSql(procedureStatement).collect();
     }
 }

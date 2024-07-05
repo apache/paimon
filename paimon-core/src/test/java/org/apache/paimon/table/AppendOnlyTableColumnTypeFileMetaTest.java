@@ -21,7 +21,7 @@ package org.apache.paimon.table;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.stats.BinaryTableStats;
+import org.apache.paimon.stats.SimpleStats;
 
 import org.junit.jupiter.api.BeforeEach;
 
@@ -47,7 +47,7 @@ public class AppendOnlyTableColumnTypeFileMetaTest extends ColumnTypeFileMetaTes
     }
 
     @Override
-    protected BinaryTableStats getTableValueStats(DataFileMeta fileMeta) {
+    protected SimpleStats getTableValueStats(DataFileMeta fileMeta) {
         return fileMeta.valueStats();
     }
 }

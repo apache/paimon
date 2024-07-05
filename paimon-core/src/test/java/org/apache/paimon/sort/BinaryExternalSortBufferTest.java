@@ -26,6 +26,7 @@ import org.apache.paimon.data.serializer.BinaryRowSerializer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemorySegmentPool;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.utils.MutableObjectIterator;
 
 import org.junit.jupiter.api.AfterEach;
@@ -262,11 +263,38 @@ public class BinaryExternalSortBufferTest {
         sorter.clear();
     }
 
+    @Test
+    public void testSpillingMaxDiskSize() throws Exception {
+        BinaryExternalSortBuffer sorter = createBuffer(128, MemorySize.ofKibiBytes(10));
+        int size = 1000_000;
+
+        MockBinaryRowReader reader = new MockBinaryRowReader(size);
+        sorter.write(reader);
+
+        assertThat(sorter.flushMemory()).isFalse();
+        assertThat(sorter.size()).isEqualTo(size);
+
+        MutableObjectIterator<BinaryRow> iterator = sorter.sortedIterator();
+
+        BinaryRow next = serializer.createInstance();
+        for (int i = 0; i < size; i++) {
+            next = iterator.next(next);
+            assertThat(next.getInt(0)).isEqualTo(i);
+            assertThat(next.getString(1).toString()).isEqualTo(getString(i));
+        }
+
+        sorter.clear();
+    }
+
     private BinaryExternalSortBuffer createBuffer() {
-        return createBuffer(128);
+        return createBuffer(128, MemorySize.MAX_VALUE);
     }
 
     private BinaryExternalSortBuffer createBuffer(int maxNumFileHandles) {
+        return createBuffer(maxNumFileHandles, MemorySize.MAX_VALUE);
+    }
+
+    private BinaryExternalSortBuffer createBuffer(int maxNumFileHandles, MemorySize diskSize) {
         @SuppressWarnings({"unchecked", "rawtypes"})
         BinaryInMemorySortBuffer inMemorySortBuffer =
                 BinaryInMemorySortBuffer.createBuffer(
@@ -281,7 +309,8 @@ public class BinaryExternalSortBufferTest {
                 inMemorySortBuffer,
                 ioManager,
                 maxNumFileHandles,
-                "lz4");
+                "lz4",
+                diskSize);
     }
 
     /** Mock reader for binary row. */

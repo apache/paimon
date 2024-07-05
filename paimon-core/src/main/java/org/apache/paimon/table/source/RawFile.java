@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
@@ -35,16 +34,23 @@ import java.util.Objects;
 public class RawFile {
 
     private final String path;
+    private final long fileSize;
     private final long offset;
     private final long length;
     private final String format;
     private final long schemaId;
-
     private final long rowCount;
 
     public RawFile(
-            String path, long offset, long length, String format, long schemaId, long rowCount) {
+            String path,
+            long fileSize,
+            long offset,
+            long length,
+            String format,
+            long schemaId,
+            long rowCount) {
         this.path = path;
+        this.fileSize = fileSize;
         this.offset = offset;
         this.length = length;
         this.format = format;
@@ -57,6 +63,11 @@ public class RawFile {
         return path;
     }
 
+    /** Size of this file. */
+    public long fileSize() {
+        return fileSize;
+    }
+
     /** Starting offset of data in the file. */
     public long offset() {
         return offset;
@@ -67,10 +78,7 @@ public class RawFile {
         return length;
     }
 
-    /**
-     * Format of the file, which is a lower-cased string. See {@link CoreOptions.FileFormatType} for
-     * all possible types.
-     */
+    /** Format of the file, which is a lower-cased string. e.g. avro, orc, parquet. */
     public String format() {
         return format;
     }
@@ -87,6 +95,7 @@ public class RawFile {
 
     public void serialize(DataOutputView out) throws IOException {
         out.writeUTF(path);
+        out.writeLong(fileSize);
         out.writeLong(offset);
         out.writeLong(length);
         out.writeUTF(format);
@@ -96,13 +105,14 @@ public class RawFile {
 
     public static RawFile deserialize(DataInputView in) throws IOException {
         String path = in.readUTF();
+        long fileSize = in.readLong();
         long offset = in.readLong();
         long length = in.readLong();
         String format = in.readUTF();
         long schemaId = in.readLong();
         long rowCount = in.readLong();
 
-        return new RawFile(path, offset, length, format, schemaId, rowCount);
+        return new RawFile(path, fileSize, offset, length, format, schemaId, rowCount);
     }
 
     @Override
@@ -113,21 +123,23 @@ public class RawFile {
 
         RawFile other = (RawFile) o;
         return Objects.equals(path, other.path)
+                && fileSize == other.fileSize
                 && offset == other.offset
                 && length == other.length
                 && Objects.equals(format, other.format)
-                && schemaId == other.schemaId;
+                && schemaId == other.schemaId
+                && rowCount == other.rowCount;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(path, offset, length, format, schemaId);
+        return Objects.hash(path, fileSize, offset, length, format, schemaId, rowCount);
     }
 
     @Override
     public String toString() {
         return String.format(
-                "{path = %s, offset = %d, length = %d, format = %s, schemaId = %d}",
-                path, offset, length, format, schemaId);
+                "{path = %s, offset = %d, offset = %d, length = %d, format = %s, schemaId = %d, rowCount = %d}",
+                path, fileSize, offset, length, format, schemaId, rowCount);
     }
 }

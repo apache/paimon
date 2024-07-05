@@ -22,8 +22,9 @@ import org.apache.paimon.FileStore;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestCacheFilter;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.stats.BinaryTableStats;
+import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.TableCommitImpl;
@@ -43,6 +44,11 @@ public interface FileStoreTable extends DataTable {
     @Override
     default String name() {
         return location().getName();
+    }
+
+    @Override
+    default String fullName() {
+        return SchemaManager.fromPath(location().toUri().toString(), true).getFullName();
     }
 
     @Override
@@ -86,9 +92,6 @@ public interface FileStoreTable extends DataTable {
     /** Doesn't change table schema even when there exists time travel scan options. */
     FileStoreTable copyWithoutTimeTravel(Map<String, String> dynamicOptions);
 
-    /** Sometimes we have to change some Immutable options to implement features. */
-    FileStoreTable internalCopyWithoutCheck(Map<String, String> dynamicOptions);
-
     /** TODO: this method is weird, old options will overwrite new options. */
     FileStoreTable copyWithLatestSchema();
 
@@ -100,11 +103,9 @@ public interface FileStoreTable extends DataTable {
     @Override
     TableCommitImpl newCommit(String commitUser);
 
-    TableCommitImpl newCommit(String commitUser, String branchName);
-
     LocalTableQuery newLocalTableQuery();
 
-    default BinaryTableStats getSchemaFieldStats(DataFileMeta dataFileMeta) {
+    default SimpleStats getSchemaFieldStats(DataFileMeta dataFileMeta) {
         return dataFileMeta.valueStats();
     }
 

@@ -20,40 +20,33 @@ package org.apache.paimon.deletionvectors;
 
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.utils.Pair;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.utils.PathFactory;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link DeletionVectorsIndexFile}. */
 public class DeletionVectorsIndexFileTest {
+
     @TempDir java.nio.file.Path tempPath;
 
     @Test
-    public void test0() {
-        Path dir = new Path(tempPath.toUri());
-        PathFactory pathFactory =
-                new PathFactory() {
-                    @Override
-                    public Path newPath() {
-                        return new Path(dir, UUID.randomUUID().toString());
-                    }
-
-                    @Override
-                    public Path toPath(String fileName) {
-                        return new Path(dir, fileName);
-                    }
-                };
+    public void testReadDvIndex() {
+        PathFactory pathFactory = getPathFactory();
 
         DeletionVectorsIndexFile deletionVectorsIndexFile =
-                new DeletionVectorsIndexFile(LocalFileIO.create(), pathFactory);
+                new DeletionVectorsIndexFile(
+                        LocalFileIO.create(), pathFactory, MemorySize.ofBytes(Long.MAX_VALUE));
 
         // write
         HashMap<String, DeletionVector> deleteMap = new HashMap<>();
@@ -70,28 +63,144 @@ public class DeletionVectorsIndexFileTest {
         index3.delete(3);
         deleteMap.put("file33.parquet", index3);
 
-        Pair<String, Map<String, Pair<Integer, Integer>>> pair =
-                deletionVectorsIndexFile.write(deleteMap);
-        String fileName = pair.getLeft();
-        Map<String, Pair<Integer, Integer>> deletionVectorRanges = pair.getRight();
+        List<IndexFileMeta> indexFiles = deletionVectorsIndexFile.write(deleteMap);
+        assertThat(indexFiles.size()).isEqualTo(1);
 
         // read
+        String fileName = indexFiles.get(0).fileName();
         Map<String, DeletionVector> actualDeleteMap =
-                deletionVectorsIndexFile.readAllDeletionVectors(fileName, deletionVectorRanges);
+                deletionVectorsIndexFile.readAllDeletionVectors(indexFiles);
         assertThat(actualDeleteMap.get("file1.parquet").isDeleted(1)).isTrue();
         assertThat(actualDeleteMap.get("file1.parquet").isDeleted(2)).isFalse();
         assertThat(actualDeleteMap.get("file2.parquet").isDeleted(2)).isTrue();
         assertThat(actualDeleteMap.get("file2.parquet").isDeleted(3)).isTrue();
         assertThat(actualDeleteMap.get("file33.parquet").isDeleted(3)).isTrue();
 
-        DeletionVector file1DeletionVector =
-                deletionVectorsIndexFile.readDeletionVector(
-                        fileName, deletionVectorRanges.get("file1.parquet"));
-        assertThat(file1DeletionVector.isDeleted(1)).isTrue();
-        assertThat(file1DeletionVector.isDeleted(2)).isFalse();
-
         // delete
         deletionVectorsIndexFile.delete(fileName);
         assertThat(deletionVectorsIndexFile.exists(fileName)).isFalse();
+    }
+
+    @Test
+    public void testReadDvIndexWithCopiousDv() {
+        PathFactory pathFactory = getPathFactory();
+        DeletionVectorsIndexFile deletionVectorsIndexFile =
+                new DeletionVectorsIndexFile(
+                        LocalFileIO.create(), pathFactory, MemorySize.ofBytes(Long.MAX_VALUE));
+
+        // write
+        Random random = new Random();
+        HashMap<String, DeletionVector> deleteMap = new HashMap<>();
+        for (int i = 0; i < 100000; i++) {
+            BitmapDeletionVector index = new BitmapDeletionVector();
+            index.delete(random.nextInt(1000000));
+            deleteMap.put(String.format("file%s.parquet", i), index);
+        }
+
+        // read
+        List<IndexFileMeta> indexFiles = deletionVectorsIndexFile.write(deleteMap);
+        assertThat(indexFiles.size()).isEqualTo(1);
+        Map<String, DeletionVector> dvs =
+                deletionVectorsIndexFile.readAllDeletionVectors(indexFiles);
+        assertThat(dvs.size()).isEqualTo(100000);
+    }
+
+    @Test
+    public void testReadDvIndexWithEnormousDv() {
+        PathFactory pathFactory = getPathFactory();
+        DeletionVectorsIndexFile deletionVectorsIndexFile =
+                new DeletionVectorsIndexFile(
+                        LocalFileIO.create(), pathFactory, MemorySize.ofBytes(Long.MAX_VALUE));
+
+        // write
+        Random random = new Random();
+        Map<String, DeletionVector> fileToDV = new HashMap<>();
+        Map<String, Long> fileToCardinality = new HashMap<>();
+        for (int i = 0; i < 5; i++) {
+            BitmapDeletionVector index = new BitmapDeletionVector();
+            // the size of dv index file is about 20M
+            for (int j = 0; j < 10000000; j++) {
+                index.delete(random.nextInt(Integer.MAX_VALUE));
+            }
+            fileToCardinality.put("f" + i, index.getCardinality());
+            fileToDV.put("f" + i, index);
+        }
+        List<IndexFileMeta> indexFiles = deletionVectorsIndexFile.write(fileToDV);
+
+        // read
+        assertThat(indexFiles.size()).isEqualTo(1);
+        Map<String, DeletionVector> dvs =
+                deletionVectorsIndexFile.readAllDeletionVectors(indexFiles);
+        assertThat(dvs.size()).isEqualTo(5);
+        for (String file : dvs.keySet()) {
+            assertThat(dvs.get(file).getCardinality()).isEqualTo(fileToCardinality.get(file));
+        }
+    }
+
+    @Test
+    public void testWriteDVIndexWithLimitedTargetSizePerIndexFile() {
+        PathFactory pathFactory = getPathFactory();
+        DeletionVectorsIndexFile deletionVectorsIndexFile =
+                new DeletionVectorsIndexFile(
+                        LocalFileIO.create(), pathFactory, MemorySize.parse("2MB"));
+
+        // write1
+        Random random = new Random();
+        Map<String, DeletionVector> fileToDV = new HashMap<>();
+        Map<String, Long> fileToCardinality = new HashMap<>();
+        for (int i = 0; i < 5; i++) {
+            BitmapDeletionVector index = new BitmapDeletionVector();
+            // the size of dv index file is about 1.7M
+            for (int j = 0; j < 750000; j++) {
+                index.delete(random.nextInt(Integer.MAX_VALUE));
+            }
+            fileToCardinality.put("f" + i, index.getCardinality());
+            fileToDV.put("f" + i, index);
+        }
+        List<IndexFileMeta> indexFiles = deletionVectorsIndexFile.write(fileToDV);
+
+        // assert 1
+        assertThat(indexFiles.size()).isEqualTo(5);
+        Map<String, DeletionVector> dvs =
+                deletionVectorsIndexFile.readAllDeletionVectors(indexFiles);
+        for (String file : dvs.keySet()) {
+            assertThat(dvs.get(file).getCardinality()).isEqualTo(fileToCardinality.get(file));
+        }
+
+        // write2
+        fileToDV.clear();
+        fileToCardinality.clear();
+        for (int i = 0; i < 10; i++) {
+            BitmapDeletionVector index = new BitmapDeletionVector();
+            // the size of dv index file is about 0.42M
+            for (int j = 0; j < 100000; j++) {
+                index.delete(random.nextInt(Integer.MAX_VALUE));
+            }
+            fileToCardinality.put("f" + i, index.getCardinality());
+            fileToDV.put("f" + i, index);
+        }
+        indexFiles = deletionVectorsIndexFile.write(fileToDV);
+
+        // assert 2
+        assertThat(indexFiles.size()).isGreaterThan(1);
+        dvs = deletionVectorsIndexFile.readAllDeletionVectors(indexFiles);
+        for (String file : dvs.keySet()) {
+            assertThat(dvs.get(file).getCardinality()).isEqualTo(fileToCardinality.get(file));
+        }
+    }
+
+    private PathFactory getPathFactory() {
+        Path dir = new Path(tempPath.toUri());
+        return new PathFactory() {
+            @Override
+            public Path newPath() {
+                return new Path(dir, UUID.randomUUID().toString());
+            }
+
+            @Override
+            public Path toPath(String fileName) {
+                return new Path(dir, fileName);
+            }
+        };
     }
 }

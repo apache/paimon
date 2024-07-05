@@ -36,6 +36,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.io.RollingFileWriter;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.mergetree.compact.AbstractCompactRewriter;
 import org.apache.paimon.mergetree.compact.CompactRewriter;
@@ -133,12 +134,15 @@ public abstract class MergeTreeTestBase {
     }
 
     private void recreateMergeTree(long targetFileSize) {
-        Options configuration = new Options();
-        configuration.set(CoreOptions.WRITE_BUFFER_SIZE, new MemorySize(4096 * 3));
-        configuration.set(CoreOptions.PAGE_SIZE, new MemorySize(4096));
-        configuration.set(CoreOptions.TARGET_FILE_SIZE, new MemorySize(targetFileSize));
-        configuration.set(CoreOptions.SORT_ENGINE, getSortEngine());
-        options = new CoreOptions(configuration);
+        Options options = new Options();
+        options.set(CoreOptions.WRITE_BUFFER_SIZE, new MemorySize(4096 * 3));
+        options.set(CoreOptions.PAGE_SIZE, new MemorySize(4096));
+        options.set(CoreOptions.TARGET_FILE_SIZE, new MemorySize(targetFileSize));
+        options.set(CoreOptions.SORT_ENGINE, getSortEngine());
+        options.set(
+                CoreOptions.NUM_SORTED_RUNS_STOP_TRIGGER,
+                options.get(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER) + 1);
+        this.options = new CoreOptions(options);
         RowType keyType = new RowType(singletonList(new DataField(0, "k", new IntType())));
         RowType valueType = new RowType(singletonList(new DataField(0, "v", new IntType())));
 
@@ -188,9 +192,9 @@ public abstract class MergeTreeTestBase {
                         valueType,
                         flushingAvro,
                         pathFactoryMap,
-                        options.targetFileSize());
-        writerFactory = writerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0, options);
-        compactWriterFactory = writerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0, options);
+                        this.options.targetFileSize());
+        writerFactory = writerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0, this.options);
+        compactWriterFactory = writerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0, this.options);
         writer = createMergeTreeWriter(Collections.emptyList());
     }
 
@@ -363,6 +367,29 @@ public abstract class MergeTreeTestBase {
         doTestWriteRead(3, 20_000);
     }
 
+    @Test
+    public void testChangelog() throws Exception {
+        writer =
+                createMergeTreeWriter(
+                        Collections.emptyList(),
+                        createCompactManager(service, Collections.emptyList()),
+                        ChangelogProducer.INPUT);
+
+        doTestWriteReadWithChangelog(8, 200, false);
+    }
+
+    @Test
+    public void testChangelogFromCopyingData() throws Exception {
+        writer =
+                createMergeTreeWriter(
+                        Collections.emptyList(),
+                        createCompactManager(service, Collections.emptyList()),
+                        ChangelogProducer.INPUT);
+        writer.withInsertOnly(true);
+
+        doTestWriteReadWithChangelog(8, 200, true);
+    }
+
     private void doTestWriteRead(int batchNumber) throws Exception {
         doTestWriteRead(batchNumber, 200);
     }
@@ -409,17 +436,83 @@ public abstract class MergeTreeTestBase {
         assertThat(files).isEqualTo(Collections.emptySet());
     }
 
+    private void doTestWriteReadWithChangelog(
+            int batchNumber, int perBatch, boolean isChangelogEqualToData) throws Exception {
+        List<TestRecord> expected = new ArrayList<>();
+        List<DataFileMeta> newFiles = new ArrayList<>();
+        List<DataFileMeta> changelogFiles = new ArrayList<>();
+        Set<String> newFileNames = new HashSet<>();
+        List<DataFileMeta> compactedFiles = new ArrayList<>();
+
+        // write batch and commit
+        for (int i = 0; i <= batchNumber; i++) {
+            if (i < batchNumber) {
+                expected.addAll(writeBatch(perBatch));
+            } else {
+                writer.sync();
+            }
+
+            CommitIncrement increment = writer.prepareCommit(true);
+            newFiles.addAll(increment.newFilesIncrement().newFiles());
+            changelogFiles.addAll(increment.newFilesIncrement().changelogFiles());
+            mergeCompacted(newFileNames, compactedFiles, increment);
+        }
+
+        // assert records from writer
+        assertRecords(expected);
+
+        // assert records from increment new files
+        assertRecords(expected, newFiles, false);
+        assertRecords(expected, newFiles, true);
+
+        // assert records from changelog files
+        if (isChangelogEqualToData) {
+            assertRecords(expected, changelogFiles, false);
+            assertRecords(expected, changelogFiles, true);
+        } else {
+            List<TestRecord> actual = new ArrayList<>();
+            for (DataFileMeta changelogFile : changelogFiles) {
+                actual.addAll(readAll(Collections.singletonList(changelogFile), false));
+            }
+            assertThat(actual).containsExactlyInAnyOrder(expected.toArray(new TestRecord[0]));
+        }
+
+        // assert records from increment compacted files
+        assertRecords(expected, compactedFiles, true);
+
+        writer.close();
+
+        Path bucketDir = writerFactory.pathFactory(0).toPath("ignore").getParent();
+        Set<String> files =
+                Arrays.stream(LocalFileIO.create().listStatus(bucketDir))
+                        .map(FileStatus::getPath)
+                        .map(Path::getName)
+                        .collect(Collectors.toSet());
+        newFiles.stream().map(DataFileMeta::fileName).forEach(files::remove);
+        changelogFiles.stream().map(DataFileMeta::fileName).forEach(files::remove);
+        compactedFiles.stream().map(DataFileMeta::fileName).forEach(files::remove);
+        assertThat(files).isEqualTo(Collections.emptySet());
+    }
+
     private MergeTreeWriter createMergeTreeWriter(List<DataFileMeta> files) {
         return createMergeTreeWriter(files, createCompactManager(service, files));
     }
 
     private MergeTreeWriter createMergeTreeWriter(
             List<DataFileMeta> files, MergeTreeCompactManager compactManager) {
+        return createMergeTreeWriter(files, compactManager, ChangelogProducer.NONE);
+    }
+
+    private MergeTreeWriter createMergeTreeWriter(
+            List<DataFileMeta> files,
+            MergeTreeCompactManager compactManager,
+            ChangelogProducer changelogProducer) {
         long maxSequenceNumber =
                 files.stream().map(DataFileMeta::maxSequenceNumber).max(Long::compare).orElse(-1L);
         MergeTreeWriter writer =
                 new MergeTreeWriter(
                         false,
+                        MemorySize.ofKibiBytes(10),
                         128,
                         "lz4",
                         null,
@@ -429,7 +522,7 @@ public abstract class MergeTreeTestBase {
                         DeduplicateMergeFunction.factory().create(),
                         writerFactory,
                         options.commitForceCompact(),
-                        ChangelogProducer.NONE,
+                        changelogProducer,
                         null,
                         null);
         writer.setMemoryPool(
@@ -453,6 +546,7 @@ public abstract class MergeTreeTestBase {
                 options.numSortedRunStopTrigger(),
                 new TestRewriter(),
                 null,
+                null,
                 false);
     }
 
@@ -473,6 +567,7 @@ public abstract class MergeTreeTestBase {
                     minFileSize,
                     numSortedRunStopTrigger,
                     rewriter,
+                    null,
                     null,
                     false);
         }
@@ -604,7 +699,7 @@ public abstract class MergeTreeTestBase {
                 int outputLevel, boolean dropDelete, List<List<SortedRun>> sections)
                 throws Exception {
             RollingFileWriter<KeyValue, DataFileMeta> writer =
-                    writerFactory.createRollingMergeTreeFileWriter(outputLevel);
+                    writerFactory.createRollingMergeTreeFileWriter(outputLevel, FileSource.COMPACT);
             RecordReader<KeyValue> reader =
                     MergeTreeReaders.readerForMergeTree(
                             sections,

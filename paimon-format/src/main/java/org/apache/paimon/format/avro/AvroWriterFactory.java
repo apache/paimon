@@ -39,7 +39,9 @@ public class AvroWriterFactory<T> {
         this.avroBuilder = avroBuilder;
     }
 
-    public AvroBulkWriter<T> create(PositionOutputStream out) throws IOException {
-        return new AvroBulkWriter<>(avroBuilder.createWriter(new CloseShieldOutputStream(out)));
+    public AvroBulkWriter<T> create(PositionOutputStream out, String compression)
+            throws IOException {
+        return new AvroBulkWriter<>(
+                avroBuilder.createWriter(new CloseShieldOutputStream(out), compression));
     }
 }

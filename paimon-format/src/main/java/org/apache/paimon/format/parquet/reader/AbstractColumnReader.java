@@ -21,7 +21,6 @@ package org.apache.paimon.format.parquet.reader;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.data.columnar.writable.WritableIntVector;
 
-import org.apache.parquet.Preconditions;
 import org.apache.parquet.bytes.ByteBufferInputStream;
 import org.apache.parquet.bytes.BytesInput;
 import org.apache.parquet.bytes.BytesUtils;
@@ -44,6 +43,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.parquet.column.ValuesType.REPETITION_LEVEL;
 
 /**
@@ -132,7 +132,7 @@ public abstract class AbstractColumnReader<VECTOR extends WritableColumnVector>
     protected void checkTypeName(PrimitiveType.PrimitiveTypeName expectedName) {
         PrimitiveType.PrimitiveTypeName actualName =
                 descriptor.getPrimitiveType().getPrimitiveTypeName();
-        Preconditions.checkArgument(
+        checkArgument(
                 actualName == expectedName,
                 "Expected type name: %s, actual type name: %s",
                 expectedName,

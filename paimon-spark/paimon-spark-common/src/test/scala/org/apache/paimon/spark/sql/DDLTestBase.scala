@@ -20,11 +20,42 @@ package org.apache.paimon.spark.sql
 
 import org.apache.paimon.spark.PaimonSparkTestBase
 
+import org.apache.spark.sql.Row
 import org.junit.jupiter.api.Assertions
 
 abstract class DDLTestBase extends PaimonSparkTestBase {
 
   import testImplicits._
+
+  test("Paimon DDL: create table with not null") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT NOT NULL, name STRING)
+            |""".stripMargin)
+
+      val exception = intercept[RuntimeException] {
+        sql("""
+              |INSERT INTO T VALUES (1, "a"), (2, "b"), (null, "c")
+              |""".stripMargin)
+      }
+      Assertions.assertTrue(
+        exception.getMessage().contains("Cannot write nullable values to non-null column"))
+
+      sql("""
+            |INSERT INTO T VALUES (1, "a"), (2, "b"), (3, null)
+            |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT * FROM T ORDER BY id"),
+        Seq((1, "a"), (2, "b"), (3, null)).toDF()
+      )
+
+      val schema = spark.table("T").schema
+      Assertions.assertEquals(schema.size, 2)
+      Assertions.assertFalse(schema("id").nullable)
+      Assertions.assertTrue(schema("name").nullable)
+    }
+  }
 
   test("Paimon DDL: Create Table As Select") {
     withTable("source", "t1", "t2") {
@@ -70,5 +101,84 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
             error.contains("Cannot specify location for a database when using fileSystem catalog."))
         }
     }
+  }
+
+  test("Paimon DDL: create other table with paimon SparkCatalog") {
+    withTable("paimon_tbl1", "paimon_tbl2", "parquet_tbl") {
+      spark.sql(s"CREATE TABLE paimon_tbl1 (id int) USING paimon")
+      spark.sql(s"CREATE TABLE paimon_tbl2 (id int)")
+      val error = intercept[Exception] {
+        spark.sql(s"CREATE TABLE parquet_tbl (id int) USING parquet")
+      }.getMessage
+      assert(
+        error.contains(
+          "SparkCatalog can only create paimon table, but current provider is parquet"))
+    }
+  }
+
+  fileFormats.foreach {
+    format =>
+      test(s"Paimon DDL: create table with char/varchar/string, file.format: $format") {
+        withTable("paimon_tbl") {
+          spark.sql(
+            s"""
+               |CREATE TABLE paimon_tbl (id int, col_s1 char(9), col_s2 varchar(10), col_s3 string)
+               |USING PAIMON
+               |TBLPROPERTIES ('file.format' = '$format')
+               |""".stripMargin)
+
+          spark.sql(s"""
+                       |insert into paimon_tbl values
+                       |(1, 'Wednesday', 'Wednesday', 'Wednesday'),
+                       |(2, 'Friday', 'Friday', 'Friday')
+                       |""".stripMargin)
+
+          // check description
+          checkAnswer(
+            spark
+              .sql(s"DESC paimon_tbl")
+              .select("col_name", "data_type")
+              .where("col_name LIKE 'col_%'")
+              .orderBy("col_name"),
+            Row("col_s1", "char(9)") :: Row("col_s2", "varchar(10)") :: Row(
+              "col_s3",
+              "string") :: Nil
+          )
+
+          // check select
+          if (!gteqSpark3_4) {
+            // Orc reader will right trim the char type, e.g. "Friday   " => "Friday" (see orc's `CharTreeReader`)
+            // and Spark has a conf `spark.sql.readSideCharPadding` to auto padding char only since 3.4 (default true)
+            // So when using orc with Spark3.4-, here will return "Friday"
+            checkAnswer(
+              spark.sql(s"select col_s1 from paimon_tbl where id = 2"),
+              Row("Friday") :: Nil
+            )
+            // Spark will auto create the filter like Filter(isnotnull(col_s1#124) AND (col_s1#124 = Friday   ))
+            // for char type, so here will not return any rows
+            checkAnswer(
+              spark.sql(s"select col_s1 from paimon_tbl where col_s1 = 'Friday'"),
+              Nil
+            )
+          } else {
+            checkAnswer(
+              spark.sql(s"select col_s1 from paimon_tbl where id = 2"),
+              Row("Friday   ") :: Nil
+            )
+            checkAnswer(
+              spark.sql(s"select col_s1 from paimon_tbl where col_s1 = 'Friday'"),
+              Row("Friday   ") :: Nil
+            )
+          }
+          checkAnswer(
+            spark.sql(s"select col_s2 from paimon_tbl where col_s2 = 'Friday'"),
+            Row("Friday") :: Nil
+          )
+          checkAnswer(
+            spark.sql(s"select col_s3 from paimon_tbl where col_s3 = 'Friday'"),
+            Row("Friday") :: Nil
+          )
+        }
+      }
   }
 }

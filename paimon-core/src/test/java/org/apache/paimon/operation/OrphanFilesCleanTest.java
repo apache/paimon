@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.Changelog;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
@@ -42,19 +43,24 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.StringUtils;
 
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -67,6 +73,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
@@ -74,6 +81,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.io.DataFilePathFactory.CHANGELOG_FILE_PREFIX;
 import static org.apache.paimon.io.DataFilePathFactory.DATA_FILE_PREFIX;
+import static org.apache.paimon.utils.BranchManager.branchPath;
 import static org.apache.paimon.utils.FileStorePathFactory.BUCKET_PATH_PREFIX;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -104,7 +112,7 @@ public class OrphanFilesCleanTest {
                             DataTypes.INT(), DataTypes.INT(), DataTypes.STRING(), DataTypes.STRING()
                         },
                         new String[] {"pk", "part1", "part2", "value"});
-        table = createFileStoreTable(rowType);
+        table = createFileStoreTable(rowType, new Options());
         String commitUser = UUID.randomUUID().toString();
         write = table.newWrite(commitUser);
         commit = table.newCommit(commitUser);
@@ -126,36 +134,9 @@ public class OrphanFilesCleanTest {
         int commitTimes = 30;
         List<List<TestPojo>> committedData = new ArrayList<>();
         Map<Long, List<TestPojo>> snapshotData = new HashMap<>();
+
         SnapshotManager snapshotManager = table.snapshotManager();
-
-        // generate data of first snapshot
-        List<TestPojo> data = generateData();
-        commit(data);
-        committedData.add(data);
-        recordSnapshotData(data, snapshotData, snapshotManager);
-
-        // randomly generate data
-        for (int i = 1; i <= commitTimes; i++) {
-            List<TestPojo> previous =
-                    new ArrayList<>(snapshotData.get(snapshotManager.latestSnapshotId()));
-            // randomly update
-            if (RANDOM.nextBoolean()) {
-                List<TestPojo> toBeUpdated = randomlyPick(previous);
-                List<TestPojo> updateAfter = commitUpdate(toBeUpdated);
-                committedData.add(updateAfter);
-
-                previous.removeAll(toBeUpdated);
-                previous.addAll(updateAfter);
-                recordSnapshotData(previous, snapshotData, snapshotManager);
-            } else {
-                List<TestPojo> current = generateData();
-                commit(current);
-                committedData.add(current);
-
-                current.addAll(previous);
-                recordSnapshotData(current, snapshotData, snapshotManager);
-            }
-        }
+        writeData(snapshotManager, committedData, snapshotData, new HashMap<>(), commitTimes);
 
         // randomly create tags
         List<String> allTags = new ArrayList<>();
@@ -168,25 +149,12 @@ public class OrphanFilesCleanTest {
             }
         }
 
+        // create branch1 by tag
+        table.createBranch("branch1", allTags.get(0));
+
         // generate non used files
-        int shouldBeDeleted = 0;
-        int fileNum = RANDOM.nextInt(10);
-        fileNum = fileNum == 0 ? 1 : fileNum;
-
-        // snapshot
-        addNonUsedFiles(
-                new Path(tablePath, "snapshot"), fileNum, Collections.singletonList("UNKNOWN"));
-        shouldBeDeleted += fileNum;
-
-        // data files
-        shouldBeDeleted += randomlyAddNonUsedDataFiles();
-
-        // manifests
-        addNonUsedFiles(
-                manifestDir,
-                fileNum,
-                Arrays.asList("manifest-list-", "manifest-", "index-manifest-", "UNKNOWN-"));
-        shouldBeDeleted += fileNum;
+        int shouldBeDeleted = generateUnUsedFile();
+        assertThat(manuallyAddedFiles.size()).isEqualTo(shouldBeDeleted);
 
         // randomly expire snapshots
         int expired = RANDOM.nextInt(snapshotCount / 2);
@@ -208,14 +176,14 @@ public class OrphanFilesCleanTest {
 
         // first check, nothing will be deleted because the default olderThan interval is 1 day
         OrphanFilesClean orphanFilesClean = new OrphanFilesClean(table);
-        assertThat(orphanFilesClean.clean()).isEqualTo(0);
+        assertThat(orphanFilesClean.clean().size()).isEqualTo(0);
 
         // second check
         orphanFilesClean = new OrphanFilesClean(table);
         setOlderThan(orphanFilesClean);
-        int deletedActual = orphanFilesClean.clean();
+        List<Path> deleted = orphanFilesClean.clean();
         try {
-            validate(deletedActual, shouldBeDeleted, snapshotData);
+            validate(deleted, snapshotData, new HashMap<>());
         } catch (Throwable t) {
             String tableOptions = "Table options:\n" + table.options();
 
@@ -250,9 +218,20 @@ public class OrphanFilesCleanTest {
     }
 
     private void validate(
-            int actualDeleted, int shouldBeDeleted, Map<Long, List<TestPojo>> snapshotData)
+            List<Path> deleteFiles,
+            Map<Long, List<TestPojo>> snapshotData,
+            Map<Long, List<InternalRow>> changelogData)
             throws Exception {
-        assertThat(actualDeleted).isEqualTo(shouldBeDeleted);
+        assertThat(
+                        deleteFiles.stream()
+                                .map(p -> p.toUri().getPath())
+                                .sorted()
+                                .collect(Collectors.joining("\n")))
+                .isEqualTo(
+                        manuallyAddedFiles.stream()
+                                .map(p -> p.toUri().getPath())
+                                .sorted()
+                                .collect(Collectors.joining("\n")));
 
         Set<Snapshot> snapshots = new HashSet<>();
         table.snapshotManager().snapshots().forEachRemaining(snapshots::add);
@@ -269,6 +248,72 @@ public class OrphanFilesCleanTest {
                 throw new Exception("Failed to validate snapshot " + snapshot.id(), e);
             }
         }
+        // validate changelog
+        if (table.coreOptions().changelogProducer() == CoreOptions.ChangelogProducer.INPUT) {
+            List<Changelog> changelogs = new ArrayList<>();
+            table.snapshotManager().changelogs().forEachRemaining(changelogs::add);
+            validateChangelog(
+                    changelogs.stream()
+                            .sorted(Comparator.comparingLong(Changelog::id))
+                            .collect(Collectors.toList()),
+                    changelogData);
+        }
+    }
+
+    private void validateChangelog(
+            List<Changelog> changelogs, Map<Long, List<InternalRow>> changelogData)
+            throws Exception {
+        Preconditions.checkArgument(!changelogs.isEmpty(), "The changelogs should not be empty!");
+        FileStoreTable scanTable =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.SCAN_SNAPSHOT_ID.key(),
+                                String.valueOf(changelogs.get(0).id())));
+        Long max =
+                changelogData.keySet().stream()
+                        .max(Comparator.comparingLong(Long::longValue))
+                        .get();
+        StreamDataTableScan scan = scanTable.newStreamScan();
+        TreeMap<Long, List<InternalRow>> data = new TreeMap<>(changelogData);
+        // clear the data < the smallest changelog data.
+        data.headMap(changelogs.get(0).id()).clear();
+
+        // initial plan
+        scan.plan();
+        Long id = changelogs.get(0).id();
+        while (id <= max) {
+            List<Split> splits = scan.plan().splits();
+            if (!splits.isEmpty()) {
+                List<ConcatRecordReader.ReaderSupplier<InternalRow>> readers = new ArrayList<>();
+                for (Split split : splits) {
+                    readers.add(() -> scanTable.newRead().createReader(split));
+                }
+                RecordReader<InternalRow> recordReader = ConcatRecordReader.create(readers);
+                RecordReaderIterator<InternalRow> iterator =
+                        new RecordReaderIterator<>(recordReader);
+                List<String> result = new ArrayList<>();
+                while (iterator.hasNext()) {
+                    InternalRow rowData = iterator.next();
+                    result.add(DataFormatTestUtil.internalRowToString(rowData, rowType));
+                }
+                iterator.close();
+                id = scan.checkpoint();
+
+                List<InternalRow> batch = data.remove(id - 1);
+                assertThat(result.stream().sorted().collect(Collectors.joining("\n")))
+                        .isEqualTo(
+                                batch.stream()
+                                        .map(
+                                                d ->
+                                                        DataFormatTestUtil.internalRowToString(
+                                                                d, rowType))
+                                        .sorted()
+                                        .collect(Collectors.joining("\n")));
+            } else {
+                id = scan.checkpoint();
+            }
+        }
+        Assertions.assertThat(data.values().stream().allMatch(List::isEmpty)).isTrue();
     }
 
     private void validateSnapshot(Snapshot snapshot, List<TestPojo> data) throws Exception {
@@ -287,6 +332,47 @@ public class OrphanFilesCleanTest {
         iterator.close();
 
         assertThat(result).containsExactlyInAnyOrderElementsOf(TestPojo.formatData(data));
+    }
+
+    @ValueSource(strings = {"none", "input"})
+    @ParameterizedTest(name = "changelog-producer = {0}")
+    public void testCleanOrphanFilesWithChangelogDecoupled(String changelogProducer)
+            throws Exception {
+        // recreate the table with another option
+        this.write.close();
+        this.commit.close();
+        int commitTimes = 30;
+        Options options = new Options();
+        options.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.INPUT);
+        options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 15);
+        options.set(CoreOptions.CHANGELOG_NUM_RETAINED_MAX, 20);
+        options.setString(CoreOptions.CHANGELOG_PRODUCER.key(), changelogProducer);
+        FileStoreTable table = createFileStoreTable(rowType, options);
+        String commitUser = UUID.randomUUID().toString();
+        this.table = table;
+        write = table.newWrite(commitUser);
+        commit = table.newCommit(commitUser);
+
+        List<List<TestPojo>> committedData = new ArrayList<>();
+        Map<Long, List<TestPojo>> snapshotData = new HashMap<>();
+        Map<Long, List<InternalRow>> changelogData = new HashMap<>();
+
+        SnapshotManager snapshotManager = table.snapshotManager();
+        writeData(snapshotManager, committedData, snapshotData, changelogData, commitTimes);
+
+        // generate non used files
+        int shouldBeDeleted = generateUnUsedFile();
+        assertThat(manuallyAddedFiles.size()).isEqualTo(shouldBeDeleted);
+
+        // first check, nothing will be deleted because the default olderThan interval is 1 day
+        OrphanFilesClean orphanFilesClean = new OrphanFilesClean(table);
+        assertThat(orphanFilesClean.clean().size()).isEqualTo(0);
+
+        // second check
+        orphanFilesClean = new OrphanFilesClean(table);
+        setOlderThan(orphanFilesClean);
+        List<Path> deleted = orphanFilesClean.clean();
+        validate(deleted, snapshotData, changelogData);
     }
 
     /** Manually make a FileNotFoundException to simulate snapshot expire while clean. */
@@ -314,7 +400,84 @@ public class OrphanFilesCleanTest {
 
         OrphanFilesClean orphanFilesClean = new OrphanFilesClean(table);
         setOlderThan(orphanFilesClean);
-        assertThat(orphanFilesClean.clean()).isGreaterThan(0);
+        assertThat(orphanFilesClean.clean().size()).isGreaterThan(0);
+    }
+
+    private void writeData(
+            SnapshotManager snapshotManager,
+            List<List<TestPojo>> committedData,
+            Map<Long, List<TestPojo>> snapshotData,
+            Map<Long, List<InternalRow>> changelogData,
+            int commitTimes)
+            throws Exception {
+        // first snapshot
+        List<TestPojo> data = generateData();
+        commit(data);
+        committedData.add(data);
+        recordSnapshotData(data, snapshotData, snapshotManager);
+        recordChangelogData(new ArrayList<>(), data, changelogData, snapshotManager);
+
+        // randomly generate data
+        for (int i = 1; i <= commitTimes; i++) {
+            List<TestPojo> previous =
+                    new ArrayList<>(snapshotData.get(snapshotManager.latestSnapshotId()));
+            // randomly update
+            if (RANDOM.nextBoolean()) {
+                List<TestPojo> toBeUpdated = randomlyPick(previous);
+                List<TestPojo> updateAfter = commitUpdate(toBeUpdated);
+                committedData.add(updateAfter);
+
+                previous.removeAll(toBeUpdated);
+                previous.addAll(updateAfter);
+                recordSnapshotData(previous, snapshotData, snapshotManager);
+                recordChangelogData(toBeUpdated, updateAfter, changelogData, snapshotManager);
+            } else {
+                List<TestPojo> current = generateData();
+                commit(current);
+                committedData.add(current);
+
+                recordChangelogData(new ArrayList<>(), current, changelogData, snapshotManager);
+                current.addAll(previous);
+                recordSnapshotData(current, snapshotData, snapshotManager);
+            }
+        }
+    }
+
+    private int generateUnUsedFile() throws Exception {
+        int shouldBeDeleted = 0;
+        int fileNum = RANDOM.nextInt(10);
+        fileNum = fileNum == 0 ? 1 : fileNum;
+
+        // snapshot
+        addNonUsedFiles(
+                new Path(tablePath, "snapshot"), fileNum, Collections.singletonList("UNKNOWN"));
+
+        shouldBeDeleted += fileNum;
+
+        // changelog
+        addNonUsedFiles(
+                new Path(tablePath, "changelog"), fileNum, Collections.singletonList("UNKNOWN"));
+
+        shouldBeDeleted += fileNum;
+
+        // data files
+        shouldBeDeleted += randomlyAddNonUsedDataFiles();
+
+        // manifests
+        addNonUsedFiles(
+                manifestDir,
+                fileNum,
+                Arrays.asList("manifest-list-", "manifest-", "index-manifest-", "UNKNOWN-"));
+        shouldBeDeleted += fileNum;
+
+        // branch snapshot
+        addNonUsedFiles(
+                new Path(branchPath(tablePath, "branch1") + "/snapshot"),
+                fileNum,
+                Collections.singletonList("UNKNOWN"));
+        shouldBeDeleted += fileNum;
+
+        return shouldBeDeleted;
     }
 
     private void setOlderThan(OrphanFilesClean orphanFilesClean) {
@@ -367,6 +530,32 @@ public class OrphanFilesCleanTest {
         snapshotData.put(latest.id(), data);
     }
 
+    private void recordChangelogData(
+            List<TestPojo> updateBefore,
+            List<TestPojo> updateAfter,
+            Map<Long, List<InternalRow>> changelogData,
+            SnapshotManager snapshotManager) {
+        Snapshot latest = snapshotManager.latestSnapshot();
+        boolean isInsert = updateBefore.isEmpty();
+        if (table.coreOptions().changelogProducer() == CoreOptions.ChangelogProducer.INPUT) {
+            List<InternalRow> data = new ArrayList<>();
+            for (TestPojo testPojo : updateBefore) {
+                data.add(testPojo.toRow(RowKind.UPDATE_BEFORE));
+            }
+            for (TestPojo testPojo : updateAfter) {
+                data.add(testPojo.toRow(isInsert ? RowKind.INSERT : RowKind.UPDATE_AFTER));
+            }
+            if (latest.commitKind() != Snapshot.CommitKind.COMPACT) {
+                changelogData.put(latest.id(), data);
+            } else {
+                changelogData.put(latest.id() - 1, data);
+                changelogData.put(latest.id(), new ArrayList<>());
+            }
+        } else {
+            changelogData.put(latest.id(), new ArrayList<>());
+        }
+    }
+
     private int randomlyAddNonUsedDataFiles() throws IOException {
         int addedFiles = 0;
         List<Path> part1 = listSubDirs(tablePath, p -> p.getName().contains("="));
@@ -417,7 +606,7 @@ public class OrphanFilesCleanTest {
                     fileNamePrefix.get(RANDOM.nextInt(fileNamePrefix.size())) + UUID.randomUUID();
             Path file = new Path(dir, fileName);
             if (RANDOM.nextBoolean()) {
-                fileIO.writeFileUtf8(file, "");
+                fileIO.tryToWriteAtomic(file, "");
             } else {
                 fileIO.mkdirs(file);
             }
@@ -467,6 +656,22 @@ public class OrphanFilesCleanTest {
             return new TestPojo(pk, part1, part2, randomValue());
         }
 
+        @Override
+        public String toString() {
+            return "TestPojo{"
+                    + "pk="
+                    + pk
+                    + ", part1="
+                    + part1
+                    + ", part2='"
+                    + part2
+                    + '\''
+                    + ", value='"
+                    + value
+                    + '\''
+                    + '}';
+        }
+
         public static void reset() {
             increaseKey = 0;
         }
@@ -493,8 +698,7 @@ public class OrphanFilesCleanTest {
         return StringUtils.getRandomString(RANDOM, 5, 20, 'a', 'z');
     }
 
-    private FileStoreTable createFileStoreTable(RowType rowType) throws Exception {
-        Options conf = new Options();
+    private FileStoreTable createFileStoreTable(RowType rowType, Options conf) throws Exception {
         conf.set(CoreOptions.PATH, tablePath.toString());
         conf.set(CoreOptions.BUCKET, RANDOM.nextInt(3) + 1);
         TableSchema tableSchema =

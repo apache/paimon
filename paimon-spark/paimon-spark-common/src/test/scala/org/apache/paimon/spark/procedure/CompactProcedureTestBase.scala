@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.procedure
 
 import org.apache.paimon.Snapshot.CommitKind
+import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.table.FileStoreTable
 
@@ -28,6 +29,8 @@ import org.apache.spark.sql.streaming.StreamTest
 import org.assertj.core.api.Assertions
 
 import java.util
+
+import scala.collection.JavaConverters._
 
 /** Test compact procedure. See [[CompactProcedure]]. */
 abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamTest {
@@ -246,6 +249,47 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     }
   }
 
+  test("Paimon Procedure: sort compact with max_concurrent_jobs") {
+    Seq("order", "zorder").foreach {
+      orderStrategy =>
+        {
+          withTable("T") {
+            spark.sql(s"""
+                         |CREATE TABLE T (id INT, pt STRING)
+                         |PARTITIONED BY (pt)
+                         |""".stripMargin)
+
+            spark.sql(s"""INSERT INTO T VALUES
+                         |(1, 'p1'), (3, 'p1'),
+                         |(1, 'p2'), (4, 'p2'),
+                         |(3, 'p3'), (2, 'p3'),
+                         |(1, 'p4'), (2, 'p4')
+                         |""".stripMargin)
+
+            spark.sql(s"""INSERT INTO T VALUES
+                         |(4, 'p1'), (2, 'p1'),
+                         |(2, 'p2'), (3, 'p2'),
+                         |(1, 'p3'), (4, 'p3'),
+                         |(3, 'p4'), (4, 'p4')
+                         |""".stripMargin)
+
+            checkAnswer(
+              spark.sql(
+                s"CALL sys.compact(table => 'T', order_strategy => '$orderStrategy', order_by => 'id', max_concurrent_jobs => 2)"),
+              Seq(true).toDF())
+
+            val result = List(Row(1), Row(2), Row(3), Row(4)).asJava
+            Seq("p1", "p2", "p3", "p4").foreach {
+              pt =>
+                Assertions
+                  .assertThat(spark.sql(s"SELECT id FROM T WHERE pt='$pt'").collect())
+                  .containsExactlyElementsOf(result)
+            }
+          }
+        }
+    }
+  }
+
   test("Paimon Procedure: compact for pk") {
     failAfter(streamingTimeout) {
       withTempDir {
@@ -314,7 +358,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
           spark.sql(s"INSERT INTO T VALUES (1, 'a', 'p1'), (2, 'b', 'p2')")
           spark.sql(s"INSERT INTO T VALUES (3, 'c', 'p1'), (4, 'd', 'p2')")
 
-          spark.sql(s"CALL sys.compact(table => 'T', partitions => 'pt=p1')")
+          spark.sql("CALL sys.compact(table => 'T', partitions => 'pt=\"p1\"')")
           Assertions.assertThat(lastSnapshotCommand(table).equals(CommitKind.COMPACT)).isTrue
           Assertions.assertThat(lastSnapshotId(table)).isEqualTo(3)
 
@@ -373,7 +417,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     spark.sql(s"INSERT INTO T VALUES (3, 'c', 'p1'), (4, 'd', 'p2')")
     spark.sql(s"INSERT INTO T VALUES (5, 'e', 'p1'), (6, 'f', 'p2')")
 
-    spark.sql(s"CALL sys.compact(table => 'T', partitions => 'pt=p1')")
+    spark.sql("CALL sys.compact(table => 'T', partitions => 'pt=\"p1\"')")
     Assertions.assertThat(lastSnapshotCommand(table).equals(CommitKind.COMPACT)).isTrue
     Assertions.assertThat(lastSnapshotId(table)).isEqualTo(4)
 
@@ -413,6 +457,67 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     checkAnswer(spark.sql(s"SELECT COUNT(*) FROM T"), Row(count) :: Nil)
   }
 
+  test("Paimon Procedure: compact with wrong usage") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, value STRING, pt STRING)
+                 |TBLPROPERTIES ('bucket'='-1', 'write-only'='true')
+                 |PARTITIONED BY (pt)
+                 |""".stripMargin)
+
+    assert(intercept[IllegalArgumentException] {
+      spark.sql(
+        "CALL sys.compact(table => 'T', partitions => 'pt = \"p1\"', where => 'pt = \"p1\"')")
+    }.getMessage.contains("partitions and where cannot be used together"))
+
+    assert(intercept[IllegalArgumentException] {
+      spark.sql("CALL sys.compact(table => 'T', partitions => 'id = 1')")
+    }.getMessage.contains("Only partition predicate is supported"))
+
+    assert(intercept[IllegalArgumentException] {
+      spark.sql("CALL sys.compact(table => 'T', where => 'id > 1 AND pt = \"p1\"')")
+    }.getMessage.contains("Only partition predicate is supported"))
+
+    assert(intercept[IllegalArgumentException] {
+      spark.sql("CALL sys.compact(table => 'T', order_strategy => 'sort', order_by => 'pt')")
+    }.getMessage.contains("order_by should not contain partition cols"))
+  }
+
+  test("Paimon Procedure: compact with where") {
+    spark.sql(
+      s"""
+         |CREATE TABLE T (id INT, value STRING, dt STRING, hh INT)
+         |TBLPROPERTIES ('bucket'='1', 'bucket-key'='id', 'write-only'='true', 'compaction.min.file-num'='1', 'compaction.max.file-num'='2')
+         |PARTITIONED BY (dt, hh)
+         |""".stripMargin)
+
+    val table = loadTable("T")
+    val fileIO = table.fileIO()
+
+    spark.sql(s"INSERT INTO T VALUES (1, '1', '2024-01-01', 0), (2, '2', '2024-01-01', 1)")
+    spark.sql(s"INSERT INTO T VALUES (3, '3', '2024-01-01', 0), (4, '4', '2024-01-01', 1)")
+    spark.sql(s"INSERT INTO T VALUES (5, '5', '2024-01-02', 0), (6, '6', '2024-01-02', 1)")
+    spark.sql(s"INSERT INTO T VALUES (7, '7', '2024-01-02', 0), (8, '8', '2024-01-02', 1)")
+
+    spark.sql("CALL sys.compact(table => 'T', where => 'dt = \"2024-01-01\" and hh >= 1')")
+    Assertions.assertThat(lastSnapshotCommand(table).equals(CommitKind.COMPACT)).isTrue
+    Assertions
+      .assertThat(
+        fileIO.listStatus(new Path(table.location(), "dt=2024-01-01/hh=0/bucket-0")).length)
+      .isEqualTo(2)
+    Assertions
+      .assertThat(
+        fileIO.listStatus(new Path(table.location(), "dt=2024-01-01/hh=1/bucket-0")).length)
+      .isEqualTo(3)
+    Assertions
+      .assertThat(
+        fileIO.listStatus(new Path(table.location(), "dt=2024-01-02/hh=0/bucket-0")).length)
+      .isEqualTo(2)
+    Assertions
+      .assertThat(
+        fileIO.listStatus(new Path(table.location(), "dt=2024-01-02/hh=1/bucket-0")).length)
+      .isEqualTo(2)
+  }
+
   test("Paimon test: toWhere method in CompactProcedure") {
     val conditions = "f0=0,f1=0,f2=0;f0=1,f1=1,f2=1;f0=1,f1=2,f2=2;f3=3"
 
@@ -421,6 +526,39 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       "(f0=0 AND f1=0 AND f2=0) OR (f0=1 AND f1=1 AND f2=1) OR (f0=1 AND f1=2 AND f2=2) OR (f3=3)"
 
     Assertions.assertThat(where).isEqualTo(whereExpected)
+  }
+
+  test("Paimon Procedure: compact unaware bucket append table with option") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, value STRING, pt STRING)
+                 |TBLPROPERTIES ('bucket'='-1', 'write-only'='true')
+                 |PARTITIONED BY (pt)
+                 |""".stripMargin)
+
+    val table = loadTable("T")
+
+    spark.sql(s"INSERT INTO T VALUES (1, 'a', 'p1'), (2, 'b', 'p2')")
+    spark.sql(s"INSERT INTO T VALUES (3, 'c', 'p1'), (4, 'd', 'p2')")
+    spark.sql(s"INSERT INTO T VALUES (5, 'e', 'p1'), (6, 'f', 'p2')")
+
+    spark.sql(
+      "CALL sys.compact(table => 'T', partitions => 'pt=\"p1\"', options => 'compaction.min.file-num=2,compaction.max.file-num = 3')")
+    Assertions.assertThat(lastSnapshotCommand(table).equals(CommitKind.COMPACT)).isTrue
+    Assertions.assertThat(lastSnapshotId(table)).isEqualTo(4)
+
+    spark.sql(
+      "CALL sys.compact(table => 'T', options => 'compaction.min.file-num=2,compaction.max.file-num = 3')")
+    Assertions.assertThat(lastSnapshotCommand(table).equals(CommitKind.COMPACT)).isTrue
+    Assertions.assertThat(lastSnapshotId(table)).isEqualTo(5)
+
+    // compact condition no longer met
+    spark.sql(s"CALL sys.compact(table => 'T')")
+    Assertions.assertThat(lastSnapshotId(table)).isEqualTo(5)
+
+    checkAnswer(
+      spark.sql(s"SELECT * FROM T ORDER BY id"),
+      Row(1, "a", "p1") :: Row(2, "b", "p2") :: Row(3, "c", "p1") :: Row(4, "d", "p2") ::
+        Row(5, "e", "p1") :: Row(6, "f", "p2") :: Nil)
   }
 
   def lastSnapshotCommand(table: FileStoreTable): CommitKind = {

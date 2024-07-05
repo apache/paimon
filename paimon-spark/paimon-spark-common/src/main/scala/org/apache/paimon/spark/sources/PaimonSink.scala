@@ -23,7 +23,7 @@ import org.apache.paimon.spark.{InsertInto, Overwrite}
 import org.apache.paimon.spark.commands.{PaimonCommand, SchemaHelper, WriteIntoPaimonTable}
 import org.apache.paimon.table.FileStoreTable
 
-import org.apache.spark.sql.{DataFrame, SQLContext, Utils}
+import org.apache.spark.sql.{DataFrame, PaimonUtils, SQLContext}
 import org.apache.spark.sql.execution.streaming.Sink
 import org.apache.spark.sql.sources.AlwaysTrue
 import org.apache.spark.sql.streaming.OutputMode
@@ -35,8 +35,7 @@ class PaimonSink(
     outputMode: OutputMode,
     options: Options)
   extends Sink
-  with SchemaHelper
-  with PaimonCommand {
+  with SchemaHelper {
 
   override def addBatch(batchId: Long, data: DataFrame): Unit = {
     val saveMode = if (outputMode == OutputMode.Complete()) {
@@ -45,7 +44,7 @@ class PaimonSink(
       InsertInto
     }
     partitionColumns.foreach(println)
-    val newData = Utils.createNewDataFrame(data)
+    val newData = PaimonUtils.createNewDataFrame(data)
     WriteIntoPaimonTable(originTable, saveMode, newData, options).run(sqlContext.sparkSession)
   }
 }

@@ -29,5 +29,6 @@ import java.io.Serializable;
 public interface AvroBuilder<T> extends Serializable {
 
     /** Creates and configures an Avro writer to the given output file. */
-    DataFileWriter<T> createWriter(OutputStream outputStream) throws IOException;
+    DataFileWriter<T> createWriter(OutputStream outputStream, String compression)
+            throws IOException;
 }

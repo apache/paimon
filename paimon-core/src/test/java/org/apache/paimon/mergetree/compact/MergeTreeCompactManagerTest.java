@@ -206,6 +206,7 @@ public class MergeTreeCompactManagerTest {
                         Integer.MAX_VALUE,
                         new TestRewriter(expectedDropDelete),
                         null,
+                        null,
                         false);
         manager.triggerCompaction(false);
         manager.getCompactionResult(true);

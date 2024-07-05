@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.paimon.spark.SparkTypeUtils.fromPaimonRowType;
+import static org.apache.paimon.spark.SparkTypeUtils.toPaimonType;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link SparkTypeUtils}. */
@@ -39,6 +40,8 @@ public class SparkTypeTest {
                                     1)) // posX and posY have field id 0 and 1, here we start from 2
                     .field("id", DataTypes.INT().notNull())
                     .field("name", DataTypes.STRING()) /* optional by default */
+                    .field("char", DataTypes.CHAR(10))
+                    .field("varchar", DataTypes.VARCHAR(10))
                     .field("salary", DataTypes.DOUBLE().notNull())
                     .field(
                             "locations",
@@ -74,12 +77,14 @@ public class SparkTypeTest {
         String nestedRowMapType =
                 "StructField(locations,MapType("
                         + "StringType,"
-                        + "StructType(StructField(posX,DoubleType,true),StructField(posY,DoubleType,true)),true),true)";
+                        + "StructType(StructField(posX,DoubleType,false),StructField(posY,DoubleType,false)),true),true)";
         String expected =
                 "StructType("
-                        + "StructField(id,IntegerType,true),"
+                        + "StructField(id,IntegerType,false),"
                         + "StructField(name,StringType,true),"
-                        + "StructField(salary,DoubleType,true),"
+                        + "StructField(char,CharType(10),true),"
+                        + "StructField(varchar,VarcharType(10),true),"
+                        + "StructField(salary,DoubleType,false),"
                         + nestedRowMapType
                         + ","
                         + "StructField(strArray,ArrayType(StringType,true),true),"
@@ -98,7 +103,6 @@ public class SparkTypeTest {
         StructType sparkType = fromPaimonRowType(ALL_TYPES);
         assertThat(sparkType.toString().replace(", ", ",")).isEqualTo(expected);
 
-        // Ignore the assertion below, since we force to make all the fields nullable.
-        // assertThat(toPaimonType(sparkType)).isEqualTo(ALL_TYPES);
+        assertThat(toPaimonType(sparkType)).isEqualTo(ALL_TYPES);
     }
 }

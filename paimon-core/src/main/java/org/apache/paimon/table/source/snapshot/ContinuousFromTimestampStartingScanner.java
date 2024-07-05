@@ -34,12 +34,15 @@ public class ContinuousFromTimestampStartingScanner extends AbstractStartingScan
             LoggerFactory.getLogger(ContinuousFromTimestampStartingScanner.class);
 
     private final long startupMillis;
+    private final boolean startFromChangelog;
 
     public ContinuousFromTimestampStartingScanner(
-            SnapshotManager snapshotManager, long startupMillis) {
+            SnapshotManager snapshotManager, long startupMillis, boolean changelogDecoupled) {
         super(snapshotManager);
         this.startupMillis = startupMillis;
-        this.startingSnapshotId = this.snapshotManager.earlierThanTimeMills(this.startupMillis);
+        this.startFromChangelog = changelogDecoupled;
+        this.startingSnapshotId =
+                this.snapshotManager.earlierThanTimeMills(startupMillis, startFromChangelog);
     }
 
     @Override
@@ -53,7 +56,8 @@ public class ContinuousFromTimestampStartingScanner extends AbstractStartingScan
 
     @Override
     public Result scan(SnapshotReader snapshotReader) {
-        Long startingSnapshotId = snapshotManager.earlierThanTimeMills(startupMillis);
+        Long startingSnapshotId =
+                snapshotManager.earlierThanTimeMills(startupMillis, startFromChangelog);
         if (startingSnapshotId == null) {
             LOG.debug("There is currently no snapshot. Waiting for snapshot generation.");
             return new NoSnapshot();

@@ -25,6 +25,8 @@ import java.util.List;
 /** Generate splits from {@link DataFileMeta}s. */
 public interface SplitGenerator {
 
+    boolean alwaysRawConvertible();
+
     List<SplitGroup> splitForBatch(List<DataFileMeta> files);
 
     List<SplitGroup> splitForStreaming(List<DataFileMeta> files);

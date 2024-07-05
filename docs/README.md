@@ -8,8 +8,8 @@ that you always have docs corresponding to your checked-out version.
 
 ### Build the site locally
 
-Make sure you have installed
-[Hugo](https://gohugo.io/getting-started/installing/) on your system.
+Make sure you have installed Hugo on your system.
+Note: An extended version of Hugo <= 0.124.1 is required. you can Find this at [Hugo](https://github.com/gohugoio/hugo/releases/tag/v0.124.1)
 
 From this directory:
 

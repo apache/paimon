@@ -34,6 +34,10 @@ public class ParquetInputStream extends DelegatingSeekableInputStream {
         this.in = in;
     }
 
+    public SeekableInputStream in() {
+        return in;
+    }
+
     @Override
     public long getPos() throws IOException {
         return in.getPos();

@@ -19,6 +19,8 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
 
 import java.util.ArrayList;
 import java.util.BitSet;
@@ -27,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /** Utils for file system. */
 public class PartitionPathUtils {
@@ -85,6 +88,31 @@ public class PartitionPathUtils {
         }
         suffixBuf.append(Path.SEPARATOR);
         return suffixBuf.toString();
+    }
+
+    public static List<String> generatePartitionPaths(
+            List<Map<String, String>> partitions, RowType partitionType) {
+        return partitions.stream()
+                .map(
+                        partition ->
+                                PartitionPathUtils.generatePartitionPath(partition, partitionType))
+                .collect(Collectors.toList());
+    }
+
+    public static String generatePartitionPath(
+            Map<String, String> partitionSpec, RowType partitionType) {
+        LinkedHashMap<String, String> linkedPartitionSpec = new LinkedHashMap<>();
+        List<DataField> fields = partitionType.getFields();
+
+        for (DataField dataField : fields) {
+            String partitionColumnName = dataField.name();
+            String partitionColumnValue = partitionSpec.get(partitionColumnName);
+            if (partitionColumnValue != null) {
+                linkedPartitionSpec.put(partitionColumnName, partitionColumnValue);
+            }
+        }
+
+        return generatePartitionPath(linkedPartitionSpec);
     }
 
     /**

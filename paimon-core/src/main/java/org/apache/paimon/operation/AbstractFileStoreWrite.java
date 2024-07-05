@@ -20,6 +20,7 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.disk.IOManager;
@@ -52,6 +53,8 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+import static org.apache.paimon.io.DataFileMeta.getMaxSequenceNumber;
+
 /**
  * Base {@link FileStoreWrite} implementation.
  *
@@ -79,6 +82,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     protected CompactionMetrics compactionMetrics = null;
     protected final String tableName;
+    private boolean isInsertOnly;
 
     protected AbstractFileStoreWrite(
             String commitUser,
@@ -118,6 +122,16 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     public void withCompactExecutor(ExecutorService compactExecutor) {
         this.lazyCompactExecutor = compactExecutor;
         this.closeCompactExecutorWhenLeaving = false;
+    }
+
+    @Override
+    public void withInsertOnly(boolean insertOnly) {
+        this.isInsertOnly = insertOnly;
+        for (Map<Integer, WriterContainer<T>> containerMap : writers.values()) {
+            for (WriterContainer<T> container : containerMap.values()) {
+                container.writer.withInsertOnly(insertOnly);
+            }
+        }
     }
 
     @Override
@@ -198,8 +212,9 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 if (writerContainer.indexMaintainer != null) {
                     newIndexFiles.addAll(writerContainer.indexMaintainer.prepareCommit());
                 }
-                if (writerContainer.deletionVectorsMaintainer != null) {
-                    newIndexFiles.addAll(writerContainer.deletionVectorsMaintainer.prepareCommit());
+                CompactDeletionFile compactDeletionFile = increment.compactDeletionFile();
+                if (compactDeletionFile != null) {
+                    compactDeletionFile.getOrCompute().ifPresent(newIndexFiles::add);
                 }
                 CommitMessageImpl committable =
                         new CommitMessageImpl(
@@ -211,10 +226,13 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 result.add(committable);
 
                 if (committable.isEmpty()) {
-                    // Condition 1: There is no more record waiting to be committed.
+                    // Condition 1: There is no more record waiting to be committed. Note that the
+                    // condition is < (instead of <=), because each commit identifier may have
+                    // multiple snapshots. We must make sure all snapshots of this identifier are
+                    // committed.
                     // Condition 2: No compaction is in progress. That is, no more changelog will be
                     // produced.
-                    if (writerContainer.lastModifiedCommitIdentifier <= latestCommittedIdentifier
+                    if (writerContainer.lastModifiedCommitIdentifier < latestCommittedIdentifier
                             && !writerContainer.writer.isCompacting()) {
                         // Clear writer if no update, and if its latest modification has committed.
                         //
@@ -297,6 +315,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                                 writerContainer.baseSnapshotId,
                                 writerContainer.lastModifiedCommitIdentifier,
                                 dataFiles,
+                                writerContainer.writer.maxSequenceNumber(),
                                 writerContainer.indexMaintainer,
                                 writerContainer.deletionVectorsMaintainer,
                                 increment));
@@ -317,6 +336,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                             state.partition,
                             state.bucket,
                             state.dataFiles,
+                            state.maxSequenceNumber,
                             state.commitIncrement,
                             compactExecutor(),
                             state.deletionVectorsMaintainer);
@@ -331,6 +351,15 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             writers.computeIfAbsent(state.partition, k -> new HashMap<>())
                     .put(state.bucket, writerContainer);
         }
+    }
+
+    public Map<BinaryRow, List<Integer>> getActiveBuckets() {
+        Map<BinaryRow, List<Integer>> result = new HashMap<>();
+        for (Map.Entry<BinaryRow, Map<Integer, WriterContainer<T>>> partitions :
+                writers.entrySet()) {
+            result.put(partitions.getKey(), new ArrayList<>(partitions.getValue().keySet()));
+        }
+        return result;
     }
 
     private WriterContainer<T> getWriterWrapper(BinaryRow partition, int bucket) {
@@ -382,9 +411,11 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                         partition.copy(),
                         bucket,
                         restoreFiles,
+                        getMaxSequenceNumber(restoreFiles),
                         null,
                         compactExecutor(),
                         deletionVectorsMaintainer);
+        writer.withInsertOnly(isInsertOnly);
         notifyNewWriter(writer);
         return new WriterContainer<>(
                 writer, indexMaintainer, deletionVectorsMaintainer, latestSnapshotId);
@@ -432,6 +463,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             BinaryRow partition,
             int bucket,
             List<DataFileMeta> restoreFiles,
+            long restoredMaxSeqNumber,
             @Nullable CommitIncrement restoreIncrement,
             ExecutorService compactExecutor,
             @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer);

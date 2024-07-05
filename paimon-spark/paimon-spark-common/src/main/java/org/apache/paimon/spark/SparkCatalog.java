@@ -27,7 +27,6 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.spark.catalog.SparkBaseCatalog;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.utils.Preconditions;
 
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.analysis.NamespaceAlreadyExistsException;
@@ -54,7 +53,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.spark.SparkCatalogOptions.DEFAULT_DATABASE;
 import static org.apache.paimon.spark.SparkTypeUtils.toPaimonType;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Spark {@link TableCatalog} for paimon. */
 public class SparkCatalog extends SparkBaseCatalog {
@@ -65,6 +66,8 @@ public class SparkCatalog extends SparkBaseCatalog {
 
     protected Catalog catalog = null;
 
+    private String defaultDatabase;
+
     @Override
     public void initialize(String name, CaseInsensitiveStringMap options) {
         this.catalogName = name;
@@ -73,6 +76,8 @@ public class SparkCatalog extends SparkBaseCatalog {
                         Options.fromMap(options),
                         SparkSession.active().sessionState().newHadoopConf());
         this.catalog = CatalogFactory.createCatalog(catalogContext);
+        this.defaultDatabase =
+                options.getOrDefault(DEFAULT_DATABASE.key(), DEFAULT_DATABASE.defaultValue());
         if (!catalog.databaseExists(defaultNamespace()[0])) {
             try {
                 createNamespace(defaultNamespace(), new HashMap<>());
@@ -88,13 +93,13 @@ public class SparkCatalog extends SparkBaseCatalog {
 
     @Override
     public String[] defaultNamespace() {
-        return new String[] {Catalog.DEFAULT_DATABASE};
+        return new String[] {defaultDatabase};
     }
 
     @Override
     public void createNamespace(String[] namespace, Map<String, String> metadata)
             throws NamespaceAlreadyExistsException {
-        Preconditions.checkArgument(
+        checkArgument(
                 isValidateNamespace(namespace),
                 "Namespace %s is not valid",
                 Arrays.toString(namespace));
@@ -132,7 +137,7 @@ public class SparkCatalog extends SparkBaseCatalog {
     @Override
     public Map<String, String> loadNamespaceMetadata(String[] namespace)
             throws NoSuchNamespaceException {
-        Preconditions.checkArgument(
+        checkArgument(
                 isValidateNamespace(namespace),
                 "Namespace %s is not valid",
                 Arrays.toString(namespace));
@@ -173,7 +178,7 @@ public class SparkCatalog extends SparkBaseCatalog {
      */
     public boolean dropNamespace(String[] namespace, boolean cascade)
             throws NoSuchNamespaceException {
-        Preconditions.checkArgument(
+        checkArgument(
                 isValidateNamespace(namespace),
                 "Namespace %s is not valid",
                 Arrays.toString(namespace));
@@ -190,7 +195,7 @@ public class SparkCatalog extends SparkBaseCatalog {
 
     @Override
     public Identifier[] listTables(String[] namespace) throws NoSuchNamespaceException {
-        Preconditions.checkArgument(
+        checkArgument(
                 isValidateNamespace(namespace),
                 "Missing database in namespace: %s",
                 Arrays.toString(namespace));
@@ -279,6 +284,11 @@ public class SparkCatalog extends SparkBaseCatalog {
             Map<String, String> properties)
             throws TableAlreadyExistsException, NoSuchNamespaceException {
         try {
+            String provider = properties.get(TableCatalog.PROP_PROVIDER);
+            checkArgument(
+                    usePaimon(provider),
+                    "SparkCatalog can only create paimon table, but current provider is %s",
+                    provider);
             catalog.createTable(
                     toIdentifier(ident), toInitialSchema(schema, partitions, properties), false);
             return loadTable(ident);
@@ -372,7 +382,7 @@ public class SparkCatalog extends SparkBaseCatalog {
 
     private Schema toInitialSchema(
             StructType schema, Transform[] partitions, Map<String, String> properties) {
-        Preconditions.checkArgument(
+        checkArgument(
                 Arrays.stream(partitions)
                         .allMatch(
                                 partition -> {

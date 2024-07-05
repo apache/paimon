@@ -19,9 +19,11 @@
 package org.apache.paimon.flink.action.cdc.postgres;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.schema.JdbcSchemaUtils;
 import org.apache.paimon.flink.action.cdc.schema.JdbcSchemasInfo;
+import org.apache.paimon.flink.action.cdc.serialization.CdcDebeziumDeserializationSchema;
 import org.apache.paimon.options.OptionsUtils;
 import org.apache.paimon.schema.Schema;
 
@@ -30,7 +32,6 @@ import com.ververica.cdc.connectors.base.source.jdbc.JdbcIncrementalSource;
 import com.ververica.cdc.connectors.postgres.source.PostgresSourceBuilder;
 import com.ververica.cdc.connectors.postgres.source.PostgresSourceBuilder.PostgresIncrementalSource;
 import com.ververica.cdc.connectors.postgres.source.config.PostgresSourceOptions;
-import com.ververica.cdc.debezium.JsonDebeziumDeserializationSchema;
 import com.ververica.cdc.debezium.table.DebeziumOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.kafka.connect.json.JsonConverterConfig;
@@ -116,9 +117,9 @@ public class PostgresActionUtils {
         return jdbcSchemasInfo;
     }
 
-    public static JdbcIncrementalSource<String> buildPostgresSource(
+    public static JdbcIncrementalSource<CdcSourceRecord> buildPostgresSource(
             Configuration postgresConfig, String[] schemaList, String[] tableList) {
-        PostgresSourceBuilder<String> sourceBuilder = PostgresIncrementalSource.builder();
+        PostgresSourceBuilder<CdcSourceRecord> sourceBuilder = PostgresIncrementalSource.builder();
 
         sourceBuilder
                 .hostname(postgresConfig.get(PostgresSourceOptions.HOSTNAME))
@@ -170,8 +171,8 @@ public class PostgresActionUtils {
 
         Map<String, Object> customConverterConfigs = new HashMap<>();
         customConverterConfigs.put(JsonConverterConfig.DECIMAL_FORMAT_CONFIG, "numeric");
-        JsonDebeziumDeserializationSchema schema =
-                new JsonDebeziumDeserializationSchema(true, customConverterConfigs);
+        CdcDebeziumDeserializationSchema schema =
+                new CdcDebeziumDeserializationSchema(true, customConverterConfigs);
         return sourceBuilder.deserializer(schema).includeSchemaChanges(true).build();
     }
 

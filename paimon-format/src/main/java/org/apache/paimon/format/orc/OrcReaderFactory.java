@@ -36,6 +36,7 @@ import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Pool;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.hadoop.hive.ql.io.sarg.SearchArgument;
 import org.apache.hadoop.hive.ql.io.sarg.SearchArgumentFactory;
@@ -57,9 +58,7 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 /** An ORC reader that produces a stream of {@link ColumnarRow} records. */
 public class OrcReaderFactory implements FormatReaderFactory {
 
-    private static final long serialVersionUID = 1L;
-
-    protected final SerializableHadoopConfigWrapper hadoopConfigWrapper;
+    protected final Configuration hadoopConfig;
 
     protected final TypeDescription schema;
 
@@ -79,7 +78,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
             final RowType readType,
             final List<OrcFilters.Predicate> conjunctPredicates,
             final int batchSize) {
-        this.hadoopConfigWrapper = new SerializableHadoopConfigWrapper(checkNotNull(hadoopConfig));
+        this.hadoopConfig = checkNotNull(hadoopConfig);
         this.schema = toOrcType(readType);
         this.tableType = readType;
         this.conjunctPredicates = checkNotNull(conjunctPredicates);
@@ -99,7 +98,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
 
         RecordReader orcReader =
                 createRecordReader(
-                        hadoopConfigWrapper.getHadoopConfig(),
+                        hadoopConfig,
                         schema,
                         conjunctPredicates,
                         context.fileIO(),
@@ -183,9 +182,8 @@ public class OrcReaderFactory implements FormatReaderFactory {
                 VectorizedRowBatch orcBatch, long rowNumber) {
             // no copying from the ORC column vectors to the Paimon columns vectors necessary,
             // because they point to the same data arrays internally design
-            int batchSize = orcBatch.size;
-            paimonColumnBatch.setNumRows(batchSize);
-            result.reset(batchSize, rowNumber);
+            paimonColumnBatch.setNumRows(orcBatch.size);
+            result.reset(rowNumber);
             return result;
         }
     }
@@ -325,26 +323,6 @@ public class OrcReaderFactory implements FormatReaderFactory {
         } else {
             return Pair.of(0L, 0L);
         }
-    }
-
-    /**
-     * Computes the ORC projection mask of the fields to include from the selected
-     * fields.rowOrcInputFormat.nextRecord(null).
-     *
-     * @return The ORC projection mask.
-     */
-    private static boolean[] computeProjectionMask(TypeDescription schema, int[] selectedFields) {
-        // mask with all fields of the schema
-        boolean[] projectionMask = new boolean[schema.getMaximumId() + 1];
-        // for each selected field
-        for (int inIdx : selectedFields) {
-            // set all nested fields of a selected field to true
-            TypeDescription fieldSchema = schema.getChildren().get(inIdx);
-            for (int i = fieldSchema.getId(); i <= fieldSchema.getMaximumId(); i++) {
-                projectionMask[i] = true;
-            }
-        }
-        return projectionMask;
     }
 
     public static org.apache.orc.Reader createReader(

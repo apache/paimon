@@ -18,16 +18,12 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.options.ExpireConfig;
+
 /** Expire snapshots. */
 public interface ExpireSnapshots {
 
-    ExpireSnapshots retainMax(int retainMax);
-
-    ExpireSnapshots retainMin(int retainMin);
-
-    ExpireSnapshots olderThanMills(long olderThanMills);
-
-    ExpireSnapshots maxDeletes(int maxDeletes);
+    ExpireSnapshots config(ExpireConfig expireConfig);
 
     /** @return How many snapshots have been expired. */
     int expire();

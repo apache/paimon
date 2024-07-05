@@ -19,20 +19,36 @@
 package org.apache.paimon.spark.catalyst.analysis
 
 import org.apache.paimon.spark.SparkTable
+import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation.isPaimonTable
 import org.apache.paimon.spark.commands.{PaimonAnalyzeTableColumnCommand, PaimonDynamicPartitionOverwriteCommand, PaimonTruncateTableCommand}
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.analysis.ResolvedTable
+import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, Cast, Expression, NamedExpression}
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.rules.Rule
-import org.apache.spark.sql.connector.catalog.{Identifier, TableCatalog}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
+import org.apache.spark.sql.types.{ArrayType, DataType, MapType, StructField, StructType}
+
+import scala.collection.JavaConverters._
 
 class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
 
   override def apply(plan: LogicalPlan): LogicalPlan = plan.resolveOperatorsDown {
+
+    case a @ PaimonV2WriteCommand(table, paimonTable)
+        if !schemaCompatible(
+          a.query.output.toStructType,
+          table.output.toStructType,
+          paimonTable.partitionKeys().asScala) =>
+      val newQuery = resolveQueryColumns(a.query, table.output)
+      if (newQuery != a.query) {
+        Compatibility.withNewQuery(a, newQuery)
+      } else {
+        a
+      }
 
     case o @ PaimonDynamicPartitionOverwrite(r, d) if o.resolved =>
       PaimonDynamicPartitionOverwriteCommand(r, d, o.query, o.writeOptions, o.isByName)
@@ -41,6 +57,75 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
       PaimonMergeIntoResolver(merge, session)
   }
 
+  private def schemaCompatible(
+      tableSchema: StructType,
+      dataSchema: StructType,
+      partitionCols: Seq[String],
+      parent: Array[String] = Array.empty): Boolean = {
+
+    if (tableSchema.size != dataSchema.size) {
+      throw new RuntimeException("the number of data columns don't match with the table schema's.")
+    }
+
+    def dataTypeCompatible(column: String, dt1: DataType, dt2: DataType): Boolean = {
+      (dt1, dt2) match {
+        case (s1: StructType, s2: StructType) =>
+          schemaCompatible(s1, s2, partitionCols, Array(column))
+        case (a1: ArrayType, a2: ArrayType) =>
+          dataTypeCompatible(column, a1.elementType, a2.elementType)
+        case (m1: MapType, m2: MapType) =>
+          dataTypeCompatible(column, m1.keyType, m2.keyType) && dataTypeCompatible(
+            column,
+            m1.valueType,
+            m2.valueType)
+        case (d1, d2) => d1 == d2
+      }
+    }
+
+    tableSchema.zip(dataSchema).forall {
+      case (f1, f2) =>
+        checkNullability(f1, f2, partitionCols, parent)
+        f1.name == f2.name && dataTypeCompatible(f1.name, f1.dataType, f2.dataType)
+    }
+  }
+
+  private def resolveQueryColumns(
+      query: LogicalPlan,
+      tableAttributes: Seq[Attribute]): LogicalPlan = {
+    val project = query.output.zipWithIndex.map {
+      case (attr, i) =>
+        val targetAttr = tableAttributes(i)
+        addCastToColumn(attr, targetAttr)
+    }
+    Project(project, query)
+  }
+
+  private def addCastToColumn(attr: Attribute, targetAttr: Attribute): NamedExpression = {
+    val expr = (attr.dataType, targetAttr.dataType) match {
+      case (s, t) if s == t =>
+        attr
+      case _ =>
+        cast(attr, targetAttr.dataType)
+    }
+    Alias(expr, targetAttr.name)(explicitMetadata = Option(targetAttr.metadata))
+  }
+
+  private def cast(expr: Expression, dataType: DataType): Expression = {
+    val cast = Compatibility.cast(expr, dataType, Option(conf.sessionLocalTimeZone))
+    cast.setTagValue(Compatibility.castByTableInsertionTag, ())
+    cast
+  }
+
+  private def checkNullability(
+      input: StructField,
+      expected: StructField,
+      partitionCols: Seq[String],
+      parent: Array[String] = Array.empty): Unit = {
+    val fullColumnName = (parent ++ Array(input.name)).mkString(".")
+    if (!partitionCols.contains(fullColumnName) && input.nullable && !expected.nullable) {
+      throw new RuntimeException("Cannot write nullable values to non-null column")
+    }
+  }
 }
 
 case class PaimonPostHocResolutionRules(session: SparkSession) extends Rule[LogicalPlan] {
@@ -74,6 +159,20 @@ case class PaimonPostHocResolutionRules(session: SparkSession) extends Rule[Logi
         PaimonAnalyzeTableColumnCommand(catalog, identifier, table, columnNames, allColumns)
 
       case _ => plan
+    }
+  }
+}
+
+object PaimonV2WriteCommand {
+  def unapply(o: V2WriteCommand): Option[(DataSourceV2Relation, FileStoreTable)] = {
+    if (o.query.resolved) {
+      o.table match {
+        case r: DataSourceV2Relation if r.table.isInstanceOf[SparkTable] =>
+          Some((r, r.table.asInstanceOf[SparkTable].getTable.asInstanceOf[FileStoreTable]))
+        case _ => None
+      }
+    } else {
+      None
     }
   }
 }

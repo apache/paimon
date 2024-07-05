@@ -29,9 +29,12 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.flink.table.api.StatementSet;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.types.Row;
+import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -49,7 +52,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     @Override
     protected List<String> ddl() {
         return Arrays.asList(
-                "CREATE TABLE IF NOT EXISTS T1 (a STRING, b STRING, c STRING) WITH ('bucket' = '1')",
+                "CREATE TABLE IF NOT EXISTS T1 (a STRING, b STRING, c STRING) WITH ('bucket' = '1', 'bucket-key' = 'a')",
                 "CREATE TABLE IF NOT EXISTS T2 (a STRING, b STRING, c STRING, PRIMARY KEY (a) NOT ENFORCED)"
                         + " WITH ('changelog-producer'='input', 'bucket' = '1')");
     }
@@ -332,7 +335,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                                         "SELECT * FROM T1 /*+ OPTIONS('log.scan'='from-timestamp') */"))
                 .hasCauseInstanceOf(IllegalArgumentException.class)
                 .hasRootCauseMessage(
-                        "scan.timestamp-millis can not be null when you use from-timestamp for scan.mode");
+                        "must set only one key in [scan.timestamp-millis,scan.timestamp] when you use from-timestamp for scan.mode");
     }
 
     @Test
@@ -549,19 +552,27 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testIgnoreDelete() {
+    public void testIgnoreDelete() throws Exception {
         sql(
                 "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING) "
-                        + "WITH ('deduplicate.ignore-delete' = 'true', 'bucket' = '1')");
+                        + "WITH ('merge-engine' = 'deduplicate', 'ignore-delete' = 'true')");
 
-        sql("INSERT INTO ignore_delete VALUES (1, 'A')");
-        assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "A"));
+        BlockingIterator<Row, Row> iterator =
+                streamSqlBlockIter(
+                        "SELECT * FROM ignore_delete /*+ OPTIONS('continuous.discovery-interval' = '1s') */");
 
+        sql("INSERT INTO ignore_delete VALUES (1, 'A'), (2, 'B')");
         sql("DELETE FROM ignore_delete WHERE pk = 1");
-        assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "A"));
-
         sql("INSERT INTO ignore_delete VALUES (1, 'B')");
-        assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "B"));
+
+        // no -D[1, 'A'] but exist -U[1, 'A']
+        assertThat(iterator.collect(4))
+                .containsExactly(
+                        Row.ofKind(RowKind.INSERT, 1, "A"),
+                        Row.ofKind(RowKind.INSERT, 2, "B"),
+                        Row.ofKind(RowKind.UPDATE_BEFORE, 1, "A"),
+                        Row.ofKind(RowKind.UPDATE_AFTER, 1, "B"));
+        iterator.close();
     }
 
     @Test
@@ -593,5 +604,49 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                                 DateTimeUtils.formatTimestamp(
                                         DateTimeUtils.toInternal(timestamp, 0), 0)));
         assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of(3, "c"));
+    }
+
+    @ParameterizedTest(name = "changelog-producer = {0}")
+    @ValueSource(strings = {"none", "input"})
+    public void testScanFromChangelog(String changelogProducer) throws Exception {
+        batchSql(
+                "CREATE TABLE IF NOT EXISTS T3 (a STRING, b STRING, c STRING, PRIMARY KEY (a) NOT ENFORCED)\n"
+                        + " WITH ('changelog-producer'='%s', 'bucket' = '1', \n"
+                        + " 'snapshot.num-retained.max' = '2',\n"
+                        + " 'snapshot.num-retained.min' = '1',\n"
+                        + " 'changelog.num-retained.max' = '3',\n"
+                        + " 'changelog.num-retained.min' = '1'\n"
+                        + ")",
+                changelogProducer);
+
+        batchSql("INSERT INTO T3 VALUES ('1', '2', '3')");
+        batchSql("INSERT INTO T3 VALUES ('4', '5', '6')");
+        batchSql("INSERT INTO T3 VALUES ('7', '8', '9')");
+        BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(
+                        streamSqlIter(
+                                "SELECT * FROM T3 /*+ OPTIONS('scan.snapshot-id'='%s') */", 0));
+        assertThat(iterator.collect(3))
+                .containsExactlyInAnyOrder(
+                        Row.of("1", "2", "3"), Row.of("4", "5", "6"), Row.of("7", "8", "9"));
+        iterator.close();
+
+        batchSql("INSERT INTO T3 VALUES ('10', '11', '12')");
+
+        iterator =
+                BlockingIterator.of(
+                        streamSqlIter(
+                                "SELECT * FROM T3 /*+ OPTIONS('scan.snapshot-id'='%s') */", 0));
+        assertThat(iterator.collect(3))
+                .containsExactlyInAnyOrder(
+                        Row.of("4", "5", "6"), Row.of("7", "8", "9"), Row.of("10", "11", "12"));
+        iterator.close();
+
+        iterator =
+                BlockingIterator.of(
+                        streamSqlIter(
+                                "SELECT * FROM T3 /*+ OPTIONS('scan.snapshot-id'='%s') */", 4));
+        assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of("10", "11", "12"));
+        iterator.close();
     }
 }

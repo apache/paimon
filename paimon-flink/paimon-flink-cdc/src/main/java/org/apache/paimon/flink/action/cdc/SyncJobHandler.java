@@ -180,7 +180,7 @@ public class SyncJobHandler {
         }
     }
 
-    public Source<String, ?, ?> provideSource() {
+    public Source<CdcSourceRecord, ?, ?> provideSource() {
         switch (sourceType) {
             case KAFKA:
                 return KafkaActionUtils.buildKafkaSource(cdcSourceConfig);
@@ -192,32 +192,23 @@ public class SyncJobHandler {
         }
     }
 
-    public FlatMapFunction<String, RichCdcMultiplexRecord> provideRecordParser(
-            boolean caseSensitive,
+    public FlatMapFunction<CdcSourceRecord, RichCdcMultiplexRecord> provideRecordParser(
             List<ComputedColumn> computedColumns,
             TypeMapping typeMapping,
             CdcMetadataConverter[] metadataConverters) {
         switch (sourceType) {
             case MYSQL:
                 return new MySqlRecordParser(
-                        cdcSourceConfig,
-                        caseSensitive,
-                        computedColumns,
-                        typeMapping,
-                        metadataConverters);
+                        cdcSourceConfig, computedColumns, typeMapping, metadataConverters);
             case POSTGRES:
                 return new PostgresRecordParser(
-                        cdcSourceConfig,
-                        caseSensitive,
-                        computedColumns,
-                        typeMapping,
-                        metadataConverters);
+                        cdcSourceConfig, computedColumns, typeMapping, metadataConverters);
             case KAFKA:
             case PULSAR:
                 DataFormat dataFormat = provideDataFormat();
-                return dataFormat.createParser(caseSensitive, typeMapping, computedColumns);
+                return dataFormat.createParser(typeMapping, computedColumns);
             case MONGODB:
-                return new MongoDBRecordParser(caseSensitive, computedColumns, cdcSourceConfig);
+                return new MongoDBRecordParser(computedColumns, cdcSourceConfig);
             default:
                 throw new UnsupportedOperationException("Unknown source type " + sourceType);
         }

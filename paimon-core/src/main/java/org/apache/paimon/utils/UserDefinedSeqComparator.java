@@ -62,8 +62,18 @@ public class UserDefinedSeqComparator implements FieldsComparator {
 
         List<String> fieldNames = rowType.getFieldNames();
         int[] fields = sequenceFields.stream().mapToInt(fieldNames::indexOf).toArray();
+
+        return create(rowType, fields);
+    }
+
+    @Nullable
+    public static UserDefinedSeqComparator create(RowType rowType, int[] sequenceFields) {
+        if (sequenceFields.length == 0) {
+            return null;
+        }
+
         RecordComparator comparator =
-                CodeGenUtils.newRecordComparator(rowType.getFieldTypes(), fields);
-        return new UserDefinedSeqComparator(fields, comparator);
+                CodeGenUtils.newRecordComparator(rowType.getFieldTypes(), sequenceFields);
+        return new UserDefinedSeqComparator(sequenceFields, comparator);
     }
 }

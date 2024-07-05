@@ -35,6 +35,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -42,7 +44,9 @@ import java.util.UUID;
 
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.StartupMode;
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link StartupMode}. */
 public class StartupModeTest extends ScannerTestBase {
@@ -144,6 +148,38 @@ public class StartupModeTest extends ScannerTestBase {
     }
 
     @Test
+    public void testStartFromTimestampString() throws Exception {
+        initializeTable(StartupMode.LATEST);
+        initializeTestData(); // initialize 3 commits
+        String timestampString =
+                LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"));
+        Thread.sleep(10L);
+
+        // write next data
+        writeAndCommit(4, rowData(1, 10, 103L));
+
+        Map<String, String> properties = new HashMap<>();
+        properties.put(CoreOptions.SCAN_MODE.key(), StartupMode.FROM_TIMESTAMP.toString());
+        properties.put(CoreOptions.SCAN_TIMESTAMP.key(), timestampString);
+        FileStoreTable readTable = table.copy(properties);
+
+        // streaming Mode
+        StreamTableScan dataTableScan = readTable.newStreamScan();
+        TableScan.Plan firstPlan = dataTableScan.plan();
+        TableScan.Plan secondPlan = dataTableScan.plan();
+
+        assertThat(firstPlan.splits()).isEmpty();
+        assertThat(secondPlan.splits())
+                .isEqualTo(snapshotReader.withSnapshot(4).withMode(ScanMode.DELTA).read().splits());
+
+        // batch mode
+        TableScan batchScan = readTable.newScan();
+        TableScan.Plan plan = batchScan.plan();
+        assertThat(plan.splits())
+                .isEqualTo(snapshotReader.withSnapshot(3).withMode(ScanMode.ALL).read().splits());
+    }
+
+    @Test
     public void testStartFromCompactedFull() throws Exception {
         initializeTable(StartupMode.COMPACTED_FULL);
         initializeTestData(); // initialize 3 commits
@@ -195,10 +231,10 @@ public class StartupModeTest extends ScannerTestBase {
     @Test
     public void testTimeTravelFromExpiredSnapshot() throws Exception {
         Map<String, String> properties = new HashMap<>();
-        // retaine 2 snapshots
+        // retain 2 snapshots
         properties.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "2");
         properties.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "2");
-        // specify consume from a expired snapshot
+        // specify consume from an expired snapshot
         properties.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1");
         initializeTable(StartupMode.FROM_SNAPSHOT, properties);
         initializeTestData(); // initialize 3 commits, expired snapshot 1
@@ -215,8 +251,11 @@ public class StartupModeTest extends ScannerTestBase {
 
         // batch mode
         TableScan batchScan = table.newScan();
-        TableScan.Plan plan = batchScan.plan();
-        assertThat(plan.splits()).isEmpty();
+        assertThatThrownBy(() -> batchScan.plan())
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "The specified scan snapshotId 1 is out of available snapshotId range [2, 3]."));
     }
 
     @Test
@@ -265,8 +304,11 @@ public class StartupModeTest extends ScannerTestBase {
 
         // batch mode
         TableScan batchScan = table.newScan();
-        TableScan.Plan plan = batchScan.plan();
-        assertThat(plan.splits()).isEmpty();
+        assertThatThrownBy(() -> batchScan.plan())
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "The specified scan snapshotId 1 is out of available snapshotId range [2, 3]."));
     }
 
     private void initializeTable(CoreOptions.StartupMode startupMode) throws Exception {

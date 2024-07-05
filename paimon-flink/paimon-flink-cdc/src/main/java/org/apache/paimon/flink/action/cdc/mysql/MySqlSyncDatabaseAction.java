@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.cdc.CdcActionCommonUtils;
+import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.SyncDatabaseActionBase;
 import org.apache.paimon.flink.action.cdc.SyncJobHandler;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
@@ -145,13 +146,14 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
             Schema fromMySql =
                     CdcActionCommonUtils.buildPaimonSchema(
                             identifier.getFullName(),
-                            Collections.emptyList(),
-                            Collections.emptyList(),
+                            partitionKeys,
+                            primaryKeys,
                             Collections.emptyList(),
                             tableConfig,
                             tableInfo.schema(),
                             metadataConverters,
                             caseSensitive,
+                            false,
                             true);
             try {
                 table = (FileStoreTable) catalog.getTable(identifier);
@@ -179,7 +181,7 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
     }
 
     @Override
-    protected MySqlSource<String> buildSource() {
+    protected MySqlSource<CdcSourceRecord> buildSource() {
         return MySqlActionUtils.buildMySqlSource(
                 cdcSourceConfig,
                 tableList(

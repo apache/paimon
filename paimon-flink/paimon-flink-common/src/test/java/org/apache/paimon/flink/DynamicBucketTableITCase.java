@@ -57,7 +57,7 @@ public class DynamicBucketTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testWriteRead() {
+    public void testWriteReadDelete() {
         sql("INSERT INTO T VALUES (1, 1, 1), (1, 2, 2), (1, 3, 3), (1, 4, 4), (1, 5, 5)");
         assertThat(sql("SELECT * FROM T"))
                 .containsExactlyInAnyOrder(
@@ -74,6 +74,10 @@ public class DynamicBucketTableITCase extends CatalogITCaseBase {
                         Row.of(1, 3, 33),
                         Row.of(1, 4, 4),
                         Row.of(1, 5, 5));
+        sql("DELETE FROM T WHERE pt = 1 AND pk = 3");
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 1, 11), Row.of(1, 2, 2), Row.of(1, 4, 4), Row.of(1, 5, 5));
 
         assertThat(sql("SELECT DISTINCT bucket FROM T$files"))
                 .containsExactlyInAnyOrder(Row.of(0), Row.of(1));
@@ -118,7 +122,7 @@ public class DynamicBucketTableITCase extends CatalogITCaseBase {
         IndexFileHandler indexFileHandler = table.store().newIndexFileHandler();
         List<BinaryRow> partitions = table.newScan().listPartitions();
         List<IndexManifestEntry> entries = new ArrayList<>();
-        partitions.forEach(p -> entries.addAll(indexFileHandler.scan(HASH_INDEX, p)));
+        partitions.forEach(p -> entries.addAll(indexFileHandler.scanEntries(HASH_INDEX, p)));
 
         Long records =
                 entries.stream().map(entry -> entry.indexFile().rowCount()).reduce(Long::sum).get();

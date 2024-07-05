@@ -22,12 +22,16 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 
@@ -64,9 +68,15 @@ public abstract class SparkReadTestBase {
     @BeforeAll
     public static void startMetastoreAndSpark(@TempDir java.nio.file.Path tempDir) {
         warehousePath = new Path("file:" + tempDir.toString());
-        spark = SparkSession.builder().master("local[2]").getOrCreate();
-        spark.conf().set("spark.sql.catalog.paimon", SparkCatalog.class.getName());
-        spark.conf().set("spark.sql.catalog.paimon.warehouse", warehousePath.toString());
+        spark =
+                SparkSession.builder()
+                        .master("local[2]")
+                        .config("spark.sql.catalog.paimon", SparkCatalog.class.getName())
+                        .config("spark.sql.catalog.paimon.warehouse", warehousePath.toString())
+                        .config(
+                                "spark.sql.extensions",
+                                PaimonSparkSessionExtensions.class.getName())
+                        .getOrCreate();
         spark.sql("USE paimon");
     }
 
@@ -188,6 +198,28 @@ public abstract class SparkReadTestBase {
         commit.close();
     }
 
+    protected static void writeTableWithWatermark(
+            String tableName, Long watermark, GenericRow... rows) throws Exception {
+        FileStoreTable fileStoreTable = getTable(tableName);
+        StreamWriteBuilder streamWriteBuilder = fileStoreTable.newStreamWriteBuilder();
+        StreamTableWrite writer = streamWriteBuilder.newWrite();
+        TableCommitImpl commit = (TableCommitImpl) streamWriteBuilder.newCommit();
+
+        for (GenericRow row : rows) {
+            writer.write(row);
+        }
+        long commitIdentifier = COMMIT_IDENTIFIER.getAndIncrement();
+        ManifestCommittable manifestCommittable =
+                new ManifestCommittable(commitIdentifier, watermark);
+        List<CommitMessage> commitMessages = writer.prepareCommit(true, commitIdentifier);
+        for (CommitMessage commitMessage : commitMessages) {
+            manifestCommittable.addFileCommittable(commitMessage);
+        }
+        commit.commit(manifestCommittable);
+        writer.close();
+        commit.close();
+    }
+
     protected static void writeTable(String tableName, String... values) {
         spark.sql(
                 String.format(
@@ -205,6 +237,6 @@ public abstract class SparkReadTestBase {
 
     // default schema
     protected String defaultShowCreateString(String table) {
-        return showCreateString(table, "a INT", "b BIGINT", "c STRING");
+        return showCreateString(table, "a INT NOT NULL", "b BIGINT", "c STRING");
     }
 }

@@ -18,27 +18,44 @@
 
 package org.apache.paimon.spark.catalyst.analysis
 
-import org.apache.paimon.CoreOptions
 import org.apache.paimon.spark.commands.UpdatePaimonTableCommand
+import org.apache.paimon.table.FileStoreTable
 
+import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, UpdateTable}
 import org.apache.spark.sql.catalyst.rules.Rule
 
-object PaimonUpdateTable extends Rule[LogicalPlan] with RowLevelHelper {
+import scala.collection.JavaConverters._
+
+object PaimonUpdateTable
+  extends Rule[LogicalPlan]
+  with RowLevelHelper
+  with AssignmentAlignmentHelper {
 
   override val operation: RowLevelOp = Update
 
   override def apply(plan: LogicalPlan): LogicalPlan = {
     plan.resolveOperators {
-      case u @ UpdateTable(PaimonRelation(table), assignments, _) if u.resolved =>
-        checkPaimonTable(table)
+      case u @ UpdateTable(PaimonRelation(table), assignments, condition) if u.resolved =>
+        checkPaimonTable(table.getTable)
 
-        val primaryKeys = table.properties().get(CoreOptions.PRIMARY_KEY.key).split(",")
-        if (!validUpdateAssignment(u.table.outputSet, primaryKeys, assignments)) {
-          throw new RuntimeException("Can't update the primary key column.")
+        table.getTable match {
+          case paimonTable: FileStoreTable =>
+            val primaryKeys = paimonTable.primaryKeys().asScala
+            if (!validUpdateAssignment(u.table.outputSet, primaryKeys, assignments)) {
+              throw new RuntimeException("Can't update the primary key column.")
+            }
+
+            val relation = PaimonRelation.getPaimonRelation(u.table)
+            UpdatePaimonTableCommand(
+              relation,
+              paimonTable,
+              condition.getOrElse(TrueLiteral),
+              assignments)
+
+          case _ =>
+            throw new RuntimeException("Update Operation is only supported for FileStoreTable.")
         }
-
-        UpdatePaimonTableCommand(u)
     }
   }
 }

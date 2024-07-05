@@ -273,7 +273,7 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
                         .setInitialSplits(Collections.emptyList())
                         .setDiscoveryInterval(1)
                         .setScan(scan)
-                        .withBucketMode(BucketMode.UNAWARE)
+                        .withBucketMode(BucketMode.BUCKET_UNAWARE)
                         .build();
         enumerator.start();
 
@@ -315,7 +315,7 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
                         .setInitialSplits(Collections.emptyList())
                         .setDiscoveryInterval(1)
                         .setScan(scan)
-                        .withBucketMode(BucketMode.UNAWARE)
+                        .withBucketMode(BucketMode.BUCKET_UNAWARE)
                         .build();
         enumerator.start();
 
@@ -374,7 +374,7 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
                         .setInitialSplits(Collections.emptyList())
                         .setDiscoveryInterval(1)
                         .setScan(scan)
-                        .withBucketMode(BucketMode.UNAWARE)
+                        .withBucketMode(BucketMode.BUCKET_UNAWARE)
                         .build();
         enumerator.start();
 
@@ -430,7 +430,7 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
                         .setInitialSplits(Collections.emptyList())
                         .setDiscoveryInterval(1)
                         .setScan(scan)
-                        .withBucketMode(BucketMode.UNAWARE)
+                        .withBucketMode(BucketMode.BUCKET_UNAWARE)
                         .build();
         enumerator.start();
 
@@ -469,7 +469,7 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
                         .setInitialSplits(Collections.emptyList())
                         .setDiscoveryInterval(1)
                         .setScan(scan)
-                        .withBucketMode(BucketMode.UNAWARE)
+                        .withBucketMode(BucketMode.BUCKET_UNAWARE)
                         .build();
         enumerator.start();
         enumerator.handleSplitRequest(1, "test-host");
@@ -765,7 +765,7 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
                         .setInitialSplits(Collections.emptyList())
                         .setDiscoveryInterval(1)
                         .setScan(scan)
-                        .withBucketMode(BucketMode.UNAWARE)
+                        .withBucketMode(BucketMode.BUCKET_UNAWARE)
                         .build();
         enumerator.start();
 
@@ -837,6 +837,8 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
                 .withBucket(bucket)
                 .withDataFiles(files)
                 .isStreaming(true)
+                .rawConvertible(false)
+                .withBucketPath("") // not used
                 .build();
     }
 
@@ -846,7 +848,7 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
         private long discoveryInterval = Long.MAX_VALUE;
 
         private StreamTableScan scan;
-        private BucketMode bucketMode = BucketMode.FIXED;
+        private BucketMode bucketMode = BucketMode.HASH_FIXED;
 
         public Builder setSplitEnumeratorContext(
                 SplitEnumeratorContext<FileStoreSourceSplit> context) {

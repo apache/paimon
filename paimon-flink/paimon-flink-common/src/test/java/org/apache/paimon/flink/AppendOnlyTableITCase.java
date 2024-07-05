@@ -48,7 +48,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
                                                 + "WITH ('bucket' = '-1', 'bucket-key' = 'id')"))
                 .hasRootCauseInstanceOf(RuntimeException.class)
                 .hasRootCauseMessage(
-                        "Cannot define 'bucket-key' in unaware or dynamic bucket mode.");
+                        "Cannot define 'bucket-key' with bucket -1, please specify a bucket number.");
     }
 
     @Test
@@ -254,17 +254,36 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
                         CoreOptions.StartupMode.LATEST.toString());
         BlockingIterator<Row, Row> iterator = streamSqlBlockIter("SELECT * FROM T");
 
+        // wait streaming job start
+        Thread.sleep(2000);
+
         sql("INSERT INTO T VALUES (2)");
         // Only fetch latest snapshot is, dynamic option worked
         assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of(2));
     }
 
+    @Test
+    public void testReadWriteBranch() throws Exception {
+        // create table
+        sql("CREATE TABLE T (id INT)");
+        // insert data
+        batchSql("INSERT INTO T VALUES (1)");
+        // create tag
+        paimonTable("T").createTag("tag1", 1);
+        // create branch
+        paimonTable("T").createBranch("branch1", "tag1");
+        // insert data to branch
+        batchSql("INSERT INTO T/*+ OPTIONS('branch' = 'branch1') */ VALUES (2)");
+        List<Row> rows = batchSql("select * from T /*+ OPTIONS('branch' = 'branch1') */");
+        assertThat(rows).containsExactlyInAnyOrder(Row.of(2), Row.of(1));
+    }
+
     @Override
     protected List<String> ddl() {
         return Arrays.asList(
-                "CREATE TABLE IF NOT EXISTS append_table (id INT, data STRING) WITH ('bucket' = '1')",
-                "CREATE TABLE IF NOT EXISTS part_table (id INT, data STRING, dt STRING) PARTITIONED BY (dt) WITH ('bucket' = '1')",
-                "CREATE TABLE IF NOT EXISTS complex_table (id INT, data MAP<INT, INT>) WITH ('bucket' = '1')");
+                "CREATE TABLE IF NOT EXISTS append_table (id INT, data STRING) WITH ('bucket' = '1', 'bucket-key'='id')",
+                "CREATE TABLE IF NOT EXISTS part_table (id INT, data STRING, dt STRING) PARTITIONED BY (dt) WITH ('bucket' = '1', 'bucket-key'='id')",
+                "CREATE TABLE IF NOT EXISTS complex_table (id INT, data MAP<INT, INT>) WITH ('bucket' = '1', 'bucket-key'='id')");
     }
 
     private void testRejectChanges(RowKind kind) {

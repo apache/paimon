@@ -107,7 +107,7 @@ public class CdcDynamicTableParsingProcessFunction<T> extends ProcessFunction<T,
                         });
 
         List<DataField> schemaChange = parser.parseSchemaChange();
-        if (schemaChange.size() > 0) {
+        if (!schemaChange.isEmpty()) {
             context.output(
                     DYNAMIC_SCHEMA_CHANGE_OUTPUT_TAG,
                     Tuple2.of(Identifier.create(database, tableName), schemaChange));
@@ -123,5 +123,13 @@ public class CdcDynamicTableParsingProcessFunction<T> extends ProcessFunction<T,
 
     private CdcMultiplexRecord wrapRecord(String databaseName, String tableName, CdcRecord record) {
         return CdcMultiplexRecord.fromCdcRecord(databaseName, tableName, record);
+    }
+
+    @Override
+    public void close() throws Exception {
+        if (catalog != null) {
+            catalog.close();
+            catalog = null;
+        }
     }
 }

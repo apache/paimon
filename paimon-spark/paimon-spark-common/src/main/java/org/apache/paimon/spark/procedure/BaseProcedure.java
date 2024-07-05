@@ -108,6 +108,11 @@ abstract class BaseProcedure implements Procedure {
         }
     }
 
+    protected DataSourceV2Relation createRelation(Identifier ident) {
+        return DataSourceV2Relation.create(
+                loadSparkTable(ident), Option.apply(tableCatalog), Option.apply(ident));
+    }
+
     protected void refreshSparkCache(Identifier ident, Table table) {
         CacheManager cacheManager = spark.sharedState().cacheManager();
         DataSourceV2Relation relation =

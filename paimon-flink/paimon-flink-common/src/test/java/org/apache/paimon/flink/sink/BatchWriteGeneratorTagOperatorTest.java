@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.flink.VersionedSerializerWrapper;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestCommittableSerializer;
 import org.apache.paimon.table.FileStoreTable;
@@ -60,9 +59,7 @@ public class BatchWriteGeneratorTagOperatorTest extends CommitterOperatorTest {
                         table,
                         initialCommitUser,
                         new RestoreAndFailCommittableStateManager<>(
-                                () ->
-                                        new VersionedSerializerWrapper<>(
-                                                new ManifestCommittableSerializer())));
+                                ManifestCommittableSerializer::new));
         committerOperator.open();
 
         TableCommitImpl tableCommit = table.newCommit(initialCommitUser);
@@ -73,19 +70,13 @@ public class BatchWriteGeneratorTagOperatorTest extends CommitterOperatorTest {
         SnapshotManager snapshotManager = table.newSnapshotReader().snapshotManager();
         TagManager tagManager = table.tagManager();
 
-        //  Generate tag name
-        String prefix = "batch-write-";
-        Instant instant =
-                Instant.ofEpochMilli(
-                        Objects.requireNonNull(snapshotManager.latestSnapshot()).timeMillis());
-        LocalDateTime localDateTime = LocalDateTime.ofInstant(instant, ZoneId.systemDefault());
-        String tagName = prefix + localDateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
-
         // No tag is generated before the finish method
         assertThat(table.tagManager().tagCount()).isEqualTo(0);
         committerOperator.finish();
         // After the finish method, a tag is generated
         assertThat(table.tagManager().tagCount()).isEqualTo(1);
+        // Get tagName from tagManager.
+        String tagName = tagManager.allTagNames().get(0);
         // The tag is consistent with the latest snapshot
         assertThat(tagManager.taggedSnapshot(tagName)).isEqualTo(snapshotManager.latestSnapshot());
 
@@ -101,7 +92,16 @@ public class BatchWriteGeneratorTagOperatorTest extends CommitterOperatorTest {
         // note that this tag has the same name with previous tag
         // so the previous tag will be deleted
         committerOperator.finish();
-
+        // If tagName does not exist, it happened across the day.
+        if (!tagManager.tagExists(tagName)) {
+            //  Generate tag name
+            String prefix = "batch-write-";
+            Instant instant =
+                    Instant.ofEpochMilli(
+                            Objects.requireNonNull(snapshotManager.latestSnapshot()).timeMillis());
+            LocalDateTime localDateTime = LocalDateTime.ofInstant(instant, ZoneId.systemDefault());
+            tagName = prefix + localDateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+        }
         assertThat(tagManager.allTagNames()).containsOnly("many-tags-test2", tagName);
     }
 

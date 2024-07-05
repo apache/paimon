@@ -21,12 +21,17 @@ package org.apache.paimon.flink.action;
 import org.apache.paimon.operation.OrphanFilesClean;
 import org.apache.paimon.table.FileStoreTable;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Action to remove the orphan data files and metadata files. */
 public class RemoveOrphanFilesAction extends TableActionBase {
+    private static final Logger LOG = LoggerFactory.getLogger(RemoveOrphanFilesAction.class);
 
     private final OrphanFilesClean orphanFilesClean;
 
@@ -49,8 +54,15 @@ public class RemoveOrphanFilesAction extends TableActionBase {
         return this;
     }
 
+    public RemoveOrphanFilesAction dryRun() {
+        this.orphanFilesClean.fileCleaner(path -> {});
+        return this;
+    }
+
     @Override
     public void run() throws Exception {
-        orphanFilesClean.clean();
+        List<String> result = OrphanFilesClean.showDeletedFiles(orphanFilesClean.clean(), 200);
+        String files = String.join(", ", result);
+        LOG.info("orphan files: [{}]", files);
     }
 }

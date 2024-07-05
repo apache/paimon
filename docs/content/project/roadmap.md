@@ -26,23 +26,69 @@ under the License.
 
 # Roadmap
 
-Paimon's long-term goal is to become the better data lake platform for building the Streaming Lakehouse. Paimon will
-invest in real-time, ecology, and data warehouse integrity for a long time.
+## Native Format IO
 
-If you have other requirements, please contact us.
+Integrate native Parquet & ORC reader & writer.
 
-## What’s Next?
+## Deletion Vectors (Merge On Write)
 
-### Core
+1. Primary Key Table Deletion Vectors Mode supports async compaction.
+2. Append Table supports DELETE & UPDATE with Deletion Vectors Mode. (Now only Spark SQL)
+3. Optimize lookup performance for HDD disk.
 
-- Foreign Key Join Partial-Update
-- Append table supports batch / streaming z-order sort
-- Supports cross partition update
+## Flink Lookup Join
 
-### Compute Engines
+Support Flink Custom Data Distribution Lookup Join to reach large-scale data lookup join.
 
-- More management via Flink/Spark `CALL` procedures
-- Flink Sink supports at-least-once / unaligned checkpoint
-- Flink Whole database compaction Job
-- Public Spark Schema Evolution Pipeline
-- Spark supports Dynamic Partition overwrite
+## Produce Iceberg snapshots
+
+Introduce a mode to produce Iceberg snapshots.
+
+## Branch
+
+Branch production ready.
+
+## Changelog life cycle decouple
+
+Changelog life cycle decouple supports none changelog-producer.
+
+## Partition Mark Done
+
+Support partition mark done.
+
+## Default File Format
+
+- Default compression is ZSTD with level 1.
+- Parquet supports filter push down.
+- Parquet supports arrow with row type element.
+- Parquet becomes default file format.
+
+## Variant Type
+
+Support Variant Type with Spark 4.0 and Flink 2.0. Unlocking support for semi-structured data.
+
+## Bucketed Join
+
+Support Bucketed Join with Spark SQL to reduce shuffler in Join.
+
+## File Index
+
+Add more index:
+1. Bitmap
+2. Inverse
+
+## Column Family
+
+Support Column Family for super Wide Table.
+
+## View & Function support
+
+Paimon Catalog supports views and functions.
+
+## Files Schema Evolution Ingestion
+
+Introduce a files Ingestion with Schema Evolution.
+
+## Foreign Key Join
+
+Explore Foreign Key Join solution.

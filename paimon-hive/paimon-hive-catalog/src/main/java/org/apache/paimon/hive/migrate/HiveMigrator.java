@@ -59,6 +59,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.hive.HiveTypeUtils.toPaimonType;
 import static org.apache.paimon.utils.FileUtils.COMMON_IO_FORK_JOIN_POOL;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Migrate hive table to paimon table. */
 public class HiveMigrator implements Migrator {
@@ -77,7 +78,8 @@ public class HiveMigrator implements Migrator {
     private final String sourceTable;
     private final String targetDatabase;
     private final String targetTable;
-    private final Map<String, String> options;
+    private final CoreOptions coreOptions;
+    private Boolean delete = true;
 
     public HiveMigrator(
             HiveCatalog hiveCatalog,
@@ -93,7 +95,7 @@ public class HiveMigrator implements Migrator {
         this.sourceTable = sourceTable;
         this.targetDatabase = targetDatabase;
         this.targetTable = targetTable;
-        this.options = options;
+        this.coreOptions = new CoreOptions(options);
     }
 
     public static List<Migrator> databaseMigrators(
@@ -114,6 +116,11 @@ public class HiveMigrator implements Migrator {
         } catch (TException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    @Override
+    public void deleteOriginTable(boolean delete) {
+        this.delete = delete;
     }
 
     @Override
@@ -202,8 +209,10 @@ public class HiveMigrator implements Migrator {
             throw new RuntimeException("Migrating failed", e);
         }
 
-        // if all success, drop the origin table
-        client.dropTable(sourceDatabase, sourceTable, true, true);
+        // if all success, drop the origin table according the delete field
+        if (delete) {
+            client.dropTable(sourceDatabase, sourceTable, true, true);
+        }
     }
 
     @Override
@@ -216,8 +225,13 @@ public class HiveMigrator implements Migrator {
 
     private void checkPrimaryKey() throws Exception {
         PrimaryKeysRequest primaryKeysRequest = new PrimaryKeysRequest(sourceDatabase, sourceTable);
-        if (!client.getPrimaryKeys(primaryKeysRequest).isEmpty()) {
-            throw new IllegalArgumentException("Can't migrate primary key table yet.");
+        try {
+            if (!client.getPrimaryKeys(primaryKeysRequest).isEmpty()) {
+                throw new IllegalArgumentException("Can't migrate primary key table yet.");
+            }
+        } catch (Exception e) {
+            LOG.warn(
+                    "Your Hive version is low which not support get_primary_keys, skip primary key check firstly!");
         }
     }
 
@@ -227,7 +241,7 @@ public class HiveMigrator implements Migrator {
                     "Hive migrator only support append only table target table");
         }
 
-        if (paimonTable.store().bucketMode() != BucketMode.UNAWARE) {
+        if (paimonTable.store().bucketMode() != BucketMode.BUCKET_UNAWARE) {
             throw new IllegalArgumentException(
                     "Hive migrator only support unaware-bucket target table");
         }
@@ -237,8 +251,10 @@ public class HiveMigrator implements Migrator {
             List<FieldSchema> fields,
             List<FieldSchema> partitionFields,
             Map<String, String> hiveTableOptions) {
-        HashMap<String, String> paimonOptions = new HashMap<>(this.options);
-        paimonOptions.put(CoreOptions.BUCKET.key(), "-1");
+        checkArgument(
+                coreOptions.bucket() == -1,
+                "Hive migrator only support unaware-bucket target table, bucket should be -1");
+        Map<String, String> paimonOptions = coreOptions.toMap();
         // for compatible with hive comment system
         if (hiveTableOptions.get("comment") != null) {
             paimonOptions.put("hive.comment", hiveTableOptions.get("comment"));
@@ -289,7 +305,11 @@ public class HiveMigrator implements Migrator {
             String format = parseFormat(partition.getSd().getSerdeInfo().toString());
             String location = partition.getSd().getLocation();
             BinaryRow partitionRow =
-                    FileMetaUtils.writePartitionValue(partitionRowType, values, valueSetters);
+                    FileMetaUtils.writePartitionValue(
+                            partitionRowType,
+                            values,
+                            valueSetters,
+                            coreOptions.partitionDefaultName());
             Path path = paimonTable.store().pathFactory().bucketPath(partitionRow, 0);
 
             migrateTasks.add(

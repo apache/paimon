@@ -40,8 +40,6 @@ import java.util.Iterator;
 /** Provides a {@link FormatReaderFactory} for Avro records. */
 public class AvroBulkFormat implements FormatReaderFactory {
 
-    private static final long serialVersionUID = 1L;
-
     protected final RowType projectedRowType;
 
     public AvroBulkFormat(RowType projectedRowType) {
@@ -61,6 +59,8 @@ public class AvroBulkFormat implements FormatReaderFactory {
 
         private final long end;
         private final Pool<Object> pool;
+        private final Path filePath;
+        private long currentRowPosition;
 
         private AvroReader(FileIO fileIO, Path path, long fileSize) throws IOException {
             this.fileIO = fileIO;
@@ -69,6 +69,8 @@ public class AvroBulkFormat implements FormatReaderFactory {
             this.reader.sync(0);
             this.pool = new Pool<>(1);
             this.pool.add(new Object());
+            this.filePath = path;
+            this.currentRowPosition = 0;
         }
 
         private DataFileReader<InternalRow> createReaderFromPath(Path path, long fileSize)
@@ -101,8 +103,11 @@ public class AvroBulkFormat implements FormatReaderFactory {
                 return null;
             }
 
+            long rowPosition = currentRowPosition;
+            currentRowPosition += reader.getBlockCount();
             Iterator<InternalRow> iterator = new AvroBlockIterator(reader.getBlockCount(), reader);
-            return new IteratorResultIterator<>(iterator, () -> pool.recycler().recycle(ticket));
+            return new IteratorResultIterator(
+                    iterator, () -> pool.recycler().recycle(ticket), filePath, rowPosition);
         }
 
         private boolean readNextBlock() throws IOException {

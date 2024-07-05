@@ -142,5 +142,10 @@ public class QueryFileMonitor extends RichSourceFunction<InternalRow> {
             int bucket = row.getInt(2);
             return ChannelComputer.select(partition, bucket, numChannels);
         }
+
+        @Override
+        public String toString() {
+            return "FileMonitorChannelComputer{" + "numChannels=" + numChannels + '}';
+        }
     }
 }

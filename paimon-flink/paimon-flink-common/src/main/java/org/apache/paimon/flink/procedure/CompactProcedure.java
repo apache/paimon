@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.procedure;
 
-import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.CompactAction;
 import org.apache.paimon.flink.action.SortCompactAction;
@@ -52,7 +51,8 @@ public class CompactProcedure extends ProcedureBase {
                         type = @DataTypeHint("STRING"),
                         isOptional = true),
                 @ArgumentHint(name = "order_by", type = @DataTypeHint("STRING"), isOptional = true),
-                @ArgumentHint(name = "options", type = @DataTypeHint("STRING"), isOptional = true)
+                @ArgumentHint(name = "options", type = @DataTypeHint("STRING"), isOptional = true),
+                @ArgumentHint(name = "where", type = @DataTypeHint("STRING"), isOptional = true)
             })
     public String[] call(
             ProcedureContext procedureContext,
@@ -60,10 +60,11 @@ public class CompactProcedure extends ProcedureBase {
             String partitions,
             String orderStrategy,
             String orderByColumns,
-            String tableOptions)
+            String tableOptions,
+            String where)
             throws Exception {
-        String warehouse = ((AbstractCatalog) catalog).warehouse();
-        Map<String, String> catalogOptions = ((AbstractCatalog) catalog).options();
+        String warehouse = catalog.warehouse();
+        Map<String, String> catalogOptions = catalog.options();
         Map<String, String> tableConf =
                 isBlank(tableOptions)
                         ? Collections.emptyMap()
@@ -98,6 +99,10 @@ public class CompactProcedure extends ProcedureBase {
 
         if (!(isBlank(partitions))) {
             action.withPartitions(getPartitions(partitions.split(";")));
+        }
+
+        if (!isBlank(where)) {
+            action.withWhereSql(where);
         }
 
         return execute(procedureContext, action, jobName);

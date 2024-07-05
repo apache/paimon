@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.lineage.LineageMetaFactory;
 import org.apache.paimon.operation.FileStoreCommit;
@@ -29,6 +30,7 @@ import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
@@ -40,6 +42,7 @@ import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -47,9 +50,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
@@ -83,6 +86,16 @@ public abstract class AbstractCatalog implements Catalog {
         this.tableDefaultOptions =
                 convertToPropertiesPrefixKey(options.toMap(), TABLE_DEFAULT_OPTION_PREFIX);
         this.catalogOptions = options;
+    }
+
+    @Override
+    public Map<String, String> options() {
+        return catalogOptions.toMap();
+    }
+
+    @Override
+    public FileIO fileIO() {
+        return fileIO;
     }
 
     @Override
@@ -128,9 +141,7 @@ public abstract class AbstractCatalog implements Catalog {
     @Override
     public void createDatabase(String name, boolean ignoreIfExists, Map<String, String> properties)
             throws DatabaseAlreadyExistException {
-        if (isSystemDatabase(name)) {
-            throw new ProcessSystemDatabaseException();
-        }
+        checkNotSystemDatabase(name);
         if (databaseExists(name)) {
             if (ignoreIfExists) {
                 return;
@@ -159,7 +170,11 @@ public abstract class AbstractCatalog implements Catalog {
             throws TableNotExistException {
         Table table = getTable(identifier);
         FileStoreTable fileStoreTable = (FileStoreTable) table;
-        FileStoreCommit commit = fileStoreTable.store().newCommit(UUID.randomUUID().toString());
+        FileStoreCommit commit =
+                fileStoreTable
+                        .store()
+                        .newCommit(
+                                createCommitUser(fileStoreTable.coreOptions().toConfiguration()));
         commit.dropPartitions(
                 Collections.singletonList(partitionSpec), BatchWriteBuilder.COMMIT_IDENTIFIER);
     }
@@ -169,9 +184,7 @@ public abstract class AbstractCatalog implements Catalog {
     @Override
     public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
             throws DatabaseNotExistException, DatabaseNotEmptyException {
-        if (isSystemDatabase(name)) {
-            throw new ProcessSystemDatabaseException();
-        }
+        checkNotSystemDatabase(name);
         if (!databaseExists(name)) {
             if (ignoreIfNotExists) {
                 return;
@@ -325,7 +338,8 @@ public abstract class AbstractCatalog implements Catalog {
             }
             return table;
         } else {
-            return getDataTable(identifier);
+            Table table = getDataTable(identifier);
+            return table;
         }
     }
 
@@ -369,17 +383,6 @@ public abstract class AbstractCatalog implements Catalog {
         }
     }
 
-    /**
-     * Get the warehouse path for the catalog if exists.
-     *
-     * @return The catalog warehouse path.
-     */
-    public abstract String warehouse();
-
-    public Map<String, String> options() {
-        return catalogOptions.toMap();
-    }
-
     protected abstract TableSchema getDataTableSchema(Identifier identifier)
             throws TableNotExistException;
 
@@ -396,7 +399,7 @@ public abstract class AbstractCatalog implements Catalog {
         return isSystemDatabase(identifier.getDatabaseName()) || isSpecifiedSystemTable(identifier);
     }
 
-    private void checkNotSystemTable(Identifier identifier, String method) {
+    protected void checkNotSystemTable(Identifier identifier, String method) {
         if (isSystemTable(identifier)) {
             throw new IllegalArgumentException(
                     String.format(
@@ -407,10 +410,6 @@ public abstract class AbstractCatalog implements Catalog {
 
     public void copyTableDefaultOptions(Map<String, String> options) {
         tableDefaultOptions.forEach(options::putIfAbsent);
-    }
-
-    public FileIO fileIO() {
-        return fileIO;
     }
 
     private String[] tableAndSystemName(Identifier identifier) {
@@ -443,6 +442,13 @@ public abstract class AbstractCatalog implements Catalog {
         return SYSTEM_DATABASE_NAME.equals(database);
     }
 
+    /** Validate database cannot be a system database. */
+    protected void checkNotSystemDatabase(String database) {
+        if (isSystemDatabase(database)) {
+            throw new ProcessSystemDatabaseException();
+        }
+    }
+
     /** Validate database, table and field names must be lowercase when not case-sensitive. */
     public static void validateCaseInsensitive(
             boolean caseSensitive, String type, String... names) {
@@ -464,7 +470,7 @@ public abstract class AbstractCatalog implements Catalog {
                         type, illegalNames));
     }
 
-    private void validateIdentifierNameCaseInsensitive(Identifier identifier) {
+    protected void validateIdentifierNameCaseInsensitive(Identifier identifier) {
         validateCaseInsensitive(caseSensitive(), "Database", identifier.getDatabaseName());
         validateCaseInsensitive(caseSensitive(), "Table", identifier.getObjectName());
     }
@@ -483,7 +489,7 @@ public abstract class AbstractCatalog implements Catalog {
         validateFieldNameCaseInsensitive(fieldNames);
     }
 
-    private void validateFieldNameCaseInsensitive(List<String> fieldNames) {
+    protected void validateFieldNameCaseInsensitive(List<String> fieldNames) {
         validateCaseInsensitive(caseSensitive(), "Field", fieldNames);
     }
 
@@ -496,5 +502,37 @@ public abstract class AbstractCatalog implements Catalog {
                 String.format(
                         "The value of %s property should be %s.",
                         CoreOptions.AUTO_CREATE.key(), Boolean.FALSE));
+    }
+
+    // =============================== Meta in File System =====================================
+
+    protected List<String> listDatabasesInFileSystem(Path warehouse) throws IOException {
+        List<String> databases = new ArrayList<>();
+        for (FileStatus status : fileIO.listDirectories(warehouse)) {
+            Path path = status.getPath();
+            if (status.isDir() && path.getName().endsWith(DB_SUFFIX)) {
+                String fileName = path.getName();
+                databases.add(fileName.substring(0, fileName.length() - DB_SUFFIX.length()));
+            }
+        }
+        return databases;
+    }
+
+    protected List<String> listTablesInFileSystem(Path databasePath) throws IOException {
+        List<String> tables = new ArrayList<>();
+        for (FileStatus status : fileIO.listDirectories(databasePath)) {
+            if (status.isDir() && tableExistsInFileSystem(status.getPath())) {
+                tables.add(status.getPath().getName());
+            }
+        }
+        return tables;
+    }
+
+    protected boolean tableExistsInFileSystem(Path tablePath) {
+        return !new SchemaManager(fileIO, tablePath).listAllIds().isEmpty();
+    }
+
+    public Optional<TableSchema> tableSchemaInFileSystem(Path tablePath) {
+        return new SchemaManager(fileIO, tablePath).latest();
     }
 }

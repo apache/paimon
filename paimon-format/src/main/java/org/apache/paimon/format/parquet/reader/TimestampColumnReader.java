@@ -22,7 +22,6 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.columnar.writable.WritableIntVector;
 import org.apache.paimon.data.columnar.writable.WritableTimestampVector;
 
-import org.apache.parquet.Preconditions;
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.page.PageReader;
 import org.apache.parquet.io.api.Binary;
@@ -32,6 +31,8 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.concurrent.TimeUnit;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Timestamp {@link ColumnReader}. We only support INT96 bytes now, julianDay(4) + nanosOfDay(8).
@@ -89,8 +90,7 @@ public class TimestampColumnReader extends AbstractColumnReader<WritableTimestam
     public static Timestamp decodeInt96ToTimestamp(
             boolean utcTimestamp, org.apache.parquet.column.Dictionary dictionary, int id) {
         Binary binary = dictionary.decodeToBinary(id);
-        Preconditions.checkArgument(
-                binary.length() == 12, "Timestamp with int96 should be 12 bytes.");
+        checkArgument(binary.length() == 12, "Timestamp with int96 should be 12 bytes.");
         ByteBuffer buffer = binary.toByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
         return int96ToTimestamp(utcTimestamp, buffer.getLong(), buffer.getInt());
     }

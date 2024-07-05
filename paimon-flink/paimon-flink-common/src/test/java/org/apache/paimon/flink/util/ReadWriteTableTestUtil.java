@@ -30,6 +30,7 @@ import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.types.Row;
+import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
 
 import javax.annotation.Nullable;
@@ -110,13 +111,17 @@ public class ReadWriteTableTestUtil {
     }
 
     public static String createTable(
-            List<String> fieldsSpec, List<String> primaryKeys, List<String> partitionKeys) {
-        return createTable(fieldsSpec, primaryKeys, partitionKeys, new HashMap<>());
+            List<String> fieldsSpec,
+            List<String> primaryKeys,
+            List<String> bucketKeys,
+            List<String> partitionKeys) {
+        return createTable(fieldsSpec, primaryKeys, bucketKeys, partitionKeys, new HashMap<>());
     }
 
     public static String createTable(
             List<String> fieldsSpec,
             List<String> primaryKeys,
+            List<String> bucketKeys,
             List<String> partitionKeys,
             Map<String, String> options) {
         // "-" is not allowed in the table name.
@@ -124,6 +129,9 @@ public class ReadWriteTableTestUtil {
         Map<String, String> newOptions = new HashMap<>(options);
         if (!newOptions.containsKey("bucket")) {
             newOptions.put("bucket", "1");
+        }
+        if (!bucketKeys.isEmpty()) {
+            newOptions.put("bucket-key", String.join(",", bucketKeys));
         }
         sEnv.executeSql(buildDdl(table, fieldsSpec, primaryKeys, partitionKeys, newOptions));
         return table;
@@ -261,13 +269,26 @@ public class ReadWriteTableTestUtil {
         CloseableIterator<Row> resultItr = bEnv.executeSql(query).collect();
         try (BlockingIterator<Row, Row> iterator = BlockingIterator.of(resultItr)) {
             if (!expected.isEmpty()) {
-                assertThat(
-                                iterator.collect(
-                                        expected.size(), TIME_OUT.getSize(), TIME_OUT.getUnit()))
-                        .containsExactlyInAnyOrderElementsOf(expected);
+                List<Row> result =
+                        iterator.collect(expected.size(), TIME_OUT.getSize(), TIME_OUT.getUnit());
+                assertThat(toInsertOnlyRows(result))
+                        .containsExactlyInAnyOrderElementsOf(toInsertOnlyRows(expected));
             }
             assertThat(resultItr.hasNext()).isFalse();
         }
+    }
+
+    private static List<Row> toInsertOnlyRows(List<Row> rows) {
+        List<Row> result = new ArrayList<>();
+        for (Row row : rows) {
+            assertThat(row.getKind()).isIn(RowKind.INSERT, RowKind.UPDATE_AFTER);
+            Row newRow = new Row(row.getArity());
+            for (int i = 0; i < row.getArity(); i++) {
+                newRow.setField(i, row.getField(i));
+            }
+            result.add(newRow);
+        }
+        return result;
     }
 
     public static BlockingIterator<Row, Row> testStreamingRead(String query, List<Row> expected)

@@ -124,35 +124,12 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                 expected,
                 Arrays.asList(
                         changelogRow("+I", 1, "v_1", "creation", "02-27"),
-                        changelogRow("+U", 2, "v_2_nmu", "not_matched_upsert", "02-27"),
-                        changelogRow("+U", 3, "v_3_nmu", "not_matched_upsert", "02-27"),
-                        changelogRow("+U", 7, "Seven", "matched_upsert", "02-28"),
+                        changelogRow("+I", 2, "v_2_nmu", "not_matched_upsert", "02-27"),
+                        changelogRow("+I", 3, "v_3_nmu", "not_matched_upsert", "02-27"),
+                        changelogRow("+I", 7, "Seven", "matched_upsert", "02-28"),
                         changelogRow("+I", 8, "v_8", "insert", "02-29"),
                         changelogRow("+I", 11, "v_11", "insert", "02-29"),
                         changelogRow("+I", 12, "v_12", "insert", "02-29")));
-
-        if (producer == CoreOptions.ChangelogProducer.FULL_COMPACTION) {
-            // test partial update still works after action
-            testWorkWithPartialUpdate();
-        }
-    }
-
-    private void testWorkWithPartialUpdate() throws Exception {
-        insertInto(
-                "T",
-                "(12, CAST (NULL AS STRING), '$', '02-29')",
-                "(12, 'Test', CAST (NULL AS STRING), '02-29')");
-
-        testBatchRead(
-                buildSimpleQuery("T"),
-                Arrays.asList(
-                        changelogRow("+I", 1, "v_1", "creation", "02-27"),
-                        changelogRow("+U", 2, "v_2_nmu", "not_matched_upsert", "02-27"),
-                        changelogRow("+U", 3, "v_3_nmu", "not_matched_upsert", "02-27"),
-                        changelogRow("+U", 7, "Seven", "matched_upsert", "02-28"),
-                        changelogRow("+I", 8, "v_8", "insert", "02-29"),
-                        changelogRow("+I", 11, "v_11", "insert", "02-29"),
-                        changelogRow("+I", 12, "Test", "$", "02-29")));
     }
 
     @ParameterizedTest(name = "in-default = {0}")
@@ -455,6 +432,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                 createTable(
                         Collections.singletonList("k int"),
                         Collections.emptyList(),
+                        Collections.singletonList("k"),
                         Collections.emptyList());
 
         assertThatThrownBy(
@@ -553,11 +531,11 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                             {
                                 put(CHANGELOG_PRODUCER.key(), producer.toString());
                                 // test works with partial update normally
-                                if (producer == CoreOptions.ChangelogProducer.FULL_COMPACTION) {
+                                if (producer == CoreOptions.ChangelogProducer.LOOKUP) {
                                     put(
                                             CoreOptions.MERGE_ENGINE.key(),
                                             CoreOptions.MergeEngine.PARTIAL_UPDATE.toString());
-                                    put(CoreOptions.PARTIAL_UPDATE_IGNORE_DELETE.key(), "true");
+                                    put(CoreOptions.IGNORE_DELETE.key(), "true");
                                 }
                             }
                         }));

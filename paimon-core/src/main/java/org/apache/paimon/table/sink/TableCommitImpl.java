@@ -31,7 +31,7 @@ import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.metrics.CommitMetrics;
-import org.apache.paimon.tag.TagAutoCreation;
+import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.IOUtils;
@@ -76,7 +76,7 @@ public class TableCommitImpl implements InnerTableCommit {
     private final List<CommitCallback> commitCallbacks;
     @Nullable private final Runnable expireSnapshots;
     @Nullable private final PartitionExpire partitionExpire;
-    @Nullable private final TagAutoCreation tagAutoCreation;
+    @Nullable private final TagAutoManager tagAutoManager;
     private final Lock lock;
 
     @Nullable private final Duration consumerExpireTime;
@@ -96,7 +96,7 @@ public class TableCommitImpl implements InnerTableCommit {
             List<CommitCallback> commitCallbacks,
             @Nullable Runnable expireSnapshots,
             @Nullable PartitionExpire partitionExpire,
-            @Nullable TagAutoCreation tagAutoCreation,
+            @Nullable TagAutoManager tagAutoManager,
             Lock lock,
             @Nullable Duration consumerExpireTime,
             ConsumerManager consumerManager,
@@ -112,7 +112,7 @@ public class TableCommitImpl implements InnerTableCommit {
         this.commitCallbacks = commitCallbacks;
         this.expireSnapshots = expireSnapshots;
         this.partitionExpire = partitionExpire;
-        this.tagAutoCreation = tagAutoCreation;
+        this.tagAutoManager = tagAutoManager;
         this.lock = lock;
 
         this.consumerExpireTime = consumerExpireTime;
@@ -131,8 +131,12 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     public boolean forceCreatingSnapshot() {
-        return this.forceCreatingSnapshot
-                || (tagAutoCreation != null && tagAutoCreation.forceCreatingSnapshot());
+        if (this.forceCreatingSnapshot) {
+            return true;
+        }
+        return tagAutoManager != null
+                && tagAutoManager.getTagAutoCreation() != null
+                && tagAutoManager.getTagAutoCreation().forceCreatingSnapshot();
     }
 
     @Override
@@ -151,11 +155,6 @@ public class TableCommitImpl implements InnerTableCommit {
     public InnerTableCommit withMetricRegistry(MetricRegistry registry) {
         commit.withMetrics(new CommitMetrics(registry, tableName));
         return this;
-    }
-
-    @Override
-    public Set<Long> filterCommitted(Set<Long> commitIdentifiers) {
-        return commit.filterCommitted(commitIdentifiers);
     }
 
     @Override
@@ -198,13 +197,13 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     public void commit(ManifestCommittable committable) {
-        commitMultiple(Collections.singletonList(committable));
+        commitMultiple(Collections.singletonList(committable), false);
     }
 
-    public void commitMultiple(List<ManifestCommittable> committables) {
+    public void commitMultiple(List<ManifestCommittable> committables, boolean checkAppendFiles) {
         if (overwritePartition == null) {
             for (ManifestCommittable committable : committables) {
-                commit.commit(committable, new HashMap<>());
+                commit.commit(committable, new HashMap<>(), checkAppendFiles);
             }
             if (!committables.isEmpty()) {
                 expire(committables.get(committables.size() - 1).identifier(), expireMainExecutor);
@@ -253,7 +252,7 @@ public class TableCommitImpl implements InnerTableCommit {
                         .collect(Collectors.toList());
         if (retryCommittables.size() > 0) {
             checkFilesExistence(retryCommittables);
-            commitMultiple(retryCommittables);
+            commitMultiple(retryCommittables, true);
         }
         return retryCommittables.size();
     }
@@ -279,6 +278,10 @@ public class TableCommitImpl implements InnerTableCommit {
                 msg.compactIncrement().compactBefore().forEach(collector);
                 msg.compactIncrement().compactAfter().forEach(collector);
                 msg.indexIncrement().newIndexFiles().stream()
+                        .map(IndexFileMeta::fileName)
+                        .map(indexFileFactory::toPath)
+                        .forEach(files::add);
+                msg.indexIncrement().deletedIndexFiles().stream()
                         .map(IndexFileMeta::fileName)
                         .map(indexFileFactory::toPath)
                         .forEach(files::add);
@@ -354,8 +357,8 @@ public class TableCommitImpl implements InnerTableCommit {
             partitionExpire.expire(partitionExpireIdentifier);
         }
 
-        if (tagAutoCreation != null) {
-            tagAutoCreation.run();
+        if (tagAutoManager != null) {
+            tagAutoManager.run();
         }
     }
 

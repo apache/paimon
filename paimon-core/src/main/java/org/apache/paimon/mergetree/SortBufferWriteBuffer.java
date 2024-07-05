@@ -33,6 +33,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.sort.BinaryInMemorySortBuffer;
 import org.apache.paimon.sort.SortBuffer;
@@ -66,6 +67,7 @@ public class SortBufferWriteBuffer implements WriteBuffer {
             @Nullable FieldsComparator userDefinedSeqComparator,
             MemorySegmentPool memoryPool,
             boolean spillable,
+            MemorySize maxDiskSize,
             int sortMaxFan,
             String compression,
             IOManager ioManager) {
@@ -118,7 +120,8 @@ public class SortBufferWriteBuffer implements WriteBuffer {
                                 inMemorySortBuffer,
                                 ioManager,
                                 sortMaxFan,
-                                compression)
+                                compression,
+                                maxDiskSize)
                         : inMemorySortBuffer;
     }
 

@@ -19,9 +19,15 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.flink.CatalogITCaseBase;
+import org.apache.paimon.table.FileStoreTable;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** Ensure that the legacy multiply overloaded CALL with positional arguments can be invoked. */
@@ -47,5 +53,36 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
                 .doesNotThrowAnyException();
         assertThatCode(() -> sql("CALL sys.compact('default.T', '', '', '', 'sink.parallelism=1')"))
                 .doesNotThrowAnyException();
+        assertThatCode(
+                        () ->
+                                sql(
+                                        "CALL sys.compact('default.T', '', '', '', 'sink.parallelism=1','pt=1')"))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testExpirePartitionsProcedure() throws Exception {
+        sql(
+                "CREATE TABLE T ("
+                        + " k STRING,"
+                        + " dt STRING,"
+                        + " PRIMARY KEY (k, dt) NOT ENFORCED"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + " 'bucket' = '1'"
+                        + ")");
+        FileStoreTable table = paimonTable("T");
+        sql("INSERT INTO T VALUES ('1', '2024-06-01')");
+        sql("INSERT INTO T VALUES ('2', '9024-06-01')");
+        assertThat(read(table)).containsExactlyInAnyOrder("1:2024-06-01", "2:9024-06-01");
+        sql("CALL sys.expire_partitions('default.T', '1 d', 'yyyy-MM-dd')");
+        assertThat(read(table)).containsExactlyInAnyOrder("2:9024-06-01");
+    }
+
+    private List<String> read(FileStoreTable table) throws IOException {
+        List<String> ret = new ArrayList<>();
+        table.newRead()
+                .createReader(table.newScan().plan().splits())
+                .forEachRemaining(row -> ret.add(row.getString(0) + ":" + row.getString(1)));
+        return ret;
     }
 }

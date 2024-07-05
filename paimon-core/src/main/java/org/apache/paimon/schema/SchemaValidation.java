@@ -35,6 +35,7 @@ import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -46,18 +47,22 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
+import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MAX;
+import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
+import static org.apache.paimon.CoreOptions.DEFAULT_AGG_FUNCTION;
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
+import static org.apache.paimon.CoreOptions.FIELDS_SEPARATOR;
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
-import static org.apache.paimon.CoreOptions.FileFormatType.ORC;
-import static org.apache.paimon.CoreOptions.FileFormatType.PARQUET;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP;
 import static org.apache.paimon.CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS;
 import static org.apache.paimon.CoreOptions.SCAN_MODE;
 import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
 import static org.apache.paimon.CoreOptions.SCAN_TAG_NAME;
+import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP;
 import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP_MILLIS;
+import static org.apache.paimon.CoreOptions.SCAN_WATERMARK;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.STREAMING_READ_OVERWRITE;
@@ -85,6 +90,8 @@ public class SchemaValidation {
         validateOnlyContainPrimitiveType(schema.fields(), schema.partitionKeys(), "partition");
 
         CoreOptions options = new CoreOptions(schema.options());
+
+        validateBucket(schema, options);
 
         validateDefaultValues(schema);
 
@@ -123,11 +130,17 @@ public class SchemaValidation {
                         + " should not be larger than "
                         + SNAPSHOT_NUM_RETAINED_MAX.key());
 
-        // Get the format type here which will try to convert string value to {@Code
-        // FileFormatType}. If the string value is illegal, an exception will be thrown.
-        CoreOptions.FileFormatType fileFormatType = options.formatType();
+        checkArgument(
+                options.changelogNumRetainMin() > 0,
+                CHANGELOG_NUM_RETAINED_MIN.key() + " should be at least 1");
+        checkArgument(
+                options.changelogNumRetainMin() <= options.changelogNumRetainMax(),
+                CHANGELOG_NUM_RETAINED_MIN.key()
+                        + " should not be larger than "
+                        + CHANGELOG_NUM_RETAINED_MAX.key());
+
         FileFormat fileFormat =
-                FileFormat.fromIdentifier(fileFormatType.name(), new Options(schema.options()));
+                FileFormat.fromIdentifier(options.formatType(), new Options(schema.options()));
         fileFormat.validateDataFields(new RowType(schema.fields()));
 
         // Check column names in schema
@@ -146,18 +159,6 @@ public class SchemaValidation {
                                             f, KEY_FIELD_PREFIX));
                         });
 
-        if (options.bucket() == -1 && options.toMap().get(BUCKET_KEY.key()) != null) {
-            throw new RuntimeException(
-                    "Cannot define 'bucket-key' in unaware or dynamic bucket mode.");
-        }
-
-        if (options.bucket() == -1
-                && schema.primaryKeys().isEmpty()
-                && options.toMap().get(FULL_COMPACTION_DELTA_COMMITS.key()) != null) {
-            throw new RuntimeException(
-                    "AppendOnlyTable of unware or dynamic bucket does not support 'full-compaction.delta-commits'");
-        }
-
         if (schema.primaryKeys().isEmpty() && options.streamingReadOverwrite()) {
             throw new RuntimeException(
                     "Doesn't support streaming read the changes from overwrite when the primary keys are not defined.");
@@ -170,20 +171,11 @@ public class SchemaValidation {
             }
         }
 
-        if (schema.crossPartitionUpdate()) {
-            if (options.bucket() != -1) {
+        if (options.mergeEngine() == MergeEngine.FIRST_ROW) {
+            if (options.changelogProducer() != ChangelogProducer.LOOKUP
+                    && options.changelogProducer() != ChangelogProducer.NONE) {
                 throw new IllegalArgumentException(
-                        String.format(
-                                "You should use dynamic bucket (bucket = -1) mode in cross partition update case "
-                                        + "(Primary key constraint %s not include all partition fields %s).",
-                                schema.primaryKeys(), schema.partitionKeys()));
-            }
-        }
-
-        if (options.mergeEngine() == CoreOptions.MergeEngine.FIRST_ROW) {
-            if (options.changelogProducer() != ChangelogProducer.LOOKUP) {
-                throw new IllegalArgumentException(
-                        "Only support 'lookup' changelog-producer on FIRST_MERGE merge engine");
+                        "Only support 'none' and 'lookup' changelog-producer on FIRST_MERGE merge engine");
             }
         }
 
@@ -196,7 +188,7 @@ public class SchemaValidation {
                                         field));
 
         if (options.deletionVectorsEnabled()) {
-            validateForDeletionVectors(schema, options);
+            validateForDeletionVectors(options);
         }
     }
 
@@ -225,8 +217,8 @@ public class SchemaValidation {
 
     private static void validateStartupMode(CoreOptions options) {
         if (options.startupMode() == CoreOptions.StartupMode.FROM_TIMESTAMP) {
-            checkOptionExistInMode(
-                    options, SCAN_TIMESTAMP_MILLIS, CoreOptions.StartupMode.FROM_TIMESTAMP);
+            checkExactOneOptionExistInMode(
+                    options, options.startupMode(), SCAN_TIMESTAMP_MILLIS, SCAN_TIMESTAMP);
             checkOptionsConflict(
                     options,
                     Arrays.asList(
@@ -235,14 +227,19 @@ public class SchemaValidation {
                             SCAN_TAG_NAME,
                             INCREMENTAL_BETWEEN_TIMESTAMP,
                             INCREMENTAL_BETWEEN),
-                    Collections.singletonList(SCAN_TIMESTAMP_MILLIS));
+                    Arrays.asList(SCAN_TIMESTAMP_MILLIS, SCAN_TIMESTAMP));
         } else if (options.startupMode() == CoreOptions.StartupMode.FROM_SNAPSHOT) {
             checkExactOneOptionExistInMode(
-                    options, options.startupMode(), SCAN_SNAPSHOT_ID, SCAN_TAG_NAME);
+                    options,
+                    options.startupMode(),
+                    SCAN_SNAPSHOT_ID,
+                    SCAN_TAG_NAME,
+                    SCAN_WATERMARK);
             checkOptionsConflict(
                     options,
                     Arrays.asList(
                             SCAN_TIMESTAMP_MILLIS,
+                            SCAN_TIMESTAMP,
                             SCAN_FILE_CREATION_TIME_MILLIS,
                             INCREMENTAL_BETWEEN_TIMESTAMP,
                             INCREMENTAL_BETWEEN),
@@ -259,6 +256,7 @@ public class SchemaValidation {
                             SCAN_SNAPSHOT_ID,
                             SCAN_TIMESTAMP_MILLIS,
                             SCAN_FILE_CREATION_TIME_MILLIS,
+                            SCAN_TIMESTAMP,
                             SCAN_TAG_NAME),
                     Arrays.asList(INCREMENTAL_BETWEEN, INCREMENTAL_BETWEEN_TIMESTAMP));
         } else if (options.startupMode() == CoreOptions.StartupMode.FROM_SNAPSHOT_FULL) {
@@ -267,6 +265,7 @@ public class SchemaValidation {
                     options,
                     Arrays.asList(
                             SCAN_TIMESTAMP_MILLIS,
+                            SCAN_TIMESTAMP,
                             SCAN_FILE_CREATION_TIME_MILLIS,
                             SCAN_TAG_NAME,
                             INCREMENTAL_BETWEEN_TIMESTAMP,
@@ -290,6 +289,7 @@ public class SchemaValidation {
             checkOptionNotExistInMode(options, SCAN_TIMESTAMP_MILLIS, options.startupMode());
             checkOptionNotExistInMode(
                     options, SCAN_FILE_CREATION_TIME_MILLIS, options.startupMode());
+            checkOptionNotExistInMode(options, SCAN_TIMESTAMP, options.startupMode());
             checkOptionNotExistInMode(options, SCAN_SNAPSHOT_ID, options.startupMode());
             checkOptionNotExistInMode(options, SCAN_TAG_NAME, options.startupMode());
             checkOptionNotExistInMode(
@@ -356,12 +356,15 @@ public class SchemaValidation {
                 .forEach(
                         k -> {
                             if (k.startsWith(FIELDS_PREFIX)) {
-                                String fieldName = k.split("\\.")[1];
-                                checkArgument(
-                                        fieldNames.contains(fieldName),
-                                        String.format(
-                                                "Field %s can not be found in table schema.",
-                                                fieldName));
+                                String[] fields = k.split("\\.")[1].split(FIELDS_SEPARATOR);
+                                for (String field : fields) {
+                                    checkArgument(
+                                            DEFAULT_AGG_FUNCTION.equals(field)
+                                                    || fieldNames.contains(field),
+                                            String.format(
+                                                    "Field %s can not be found in table schema.",
+                                                    field));
+                                }
                             }
                         });
     }
@@ -373,29 +376,42 @@ public class SchemaValidation {
             String v = entry.getValue();
             List<String> fieldNames = schema.fieldNames();
             if (k.startsWith(FIELDS_PREFIX) && k.endsWith(SEQUENCE_GROUP)) {
-                String sequenceFieldName =
+                String[] sequenceFieldNames =
                         k.substring(
-                                FIELDS_PREFIX.length() + 1,
-                                k.length() - SEQUENCE_GROUP.length() - 1);
-                if (!fieldNames.contains(sequenceFieldName)) {
-                    throw new IllegalArgumentException(
-                            String.format(
-                                    "The sequence field group: %s can not be found in table schema.",
-                                    sequenceFieldName));
-                }
+                                        FIELDS_PREFIX.length() + 1,
+                                        k.length() - SEQUENCE_GROUP.length() - 1)
+                                .split(FIELDS_SEPARATOR);
 
-                for (String field : v.split(",")) {
+                for (String field : v.split(FIELDS_SEPARATOR)) {
                     if (!fieldNames.contains(field)) {
                         throw new IllegalArgumentException(
                                 String.format("Field %s can not be found in table schema.", field));
                     }
-                    Set<String> group = fields2Group.computeIfAbsent(field, p -> new HashSet<>());
-                    if (group.add(sequenceFieldName) && group.size() > 1) {
+
+                    List<String> sequenceFieldsList = new ArrayList<>();
+                    for (String sequenceFieldName : sequenceFieldNames) {
+                        if (!fieldNames.contains(sequenceFieldName)) {
+                            throw new IllegalArgumentException(
+                                    String.format(
+                                            "The sequence field group: %s can not be found in table schema.",
+                                            sequenceFieldName));
+                        }
+                        sequenceFieldsList.add(sequenceFieldName);
+                    }
+
+                    if (fields2Group.containsKey(field)) {
+                        List<List<String>> sequenceGroups = new ArrayList<>();
+                        sequenceGroups.add(new ArrayList<>(fields2Group.get(field)));
+                        sequenceGroups.add(sequenceFieldsList);
+
                         throw new IllegalArgumentException(
                                 String.format(
                                         "Field %s is defined repeatedly by multiple groups: %s.",
-                                        field, group));
+                                        field, sequenceGroups));
                     }
+
+                    Set<String> group = fields2Group.computeIfAbsent(field, p -> new HashSet<>());
+                    group.addAll(sequenceFieldsList);
                 }
             }
         }
@@ -468,15 +484,7 @@ public class SchemaValidation {
         }
     }
 
-    private static void validateForDeletionVectors(TableSchema schema, CoreOptions options) {
-        checkArgument(
-                !schema.primaryKeys().isEmpty(),
-                "Deletion vectors mode is only supported for tables with primary keys.");
-
-        checkArgument(
-                options.formatType().equals(ORC) || options.formatType().equals(PARQUET),
-                "Deletion vectors mode is only supported for orc or parquet file format now.");
-
+    private static void validateForDeletionVectors(CoreOptions options) {
         checkArgument(
                 options.changelogProducer() == ChangelogProducer.NONE
                         || options.changelogProducer() == ChangelogProducer.LOOKUP,
@@ -512,7 +520,7 @@ public class SchemaValidation {
                                 field);
                     });
 
-            if (options.mergeEngine() == CoreOptions.MergeEngine.FIRST_ROW) {
+            if (options.mergeEngine() == MergeEngine.FIRST_ROW) {
                 throw new IllegalArgumentException(
                         "Do not support use sequence field on FIRST_MERGE merge engine.");
             }
@@ -523,6 +531,37 @@ public class SchemaValidation {
                                 "You can not use sequence.field in cross partition update case "
                                         + "(Primary key constraint '%s' not include all partition fields '%s').",
                                 schema.primaryKeys(), schema.partitionKeys()));
+            }
+        }
+    }
+
+    private static void validateBucket(TableSchema schema, CoreOptions options) {
+        int bucket = options.bucket();
+        if (bucket == -1) {
+            if (options.toMap().get(BUCKET_KEY.key()) != null) {
+                throw new RuntimeException(
+                        "Cannot define 'bucket-key' with bucket -1, please specify a bucket number.");
+            }
+
+            if (schema.primaryKeys().isEmpty()
+                    && options.toMap().get(FULL_COMPACTION_DELTA_COMMITS.key()) != null) {
+                throw new RuntimeException(
+                        "AppendOnlyTable of unware or dynamic bucket does not support 'full-compaction.delta-commits'");
+            }
+        } else if (bucket < 1) {
+            throw new RuntimeException("The number of buckets needs to be greater than 0.");
+        } else {
+            if (schema.crossPartitionUpdate()) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "You should use dynamic bucket (bucket = -1) mode in cross partition update case "
+                                        + "(Primary key constraint %s not include all partition fields %s).",
+                                schema.primaryKeys(), schema.partitionKeys()));
+            }
+
+            if (schema.primaryKeys().isEmpty() && schema.bucketKeys().isEmpty()) {
+                throw new RuntimeException(
+                        "You should define a 'bucket-key' for bucketed append mode.");
             }
         }
     }

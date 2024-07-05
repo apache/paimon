@@ -22,18 +22,19 @@ import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.operation.FileStoreCommit;
-import org.apache.paimon.operation.FileStoreRead;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
+import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.service.ServiceManager;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.sink.TagCallback;
-import org.apache.paimon.tag.TagAutoCreation;
+import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SnapshotManager;
@@ -63,8 +64,6 @@ public interface FileStore<T> extends Serializable {
 
     FileStoreScan newScan();
 
-    FileStoreScan newScan(String branchName);
-
     ManifestList.Factory manifestListFactory();
 
     ManifestFile.Factory manifestFileFactory();
@@ -73,7 +72,7 @@ public interface FileStore<T> extends Serializable {
 
     StatsFileHandler newStatsFileHandler();
 
-    FileStoreRead<T> newRead();
+    SplitRead<T> newRead();
 
     FileStoreWrite<T> newWrite(String commitUser);
 
@@ -81,9 +80,9 @@ public interface FileStore<T> extends Serializable {
 
     FileStoreCommit newCommit(String commitUser);
 
-    FileStoreCommit newCommit(String commitUser, String branchName);
-
     SnapshotDeletion newSnapshotDeletion();
+
+    ChangelogDeletion newChangelogDeletion();
 
     TagManager newTagManager();
 
@@ -92,8 +91,7 @@ public interface FileStore<T> extends Serializable {
     @Nullable
     PartitionExpire newPartitionExpire(String commitUser);
 
-    @Nullable
-    TagAutoCreation newTagCreationManager();
+    TagAutoManager newTagCreationManager();
 
     ServiceManager newServiceManager();
 

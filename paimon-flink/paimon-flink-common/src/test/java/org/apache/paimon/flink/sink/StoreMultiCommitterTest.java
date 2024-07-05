@@ -27,7 +27,6 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.flink.VersionedSerializerWrapper;
 import org.apache.paimon.flink.utils.TestingMetricUtils;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -59,6 +58,7 @@ import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -128,12 +128,15 @@ class StoreMultiCommitterTest {
                         firstOptions.toMap(),
                         "");
 
+        Options secondOptions = new Options();
+        secondOptions.setString("bucket", "1");
+        secondOptions.setString("bucket-key", "a");
         Schema secondTableSchema =
                 new Schema(
                         rowType2.getFields(),
                         Collections.emptyList(),
                         Collections.emptyList(),
-                        Collections.singletonMap("bucket", "1"),
+                        secondOptions.toMap(),
                         "");
         createTestTables(
                 catalog,
@@ -141,6 +144,13 @@ class StoreMultiCommitterTest {
                 Tuple2.of(secondTable, secondTableSchema));
         firstTablePath = ((FileStoreTable) catalog.getTable(firstTable)).location();
         secondTablePath = ((FileStoreTable) catalog.getTable(secondTable)).location();
+    }
+
+    @AfterEach
+    public void after() throws Exception {
+        if (catalog != null) {
+            catalog.close();
+        }
     }
 
     // ------------------------------------------------------------------------
@@ -636,14 +646,12 @@ class StoreMultiCommitterTest {
         CommitterOperator<MultiTableCommittable, WrappedManifestCommittable> operator =
                 new CommitterOperator<>(
                         true,
+                        false,
+                        true,
                         initialCommitUser,
-                        (user, metricGroup) ->
-                                new StoreMultiCommitter(
-                                        catalogLoader, initialCommitUser, metricGroup),
+                        context -> new StoreMultiCommitter(catalogLoader, context),
                         new RestoreAndFailCommittableStateManager<>(
-                                () ->
-                                        new VersionedSerializerWrapper<>(
-                                                new WrappedManifestCommittableSerializer())));
+                                WrappedManifestCommittableSerializer::new));
         return createTestHarness(operator);
     }
 
@@ -652,10 +660,10 @@ class StoreMultiCommitterTest {
         CommitterOperator<MultiTableCommittable, WrappedManifestCommittable> operator =
                 new CommitterOperator<>(
                         true,
+                        false,
+                        true,
                         initialCommitUser,
-                        (user, metricGroup) ->
-                                new StoreMultiCommitter(
-                                        catalogLoader, initialCommitUser, metricGroup),
+                        context -> new StoreMultiCommitter(catalogLoader, context),
                         new CommittableStateManager<WrappedManifestCommittable>() {
                             @Override
                             public void initializeState(

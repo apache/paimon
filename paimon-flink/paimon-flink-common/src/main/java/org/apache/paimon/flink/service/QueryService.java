@@ -29,6 +29,7 @@ import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
@@ -43,7 +44,7 @@ public class QueryService {
                 "Query Service only supports streaming mode.");
 
         FileStoreTable storeTable = (FileStoreTable) table;
-        if (storeTable.bucketMode() != BucketMode.FIXED
+        if (storeTable.bucketMode() != BucketMode.HASH_FIXED
                 || storeTable.schema().primaryKeys().isEmpty()) {
             throw new UnsupportedOperationException(
                     "The bucket mode of "
@@ -55,13 +56,15 @@ public class QueryService {
         stream = partition(stream, QueryFileMonitor.createChannelComputer(), parallelism);
 
         QueryExecutorOperator executorOperator = new QueryExecutorOperator(table);
-        stream.transform(
-                        "Executor",
-                        InternalTypeInfo.fromRowType(QueryExecutorOperator.outputType()),
-                        executorOperator)
-                .setParallelism(parallelism)
-                .addSink(new QueryAddressRegister(table))
-                .setParallelism(1)
-                .setMaxParallelism(1);
+        DataStreamSink<?> sink =
+                stream.transform(
+                                "Executor",
+                                InternalTypeInfo.fromRowType(QueryExecutorOperator.outputType()),
+                                executorOperator)
+                        .setParallelism(parallelism)
+                        .addSink(new QueryAddressRegister(table))
+                        .setParallelism(1);
+
+        sink.getTransformation().setMaxParallelism(1);
     }
 }

@@ -26,6 +26,8 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.IndexIncrement;
+import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -36,9 +38,10 @@ import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.FileStoreCommitImpl;
-import org.apache.paimon.operation.FileStoreRead;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.operation.SplitRead;
+import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReaderIterator;
@@ -46,6 +49,7 @@ import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
+import org.apache.paimon.table.ExpireChangelogImpl;
 import org.apache.paimon.table.ExpireSnapshots;
 import org.apache.paimon.table.ExpireSnapshotsImpl;
 import org.apache.paimon.table.sink.CommitMessageImpl;
@@ -64,6 +68,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -164,9 +169,34 @@ public class TestFileStore extends KeyValueFileStore {
                         newSnapshotDeletion(),
                         new TagManager(fileIO, options.path()),
                         snapshotExpireCleanEmptyDirectories)
-                .retainMax(numRetainedMax)
-                .retainMin(numRetainedMin)
-                .olderThanMills(System.currentTimeMillis() - millisRetained);
+                .config(
+                        ExpireConfig.builder()
+                                .snapshotRetainMax(numRetainedMax)
+                                .snapshotRetainMin(numRetainedMin)
+                                .snapshotTimeRetain(Duration.ofMillis(millisRetained))
+                                .build());
+    }
+
+    public ExpireSnapshots newExpire(
+            ExpireConfig expireConfig, boolean snapshotExpireCleanEmptyDirectories) {
+        return new ExpireSnapshotsImpl(
+                        snapshotManager(),
+                        newSnapshotDeletion(),
+                        new TagManager(fileIO, options.path()),
+                        snapshotExpireCleanEmptyDirectories)
+                .config(expireConfig);
+    }
+
+    public ExpireSnapshots newChangelogExpire(
+            ExpireConfig config, boolean snapshotExpireCleanEmptyDirectories) {
+        ExpireChangelogImpl impl =
+                new ExpireChangelogImpl(
+                        snapshotManager(),
+                        new TagManager(fileIO, options.path()),
+                        newChangelogDeletion(),
+                        snapshotExpireCleanEmptyDirectories);
+        impl.config(config);
+        return impl;
     }
 
     public List<Snapshot> commitData(
@@ -395,7 +425,7 @@ public class TestFileStore extends KeyValueFileStore {
         }
 
         List<KeyValue> kvs = new ArrayList<>();
-        FileStoreRead<KeyValue> read = newRead();
+        SplitRead<KeyValue> read = newRead();
         for (Map.Entry<BinaryRow, Map<Integer, List<DataFileMeta>>> entryWithPartition :
                 filesPerPartitionAndBucket.entrySet()) {
             for (Map.Entry<Integer, List<DataFileMeta>> entryWithBucket :
@@ -408,6 +438,8 @@ public class TestFileStore extends KeyValueFileStore {
                                                 .withBucket(entryWithBucket.getKey())
                                                 .withDataFiles(entryWithBucket.getValue())
                                                 .isStreaming(isStreaming)
+                                                .rawConvertible(false)
+                                                .withBucketPath("not used")
                                                 .build()));
                 while (iterator.hasNext()) {
                     kvs.add(iterator.next().copy(keySerializer, valueSerializer));
@@ -479,7 +511,20 @@ public class TestFileStore extends KeyValueFileStore {
             fileIO.delete(latest, false);
             assertThat(latestId <= snapshotManager.latestSnapshotId()).isTrue();
         }
-        actualFiles.remove(latest);
+        Path changelogDir = snapshotManager.changelogDirectory();
+        Path earliestChangelog = new Path(changelogDir, SnapshotManager.EARLIEST);
+        Path latestChangelog = new Path(changelogDir, SnapshotManager.LATEST);
+
+        if (actualFiles.remove(earliestChangelog)) {
+            long earliestId = snapshotManager.readHint(SnapshotManager.EARLIEST, changelogDir);
+            fileIO.delete(earliest, false);
+            assertThat(earliestId <= snapshotManager.earliestLongLivedChangelogId()).isTrue();
+        }
+        if (actualFiles.remove(latestChangelog)) {
+            long latestId = snapshotManager.readHint(SnapshotManager.LATEST, changelogDir);
+            fileIO.delete(latest, false);
+            assertThat(latestId <= snapshotManager.latestLongLivedChangelogId()).isTrue();
+        }
 
         // for easier debugging
         String expectedString =
@@ -507,7 +552,8 @@ public class TestFileStore extends KeyValueFileStore {
 
         long firstInUseSnapshotId = Snapshot.FIRST_SNAPSHOT_ID;
         for (long id = latestSnapshotId - 1; id >= Snapshot.FIRST_SNAPSHOT_ID; id--) {
-            if (!snapshotManager.snapshotExists(id)) {
+            if (!snapshotManager.snapshotExists(id)
+                    && !snapshotManager.longLivedChangelogExists(id)) {
                 firstInUseSnapshotId = id + 1;
                 break;
             }
@@ -516,6 +562,7 @@ public class TestFileStore extends KeyValueFileStore {
         for (long id = firstInUseSnapshotId; id <= latestSnapshotId; id++) {
             result.addAll(getFilesInUse(id));
         }
+
         return result;
     }
 
@@ -537,6 +584,37 @@ public class TestFileStore extends KeyValueFileStore {
             FileStorePathFactory pathFactory,
             ManifestList manifestList) {
         Set<Path> result = new HashSet<>();
+
+        if (snapshotManager.snapshotExists(snapshotId)) {
+            result.addAll(
+                    getSnapshotFileInUse(
+                            snapshotId, snapshotManager, scan, fileIO, pathFactory, manifestList));
+        } else if (snapshotManager.longLivedChangelogExists(snapshotId)) {
+            result.addAll(
+                    getChangelogFileInUse(
+                            snapshotId, snapshotManager, scan, fileIO, pathFactory, manifestList));
+        } else {
+            throw new RuntimeException(
+                    String.format("The snapshot %s does not exist.", snapshotId));
+        }
+
+        return result;
+    }
+
+    private static Set<Path> getSnapshotFileInUse(
+            long snapshotId,
+            SnapshotManager snapshotManager,
+            FileStoreScan scan,
+            FileIO fileIO,
+            FileStorePathFactory pathFactory,
+            ManifestList manifestList) {
+        Set<Path> result = new HashSet<>();
+        SchemaManager schemaManager = new SchemaManager(fileIO, snapshotManager.tablePath());
+        CoreOptions options = new CoreOptions(schemaManager.latest().get().options());
+        boolean produceChangelog =
+                options.changelogProducer() != CoreOptions.ChangelogProducer.NONE;
+        // The option from the table may not align with the expiration config
+        boolean changelogDecoupled = snapshotManager.earliestLongLivedChangelogId() != null;
 
         Path snapshotPath = snapshotManager.snapshotPath(snapshotId);
         Snapshot snapshot = Snapshot.fromPath(fileIO, snapshotPath);
@@ -564,6 +642,95 @@ public class TestFileStore extends KeyValueFileStore {
                             entry.file().fileName()));
         }
 
+        // Add 'DELETE' 'APPEND' file in snapshot
+        // These 'delete' files can be merged by the plan#splits,
+        // so it's not shown in the entries above.
+        // In other words, these files are not used (by snapshot or changelog) now,
+        // but it can only be cleaned after this snapshot expired, so we should add it to the file
+        // use list.
+        if (changelogDecoupled && !produceChangelog) {
+            entries = scan.withManifestList(snapshot.deltaManifests(manifestList)).plan().files();
+            for (ManifestEntry entry : entries) {
+                // append delete file are delayed to delete
+                if (entry.kind() == FileKind.DELETE
+                        && entry.file().fileSource().orElse(FileSource.APPEND)
+                                == FileSource.APPEND) {
+                    result.add(
+                            new Path(
+                                    pathFactory.bucketPath(entry.partition(), entry.bucket()),
+                                    entry.file().fileName()));
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private static Set<Path> getChangelogFileInUse(
+            long changelogId,
+            SnapshotManager snapshotManager,
+            FileStoreScan scan,
+            FileIO fileIO,
+            FileStorePathFactory pathFactory,
+            ManifestList manifestList) {
+        Set<Path> result = new HashSet<>();
+        SchemaManager schemaManager = new SchemaManager(fileIO, snapshotManager.tablePath());
+        CoreOptions options = new CoreOptions(schemaManager.latest().get().options());
+        boolean produceChangelog =
+                options.changelogProducer() != CoreOptions.ChangelogProducer.NONE;
+
+        Path changelogPath = snapshotManager.longLivedChangelogPath(changelogId);
+        Changelog changelog = Changelog.fromPath(fileIO, changelogPath);
+
+        // changelog file
+        result.add(changelogPath);
+
+        // manifest lists
+        if (!produceChangelog) {
+            result.add(pathFactory.toManifestListPath(changelog.baseManifestList()));
+            result.add(pathFactory.toManifestListPath(changelog.deltaManifestList()));
+        }
+        if (changelog.changelogManifestList() != null) {
+            result.add(pathFactory.toManifestListPath(changelog.changelogManifestList()));
+        }
+
+        // manifests
+        List<ManifestFileMeta> manifests =
+                new ArrayList<>(changelog.changelogManifests(manifestList));
+        if (!produceChangelog) {
+            manifests.addAll(changelog.dataManifests(manifestList));
+        }
+
+        manifests.forEach(m -> result.add(pathFactory.toManifestFilePath(m.fileName())));
+
+        // data file
+        // not all manifests contains useful data file
+        // (1) produceChangelog = 'true': data file in changelog manifests
+        // (2) produceChangelog = 'false': 'APPEND' data file in delta manifests
+
+        // delta file
+        if (!produceChangelog) {
+            for (ManifestEntry entry :
+                    scan.withManifestList(changelog.deltaManifests(manifestList)).plan().files()) {
+                if (entry.file().fileSource().orElse(FileSource.APPEND) == FileSource.APPEND) {
+                    result.add(
+                            new Path(
+                                    pathFactory.bucketPath(entry.partition(), entry.bucket()),
+                                    entry.file().fileName()));
+                }
+            }
+        } else {
+            // changelog
+            for (ManifestEntry entry :
+                    scan.withManifestList(changelog.changelogManifests(manifestList))
+                            .plan()
+                            .files()) {
+                result.add(
+                        new Path(
+                                pathFactory.bucketPath(entry.partition(), entry.bucket()),
+                                entry.file().fileName()));
+            }
+        }
         return result;
     }
 
@@ -621,8 +788,8 @@ public class TestFileStore extends KeyValueFileStore {
                     CoreOptions.MANIFEST_TARGET_FILE_SIZE,
                     MemorySize.parse((ThreadLocalRandom.current().nextInt(16) + 1) + "kb"));
 
-            conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.fromValue(format));
-            conf.set(CoreOptions.MANIFEST_FORMAT, CoreOptions.FileFormatType.fromValue(format));
+            conf.set(CoreOptions.FILE_FORMAT, format);
+            conf.set(CoreOptions.MANIFEST_FORMAT, format);
             conf.set(CoreOptions.PATH, root);
             conf.set(CoreOptions.BUCKET, numBuckets);
 

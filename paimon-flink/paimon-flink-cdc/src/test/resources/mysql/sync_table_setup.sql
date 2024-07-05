@@ -309,6 +309,20 @@ CREATE TABLE test_options_change (
    PRIMARY KEY (pk)
 );
 
+CREATE TABLE test_exist_options_change (
+    pk INT,
+    _date DATE,
+    _timestamp TIMESTAMP,
+    PRIMARY KEY (pk)
+);
+
+CREATE TABLE test_exist_column_comment_change (
+    pk INT,
+    c1 DATE,
+    c2 VARCHAR(10) not null comment 'c2 comment',
+    PRIMARY KEY (pk)
+);
+
 -- ################################################################################
 --  testSyncShard
 -- ################################################################################
@@ -405,4 +419,15 @@ USE invalid_alter_bucket;
 
 CREATE TABLE t (
     k INT PRIMARY KEY
+);
+
+-- ################################################################################
+--  testInvalidAlterBucket
+-- ################################################################################
+
+CREATE DATABASE write_only_and_schema_evolution;
+USE write_only_and_schema_evolution;
+CREATE TABLE t (
+    k INT PRIMARY KEY,
+    v1 VARCHAR(10)
 );

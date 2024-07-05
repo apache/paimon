@@ -21,9 +21,12 @@ package org.apache.paimon.operation;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.TestFileStore;
 import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.deletionvectors.DeletionVector;
+import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.IndexFileHandler;
@@ -39,6 +42,8 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.ColStats;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.stats.StatsFileHandler;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
@@ -57,6 +62,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -65,6 +71,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Predicate;
@@ -72,6 +79,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
+import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -174,8 +182,7 @@ public class FileStoreCommitTest {
         Path firstSnapshotPath = snapshotManager.snapshotPath(Snapshot.FIRST_SNAPSHOT_ID);
         LocalFileIO.create().deleteQuietly(firstSnapshotPath);
         // this test succeeds if this call does not fail
-        store.newCommit(UUID.randomUUID().toString())
-                .filterCommitted(Collections.singletonList(new ManifestCommittable(999)));
+        store.newCommit(UUID.randomUUID().toString()).filterCommitted(Collections.singleton(999L));
     }
 
     @Test
@@ -194,12 +201,7 @@ public class FileStoreCommitTest {
         }
 
         // all commit identifiers should be filtered out
-        List<ManifestCommittable> remaining =
-                store.newCommit(user)
-                        .filterCommitted(
-                                commitIdentifiers.stream()
-                                        .map(ManifestCommittable::new)
-                                        .collect(Collectors.toList()));
+        Set<Long> remaining = store.newCommit(user).filterCommitted(commitIdentifiers);
         assertThat(remaining).isEmpty();
     }
 
@@ -557,7 +559,10 @@ public class FileStoreCommitTest {
             assertThatThrownBy(
                             () ->
                                     store.newCommit()
-                                            .commit(committables.get(0), Collections.emptyMap()))
+                                            .commit(
+                                                    committables.get(0),
+                                                    Collections.emptyMap(),
+                                                    true))
                     .isInstanceOf(RuntimeException.class)
                     .hasMessageContaining("Give up committing.");
         }
@@ -654,8 +659,10 @@ public class FileStoreCommitTest {
                 partitions.stream()
                         .map(
                                 partition ->
-                                        PredicateBuilder.partition(
-                                                partition, TestKeyValueGenerator.DEFAULT_PART_TYPE))
+                                        createPartitionPredicate(
+                                                partition,
+                                                TestKeyValueGenerator.DEFAULT_PART_TYPE,
+                                                CoreOptions.PARTITION_DEFAULT_NAME.defaultValue()))
                         .reduce(PredicateBuilder::or)
                         .get();
 
@@ -718,20 +725,22 @@ public class FileStoreCommitTest {
 
         // assert part1
         List<IndexManifestEntry> part1Index =
-                indexFileHandler.scan(snapshot.id(), HASH_INDEX, part1);
+                indexFileHandler.scanEntries(snapshot.id(), HASH_INDEX, part1);
         assertThat(part1Index.size()).isEqualTo(2);
 
-        assertThat(part1Index.get(0).bucket()).isEqualTo(0);
-        assertThat(indexFileHandler.readHashIndexList(part1Index.get(0).indexFile()))
+        IndexManifestEntry indexManifestEntry =
+                part1Index.stream().filter(entry -> entry.bucket() == 0).findAny().get();
+        assertThat(indexFileHandler.readHashIndexList(indexManifestEntry.indexFile()))
                 .containsExactlyInAnyOrder(1, 2, 5);
 
-        assertThat(part1Index.get(1).bucket()).isEqualTo(1);
-        assertThat(indexFileHandler.readHashIndexList(part1Index.get(1).indexFile()))
+        indexManifestEntry =
+                part1Index.stream().filter(entry -> entry.bucket() == 1).findAny().get();
+        assertThat(indexFileHandler.readHashIndexList(indexManifestEntry.indexFile()))
                 .containsExactlyInAnyOrder(6, 8);
 
         // assert part2
         List<IndexManifestEntry> part2Index =
-                indexFileHandler.scan(snapshot.id(), HASH_INDEX, part2);
+                indexFileHandler.scanEntries(snapshot.id(), HASH_INDEX, part2);
         assertThat(part2Index.size()).isEqualTo(1);
         assertThat(part2Index.get(0).bucket()).isEqualTo(2);
         assertThat(indexFileHandler.readHashIndexList(part2Index.get(0).indexFile()))
@@ -743,19 +752,21 @@ public class FileStoreCommitTest {
         snapshot = store.snapshotManager().latestSnapshot();
 
         // assert update part1
-        part1Index = indexFileHandler.scan(snapshot.id(), HASH_INDEX, part1);
+        part1Index = indexFileHandler.scanEntries(snapshot.id(), HASH_INDEX, part1);
         assertThat(part1Index.size()).isEqualTo(2);
 
-        assertThat(part1Index.get(0).bucket()).isEqualTo(0);
-        assertThat(indexFileHandler.readHashIndexList(part1Index.get(0).indexFile()))
+        indexManifestEntry =
+                part1Index.stream().filter(entry -> entry.bucket() == 0).findAny().get();
+        assertThat(indexFileHandler.readHashIndexList(indexManifestEntry.indexFile()))
                 .containsExactlyInAnyOrder(1, 4);
 
-        assertThat(part1Index.get(1).bucket()).isEqualTo(1);
-        assertThat(indexFileHandler.readHashIndexList(part1Index.get(1).indexFile()))
+        indexManifestEntry =
+                part1Index.stream().filter(entry -> entry.bucket() == 1).findAny().get();
+        assertThat(indexFileHandler.readHashIndexList(indexManifestEntry.indexFile()))
                 .containsExactlyInAnyOrder(6, 8);
 
         // assert scan one bucket
-        Optional<IndexFileMeta> file = indexFileHandler.scan(snapshot.id(), HASH_INDEX, part1, 0);
+        Optional<IndexFileMeta> file = indexFileHandler.scanHashIndex(snapshot.id(), part1, 0);
         assertThat(file).isPresent();
         assertThat(indexFileHandler.readHashIndexList(file.get())).containsExactlyInAnyOrder(1, 4);
 
@@ -764,9 +775,9 @@ public class FileStoreCommitTest {
         store.overwriteData(
                 Collections.singletonList(record1), gen::getPartition, kv -> 0, new HashMap<>());
         snapshot = store.snapshotManager().latestSnapshot();
-        file = indexFileHandler.scan(snapshot.id(), HASH_INDEX, part1, 0);
+        file = indexFileHandler.scanHashIndex(snapshot.id(), part1, 0);
         assertThat(file).isEmpty();
-        file = indexFileHandler.scan(snapshot.id(), HASH_INDEX, part2, 2);
+        file = indexFileHandler.scanHashIndex(snapshot.id(), part2, 2);
         assertThat(file).isPresent();
 
         // overwrite all partitions
@@ -774,7 +785,7 @@ public class FileStoreCommitTest {
         store.overwriteData(
                 Collections.singletonList(record1), gen::getPartition, kv -> 0, new HashMap<>());
         snapshot = store.snapshotManager().latestSnapshot();
-        file = indexFileHandler.scan(snapshot.id(), HASH_INDEX, part2, 2);
+        file = indexFileHandler.scanHashIndex(snapshot.id(), part2, 2);
         assertThat(file).isEmpty();
     }
 
@@ -839,6 +850,52 @@ public class FileStoreCommitTest {
         readStats = statsFileHandler.readStats();
         assertThat(readStats).isPresent();
         assertThat(readStats.get()).isEqualTo(fakeStats);
+    }
+
+    @Test
+    public void testDVIndexFiles() throws Exception {
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+
+        // commit 1
+        CommitMessageImpl commitMessage1 =
+                store.writeDVIndexFiles(
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        Collections.singletonMap("f1", Arrays.asList(1, 3)));
+        CommitMessageImpl commitMessage2 =
+                store.writeDVIndexFiles(
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        Collections.singletonMap("f2", Arrays.asList(2, 4)));
+        store.commit(commitMessage1, commitMessage2);
+
+        // assert 1
+        assertThat(store.scanDVIndexFiles(BinaryRow.EMPTY_ROW, 0).size()).isEqualTo(2);
+        DeletionVectorsMaintainer maintainer =
+                store.createOrRestoreDVMaintainer(BinaryRow.EMPTY_ROW, 0);
+        Map<String, DeletionVector> dvs = maintainer.deletionVectors();
+        assertThat(dvs.size()).isEqualTo(2);
+        assertThat(dvs.get("f2").isDeleted(2)).isTrue();
+        assertThat(dvs.get("f2").isDeleted(3)).isFalse();
+        assertThat(dvs.get("f2").isDeleted(4)).isTrue();
+
+        // commit 2
+        CommitMessage commitMessage3 =
+                store.writeDVIndexFiles(
+                        BinaryRow.EMPTY_ROW, 0, Collections.singletonMap("f2", Arrays.asList(3)));
+        List<IndexFileMeta> deleted =
+                new ArrayList<>(commitMessage1.indexIncrement().newIndexFiles());
+        deleted.addAll(commitMessage2.indexIncrement().newIndexFiles());
+        CommitMessage commitMessage4 = store.removeIndexFiles(BinaryRow.EMPTY_ROW, 0, deleted);
+        store.commit(commitMessage3, commitMessage4);
+
+        // assert 2
+        assertThat(store.scanDVIndexFiles(BinaryRow.EMPTY_ROW, 0).size()).isEqualTo(1);
+        maintainer = store.createOrRestoreDVMaintainer(BinaryRow.EMPTY_ROW, 0);
+        dvs = maintainer.deletionVectors();
+        assertThat(dvs.size()).isEqualTo(2);
+        assertThat(dvs.get("f1").isDeleted(3)).isTrue();
+        assertThat(dvs.get("f2").isDeleted(3)).isTrue();
     }
 
     private TestFileStore createStore(boolean failing) throws Exception {

@@ -29,6 +29,7 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
     public static final String IDENTIFIER = "remove_orphan_files";
 
     private static final String OLDER_THAN = "older_than";
+    private static final String DRY_RUN = "dry_run";
 
     @Override
     public String identifier() {
@@ -48,6 +49,10 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
             action.olderThan(params.get(OLDER_THAN));
         }
 
+        if (params.has(DRY_RUN) && Boolean.parseBoolean(params.get(DRY_RUN))) {
+            action.dryRun();
+        }
+
         return Optional.of(action);
     }
 
@@ -60,12 +65,16 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
         System.out.println("Syntax:");
         System.out.println(
                 "  remove_orphan_files --warehouse <warehouse_path> --database <database_name> "
-                        + "--table <table_name> [--older_than <timestamp>]");
+                        + "--table <table_name> [--older_than <timestamp>] [--dry_run <false/true>]");
 
         System.out.println();
         System.out.println(
                 "To avoid deleting newly written files, this action only deletes orphan files older than 1 day by default. "
                         + "The interval can be modified by '--older_than'. <timestamp> format: yyyy-MM-dd HH:mm:ss");
+
+        System.out.println();
+        System.out.println(
+                "When '--dry_run true', view only orphan files, don't actually remove files. Default is false.");
         System.out.println();
     }
 }

@@ -24,7 +24,6 @@ import org.apache.paimon.table.sink.CompactionTaskSerializer;
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.core.io.SimpleVersionedSerializerTypeSerializerProxy;
 
 /** Type information of {@link AppendOnlyCompactionTask}. */
 public class CompactionTaskTypeInfo extends TypeInformation<AppendOnlyCompactionTask> {
@@ -62,19 +61,8 @@ public class CompactionTaskTypeInfo extends TypeInformation<AppendOnlyCompaction
     @Override
     public TypeSerializer<AppendOnlyCompactionTask> createSerializer(ExecutionConfig config) {
         // we don't need copy for task
-        return new SimpleVersionedSerializerTypeSerializerProxy<AppendOnlyCompactionTask>(
-                () -> new CompactionTaskSimpleSerializer(new CompactionTaskSerializer())) {
-            @Override
-            public AppendOnlyCompactionTask copy(AppendOnlyCompactionTask from) {
-                return from;
-            }
-
-            @Override
-            public AppendOnlyCompactionTask copy(
-                    AppendOnlyCompactionTask from, AppendOnlyCompactionTask reuse) {
-                return from;
-            }
-        };
+        return new NoneCopyVersionedSerializerTypeSerializerProxy<AppendOnlyCompactionTask>(
+                () -> new CompactionTaskSimpleSerializer(new CompactionTaskSerializer())) {};
     }
 
     @Override

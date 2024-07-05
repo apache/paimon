@@ -42,7 +42,7 @@ public class NoPrimaryKeyLookupTable extends FullCacheLookupTable {
 
     private RocksDBListState<InternalRow, InternalRow> state;
 
-    public NoPrimaryKeyLookupTable(Context context, long lruCacheSize) throws IOException {
+    public NoPrimaryKeyLookupTable(Context context, long lruCacheSize) {
         super(context);
         this.lruCacheSize = lruCacheSize;
         List<String> fieldNames = projectedType.getFieldNames();
@@ -52,6 +52,7 @@ public class NoPrimaryKeyLookupTable extends FullCacheLookupTable {
 
     @Override
     public void open() throws Exception {
+        openStateFactory();
         this.state =
                 stateFactory.listState(
                         "join-key-index",
@@ -59,7 +60,7 @@ public class NoPrimaryKeyLookupTable extends FullCacheLookupTable {
                                 TypeUtils.project(projectedType, joinKeyRow.indexMapping())),
                         InternalSerializers.create(projectedType),
                         lruCacheSize);
-        super.open();
+        bootstrap();
     }
 
     @Override
@@ -73,21 +74,21 @@ public class NoPrimaryKeyLookupTable extends FullCacheLookupTable {
             throw new IllegalArgumentException(
                     "Append table does not support user defined sequence fields.");
         }
+        super.refresh(incremental);
+    }
 
-        Predicate predicate = projectedPredicate();
-        while (incremental.hasNext()) {
-            InternalRow row = incremental.next();
-            joinKeyRow.replaceRow(row);
-            if (row.getRowKind() == RowKind.INSERT || row.getRowKind() == RowKind.UPDATE_AFTER) {
-                if (predicate == null || predicate.test(row)) {
-                    state.add(joinKeyRow, row);
-                }
-            } else {
-                throw new RuntimeException(
-                        String.format(
-                                "Received %s message. Only INSERT/UPDATE_AFTER values are expected here.",
-                                row.getRowKind()));
+    @Override
+    protected void refreshRow(InternalRow row, Predicate predicate) throws IOException {
+        joinKeyRow.replaceRow(row);
+        if (row.getRowKind() == RowKind.INSERT || row.getRowKind() == RowKind.UPDATE_AFTER) {
+            if (predicate == null || predicate.test(row)) {
+                state.add(joinKeyRow, row);
             }
+        } else {
+            throw new RuntimeException(
+                    String.format(
+                            "Received %s message. Only INSERT/UPDATE_AFTER values are expected here.",
+                            row.getRowKind()));
         }
     }
 

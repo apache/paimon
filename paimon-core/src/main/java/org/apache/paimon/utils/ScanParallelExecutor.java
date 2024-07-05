@@ -31,6 +31,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ForkJoinPool;
 import java.util.function.Function;
 
+import static org.apache.paimon.utils.FileUtils.COMMON_IO_FORK_JOIN_POOL;
+
 /**
  * This class is a parallel execution util class, which mainly aim to process tasks parallelly with
  * memory control.
@@ -40,9 +42,8 @@ public class ScanParallelExecutor {
     // reduce memory usage by batch iterable process, the cached result in memory will be queueSize
     public static <T, U> Iterable<T> parallelismBatchIterable(
             Function<List<U>, List<T>> processor, List<U> input, @Nullable Integer queueSize) {
-        ForkJoinPool poolCandidate = FileUtils.COMMON_IO_FORK_JOIN_POOL;
         if (queueSize == null) {
-            queueSize = poolCandidate.getParallelism();
+            queueSize = COMMON_IO_FORK_JOIN_POOL.getParallelism();
         } else if (queueSize <= 0) {
             throw new NegativeArraySizeException("queue size should not be negetive");
         }
@@ -71,7 +72,7 @@ public class ScanParallelExecutor {
 
                     private void advanceIfNeeded() {
                         while ((activeList == null || index >= activeList.size())
-                                && stack.size() > 0) {
+                                && !stack.isEmpty()) {
                             // reset index
                             index = 0;
                             try {
@@ -88,9 +89,13 @@ public class ScanParallelExecutor {
                 };
     }
 
-    private static ForkJoinPool getExecutePool(int queueSize) {
-        return queueSize > FileUtils.COMMON_IO_FORK_JOIN_POOL.getParallelism()
+    public static ForkJoinPool getExecutePool(@Nullable Integer queueSize) {
+        if (queueSize == null) {
+            return COMMON_IO_FORK_JOIN_POOL;
+        }
+
+        return queueSize > COMMON_IO_FORK_JOIN_POOL.getParallelism()
                 ? FileUtils.getScanIoForkJoinPool(queueSize)
-                : FileUtils.COMMON_IO_FORK_JOIN_POOL;
+                : COMMON_IO_FORK_JOIN_POOL;
     }
 }

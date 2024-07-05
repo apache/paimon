@@ -326,14 +326,12 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
                         .build();
         JobClient client = runActionWithDefaultEnv(action);
 
-        try (Statement statement = getStatement(DATABASE_NAME)) {
-            testAllTypesImpl(statement);
-        }
+        testAllTypesImpl();
 
         client.cancel().get();
     }
 
-    private void testAllTypesImpl(Statement statement) throws Exception {
+    private void testAllTypesImpl() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
@@ -422,7 +420,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
                                 + "19439, "
                                 + "2023-03-23T14:30:05, 2023-03-23T00:00, "
                                 + "36803000, 36803000, "
-                                + "Paimon, Apache Paimon, Apache Paimon PostgreSQL Test Data, "
+                                + "Paimon    , Apache Paimon, Apache Paimon PostgreSQL Test Data, "
                                 + "[98, 121, 116, 101, 115], "
                                 + "{\"a\": \"b\"}, "
                                 + "[\"item1\", \"item2\"]"
@@ -482,6 +480,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
                         new String[] {"a", "b", "c"}),
                 Collections.emptyList(),
                 Collections.singletonList("a"),
+                Collections.emptyList(),
                 new HashMap<>());
 
         PostgresSyncTableAction action =
@@ -508,7 +507,9 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
                 .satisfies(
                         anyCauseMatches(
                                 IllegalArgumentException.class,
-                                "Specified primary key 'pk' does not exist in source tables or computed columns [pt, _id, v1]."));
+                                "For sink table "
+                                        + tableName
+                                        + ", not all specified primary keys '[pk]' exist in source tables or computed columns '[pt, _id, v1]'."));
     }
 
     @Test
@@ -524,8 +525,9 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
                 .satisfies(
                         anyCauseMatches(
                                 IllegalArgumentException.class,
-                                "Primary keys are not specified. "
-                                        + "Also, can't infer primary keys from source table schemas because "
+                                "Failed to set specified primary keys for sink table "
+                                        + tableName
+                                        + ". Also, can't infer primary keys from source table schemas because "
                                         + "source tables have no primary keys or have different primary keys."));
     }
 

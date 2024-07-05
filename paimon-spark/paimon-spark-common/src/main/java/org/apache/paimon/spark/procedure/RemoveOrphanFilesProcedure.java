@@ -30,7 +30,10 @@ import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.unsafe.types.UTF8String;
 
+import java.util.List;
+
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.spark.sql.types.DataTypes.BooleanType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /**
@@ -45,7 +48,8 @@ public class RemoveOrphanFilesProcedure extends BaseProcedure {
     private static final ProcedureParameter[] PARAMETERS =
             new ProcedureParameter[] {
                 ProcedureParameter.required("table", StringType),
-                ProcedureParameter.optional("older_than", StringType)
+                ProcedureParameter.optional("older_than", StringType),
+                ProcedureParameter.optional("dry_run", BooleanType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -72,6 +76,7 @@ public class RemoveOrphanFilesProcedure extends BaseProcedure {
     public InternalRow[] call(InternalRow args) {
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
         String olderThan = args.isNullAt(1) ? null : args.getString(1);
+        boolean dryRun = args.isNullAt(2) ? false : args.getBoolean(2);
 
         return modifyPaimonTable(
                 tableIdent,
@@ -82,11 +87,19 @@ public class RemoveOrphanFilesProcedure extends BaseProcedure {
                     if (!StringUtils.isBlank(olderThan)) {
                         orphanFilesClean.olderThan(olderThan);
                     }
+                    if (dryRun) {
+                        orphanFilesClean.fileCleaner(path -> {});
+                    }
                     try {
-                        int deleted = orphanFilesClean.clean();
-                        return new InternalRow[] {
-                            newInternalRow(UTF8String.fromString("Deleted=" + deleted))
-                        };
+                        List<String> result =
+                                OrphanFilesClean.showDeletedFiles(orphanFilesClean.clean(), 200);
+                        InternalRow[] rows = new InternalRow[result.size()];
+                        int index = 0;
+                        for (String line : result) {
+                            rows[index] = newInternalRow(UTF8String.fromString(line));
+                            index++;
+                        }
+                        return rows;
                     } catch (Exception e) {
                         throw new RuntimeException("Call remove_orphan_files error", e);
                     }

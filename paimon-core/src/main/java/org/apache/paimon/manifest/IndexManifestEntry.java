@@ -94,10 +94,6 @@ public class IndexManifestEntry {
         return new RowType(fields);
     }
 
-    public Identifier identifier() {
-        return new Identifier(partition, bucket, indexFile.indexType());
-    }
-
     @Override
     public boolean equals(Object o) {
         if (this == o) {
@@ -130,56 +126,5 @@ public class IndexManifestEntry {
                 + ", indexFile="
                 + indexFile
                 + '}';
-    }
-
-    /** The {@link Identifier} of a {@link IndexFileMeta}. */
-    public static class Identifier {
-
-        public final BinaryRow partition;
-        public final int bucket;
-        public final String indexType;
-
-        private Integer hash;
-
-        private Identifier(BinaryRow partition, int bucket, String indexType) {
-            this.partition = partition;
-            this.bucket = bucket;
-            this.indexType = indexType;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            Identifier that = (Identifier) o;
-            return bucket == that.bucket
-                    && Objects.equals(partition, that.partition)
-                    && Objects.equals(indexType, that.indexType);
-        }
-
-        @Override
-        public int hashCode() {
-            if (hash == null) {
-                hash = Objects.hash(partition, bucket, indexType);
-            }
-            return hash;
-        }
-
-        @Override
-        public String toString() {
-            return "Identifier{"
-                    + "partition="
-                    + partition
-                    + ", bucket="
-                    + bucket
-                    + ", indexType='"
-                    + indexType
-                    + '\''
-                    + '}';
-        }
     }
 }

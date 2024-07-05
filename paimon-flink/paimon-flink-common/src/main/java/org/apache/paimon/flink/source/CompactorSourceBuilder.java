@@ -23,7 +23,6 @@ import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.system.BucketsTable;
@@ -38,9 +37,7 @@ import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 
 import javax.annotation.Nullable;
 
-import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -54,7 +51,7 @@ public class CompactorSourceBuilder {
 
     private boolean isContinuous = false;
     private StreamExecutionEnvironment env;
-    @Nullable private List<Map<String, String>> specifiedPartitions = null;
+    @Nullable private Predicate partitionPredicate = null;
 
     public CompactorSourceBuilder(String tableIdentifier, FileStoreTable table) {
         this.tableIdentifier = tableIdentifier;
@@ -71,27 +68,7 @@ public class CompactorSourceBuilder {
         return this;
     }
 
-    public CompactorSourceBuilder withPartition(Map<String, String> partition) {
-        return withPartitions(Collections.singletonList(partition));
-    }
-
-    public CompactorSourceBuilder withPartitions(List<Map<String, String>> partitions) {
-        this.specifiedPartitions = partitions;
-        return this;
-    }
-
     private Source<RowData, ?, ?> buildSource(BucketsTable bucketsTable) {
-        Predicate partitionPredicate = null;
-        if (specifiedPartitions != null) {
-            // This predicate is based on the row type of the original table, not bucket table.
-            // Because TableScan in BucketsTable is the same with FileStoreTable,
-            // and partition filter is done by scan.
-            partitionPredicate =
-                    PredicateBuilder.or(
-                            specifiedPartitions.stream()
-                                    .map(p -> PredicateBuilder.partition(p, table.rowType()))
-                                    .toArray(Predicate[]::new));
-        }
 
         if (isContinuous) {
             bucketsTable = bucketsTable.copy(streamingCompactOptions());
@@ -150,9 +127,15 @@ public class CompactorSourceBuilder {
             {
                 put(CoreOptions.SCAN_TIMESTAMP_MILLIS.key(), null);
                 put(CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS.key(), null);
+                put(CoreOptions.SCAN_TIMESTAMP.key(), null);
                 put(CoreOptions.SCAN_SNAPSHOT_ID.key(), null);
                 put(CoreOptions.SCAN_MODE.key(), CoreOptions.StartupMode.LATEST_FULL.toString());
             }
         };
+    }
+
+    public CompactorSourceBuilder withPartitionPredicate(@Nullable Predicate partitionPredicate) {
+        this.partitionPredicate = partitionPredicate;
+        return this;
     }
 }

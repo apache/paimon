@@ -112,6 +112,19 @@ public abstract class ObjectSerializer<T> implements Serializable {
         return deserializeList(view);
     }
 
+    public byte[] serializeToBytes(T record) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(out);
+        serialize(record, view);
+        return out.toByteArray();
+    }
+
+    public T deserializeFromBytes(byte[] bytes) throws IOException {
+        ByteArrayInputStream in = new ByteArrayInputStream(bytes);
+        DataInputViewStreamWrapper view = new DataInputViewStreamWrapper(in);
+        return deserialize(view);
+    }
+
     /** Convert a {@link T} to {@link InternalRow}. */
     public abstract InternalRow toRow(T record);
 

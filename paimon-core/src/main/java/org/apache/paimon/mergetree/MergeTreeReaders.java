@@ -21,7 +21,7 @@ package org.apache.paimon.mergetree;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.io.KeyValueFileReaderFactory;
+import org.apache.paimon.io.FileReaderFactory;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader.ReaderSupplier;
 import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
@@ -42,7 +42,7 @@ public class MergeTreeReaders {
 
     public static <T> RecordReader<T> readerForMergeTree(
             List<List<SortedRun>> sections,
-            KeyValueFileReaderFactory readerFactory,
+            FileReaderFactory<KeyValue> readerFactory,
             Comparator<InternalRow> userKeyComparator,
             @Nullable FieldsComparator userDefinedSeqComparator,
             MergeFunctionWrapper<T> mergeFunctionWrapper,
@@ -65,7 +65,7 @@ public class MergeTreeReaders {
 
     public static <T> RecordReader<T> readerForSection(
             List<SortedRun> section,
-            KeyValueFileReaderFactory readerFactory,
+            FileReaderFactory<KeyValue> readerFactory,
             Comparator<InternalRow> userKeyComparator,
             @Nullable FieldsComparator userDefinedSeqComparator,
             MergeFunctionWrapper<T> mergeFunctionWrapper,
@@ -80,16 +80,10 @@ public class MergeTreeReaders {
     }
 
     private static RecordReader<KeyValue> readerForRun(
-            SortedRun run, KeyValueFileReaderFactory readerFactory) throws IOException {
+            SortedRun run, FileReaderFactory<KeyValue> readerFactory) throws IOException {
         List<ReaderSupplier<KeyValue>> readers = new ArrayList<>();
         for (DataFileMeta file : run.files()) {
-            readers.add(
-                    () ->
-                            readerFactory.createRecordReader(
-                                    file.schemaId(),
-                                    file.fileName(),
-                                    file.fileSize(),
-                                    file.level()));
+            readers.add(() -> readerFactory.createRecordReader(file));
         }
         return ConcatRecordReader.create(readers);
     }

@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.catalyst.analysis
 
 import org.apache.paimon.spark.catalog.ProcedureCatalog
+import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.catalyst.plans.logical.{PaimonCallArgument, PaimonCallCommand, PaimonCallStatement, PaimonNamedArgument, PaimonPositionalArgument}
 import org.apache.paimon.spark.procedure.ProcedureParameter
 
@@ -71,7 +72,7 @@ case class PaimonProcedureResolver(sparkSession: SparkSession)
               s"Cannot cast $argumentType to $parameterType of ${parameter.name}.")
           }
           if (parameterType != argumentType) {
-            Cast(argument, parameterType)
+            Compatibility.cast(argument, parameterType)
           } else {
             argument
           }

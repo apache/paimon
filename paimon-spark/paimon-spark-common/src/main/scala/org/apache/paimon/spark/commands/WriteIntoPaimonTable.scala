@@ -39,7 +39,6 @@ case class WriteIntoPaimonTable(
     options: Options)
   extends RunnableCommand
   with PaimonCommand
-  with PaimonSparkWriter
   with SchemaHelper
   with Logging {
 
@@ -57,20 +56,12 @@ case class WriteIntoPaimonTable(
     updateTableWithOptions(
       Map(DYNAMIC_PARTITION_OVERWRITE.key -> dynamicPartitionOverwriteMode.toString))
 
-    val writeBuilder = table.newBatchWriteBuilder()
+    val writer = PaimonSparkWriter(table)
     if (overwritePartition != null) {
-      writeBuilder.withOverwrite(overwritePartition.asJava)
+      writer.writeBuilder.withOverwrite(overwritePartition.asJava)
     }
-
-    val commitMessages = write(data, writeBuilder)
-    val tableCommit = writeBuilder.newCommit()
-    try {
-      tableCommit.commit(commitMessages.toList.asJava)
-    } catch {
-      case e: Throwable => throw new RuntimeException(e);
-    } finally {
-      tableCommit.close()
-    }
+    val commitMessages = writer.write(data)
+    writer.commit(commitMessages)
 
     Seq.empty
   }

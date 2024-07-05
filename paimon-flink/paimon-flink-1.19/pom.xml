@@ -25,7 +25,7 @@ under the License.
     <parent>
         <groupId>org.apache.paimon</groupId>
         <artifactId>paimon-flink</artifactId>
-        <version>0.8-SNAPSHOT</version>
+        <version>0.9-SNAPSHOT</version>
     </parent>
 
     <packaging>jar</packaging>
@@ -34,7 +34,7 @@ under the License.
     <name>Paimon : Flink : 1.19</name>
 
     <properties>
-        <flink.version>1.19.0</flink.version>
+        <flink.version>1.19.1</flink.version>
     </properties>
 
     <dependencies>

@@ -21,7 +21,8 @@ package org.apache.paimon.spark
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.io.DataFileMeta
-import org.apache.paimon.table.source.{DataSplit, RawFile, Split}
+import org.apache.paimon.manifest.FileSource
+import org.apache.paimon.table.source.{DataSplit, Split}
 
 import org.junit.jupiter.api.Assertions
 
@@ -38,13 +39,10 @@ class ScanHelperTest extends PaimonSparkTestBase {
       val fileNum = 100
 
       val files = scala.collection.mutable.ListBuffer.empty[DataFileMeta]
-      val rawFiles = scala.collection.mutable.ListBuffer.empty[RawFile]
       0.until(fileNum).foreach {
         i =>
           val path = s"f$i.parquet"
-          files += DataFileMeta.forAppend(path, 750000, 30000, null, 0, 29999, 1)
-
-          rawFiles += new RawFile(s"/a/b/$path", 0, 75000, "parquet", 0, 30000)
+          files += DataFileMeta.forAppend(path, 750000, 30000, null, 0, 29999, 1, FileSource.APPEND)
       }
 
       val dataSplits = mutable.ArrayBuffer.empty[Split]
@@ -54,14 +52,15 @@ class ScanHelperTest extends PaimonSparkTestBase {
             .builder()
             .withSnapshot(1)
             .withBucket(0)
-            .withPartition(new BinaryRow(0))
+            .withPartition(BinaryRow.EMPTY_ROW)
             .withDataFiles(files.zipWithIndex.filter(_._2 % splitNum == i).map(_._1).toList.asJava)
-            .rawFiles(rawFiles.zipWithIndex.filter(_._2 % splitNum == i).map(_._1).toList.asJava)
+            .rawConvertible(true)
+            .withBucketPath("no use")
             .build()
       }
 
       val fakeScan = new FakeScan()
-      val reshuffled = fakeScan.reshuffleSplits(dataSplits.toArray)
+      val reshuffled = fakeScan.getInputPartitions(dataSplits.toArray)
       Assertions.assertTrue(reshuffled.length > 5)
     }
   }

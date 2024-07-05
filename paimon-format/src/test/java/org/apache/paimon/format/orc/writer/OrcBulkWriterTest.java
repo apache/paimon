@@ -57,7 +57,7 @@ class OrcBulkWriterTest {
 
         Path path = new Path(tempDir.toUri().toString(), "1.orc");
         PositionOutputStream out = LocalFileIO.create().newOutputStream(path, false);
-        FormatWriter formatWriter = writerFactory.create(out, null);
+        FormatWriter formatWriter = writerFactory.create(out, "zstd");
 
         Assertions.assertThat(formatWriter).isInstanceOf(OrcBulkWriter.class);
 

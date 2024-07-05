@@ -19,26 +19,37 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.AppendOnlyFileStore;
+import org.apache.paimon.fileindex.FileIndexPredicate;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.stats.BinaryTableStats;
-import org.apache.paimon.stats.FieldStatsArraySerializer;
-import org.apache.paimon.stats.FieldStatsConverters;
+import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.stats.SimpleStatsConverter;
+import org.apache.paimon.stats.SimpleStatsConverters;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
+import javax.annotation.Nullable;
+
+import java.io.IOException;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /** {@link FileStoreScan} for {@link AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
-    private final FieldStatsConverters fieldStatsConverters;
+    private final SimpleStatsConverters simpleStatsConverters;
+
+    private final boolean fileIndexReadEnabled;
 
     private Predicate filter;
+
+    // just cache.
+    private final Map<Long, Predicate> dataFilterMapping = new HashMap<>();
 
     public AppendOnlyFileStoreScan(
             RowType partitionType,
@@ -51,7 +62,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
             int numOfBuckets,
             boolean checkNumOfBuckets,
             Integer scanManifestParallelism,
-            String branchName) {
+            boolean fileIndexReadEnabled) {
         super(
                 partitionType,
                 bucketFilter,
@@ -62,10 +73,10 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                 manifestListFactory,
                 numOfBuckets,
                 checkNumOfBuckets,
-                scanManifestParallelism,
-                branchName);
-        this.fieldStatsConverters =
-                new FieldStatsConverters(sid -> scanTableSchema(sid).fields(), schema.id());
+                scanManifestParallelism);
+        this.simpleStatsConverters =
+                new SimpleStatsConverters(sid -> scanTableSchema(sid).fields(), schema.id());
+        this.fileIndexReadEnabled = fileIndexReadEnabled;
     }
 
     public AppendOnlyFileStoreScan withFilter(Predicate predicate) {
@@ -81,19 +92,41 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
             return true;
         }
 
-        FieldStatsArraySerializer serializer =
-                fieldStatsConverters.getOrCreate(entry.file().schemaId());
-        BinaryTableStats stats = entry.file().valueStats();
+        SimpleStatsConverter serializer =
+                simpleStatsConverters.getOrCreate(entry.file().schemaId());
+        SimpleStats stats = entry.file().valueStats();
+
         return filter.test(
-                entry.file().rowCount(),
-                serializer.evolution(stats.minValues()),
-                serializer.evolution(stats.maxValues()),
-                serializer.evolution(stats.nullCounts(), entry.file().rowCount()));
+                        entry.file().rowCount(),
+                        serializer.evolution(stats.minValues()),
+                        serializer.evolution(stats.maxValues()),
+                        serializer.evolution(stats.nullCounts(), entry.file().rowCount()))
+                && (!fileIndexReadEnabled || testFileIndex(entry.file().embeddedIndex(), entry));
     }
 
     @Override
     protected List<ManifestEntry> filterWholeBucketByStats(List<ManifestEntry> entries) {
         // We don't need to filter per-bucket entries here
         return entries;
+    }
+
+    private boolean testFileIndex(@Nullable byte[] embeddedIndexBytes, ManifestEntry entry) {
+        if (embeddedIndexBytes == null) {
+            return true;
+        }
+
+        RowType dataRowType = scanTableSchema(entry.file().schemaId()).logicalRowType();
+
+        Predicate dataPredicate =
+                dataFilterMapping.computeIfAbsent(
+                        entry.file().schemaId(),
+                        id -> simpleStatsConverters.convertFilter(entry.file().schemaId(), filter));
+
+        try (FileIndexPredicate predicate =
+                new FileIndexPredicate(embeddedIndexBytes, dataRowType)) {
+            return predicate.testPredicate(dataPredicate);
+        } catch (IOException e) {
+            throw new RuntimeException("Exception happens while checking predicate.", e);
+        }
     }
 }

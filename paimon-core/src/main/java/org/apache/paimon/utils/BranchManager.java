@@ -21,8 +21,10 @@ package org.apache.paimon.utils;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.branch.TableBranch;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 
@@ -31,10 +33,16 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
+import java.util.PriorityQueue;
 import java.util.SortedMap;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
+import static org.apache.paimon.utils.FileUtils.listOriginalVersionedFiles;
+import static org.apache.paimon.utils.FileUtils.listVersionedDirectories;
 import static org.apache.paimon.utils.FileUtils.listVersionedFileStatus;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -70,21 +78,100 @@ public class BranchManager {
         return new Path(tablePath + "/branch");
     }
 
+    /** Return the root Directory of branch by given tablePath. */
+    public static Path branchDirectory(Path tablePath) {
+        return new Path(tablePath + "/branch");
+    }
+
+    public static List<String> branchNames(FileIO fileIO, Path tablePath) throws IOException {
+        return listOriginalVersionedFiles(fileIO, branchDirectory(tablePath), BRANCH_PREFIX)
+                .collect(Collectors.toList());
+    }
+
+    public static boolean isMainBranch(String branch) {
+        return branch.equals(DEFAULT_MAIN_BRANCH);
+    }
+
     /** Return the path string of a branch. */
-    public static String getBranchPath(Path tablePath, String branchName) {
-        return tablePath.toString() + "/branch/" + BRANCH_PREFIX + branchName;
+    public static String branchPath(Path tablePath, String branch) {
+        return isMainBranch(branch)
+                ? tablePath.toString()
+                : tablePath.toString() + "/branch/" + BRANCH_PREFIX + branch;
     }
 
     /** Return the path of a branch. */
     public Path branchPath(String branchName) {
-        return new Path(getBranchPath(tablePath, branchName));
+        return new Path(branchPath(tablePath, branchName));
+    }
+
+    /** Create empty branch. */
+    public void createBranch(String branchName) {
+        checkArgument(
+                !isMainBranch(branchName),
+                String.format(
+                        "Branch name '%s' is the default branch and cannot be used.",
+                        DEFAULT_MAIN_BRANCH));
+        checkArgument(!StringUtils.isBlank(branchName), "Branch name '%s' is blank.", branchName);
+        checkArgument(!branchExists(branchName), "Branch name '%s' already exists.", branchName);
+        checkArgument(
+                !branchName.chars().allMatch(Character::isDigit),
+                "Branch name cannot be pure numeric string but is '%s'.",
+                branchName);
+
+        try {
+            TableSchema latestSchema = schemaManager.latest().get();
+            fileIO.copyFile(
+                    schemaManager.toSchemaPath(latestSchema.id()),
+                    schemaManager.copyWithBranch(branchName).toSchemaPath(latestSchema.id()),
+                    true);
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Exception occurs when create branch '%s' (directory in %s).",
+                            branchName, branchPath(tablePath, branchName)),
+                    e);
+        }
+    }
+
+    public void createBranch(String branchName, long snapshotId) {
+        checkArgument(
+                !isMainBranch(branchName),
+                String.format(
+                        "Branch name '%s' is the default branch and cannot be used.",
+                        DEFAULT_MAIN_BRANCH));
+        checkArgument(!StringUtils.isBlank(branchName), "Branch name '%s' is blank.", branchName);
+        checkArgument(!branchExists(branchName), "Branch name '%s' already exists.", branchName);
+        checkArgument(
+                !branchName.chars().allMatch(Character::isDigit),
+                "Branch name cannot be pure numeric string but is '%s'.",
+                branchName);
+
+        Snapshot snapshot = snapshotManager.snapshot(snapshotId);
+
+        try {
+            // Copy the corresponding snapshot and schema files into the branch directory
+            fileIO.copyFile(
+                    snapshotManager.snapshotPath(snapshotId),
+                    snapshotManager.copyWithBranch(branchName).snapshotPath(snapshot.id()),
+                    true);
+            fileIO.copyFile(
+                    schemaManager.toSchemaPath(snapshot.schemaId()),
+                    schemaManager.copyWithBranch(branchName).toSchemaPath(snapshot.schemaId()),
+                    true);
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Exception occurs when create branch '%s' (directory in %s).",
+                            branchName, branchPath(tablePath, branchName)),
+                    e);
+        }
     }
 
     public void createBranch(String branchName, String tagName) {
         checkArgument(
-                !branchName.equals(DEFAULT_MAIN_BRANCH),
+                !isMainBranch(branchName),
                 String.format(
-                        "Branch name '%s' is the default branch and cannot be used.",
+                        "Branch name '%s' is the default branch and cannot be created.",
                         DEFAULT_MAIN_BRANCH));
         checkArgument(!StringUtils.isBlank(branchName), "Branch name '%s' is blank.", branchName);
         checkArgument(!branchExists(branchName), "Branch name '%s' already exists.", branchName);
@@ -98,19 +185,23 @@ public class BranchManager {
 
         try {
             // Copy the corresponding tag, snapshot and schema files into the branch directory
-            fileIO.copyFileUtf8(
-                    tagManager.tagPath(tagName), tagManager.branchTagPath(branchName, tagName));
-            fileIO.copyFileUtf8(
+            fileIO.copyFile(
+                    tagManager.tagPath(tagName),
+                    tagManager.copyWithBranch(branchName).tagPath(tagName),
+                    true);
+            fileIO.copyFile(
                     snapshotManager.snapshotPath(snapshot.id()),
-                    snapshotManager.branchSnapshotPath(branchName, snapshot.id()));
-            fileIO.copyFileUtf8(
+                    snapshotManager.copyWithBranch(branchName).snapshotPath(snapshot.id()),
+                    true);
+            fileIO.copyFile(
                     schemaManager.toSchemaPath(snapshot.schemaId()),
-                    schemaManager.branchSchemaPath(branchName, snapshot.schemaId()));
+                    schemaManager.copyWithBranch(branchName).toSchemaPath(snapshot.schemaId()),
+                    true);
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(
                             "Exception occurs when create branch '%s' (directory in %s).",
-                            branchName, getBranchPath(tablePath, branchName)),
+                            branchName, branchPath(tablePath, branchName)),
                     e);
         }
     }
@@ -124,7 +215,7 @@ public class BranchManager {
             LOG.info(
                     String.format(
                             "Deleting the branch failed due to an exception in deleting the directory %s. Please try again.",
-                            getBranchPath(tablePath, branchName)),
+                            branchPath(tablePath, branchName)),
                     e);
         }
     }
@@ -142,43 +233,132 @@ public class BranchManager {
         }
     }
 
+    public void fastForward(String branchName) {
+        checkArgument(
+                !branchName.equals(DEFAULT_MAIN_BRANCH),
+                "Branch name '%s' do not use in fast-forward.",
+                branchName);
+        checkArgument(!StringUtils.isBlank(branchName), "Branch name '%s' is blank.", branchName);
+        checkArgument(branchExists(branchName), "Branch name '%s' doesn't exist.", branchName);
+
+        Long earliestSnapshotId = snapshotManager.copyWithBranch(branchName).earliestSnapshotId();
+        Snapshot earliestSnapshot =
+                snapshotManager.copyWithBranch(branchName).snapshot(earliestSnapshotId);
+        long earliestSchemaId = earliestSnapshot.schemaId();
+
+        try {
+            // Delete snapshot, schema, and tag from the main branch which occurs after
+            // earliestSnapshotId
+            List<Path> deleteSnapshotPaths =
+                    listVersionedFileStatus(
+                                    fileIO, snapshotManager.snapshotDirectory(), "snapshot-")
+                            .map(FileStatus::getPath)
+                            .filter(
+                                    path ->
+                                            Snapshot.fromPath(fileIO, path).id()
+                                                    >= earliestSnapshotId)
+                            .collect(Collectors.toList());
+            List<Path> deleteSchemaPaths =
+                    listVersionedFileStatus(fileIO, schemaManager.schemaDirectory(), "schema-")
+                            .map(FileStatus::getPath)
+                            .filter(
+                                    path ->
+                                            TableSchema.fromPath(fileIO, path).id()
+                                                    >= earliestSchemaId)
+                            .collect(Collectors.toList());
+            List<Path> deleteTagPaths =
+                    listVersionedFileStatus(fileIO, tagManager.tagDirectory(), "tag-")
+                            .map(FileStatus::getPath)
+                            .filter(
+                                    path ->
+                                            Snapshot.fromPath(fileIO, path).id()
+                                                    >= earliestSnapshotId)
+                            .collect(Collectors.toList());
+
+            List<Path> deletePaths =
+                    Stream.concat(
+                                    Stream.concat(
+                                            deleteSnapshotPaths.stream(),
+                                            deleteSchemaPaths.stream()),
+                                    deleteTagPaths.stream())
+                            .collect(Collectors.toList());
+
+            // Delete latest snapshot hint
+            snapshotManager.deleteLatestHint();
+
+            fileIO.deleteFilesQuietly(deletePaths);
+            fileIO.copyFiles(
+                    snapshotManager.copyWithBranch(branchName).snapshotDirectory(),
+                    snapshotManager.snapshotDirectory(),
+                    true);
+            fileIO.copyFiles(
+                    schemaManager.copyWithBranch(branchName).schemaDirectory(),
+                    schemaManager.schemaDirectory(),
+                    true);
+            fileIO.copyFiles(
+                    tagManager.copyWithBranch(branchName).tagDirectory(),
+                    tagManager.tagDirectory(),
+                    true);
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Exception occurs when fast forward '%s' (directory in %s).",
+                            branchName, branchPath(tablePath, branchName)),
+                    e);
+        }
+    }
+
     /** Check if a branch exists. */
     public boolean branchExists(String branchName) {
         Path branchPath = branchPath(branchName);
         return fileExists(branchPath);
     }
 
-    /** Get branch count for the table. */
-    public long branchCount() {
-        try {
-            return listVersionedFileStatus(fileIO, branchDirectory(), BRANCH_PREFIX).count();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
     /** Get all branches for the table. */
     public List<TableBranch> branches() {
         try {
             List<Pair<Path, Long>> paths =
-                    listVersionedFileStatus(fileIO, branchDirectory(), BRANCH_PREFIX)
+                    listVersionedDirectories(fileIO, branchDirectory(), BRANCH_PREFIX)
                             .map(status -> Pair.of(status.getPath(), status.getModificationTime()))
                             .collect(Collectors.toList());
-            List<TableBranch> branches = new ArrayList<>();
+            PriorityQueue<TableBranch> pq =
+                    new PriorityQueue<>(Comparator.comparingLong(TableBranch::getCreateTime));
             for (Pair<Path, Long> path : paths) {
                 String branchName = path.getLeft().getName().substring(BRANCH_PREFIX.length());
+                Optional<TableSchema> tableSchema =
+                        schemaManager.copyWithBranch(branchName).latest();
+                if (!tableSchema.isPresent()) {
+                    // Support empty branch.
+                    pq.add(new TableBranch(branchName, path.getValue()));
+                    continue;
+                }
                 FileStoreTable branchTable =
                         FileStoreTableFactory.create(
-                                fileIO, new Path(getBranchPath(tablePath, branchName)));
+                                fileIO, new Path(branchPath(tablePath, branchName)));
                 SortedMap<Snapshot, List<String>> snapshotTags = branchTable.tagManager().tags();
-                checkArgument(!snapshotTags.isEmpty());
-                Snapshot snapshot = snapshotTags.firstKey();
-                List<String> tags = snapshotTags.get(snapshot);
-                checkArgument(tags.size() == 1);
-                branches.add(
-                        new TableBranch(branchName, tags.get(0), snapshot.id(), path.getValue()));
+                Long earliestSnapshotId = branchTable.snapshotManager().earliestSnapshotId();
+                if (snapshotTags.isEmpty()) {
+                    // Create based on snapshotId.
+                    pq.add(new TableBranch(branchName, earliestSnapshotId, path.getValue()));
+                } else {
+                    Snapshot snapshot = snapshotTags.firstKey();
+                    if (earliestSnapshotId == snapshot.id()) {
+                        List<String> tags = snapshotTags.get(snapshot);
+                        checkArgument(tags.size() == 1);
+                        pq.add(
+                                new TableBranch(
+                                        branchName, tags.get(0), snapshot.id(), path.getValue()));
+                    } else {
+                        // Create based on snapshotId.
+                        pq.add(new TableBranch(branchName, earliestSnapshotId, path.getValue()));
+                    }
+                }
             }
 
+            List<TableBranch> branches = new ArrayList<>(pq.size());
+            while (!pq.isEmpty()) {
+                branches.add(pq.poll());
+            }
             return branches;
         } catch (IOException e) {
             throw new RuntimeException(e);

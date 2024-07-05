@@ -39,6 +39,8 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataTypes;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
+
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -101,6 +103,7 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
                         .withPartition(entry.partition())
                         .withBucket(entry.bucket())
                         .withDataFiles(Collections.singletonList(entry.file()))
+                        .withBucketPath("not used")
                         .build();
 
         final AtomicInteger i = new AtomicInteger(Integer.MIN_VALUE);
@@ -126,6 +129,7 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
                         .withPartition(entry.partition())
                         .withBucket(entry.bucket())
                         .withDataFiles(Collections.singletonList(entry.file()))
+                        .withBucketPath("not used")
                         .build();
 
         i.set(Integer.MIN_VALUE);
@@ -135,7 +139,7 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
                 .createReader(dataSplit)
                 .forEachRemaining(
                         a -> {
-                            Integer current = a.getInt(2);
+                            int current = a.getShort(2);
                             Assertions.assertThat(current).isGreaterThanOrEqualTo(i.get());
                             i.set(current);
                         });
@@ -347,22 +351,55 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
 
     private SortCompactAction createAction(
             String orderStrategy, String rangeStrategy, List<String> columns) {
+        return createAction(orderStrategy, rangeStrategy, columns, Lists.newArrayList());
+    }
 
-        return createAction(
-                SortCompactAction.class,
-                "compact",
-                "--warehouse",
-                warehouse,
-                "--database",
-                database,
-                "--table",
-                tableName,
-                "--order_strategy",
-                orderStrategy,
-                "--order_by",
-                String.join(",", columns),
-                "--table_conf sort-compaction.range-strategy=" + rangeStrategy,
-                rangeStrategy);
+    private SortCompactAction createAction(
+            String orderStrategy,
+            String rangeStrategy,
+            List<String> columns,
+            List<String> extraConfigs) {
+        ArrayList<String> args =
+                Lists.newArrayList(
+                        "compact",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--order_strategy",
+                        orderStrategy,
+                        "--order_by",
+                        String.join(",", columns),
+                        "--table_conf",
+                        "sort-compaction.range-strategy=" + rangeStrategy);
+        args.addAll(extraConfigs);
+        return createAction(SortCompactAction.class, args.toArray(new String[0]));
+    }
+
+    @Test
+    public void testvalidSampleConfig() throws Exception {
+        prepareData(300, 1);
+        {
+            ArrayList<String> extraCompactionConfig =
+                    Lists.newArrayList(
+                            "--table_conf", "sort-compaction.local-sample.magnification=1");
+            Assertions.assertThatCode(
+                            () -> {
+                                createAction(
+                                                "order",
+                                                "size",
+                                                Arrays.asList(
+                                                        "f0", "f1", "f2", "f3", "f4", "f5", "f6",
+                                                        "f7", "f8", "f9", "f10", "f11", "f12",
+                                                        "f13", "f14", "f15"),
+                                                extraCompactionConfig)
+                                        .run();
+                            })
+                    .hasMessage(
+                            "the config 'sort-compaction.local-sample.magnification=1' should not be set too small,greater than or equal to 20 is needed.");
+        }
     }
 
     private void createTable() throws Exception {

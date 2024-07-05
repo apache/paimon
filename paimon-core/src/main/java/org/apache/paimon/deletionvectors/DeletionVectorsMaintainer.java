@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.manifest.IndexManifestEntry;
 
 import javax.annotation.Nullable;
 
@@ -30,6 +31,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 
@@ -41,21 +43,9 @@ public class DeletionVectorsMaintainer {
     private boolean modified;
 
     private DeletionVectorsMaintainer(
-            IndexFileHandler fileHandler,
-            @Nullable Long snapshotId,
-            BinaryRow partition,
-            int bucket) {
+            IndexFileHandler fileHandler, Map<String, DeletionVector> deletionVectors) {
         this.indexFileHandler = fileHandler;
-        IndexFileMeta indexFile =
-                snapshotId == null
-                        ? null
-                        : fileHandler
-                                .scan(snapshotId, DELETION_VECTORS_INDEX, partition, bucket)
-                                .orElse(null);
-        this.deletionVectors =
-                indexFile == null
-                        ? new HashMap<>()
-                        : new HashMap<>(indexFileHandler.readAllDeletionVectors(indexFile));
+        this.deletionVectors = deletionVectors;
         this.modified = false;
     }
 
@@ -75,6 +65,17 @@ public class DeletionVectorsMaintainer {
     }
 
     /**
+     * Notifies a new deletion which marks the specified deletion vector with the given file name.
+     *
+     * @param fileName The name of the file where the deletion occurred.
+     * @param deletionVector The deletion vector
+     */
+    public void notifyNewDeletion(String fileName, DeletionVector deletionVector) {
+        deletionVectors.put(fileName, deletionVector);
+        modified = true;
+    }
+
+    /**
      * Removes the specified file's deletion vector, this method is typically used for remove before
      * files' deletion vector in compaction.
      *
@@ -88,17 +89,15 @@ public class DeletionVectorsMaintainer {
     }
 
     /**
-     * Prepares to commit: write new deletion vectors index file if any modifications have been
-     * made.
+     * Write new deletion vectors index file if any modifications have been made.
      *
      * @return A list containing the metadata of the deletion vectors index file, or an empty list
      *     if no changes need to be committed.
      */
-    public List<IndexFileMeta> prepareCommit() {
+    public List<IndexFileMeta> writeDeletionVectorsIndex() {
         if (modified) {
-            IndexFileMeta entry = indexFileHandler.writeDeletionVectorsIndex(deletionVectors);
             modified = false;
-            return Collections.singletonList(entry);
+            return indexFileHandler.writeDeletionVectorsIndex(deletionVectors);
         }
         return Collections.emptyList();
     }
@@ -112,6 +111,10 @@ public class DeletionVectorsMaintainer {
      */
     public Optional<DeletionVector> deletionVectorOf(String fileName) {
         return Optional.ofNullable(deletionVectors.get(fileName));
+    }
+
+    public IndexFileHandler indexFileHandler() {
+        return indexFileHandler;
     }
 
     @VisibleForTesting
@@ -130,7 +133,37 @@ public class DeletionVectorsMaintainer {
 
         public DeletionVectorsMaintainer createOrRestore(
                 @Nullable Long snapshotId, BinaryRow partition, int bucket) {
-            return new DeletionVectorsMaintainer(handler, snapshotId, partition, bucket);
+            List<IndexFileMeta> indexFiles =
+                    snapshotId == null
+                            ? Collections.emptyList()
+                            : handler.scan(snapshotId, DELETION_VECTORS_INDEX, partition, bucket);
+            Map<String, DeletionVector> deletionVectors =
+                    new HashMap<>(handler.readAllDeletionVectors(indexFiles));
+            return createOrRestore(deletionVectors);
+        }
+
+        @VisibleForTesting
+        public DeletionVectorsMaintainer createOrRestore(
+                @Nullable Long snapshotId, BinaryRow partition) {
+            List<IndexFileMeta> indexFiles =
+                    snapshotId == null
+                            ? Collections.emptyList()
+                            : handler.scanEntries(snapshotId, DELETION_VECTORS_INDEX, partition)
+                                    .stream()
+                                    .map(IndexManifestEntry::indexFile)
+                                    .collect(Collectors.toList());
+            Map<String, DeletionVector> deletionVectors =
+                    new HashMap<>(handler.readAllDeletionVectors(indexFiles));
+            return createOrRestore(deletionVectors);
+        }
+
+        public DeletionVectorsMaintainer create() {
+            return createOrRestore(new HashMap<>());
+        }
+
+        public DeletionVectorsMaintainer createOrRestore(
+                Map<String, DeletionVector> deletionVectors) {
+            return new DeletionVectorsMaintainer(handler, deletionVectors);
         }
     }
 }

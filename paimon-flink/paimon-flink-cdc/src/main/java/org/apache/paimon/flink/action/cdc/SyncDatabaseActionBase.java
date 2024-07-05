@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action.cdc;
 
 import org.apache.paimon.catalog.AbstractCatalog;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.MultiTablesSinkMode;
 import org.apache.paimon.flink.sink.cdc.EventParser;
@@ -34,9 +35,12 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
@@ -49,6 +53,8 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
     protected String tablePrefix = "";
     protected String tableSuffix = "";
     protected String includingTables = ".*";
+    protected List<String> partitionKeys = new ArrayList<>();
+    protected List<String> primaryKeys = new ArrayList<>();
     @Nullable protected String excludingTables;
     protected List<FileStoreTable> tables = new ArrayList<>();
 
@@ -102,6 +108,16 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
         return this;
     }
 
+    public SyncDatabaseActionBase withPartitionKeys(String... partitionKeys) {
+        this.partitionKeys.addAll(Arrays.asList(partitionKeys));
+        return this;
+    }
+
+    public SyncDatabaseActionBase withPrimaryKeys(String... primaryKeys) {
+        this.primaryKeys.addAll(Arrays.asList(primaryKeys));
+        return this;
+    }
+
     @Override
     protected void validateCaseSensitivity() {
         AbstractCatalog.validateCaseInsensitive(caseSensitive, "Database", database);
@@ -110,24 +126,34 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
     }
 
     @Override
-    protected FlatMapFunction<String, RichCdcMultiplexRecord> recordParse() {
+    protected FlatMapFunction<CdcSourceRecord, RichCdcMultiplexRecord> recordParse() {
         return syncJobHandler.provideRecordParser(
-                caseSensitive, Collections.emptyList(), typeMapping, metadataConverters);
+                Collections.emptyList(), typeMapping, metadataConverters);
     }
 
     @Override
     protected EventParser.Factory<RichCdcMultiplexRecord> buildEventParserFactory() {
         NewTableSchemaBuilder schemaBuilder =
-                new NewTableSchemaBuilder(tableConfig, caseSensitive, metadataConverters);
+                new NewTableSchemaBuilder(
+                        tableConfig, caseSensitive, partitionKeys, primaryKeys, metadataConverters);
         Pattern includingPattern = Pattern.compile(includingTables);
         Pattern excludingPattern =
                 excludingTables == null ? null : Pattern.compile(excludingTables);
         TableNameConverter tableNameConverter =
                 new TableNameConverter(caseSensitive, mergeShards, tablePrefix, tableSuffix);
-
+        Set<String> createdTables;
+        try {
+            createdTables = new HashSet<>(catalog.listTables(database));
+        } catch (Catalog.DatabaseNotExistException e) {
+            throw new RuntimeException(e);
+        }
         return () ->
                 new RichCdcMultiplexRecordEventParser(
-                        schemaBuilder, includingPattern, excludingPattern, tableNameConverter);
+                        schemaBuilder,
+                        includingPattern,
+                        excludingPattern,
+                        tableNameConverter,
+                        createdTables);
     }
 
     @Override

@@ -26,13 +26,14 @@ import org.apache.paimon.hive.pool.CachedClientPool;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.PartitionPathUtils;
-import org.apache.paimon.utils.RowDataPartitionComputer;
 
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
 import org.apache.hadoop.hive.metastore.api.Partition;
+import org.apache.hadoop.hive.metastore.api.PartitionEventType;
 import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.thrift.TException;
 
@@ -44,19 +45,19 @@ import java.util.List;
 public class HiveMetastoreClient implements MetastoreClient {
 
     private final Identifier identifier;
-    private final RowDataPartitionComputer partitionComputer;
+    private final InternalRowPartitionComputer partitionComputer;
 
     private final ClientPool<IMetaStoreClient, TException> clients;
     private final StorageDescriptor sd;
 
-    private HiveMetastoreClient(
+    HiveMetastoreClient(
             Identifier identifier,
             TableSchema schema,
             ClientPool<IMetaStoreClient, TException> clients)
             throws TException, InterruptedException {
         this.identifier = identifier;
         this.partitionComputer =
-                new RowDataPartitionComputer(
+                new InternalRowPartitionComputer(
                         new CoreOptions(schema.options()).partitionDefaultName(),
                         schema.logicalPartitionType(),
                         schema.partitionKeys().toArray(new String[0]));
@@ -126,8 +127,27 @@ public class HiveMetastoreClient implements MetastoreClient {
     }
 
     @Override
+    public void markDone(LinkedHashMap<String, String> partitionSpec) throws Exception {
+        try {
+            clients.execute(
+                    client ->
+                            client.markPartitionForEvent(
+                                    identifier.getDatabaseName(),
+                                    identifier.getObjectName(),
+                                    partitionSpec,
+                                    PartitionEventType.LOAD_DONE));
+        } catch (NoSuchObjectException e) {
+            // do nothing if the partition not exists
+        }
+    }
+
+    @Override
     public void close() throws Exception {
         // do nothing
+    }
+
+    public IMetaStoreClient client() throws TException, InterruptedException {
+        return clients.run(client -> client);
     }
 
     /** Factory to create {@link HiveMetastoreClient}. */

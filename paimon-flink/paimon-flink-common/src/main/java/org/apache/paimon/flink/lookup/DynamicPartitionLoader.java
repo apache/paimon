@@ -53,7 +53,7 @@ public class DynamicPartitionLoader implements Serializable {
     private Comparator<InternalRow> comparator;
 
     private LocalDateTime lastRefresh;
-    private BinaryRow partition;
+    @Nullable private BinaryRow partition;
 
     private DynamicPartitionLoader(Table table, Duration refreshInterval) {
         this.table = table;

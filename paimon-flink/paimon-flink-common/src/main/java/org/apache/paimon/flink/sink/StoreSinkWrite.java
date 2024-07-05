@@ -39,8 +39,19 @@ import java.util.List;
 /** Helper class of {@link PrepareCommitOperator} for different types of paimon sinks. */
 public interface StoreSinkWrite {
 
+    /**
+     * This method is called when the insert only status of the records changes.
+     *
+     * @param insertOnly If true, all the following records would be of {@link
+     *     org.apache.paimon.types.RowKind#INSERT}, and no two records would have the same primary
+     *     key.
+     */
+    void withInsertOnly(boolean insertOnly);
+
+    @Nullable
     SinkRecord write(InternalRow rowData) throws Exception;
 
+    @Nullable
     SinkRecord write(InternalRow rowData, int bucket) throws Exception;
 
     SinkRecord toLogRecord(SinkRecord record);

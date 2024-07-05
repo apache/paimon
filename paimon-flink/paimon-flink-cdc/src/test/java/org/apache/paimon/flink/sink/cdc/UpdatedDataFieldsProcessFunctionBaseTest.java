@@ -22,6 +22,7 @@ import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.SmallIntType;
+import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarCharType;
 
 import org.junit.Assert;
@@ -75,6 +76,24 @@ public class UpdatedDataFieldsProcessFunctionBaseTest {
         Assert.assertEquals(
                 UpdatedDataFieldsProcessFunctionBase.ConvertAction.CONVERT, convertAction);
         convertAction = UpdatedDataFieldsProcessFunctionBase.canConvert(oldType, smallerRangeType);
+
+        Assert.assertEquals(
+                UpdatedDataFieldsProcessFunctionBase.ConvertAction.IGNORE, convertAction);
+    }
+
+    @Test
+    public void testCanConvertTimestamp() {
+        TimestampType oldType = new TimestampType(true, 3);
+        TimestampType biggerLengthTimestamp = new TimestampType(true, 5);
+        TimestampType smallerLengthTimestamp = new TimestampType(true, 2);
+
+        UpdatedDataFieldsProcessFunctionBase.ConvertAction convertAction = null;
+        convertAction =
+                UpdatedDataFieldsProcessFunctionBase.canConvert(oldType, biggerLengthTimestamp);
+        Assert.assertEquals(
+                UpdatedDataFieldsProcessFunctionBase.ConvertAction.CONVERT, convertAction);
+        convertAction =
+                UpdatedDataFieldsProcessFunctionBase.canConvert(oldType, smallerLengthTimestamp);
 
         Assert.assertEquals(
                 UpdatedDataFieldsProcessFunctionBase.ConvertAction.IGNORE, convertAction);

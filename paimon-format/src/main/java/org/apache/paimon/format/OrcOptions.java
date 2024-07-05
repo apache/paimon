@@ -20,11 +20,6 @@ package org.apache.paimon.format;
 
 import org.apache.paimon.options.ConfigOption;
 
-import org.apache.orc.OrcConf;
-
-import static org.apache.orc.OrcConf.COMPRESSION_ZSTD_LEVEL;
-import static org.apache.orc.OrcConf.DICTIONARY_KEY_SIZE_THRESHOLD;
-import static org.apache.orc.OrcConf.DIRECT_ENCODING_COLUMNS;
 import static org.apache.paimon.options.ConfigOptions.key;
 
 /** Options for orc format. */
@@ -36,37 +31,20 @@ public class OrcOptions {
                     .defaultValue(1024)
                     .withDescription("write batch size for orc.");
 
-    public static final ConfigOption<String> ORC_COMPRESS =
-            key(OrcConf.COMPRESS.getAttribute())
-                    .stringType()
-                    .defaultValue("lz4")
-                    .withDescription(
-                            "Define the compression codec for ORC file, if a higher compression ratio is required, "
-                                    + "it is recommended to configure it as 'zstd', and you can configure: "
-                                    + COMPRESSION_ZSTD_LEVEL.getAttribute());
-
     public static final ConfigOption<Integer> ORC_COLUMN_ENCODING_DIRECT =
-            key(DIRECT_ENCODING_COLUMNS.getAttribute())
+            key("orc.column.encoding.direct")
                     .intType()
                     .noDefaultValue()
                     .withDescription(
                             "Comma-separated list of fields for which dictionary encoding is to be skipped in orc.");
 
     public static final ConfigOption<Double> ORC_DICTIONARY_KEY_THRESHOLD =
-            key(DICTIONARY_KEY_SIZE_THRESHOLD.getAttribute())
+            key("orc.dictionary.key.threshold")
                     .doubleType()
-                    .defaultValue((Double) DICTIONARY_KEY_SIZE_THRESHOLD.getDefaultValue())
+                    .defaultValue(0.8)
                     .withDescription(
                             "If the number of distinct keys in a dictionary is greater than this "
                                     + "fraction of the total number of non-null rows, turn off "
                                     + "dictionary encoding in orc. Use 0 to always disable dictionary encoding. "
                                     + "Use 1 to always use dictionary encoding.");
-
-    public static final ConfigOption<Integer> ORC_COMPRESSION_ZSTD_LEVEL =
-            key(COMPRESSION_ZSTD_LEVEL.getAttribute())
-                    .intType()
-                    .defaultValue((Integer) COMPRESSION_ZSTD_LEVEL.getDefaultValue())
-                    .withDescription(
-                            "Define the compression level to use with ZStandard codec while writing data. "
-                                    + "The valid range is 1~22.");
 }

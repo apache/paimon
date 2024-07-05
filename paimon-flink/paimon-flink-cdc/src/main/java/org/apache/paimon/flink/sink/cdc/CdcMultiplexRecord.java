@@ -55,6 +55,10 @@ public class CdcMultiplexRecord implements Serializable {
         return record;
     }
 
+    public CdcMultiplexRecord fieldNameLowerCase() {
+        return new CdcMultiplexRecord(databaseName, tableName, record.fieldNameLowerCase());
+    }
+
     @Override
     public boolean equals(Object o) {
         if (!(o instanceof CdcMultiplexRecord)) {

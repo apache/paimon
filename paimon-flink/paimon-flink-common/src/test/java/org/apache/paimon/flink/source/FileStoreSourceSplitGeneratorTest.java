@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.DataSplit;
@@ -106,14 +107,15 @@ public class FileStoreSourceSplitGeneratorTest {
                             0, // not used
                             null, // not used
                             null, // not used
-                            StatsTestUtils.newEmptyTableStats(), // not used
-                            StatsTestUtils.newEmptyTableStats(), // not used
+                            StatsTestUtils.newEmptySimpleStats(), // not used
+                            StatsTestUtils.newEmptySimpleStats(), // not used
                             0, // not used
                             0, // not used
                             0, // not used
                             0, // not used
-                            0L // not used
-                            ));
+                            0L, // not used
+                            null, // not used
+                            FileSource.APPEND));
         }
         return DataSplit.builder()
                 .withSnapshot(1)
@@ -121,6 +123,8 @@ public class FileStoreSourceSplitGeneratorTest {
                 .withBucket(bucket)
                 .isStreaming(false)
                 .withDataFiles(metas)
+                .rawConvertible(false)
+                .withBucketPath("/") // not used
                 .build();
     }
 }

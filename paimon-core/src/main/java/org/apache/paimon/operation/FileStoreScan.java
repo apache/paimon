@@ -25,6 +25,7 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.operation.metrics.ScanMetrics;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -69,6 +70,8 @@ public interface FileStoreScan {
 
     FileStoreScan withManifestCacheFilter(ManifestCacheFilter manifestFilter);
 
+    FileStoreScan withDataFileNameFilter(Filter<String> fileNameFilter);
+
     FileStoreScan withMetrics(ScanMetrics metrics);
 
     /** Produce a {@link Plan}. */
@@ -79,6 +82,14 @@ public interface FileStoreScan {
      * cannot perform filtering based on statistical information.
      */
     List<SimpleFileEntry> readSimpleEntries();
+
+    List<PartitionEntry> readPartitionEntries();
+
+    default List<BinaryRow> listPartitions() {
+        return readPartitionEntries().stream()
+                .map(PartitionEntry::partition)
+                .collect(Collectors.toList());
+    }
 
     /** Result plan of this scan. */
     interface Plan {

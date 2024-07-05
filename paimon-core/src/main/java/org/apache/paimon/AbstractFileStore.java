@@ -28,6 +28,7 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.metastore.AddPartitionTagCallback;
 import org.apache.paimon.metastore.MetastoreClient;
+import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
@@ -38,10 +39,11 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.service.ServiceManager;
 import org.apache.paimon.stats.StatsFile;
 import org.apache.paimon.stats.StatsFileHandler;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.sink.CallbackUtils;
 import org.apache.paimon.table.sink.TagCallback;
-import org.apache.paimon.tag.TagAutoCreation;
+import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SegmentsCache;
@@ -55,14 +57,12 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
-import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
-
 /**
  * Base {@link FileStore} implementation.
  *
  * @param <T> type of record to read and write.
  */
-public abstract class AbstractFileStore<T> implements FileStore<T> {
+abstract class AbstractFileStore<T> implements FileStore<T> {
 
     protected final FileIO fileIO;
     protected final SchemaManager schemaManager;
@@ -73,7 +73,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @Nullable private final SegmentsCache<String> writeManifestCache;
 
-    public AbstractFileStore(
+    protected AbstractFileStore(
             FileIO fileIO,
             SchemaManager schemaManager,
             TableSchema schema,
@@ -104,7 +104,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @Override
     public SnapshotManager snapshotManager() {
-        return new SnapshotManager(fileIO, options.path());
+        return new SnapshotManager(fileIO, options.path(), options.branch());
     }
 
     @Override
@@ -118,6 +118,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 schemaManager,
                 partitionType,
                 options.manifestFormat(),
+                options.manifestCompression(),
                 pathFactory(),
                 options.manifestTargetSize().getBytes(),
                 forWrite ? writeManifestCache : null);
@@ -132,12 +133,14 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
         return new ManifestList.Factory(
                 fileIO,
                 options.manifestFormat(),
+                options.manifestCompression(),
                 pathFactory(),
                 forWrite ? writeManifestCache : null);
     }
 
     protected IndexManifestFile.Factory indexManifestFileFactory() {
-        return new IndexManifestFile.Factory(fileIO, options.manifestFormat(), pathFactory());
+        return new IndexManifestFile.Factory(
+                fileIO, options.manifestFormat(), options.manifestCompression(), pathFactory());
     }
 
     @Override
@@ -147,7 +150,12 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 pathFactory().indexFileFactory(),
                 indexManifestFileFactory().create(),
                 new HashIndexFile(fileIO, pathFactory().indexFileFactory()),
-                new DeletionVectorsIndexFile(fileIO, pathFactory().indexFileFactory()));
+                new DeletionVectorsIndexFile(
+                        fileIO,
+                        pathFactory().indexFileFactory(),
+                        bucketMode() == BucketMode.BUCKET_UNAWARE
+                                ? options.deletionVectorIndexFileTargetSize()
+                                : MemorySize.ofBytes(Long.MAX_VALUE)));
     }
 
     @Override
@@ -175,15 +183,12 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @Override
     public FileStoreCommitImpl newCommit(String commitUser) {
-        return newCommit(commitUser, DEFAULT_MAIN_BRANCH);
-    }
-
-    public FileStoreCommitImpl newCommit(String commitUser, String branchName) {
         return new FileStoreCommitImpl(
                 fileIO,
                 schemaManager,
                 commitUser,
                 partitionType,
+                options.partitionDefaultName(),
                 pathFactory(),
                 snapshotManager(),
                 manifestFileFactory(),
@@ -196,13 +201,27 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.manifestMergeMinCount(),
                 partitionType.getFieldCount() > 0 && options.dynamicPartitionOverwrite(),
                 newKeyComparator(),
-                branchName,
-                newStatsFileHandler());
+                options.branch(),
+                newStatsFileHandler(),
+                bucketMode(),
+                options.scanManifestParallelism());
     }
 
     @Override
     public SnapshotDeletion newSnapshotDeletion() {
         return new SnapshotDeletion(
+                fileIO,
+                pathFactory(),
+                manifestFileFactory().create(),
+                manifestListFactory().create(),
+                newIndexFileHandler(),
+                newStatsFileHandler(),
+                options.changelogProducer() != CoreOptions.ChangelogProducer.NONE);
+    }
+
+    @Override
+    public ChangelogDeletion newChangelogDeletion() {
+        return new ChangelogDeletion(
                 fileIO,
                 pathFactory(),
                 manifestFileFactory().create(),
@@ -237,6 +256,13 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
             return null;
         }
 
+        MetastoreClient.Factory metastoreClientFactory =
+                catalogEnvironment.metastoreClientFactory();
+        MetastoreClient metastoreClient = null;
+        if (options.partitionedTableInMetastore() && metastoreClientFactory != null) {
+            metastoreClient = metastoreClientFactory.create();
+        }
+
         return new PartitionExpire(
                 partitionType(),
                 partitionExpireTime,
@@ -244,13 +270,13 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.partitionTimestampPattern(),
                 options.partitionTimestampFormatter(),
                 newScan(),
-                newCommit(commitUser));
+                newCommit(commitUser),
+                metastoreClient);
     }
 
     @Override
-    @Nullable
-    public TagAutoCreation newTagCreationManager() {
-        return TagAutoCreation.create(
+    public TagAutoManager newTagCreationManager() {
+        return TagAutoManager.create(
                 options,
                 snapshotManager(),
                 newTagManager(),

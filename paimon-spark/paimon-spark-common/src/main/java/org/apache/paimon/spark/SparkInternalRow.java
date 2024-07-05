@@ -40,6 +40,7 @@ import org.apache.spark.sql.types.BinaryType;
 import org.apache.spark.sql.types.BooleanType;
 import org.apache.spark.sql.types.ByteType;
 import org.apache.spark.sql.types.CalendarIntervalType;
+import org.apache.spark.sql.types.CharType;
 import org.apache.spark.sql.types.DateType;
 import org.apache.spark.sql.types.Decimal;
 import org.apache.spark.sql.types.DecimalType;
@@ -53,6 +54,7 @@ import org.apache.spark.sql.types.StringType;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.types.TimestampType;
 import org.apache.spark.sql.types.UserDefinedType;
+import org.apache.spark.sql.types.VarcharType;
 import org.apache.spark.unsafe.types.CalendarInterval;
 import org.apache.spark.unsafe.types.UTF8String;
 
@@ -205,7 +207,9 @@ public class SparkInternalRow extends org.apache.spark.sql.catalyst.InternalRow 
         if (dataType instanceof DoubleType) {
             return getDouble(ordinal);
         }
-        if (dataType instanceof StringType) {
+        if (dataType instanceof StringType
+                || dataType instanceof CharType
+                || dataType instanceof VarcharType) {
             return getUTF8String(ordinal);
         }
         if (dataType instanceof DecimalType) {

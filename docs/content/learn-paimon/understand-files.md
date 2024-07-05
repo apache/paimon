@@ -40,8 +40,8 @@ Before delving further into this page, please ensure that you have read through 
 following sections:
 
 1. [Basic Concepts]({{< ref "concepts/basic-concepts" >}}),
-2. [Primary Key Table]({{< ref "concepts/primary-key-table/overview" >}}) and
-3. How to use Paimon in [Flink]({{< ref "engines/flink" >}}).
+2. [Primary Key Table]({{< ref "primary-key-table/overview" >}}) and
+3. How to use Paimon in [Flink]({{< ref "flink" >}}).
 
 ## Understand File Operations
 
@@ -450,12 +450,12 @@ file belongs to exactly one sorted run.
 By default, sorted runs number depends on `num-sorted-run.compaction-trigger`, see [Compaction for Primary Key Table]({{< ref "/maintenance/write-performance#compaction" >}}),
 this means that there are at least 5 files in a bucket. If you want to reduce this number, you can keep fewer files, but write performance may suffer.
 
-### Understand Files for Append Queue Table
+### Understand Files for Bucketed Append Table
 
 By default, Append also does automatic compaction to reduce the number of small files.
 
-However, for Bucket's Append table, it will only compact the files within the Bucket for sequential
-purposes, which may keep more small files. See [Append Queue Table]({{< ref "/concepts/append-table/append-queue-table" >}}).
+However, for Bucketed Append table, it will only compact the files within the Bucket for sequential
+purposes, which may keep more small files. See [Bucketed Append]({{< ref "append-table/bucketed-append" >}}).
 
 ### Understand Full-Compaction
 
@@ -463,6 +463,5 @@ Maybe you think the 5 files for the primary key table are actually okay, but the
 may have 50 small files in a single bucket, which is very difficult to accept. Worse still, partitions that
 are no longer active also keep so many small files.
 
-It is recommended that you configure [Full-Compaction]({{< ref "/maintenance/read-performance#full-compaction" >}}),
-configure ‘full-compaction.delta-commits’ perform full-compaction periodically in Flink writing. And it can ensure
+Configure ‘full-compaction.delta-commits’ perform full-compaction periodically in Flink writing. And it can ensure
 that partitions are full compacted before writing ends.

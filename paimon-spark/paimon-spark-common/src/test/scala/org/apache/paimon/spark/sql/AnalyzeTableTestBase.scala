@@ -50,6 +50,34 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     Assertions.assertTrue(stats.colStats().isEmpty)
   }
 
+  test("Paimon analyze: test statistic system table") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id STRING, name STRING, i INT, l LONG)
+                 |USING PAIMON
+                 |TBLPROPERTIES ('primary-key'='id')
+                 |""".stripMargin)
+
+    spark.sql(s"INSERT INTO T VALUES ('1', 'a', 1, 1)")
+    spark.sql(s"INSERT INTO T VALUES ('2', 'aaa', 1, 2)")
+    Assertions.assertEquals(0, spark.sql("select * from `T$statistics`").count())
+
+    spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS")
+
+    val df =
+      spark.sql("select snapshot_id, schema_id, mergedRecordCount, colstat from `T$statistics`")
+    Assertions.assertEquals(df.collect().size, 1)
+    checkAnswer(
+      spark.sql("SELECT snapshot_id, schema_id, mergedRecordCount, colstat from `T$statistics`"),
+      Row(2, 0, 2, "{ }"))
+  }
+
+  test("Paimon analyze: analyze table without snapshot") {
+    spark.sql(s"CREATE TABLE T (id STRING, name STRING)")
+    spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS")
+    spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS FOR ALL COLUMNS")
+    Assertions.assertEquals(0, spark.sql("select * from `T$statistics`").count())
+  }
+
   test("Paimon analyze: analyze no scan") {
     spark.sql(s"CREATE TABLE T (id STRING, name STRING)")
     assertThatThrownBy(() => spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS NOSCAN"))
@@ -272,7 +300,7 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     Assertions.assertEquals(1, statsFileCount(tableLocation, fileIO))
 
     val orphanStats = new Path(tableLocation, "statistics/stats-orphan-0")
-    fileIO.writeFileUtf8(orphanStats, "x")
+    fileIO.tryToWriteAtomic(orphanStats, "x")
     Assertions.assertEquals(2, statsFileCount(tableLocation, fileIO))
 
     // test clean orhan statistic
@@ -312,7 +340,7 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
 
     val stats = getScanStatistic("SELECT * FROM T")
     Assertions.assertEquals(2L, stats.rowCount.get.longValue())
-    Assertions.assertEquals(if (supportsColStats()) 4 else 0, stats.attributeStats.size)
+    Assertions.assertEquals(if (gteqSpark3_4) 4 else 0, stats.attributeStats.size)
   }
 
   test("Paimon analyze: partition filter push down hit") {
@@ -329,7 +357,14 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     // partition push down hit
     var sql = "SELECT * FROM T WHERE pt < 1"
     Assertions.assertEquals(
-      if (supportsColStats()) 0L else 4L,
+      if (gteqSpark3_4) 0L else 4L,
+      getScanStatistic(sql).rowCount.get.longValue())
+    checkAnswer(spark.sql(sql), Nil)
+
+    // partition push down hit and select without it
+    sql = "SELECT id FROM T WHERE pt < 1"
+    Assertions.assertEquals(
+      if (gteqSpark3_4) 0L else 4L,
       getScanStatistic(sql).rowCount.get.longValue())
     checkAnswer(spark.sql(sql), Nil)
 
@@ -353,6 +388,4 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     relation.computeStats()
   }
 
-  /** Spark supports the use of col stats for v2 table since 3.4+. */
-  protected def supportsColStats(): Boolean = true
 }

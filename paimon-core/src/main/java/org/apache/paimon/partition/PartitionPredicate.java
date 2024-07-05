@@ -23,18 +23,24 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.data.serializer.Serializer;
-import org.apache.paimon.format.FieldStats;
+import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.statistics.FullFieldStatsCollector;
+import org.apache.paimon.statistics.FullSimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import javax.annotation.Nullable;
 
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+
+import static org.apache.paimon.utils.InternalRowPartitionComputer.convertSpecToInternal;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** A special predicate to filter partition only, just like {@link Predicate}. */
 public interface PartitionPredicate {
@@ -105,12 +111,12 @@ public interface PartitionPredicate {
             this.fieldNum = partitionType.getFieldCount();
             @SuppressWarnings("unchecked")
             Serializer<Object>[] serializers = new Serializer[fieldNum];
-            FullFieldStatsCollector[] collectors = new FullFieldStatsCollector[fieldNum];
+            FullSimpleColStatsCollector[] collectors = new FullSimpleColStatsCollector[fieldNum];
             min = new Predicate[fieldNum];
             max = new Predicate[fieldNum];
             for (int i = 0; i < fieldNum; i++) {
                 serializers[i] = InternalSerializers.create(partitionType.getTypeAt(i));
-                collectors[i] = new FullFieldStatsCollector();
+                collectors[i] = new FullSimpleColStatsCollector();
             }
             for (BinaryRow part : partitions) {
                 Object[] fields = converter.convert(part);
@@ -120,9 +126,18 @@ public interface PartitionPredicate {
             }
             PredicateBuilder builder = new PredicateBuilder(partitionType);
             for (int i = 0; i < collectors.length; i++) {
-                FieldStats stats = collectors[i].result();
-                min[i] = builder.greaterOrEqual(i, stats.minValue());
-                max[i] = builder.lessOrEqual(i, stats.maxValue());
+                SimpleColStats stats = collectors[i].result();
+                if (stats.nullCount() == partitions.size()) {
+                    min[i] = builder.isNull(i);
+                    max[i] = builder.isNull(i);
+                } else {
+                    min[i] = builder.greaterOrEqual(i, checkNotNull(stats.min()));
+                    max[i] = builder.lessOrEqual(i, checkNotNull(stats.max()));
+                    if (stats.nullCount() > 0) {
+                        min[i] = PredicateBuilder.or(builder.isNull(i), min[i]);
+                        max[i] = PredicateBuilder.or(builder.isNull(i), max[i]);
+                    }
+                }
             }
         }
 
@@ -149,5 +164,59 @@ public interface PartitionPredicate {
             }
             return true;
         }
+    }
+
+    static Predicate createPartitionPredicate(RowType rowType, Map<String, Object> partition) {
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        List<String> fieldNames = rowType.getFieldNames();
+        Predicate predicate = null;
+        for (Map.Entry<String, Object> entry : partition.entrySet()) {
+            Object literal = entry.getValue();
+            int idx = fieldNames.indexOf(entry.getKey());
+            Predicate predicateTemp =
+                    literal == null ? builder.isNull(idx) : builder.equal(idx, literal);
+            if (predicate == null) {
+                predicate = predicateTemp;
+            } else {
+                predicate = PredicateBuilder.and(predicate, predicateTemp);
+            }
+        }
+        return predicate;
+    }
+
+    static Predicate createPartitionPredicate(RowType partitionType, Object[] partition) {
+        Preconditions.checkArgument(
+                partition.length == partitionType.getFieldCount(),
+                "Partition's field count should be equal to partitionType's field count.");
+
+        Map<String, Object> partitionMap = new HashMap<>(partition.length);
+        for (int i = 0; i < partition.length; i++) {
+            partitionMap.put(partitionType.getFields().get(i).name(), partition[i]);
+        }
+
+        return createPartitionPredicate(partitionType, partitionMap);
+    }
+
+    static Predicate createPartitionPredicate(RowType partitionType, BinaryRow partition) {
+        Preconditions.checkArgument(
+                partition.getFieldCount() == partitionType.getFieldCount(),
+                "Partition's field count should be equal to partitionType's field count.");
+        RowDataToObjectArrayConverter converter = new RowDataToObjectArrayConverter(partitionType);
+        return createPartitionPredicate(partitionType, converter.convert(partition));
+    }
+
+    @Nullable
+    static Predicate createPartitionPredicate(
+            Map<String, String> spec, RowType rowType, String defaultPartValue) {
+        Map<String, Object> internalValues = convertSpecToInternal(spec, rowType, defaultPartValue);
+        return createPartitionPredicate(rowType, internalValues);
+    }
+
+    static Predicate createPartitionPredicate(
+            List<Map<String, String>> partitions, RowType rowType, String defaultPartValue) {
+        return PredicateBuilder.or(
+                partitions.stream()
+                        .map(p -> createPartitionPredicate(p, rowType, defaultPartValue))
+                        .toArray(Predicate[]::new));
     }
 }

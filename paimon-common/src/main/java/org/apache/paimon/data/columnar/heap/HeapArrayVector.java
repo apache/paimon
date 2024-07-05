@@ -84,4 +84,9 @@ public class HeapArrayVector extends AbstractHeapVector
         long length = lengths[i];
         return new ColumnarArray(child, (int) offset, (int) length);
     }
+
+    @Override
+    public ColumnVector getColumnVector() {
+        return child;
+    }
 }

@@ -22,25 +22,38 @@ import org.apache.paimon.data
 import org.apache.paimon.disk.IOManager
 import org.apache.paimon.reader.RecordReader
 import org.apache.paimon.spark.SparkUtils.createIOManager
+import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.table.source.{ReadBuilder, Split}
+import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.connector.read.{InputPartition, PartitionReader, PartitionReaderFactory}
 
+import java.util.{ArrayList => JList}
 import java.util.Objects
 
-case class PaimonPartitionReaderFactory(readBuilder: ReadBuilder) extends PartitionReaderFactory {
+import scala.collection.JavaConverters._
+
+case class PaimonPartitionReaderFactory(
+    readBuilder: ReadBuilder,
+    metadataColumns: Seq[PaimonMetadataColumn] = Seq.empty)
+  extends PartitionReaderFactory {
 
   private lazy val ioManager: IOManager = createIOManager()
 
-  private lazy val row: SparkInternalRow = new SparkInternalRow(readBuilder.readType())
+  private lazy val row: SparkInternalRow = {
+    val dataFields = new JList(readBuilder.readType().getFields)
+    dataFields.addAll(metadataColumns.map(_.toPaimonDataField).asJava)
+    val rowType = new RowType(dataFields)
+    new SparkInternalRow(rowType)
+  }
 
   override def createReader(partition: InputPartition): PartitionReader[InternalRow] = {
     partition match {
-      case paimonInputPartition: SparkInputPartition =>
+      case paimonInputPartition: PaimonInputPartition =>
         val readFunc: Split => RecordReader[data.InternalRow] =
           (split: Split) => readBuilder.newRead().withIOManager(ioManager).createReader(split)
-        PaimonPartitionReader(readFunc, paimonInputPartition, row)
+        PaimonPartitionReader(readFunc, paimonInputPartition, row, metadataColumns)
       case _ =>
         throw new RuntimeException(s"It's not a Paimon input partition, $partition")
     }
@@ -49,7 +62,7 @@ case class PaimonPartitionReaderFactory(readBuilder: ReadBuilder) extends Partit
   override def equals(obj: Any): Boolean = {
     obj match {
       case other: PaimonPartitionReaderFactory =>
-        this.readBuilder.equals(other.readBuilder)
+        this.readBuilder.equals(other.readBuilder) && this.metadataColumns == other.metadataColumns
 
       case _ => false
     }

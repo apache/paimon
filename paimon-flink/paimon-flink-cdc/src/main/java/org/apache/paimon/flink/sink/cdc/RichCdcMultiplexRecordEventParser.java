@@ -49,10 +49,11 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
     @Nullable private final Pattern includingPattern;
     @Nullable private final Pattern excludingPattern;
     private final TableNameConverter tableNameConverter;
+    private final Set<String> createdTables;
+
     private final Map<String, RichEventParser> parsers = new HashMap<>();
     private final Set<String> includedTables = new HashSet<>();
     private final Set<String> excludedTables = new HashSet<>();
-    private final Set<String> createdTables = new HashSet<>();
 
     private RichCdcMultiplexRecord record;
     private String currentTable;
@@ -60,18 +61,20 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
     private RichEventParser currentParser;
 
     public RichCdcMultiplexRecordEventParser(boolean caseSensitive) {
-        this(null, null, null, new TableNameConverter(caseSensitive));
+        this(null, null, null, new TableNameConverter(caseSensitive), new HashSet<>());
     }
 
     public RichCdcMultiplexRecordEventParser(
             @Nullable NewTableSchemaBuilder schemaBuilder,
             @Nullable Pattern includingPattern,
             @Nullable Pattern excludingPattern,
-            TableNameConverter tableNameConverter) {
+            TableNameConverter tableNameConverter,
+            Set<String> createdTables) {
         this.schemaBuilder = schemaBuilder;
         this.includingPattern = includingPattern;
         this.excludingPattern = excludingPattern;
         this.tableNameConverter = tableNameConverter;
+        this.createdTables = createdTables;
     }
 
     @Override
@@ -157,7 +160,7 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
 
     private boolean shouldCreateCurrentTable() {
         return shouldSynchronizeCurrentTable
-                && !record.fieldTypes().isEmpty()
+                && !record.fields().isEmpty()
                 && createdTables.add(parseTableName());
     }
 }

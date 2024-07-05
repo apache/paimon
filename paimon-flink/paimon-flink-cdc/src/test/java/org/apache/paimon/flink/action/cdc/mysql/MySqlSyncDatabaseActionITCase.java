@@ -27,7 +27,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.core.execution.JobClient;
@@ -241,6 +240,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         new String[] {"k", "v1"}),
                 Collections.emptyList(),
                 Collections.singletonList("k"),
+                Collections.emptyList(),
                 Collections.emptyMap());
 
         // try synchronization
@@ -288,6 +288,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         new String[] {"k1", "v0"}),
                 Collections.emptyList(),
                 Collections.singletonList("k1"),
+                Collections.emptyList(),
                 Collections.emptyMap());
 
         // try synchronization
@@ -466,9 +467,9 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testIgnoreCase() throws Exception {
+    public void testIgnoreCaseDivided() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
-        mySqlConfig.put("database-name", "paimon_ignore_CASE");
+        mySqlConfig.put("database-name", "paimon_ignore_CASE_divided");
 
         MySqlSyncDatabaseAction action =
                 syncDatabaseActionBuilder(mySqlConfig)
@@ -479,53 +480,81 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         .build();
         runActionWithDefaultEnv(action);
 
-        // check table schema
-        FileStoreTable table = getFileStoreTable("t");
-        assertThat(JsonSerdeUtil.toFlatJson(table.schema().fields()))
-                .isEqualTo(
-                        "[{\"id\":0,\"name\":\"k\",\"type\":\"INT NOT NULL\",\"description\":\"\"},"
-                                + "{\"id\":1,\"name\":\"uppercase_v0\",\"type\":\"VARCHAR(20)\",\"description\":\"\"}]");
+        try (Statement statement = getStatement()) {
+            statement.executeUpdate("USE paimon_ignore_CASE_divided");
+            ignoreCaseTableCheck(statement, "T");
+        }
+    }
+
+    @Test
+    @Timeout(60)
+    public void testIgnoreCaseCombined() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "paimon_ignore_CASE_combined");
+
+        MySqlSyncDatabaseAction action =
+                syncDatabaseActionBuilder(mySqlConfig)
+                        .withCatalogConfig(
+                                Collections.singletonMap(
+                                        FileSystemCatalogOptions.CASE_SENSITIVE.key(), "false"))
+                        .withMode(COMBINED.configString())
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        try (Statement statement = getStatement()) {
+            statement.executeUpdate("USE paimon_ignore_CASE_combined");
+            ignoreCaseTableCheck(statement, "T");
+
+            // check new table
+            statement.executeUpdate(
+                    "CREATE TABLE T1 (k INT, UPPERCASE_V0 VARCHAR(20), PRIMARY KEY (k))");
+            waitingTables("t1");
+            ignoreCaseTableCheck(statement, "T1");
+        }
+    }
+
+    private void ignoreCaseTableCheck(Statement statement, String tableName) throws Exception {
+        FileStoreTable table = getFileStoreTable(tableName.toLowerCase());
 
         // check sync schema changes and records
-        try (Statement statement = getStatement()) {
-            statement.executeUpdate("USE paimon_ignore_CASE");
-            statement.executeUpdate("INSERT INTO T VALUES (1, 'Hi')");
-            RowType rowType1 =
-                    RowType.of(
-                            new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(20)},
-                            new String[] {"k", "uppercase_v0"});
-            waitForResult(
-                    Collections.singletonList("+I[1, Hi]"),
-                    table,
-                    rowType1,
-                    Collections.singletonList("k"));
+        statement.executeUpdate("INSERT INTO " + tableName + " VALUES (1, 'Hi')");
+        RowType rowType1 =
+                RowType.of(
+                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(20)},
+                        new String[] {"k", "uppercase_v0"});
+        waitForResult(
+                Collections.singletonList("+I[1, Hi]"),
+                table,
+                rowType1,
+                Collections.singletonList("k"));
 
-            statement.executeUpdate("ALTER TABLE T MODIFY COLUMN UPPERCASE_V0 VARCHAR(30)");
-            statement.executeUpdate("INSERT INTO T VALUES (2, 'Paimon')");
-            RowType rowType2 =
-                    RowType.of(
-                            new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(30)},
-                            new String[] {"k", "uppercase_v0"});
-            waitForResult(
-                    Arrays.asList("+I[1, Hi]", "+I[2, Paimon]"),
-                    table,
-                    rowType2,
-                    Collections.singletonList("k"));
+        statement.executeUpdate(
+                "ALTER TABLE " + tableName + " MODIFY COLUMN UPPERCASE_V0 VARCHAR(30)");
+        statement.executeUpdate("INSERT INTO " + tableName + " VALUES (2, 'Paimon')");
+        RowType rowType2 =
+                RowType.of(
+                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(30)},
+                        new String[] {"k", "uppercase_v0"});
+        waitForResult(
+                Arrays.asList("+I[1, Hi]", "+I[2, Paimon]"),
+                table,
+                rowType2,
+                Collections.singletonList("k"));
 
-            statement.executeUpdate("ALTER TABLE T ADD COLUMN UPPERCASE_V1 DOUBLE");
-            statement.executeUpdate("INSERT INTO T VALUES (3, 'Test', 0.5)");
-            RowType rowType3 =
-                    RowType.of(
-                            new DataType[] {
-                                DataTypes.INT().notNull(), DataTypes.VARCHAR(30), DataTypes.DOUBLE()
-                            },
-                            new String[] {"k", "uppercase_v0", "uppercase_v1"});
-            waitForResult(
-                    Arrays.asList("+I[1, Hi, NULL]", "+I[2, Paimon, NULL]", "+I[3, Test, 0.5]"),
-                    table,
-                    rowType3,
-                    Collections.singletonList("k"));
-        }
+        statement.executeUpdate("ALTER TABLE " + tableName + " ADD COLUMN UPPERCASE_V1 DOUBLE");
+        statement.executeUpdate("INSERT INTO " + tableName + " VALUES (3, 'Test', 0.5)");
+        RowType rowType3 =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(), DataTypes.VARCHAR(30), DataTypes.DOUBLE()
+                        },
+                        new String[] {"k", "uppercase_v0", "uppercase_v1"});
+        waitForResult(
+                Arrays.asList("+I[1, Hi, NULL]", "+I[2, Paimon, NULL]", "+I[3, Test, 0.5]"),
+                table,
+                rowType3,
+                Collections.singletonList("k"));
     }
 
     @Test
@@ -1158,6 +1187,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         new String[] {"k", "v1"}),
                 Collections.emptyList(),
                 Collections.singletonList("k"),
+                Collections.emptyList(),
                 Collections.emptyMap());
 
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
@@ -1329,6 +1359,79 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         Collections.singletonList("k"));
             }
         }
+    }
+
+    @Test
+    @Timeout(60)
+    public void testSpecifyKeys() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "test_specify_keys");
+
+        MultiTablesSinkMode mode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
+        MySqlSyncDatabaseAction action =
+                syncDatabaseActionBuilder(mySqlConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .withMode(mode.configString())
+                        .withPartitionKeys("part")
+                        .withPrimaryKeys("k", "part")
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        try (Statement statement = getStatement()) {
+            statement.executeUpdate("USE test_specify_keys");
+            testSpecifyKeysVerify1("t1", statement);
+            testSpecifyKeysVerify2("t2", statement);
+
+            // test newly created table
+            if (mode == COMBINED) {
+                statement.executeUpdate(
+                        "CREATE TABLE t3 (k INT, part INT, v1 VARCHAR(10), PRIMARY KEY (k))");
+                statement.executeUpdate("CREATE TABLE t4 (k INT, v1 VARCHAR(10), PRIMARY KEY (k))");
+                waitingTables("t3", "t4");
+                testSpecifyKeysVerify1("t3", statement);
+                testSpecifyKeysVerify2("t4", statement);
+            }
+        }
+    }
+
+    private void testSpecifyKeysVerify1(String tableName, Statement statement) throws Exception {
+        FileStoreTable table = getFileStoreTable(tableName);
+        assertThat(table.partitionKeys()).containsExactly("part");
+        assertThat(table.primaryKeys()).containsExactly("k", "part");
+
+        statement.executeUpdate("INSERT INTO " + tableName + " VALUES(1, 1, 'A')");
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.VARCHAR(10),
+                        },
+                        new String[] {"k", "part", "v1"});
+        waitForResult(
+                Collections.singletonList("+I[1, 1, A]"),
+                table,
+                rowType,
+                Arrays.asList("k", "part"));
+    }
+
+    private void testSpecifyKeysVerify2(String tableName, Statement statement) throws Exception {
+        FileStoreTable table = getFileStoreTable(tableName);
+        assertThat(table.partitionKeys()).isEmpty();
+        assertThat(table.primaryKeys()).containsExactly("k");
+
+        statement.executeUpdate("INSERT INTO " + tableName + " VALUES(1, 'A')");
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10),
+                        },
+                        new String[] {"k", "v1"});
+        waitForResult(
+                Collections.singletonList("+I[1, A]"),
+                table,
+                rowType,
+                Collections.singletonList("k"));
     }
 
     private class SyncNewTableJob implements Runnable {

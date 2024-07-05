@@ -58,16 +58,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
     protected void runSingleTableSchemaEvolution(String sourceDir, String format) throws Exception {
         final String topic = "schema_evolution";
         createTestTopic(topic, 1, 1);
-        // ---------- Write the data into Kafka -------------------
-        List<String> lines =
-                readLines(
-                        String.format(
-                                "kafka/%s/table/%s/%s-data-1.txt", format, sourceDir, format));
-        try {
-            writeRecordsToKafka(topic, lines);
-        } catch (Exception e) {
-            throw new Exception(String.format("Failed to write %s data to Kafka.", format), e);
-        }
+        writeRecordsToKafka(topic, "kafka/%s/table/%s/%s-data-1.txt", format, sourceDir, format);
+
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
         kafkaConfig.put(TOPIC.key(), topic);
@@ -101,15 +93,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                         "+I[102, car battery, 12V car battery, 8.1]");
         waitForResult(expected, table, rowType, primaryKeys);
 
-        try {
-            writeRecordsToKafka(
-                    topic,
-                    readLines(
-                            String.format(
-                                    "kafka/%s/table/%s/%s-data-2.txt", format, sourceDir, format)));
-        } catch (Exception e) {
-            throw new Exception(String.format("Failed to write %s data to Kafka.", format), e);
-        }
+        writeRecordsToKafka(topic, "kafka/%s/table/%s/%s-data-2.txt", format, sourceDir, format);
+
         rowType =
                 RowType.of(
                         new DataType[] {
@@ -128,15 +113,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                         "+I[104, hammer, 12oz carpenter's hammer, 0.75, 24]");
         waitForResult(expected, table, rowType, primaryKeys);
 
-        try {
-            writeRecordsToKafka(
-                    topic,
-                    readLines(
-                            String.format(
-                                    "kafka/%s/table/%s/%s-data-3.txt", format, sourceDir, format)));
-        } catch (Exception e) {
-            throw new Exception(String.format("Failed to write %s data to Kafka.", format), e);
-        }
+        writeRecordsToKafka(topic, "kafka/%s/table/%s/%s-data-3.txt", format, sourceDir, format);
+
         rowType =
                 RowType.of(
                         new DataType[] {
@@ -161,16 +139,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
     public void testNotSupportFormat(String format) throws Exception {
         final String topic = "not_support";
         createTestTopic(topic, 1, 1);
-        // ---------- Write the data into Kafka -------------------
-        List<String> lines =
-                readLines(
-                        String.format(
-                                "kafka/%s/table/schemaevolution/%s-data-1.txt", format, format));
-        try {
-            writeRecordsToKafka(topic, lines);
-        } catch (Exception e) {
-            throw new Exception(String.format("Failed to write %s data to Kafka.", format), e);
-        }
+        writeRecordsToKafka(topic, "kafka/%s/table/schemaevolution/%s-data-1.txt", format, format);
+
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put(VALUE_FORMAT.key(), "togg-json");
         kafkaConfig.put(TOPIC.key(), topic);
@@ -190,16 +160,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
     protected void testAssertSchemaCompatible(String format) throws Exception {
         final String topic = "assert_schema_compatible";
         createTestTopic(topic, 1, 1);
-        // ---------- Write the data into Kafka -------------------
-        List<String> lines =
-                readLines(
-                        String.format(
-                                "kafka/%s/table/schemaevolution/%s-data-1.txt", format, format));
-        try {
-            writeRecordsToKafka(topic, lines);
-        } catch (Exception e) {
-            throw new Exception(String.format("Failed to write %s data to Kafka.", format), e);
-        }
+        writeRecordsToKafka(topic, "kafka/%s/table/schemaevolution/%s-data-1.txt", format, format);
+
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
         kafkaConfig.put(TOPIC.key(), topic);
@@ -211,6 +173,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                         new String[] {"k", "v1"}),
                 Collections.emptyList(),
                 Collections.singletonList("k"),
+                Collections.emptyList(),
                 Collections.emptyMap());
 
         KafkaSyncTableAction action =
@@ -231,15 +194,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
     protected void testStarUpOptionSpecific(String format) throws Exception {
         final String topic = "start_up_specific";
         createTestTopic(topic, 1, 1);
-        // ---------- Write the data into Kafka -------------------
-        List<String> lines =
-                readLines(
-                        String.format("kafka/%s/table/startupmode/%s-data-1.txt", format, format));
-        try {
-            writeRecordsToKafka(topic, lines);
-        } catch (Exception e) {
-            throw new Exception(String.format("Failed to write %s data to Kafka.", format), e);
-        }
+        writeRecordsToKafka(topic, "kafka/%s/table/startupmode/%s-data-1.txt", format, format);
+
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
         kafkaConfig.put(TOPIC.key(), topic);
@@ -273,15 +229,9 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
     protected void testStarUpOptionLatest(String format) throws Exception {
         final String topic = "start_up_latest";
         createTestTopic(topic, 1, 1);
-        // ---------- Write the data into Kafka -------------------
-        List<String> lines =
-                readLines(
-                        String.format("kafka/%s/table/startupmode/%s-data-1.txt", format, format));
-        try {
-            writeRecordsToKafka(topic, lines);
-        } catch (Exception e) {
-            throw new Exception(String.format("Failed to write %s data to Kafka.", format), e);
-        }
+        writeRecordsToKafka(
+                topic, true, "kafka/%s/table/startupmode/%s-data-1.txt", format, format);
+
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
         kafkaConfig.put(TOPIC.key(), topic);
@@ -295,15 +245,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
 
         Thread.sleep(5000);
         FileStoreTable table = getFileStoreTable(tableName);
-        try {
-            writeRecordsToKafka(
-                    topic,
-                    readLines(
-                            String.format(
-                                    "kafka/%s/table/startupmode/%s-data-2.txt", format, format)));
-        } catch (Exception e) {
-            throw new Exception(String.format("Failed to write %s data to Kafka.", format), e);
-        }
+
+        writeRecordsToKafka(topic, "kafka/%s/table/startupmode/%s-data-2.txt", format, format);
 
         RowType rowType =
                 RowType.of(
@@ -326,15 +269,9 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
     public void testStarUpOptionTimestamp(String format) throws Exception {
         final String topic = "start_up_timestamp";
         createTestTopic(topic, 1, 1);
-        // ---------- Write the data into Kafka -------------------
-        List<String> lines =
-                readLines(
-                        String.format("kafka/%s/table/startupmode/%s-data-1.txt", format, format));
-        try {
-            writeRecordsToKafka(topic, lines);
-        } catch (Exception e) {
-            throw new Exception(String.format("Failed to write %s data to Kafka.", format), e);
-        }
+        writeRecordsToKafka(
+                topic, true, "kafka/%s/table/startupmode/%s-data-1.txt", format, format);
+
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
         kafkaConfig.put(TOPIC.key(), topic);
@@ -348,15 +285,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                         .build();
         runActionWithDefaultEnv(action);
 
-        try {
-            writeRecordsToKafka(
-                    topic,
-                    readLines(
-                            String.format(
-                                    "kafka/%s/table/startupmode/%s-data-2.txt", format, format)));
-        } catch (Exception e) {
-            throw new Exception(String.format("Failed to write %s data to Kafka.", format), e);
-        }
+        writeRecordsToKafka(topic, "kafka/%s/table/startupmode/%s-data-2.txt", format, format);
+
         FileStoreTable table = getFileStoreTable(tableName);
 
         RowType rowType =
@@ -380,15 +310,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
     public void testStarUpOptionEarliest(String format) throws Exception {
         final String topic = "start_up_earliest";
         createTestTopic(topic, 1, 1);
-        // ---------- Write the data into Kafka -------------------
-        List<String> lines =
-                readLines(
-                        String.format("kafka/%s/table/startupmode/%s-data-1.txt", format, format));
-        try {
-            writeRecordsToKafka(topic, lines);
-        } catch (Exception e) {
-            throw new Exception(String.format("Failed to write %s data to Kafka.", format), e);
-        }
+        writeRecordsToKafka(topic, "kafka/%s/table/startupmode/%s-data-1.txt", format, format);
+
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
         kafkaConfig.put(TOPIC.key(), topic);
@@ -400,15 +323,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                         .build();
         runActionWithDefaultEnv(action);
 
-        try {
-            writeRecordsToKafka(
-                    topic,
-                    readLines(
-                            String.format(
-                                    "kafka/%s/table/startupmode/%s-data-2.txt", format, format)));
-        } catch (Exception e) {
-            throw new Exception(String.format("Failed to write %s data to Kafka.", format), e);
-        }
+        writeRecordsToKafka(topic, "kafka/%s/table/startupmode/%s-data-2.txt", format, format);
+
         FileStoreTable table = getFileStoreTable(tableName);
 
         RowType rowType =
@@ -434,15 +350,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
     public void testStarUpOptionGroup(String format) throws Exception {
         final String topic = "start_up_group";
         createTestTopic(topic, 1, 1);
-        // ---------- Write the data into Kafka -------------------
-        List<String> lines =
-                readLines(
-                        String.format("kafka/%s/table/startupmode/%s-data-1.txt", format, format));
-        try {
-            writeRecordsToKafka(topic, lines);
-        } catch (Exception e) {
-            throw new Exception(String.format("Failed to write %s data to Kafka.", format), e);
-        }
+        writeRecordsToKafka(topic, "kafka/%s/table/startupmode/%s-data-1.txt", format, format);
+
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
         kafkaConfig.put(TOPIC.key(), topic);
@@ -454,15 +363,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                         .build();
         runActionWithDefaultEnv(action);
 
-        try {
-            writeRecordsToKafka(
-                    topic,
-                    readLines(
-                            String.format(
-                                    "kafka/%s/table/startupmode/%s-data-2.txt", format, format)));
-        } catch (Exception e) {
-            throw new Exception(String.format("Failed to write %s data to Kafka.", format), e);
-        }
+        writeRecordsToKafka(topic, "kafka/%s/table/startupmode/%s-data-2.txt", format, format);
+
         FileStoreTable table = getFileStoreTable(tableName);
 
         RowType rowType =
@@ -488,16 +390,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
     public void testComputedColumn(String format) throws Exception {
         String topic = "computed_column";
         createTestTopic(topic, 1, 1);
+        writeRecordsToKafka(topic, "kafka/%s/table/computedcolumn/%s-data-1.txt", format, format);
 
-        List<String> lines =
-                readLines(
-                        String.format(
-                                "kafka/%s/table/computedcolumn/%s-data-1.txt", format, format));
-        try {
-            writeRecordsToKafka(topic, lines);
-        } catch (Exception e) {
-            throw new Exception(String.format("Failed to write %s data to Kafka.", format), e);
-        }
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
         kafkaConfig.put(TOPIC.key(), topic);
@@ -528,14 +422,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
     protected void testCDCOperations(String format) throws Exception {
         String topic = "event";
         createTestTopic(topic, 1, 1);
+        writeRecordsToKafka(topic, "kafka/%s/table/event/event-insert.txt", format);
 
-        List<String> lines =
-                readLines(String.format("kafka/%s/table/event/event-insert.txt", format));
-        try {
-            writeRecordsToKafka(topic, lines);
-        } catch (Exception e) {
-            throw new Exception(String.format("Failed to write %s data to Kafka.", format), e);
-        }
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put(VALUE_FORMAT.key(), "ogg-json");
         kafkaConfig.put(TOPIC.key(), topic);
@@ -566,13 +454,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                         "+I[103, scooter, Big 2-wheel scooter , 5.1]");
         waitForResult(expectedInsert, table, rowType, primaryKeys);
 
-        try {
-            writeRecordsToKafka(
-                    topic,
-                    readLines(String.format("kafka/%s/table/event/event-update.txt", format)));
-        } catch (Exception e) {
-            throw new Exception(String.format("Failed to write %s data to Kafka.", format), e);
-        }
+        writeRecordsToKafka(topic, "kafka/%s/table/event/event-update.txt", format);
+
         // For the UPDATE operation
         List<String> expectedUpdate =
                 Arrays.asList(
@@ -581,13 +464,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                         "+I[103, scooter, Big 2-wheel scooter , 8.1]");
         waitForResult(expectedUpdate, table, rowType, primaryKeys);
 
-        try {
-            writeRecordsToKafka(
-                    topic,
-                    readLines(String.format("kafka/%s/table/event/event-delete.txt", format)));
-        } catch (Exception e) {
-            throw new Exception(String.format("Failed to write %s data to Kafka.", format), e);
-        }
+        writeRecordsToKafka(topic, "kafka/%s/table/event/event-delete.txt", format);
 
         // For the REPLACE operation
         List<String> expectedReplace =
@@ -600,17 +477,9 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
     public void testKafkaBuildSchemaWithDelete(String format) throws Exception {
         final String topic = "test_kafka_schema";
         createTestTopic(topic, 1, 1);
-        // ---------- Write the Debezium json into Kafka -------------------
-        List<String> lines =
-                readLines(
-                        String.format(
-                                "kafka/%s/table/schema/schemaevolution/%s-data-4.txt",
-                                format, format));
-        try {
-            writeRecordsToKafka(topic, lines);
-        } catch (Exception e) {
-            throw new Exception(String.format("Failed to write %s data to Kafka.", format), e);
-        }
+        writeRecordsToKafka(
+                topic, "kafka/%s/table/schema/schemaevolution/%s-data-4.txt", format, format);
+
         Configuration kafkaConfig = Configuration.fromMap(getBasicKafkaConfig());
         kafkaConfig.setString(VALUE_FORMAT.key(), format + "-json");
         kafkaConfig.setString(TOPIC.key(), topic);
@@ -632,15 +501,19 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
     public void testWaterMarkSyncTable(String format) throws Exception {
         String topic = "watermark";
         createTestTopic(topic, 1, 1);
-        writeRecordsToKafka(
-                topic,
-                readLines(String.format("kafka/%s/table/watermark/%s-data-1.txt", format, format)));
+        writeRecordsToKafka(topic, "kafka/%s/table/watermark/%s-data-1.txt", format, format);
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
         kafkaConfig.put(TOPIC.key(), topic);
 
         Map<String, String> config = getBasicTableConfig();
+        if ("debezium".equals(format)) {
+            // debezium has no key
+            // append mode never stop with compaction
+            config.remove("bucket");
+            config.put("write-only", "true");
+        }
         config.put("tag.automatic-creation", "watermark");
         config.put("tag.creation-period", "hourly");
         config.put("scan.watermark.alignment.group", "alignment-group-1");
@@ -666,13 +539,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
     public void testSchemaIncludeRecord(String format) throws Exception {
         String topic = "schema_include";
         createTestTopic(topic, 1, 1);
-
-        List<String> lines = readLines("kafka/debezium/table/schema/include/debezium-data-1.txt");
-        try {
-            writeRecordsToKafka(topic, lines);
-        } catch (Exception e) {
-            throw new Exception("Failed to write debezium data to Kafka.", e);
-        }
+        writeRecordsToKafka(topic, "kafka/debezium/table/schema/include/debezium-data-1.txt");
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
@@ -706,9 +573,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
     public void testAllTypesWithSchemaImpl(String format) throws Exception {
         String topic = "schema_include_all_type";
         createTestTopic(topic, 1, 1);
-
-        List<String> lines = readLines("kafka/debezium/table/schema/alltype/debezium-data-1.txt");
-        writeRecordsToKafka(topic, lines);
+        writeRecordsToKafka(topic, "kafka/debezium/table/schema/alltype/debezium-data-1.txt");
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
@@ -907,10 +772,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                                 + "1.000011, 2.000022, 3.000033, "
                                 + "1.000111, 2.000222, 3.000333, "
                                 + "12345.110, 12345.220, 12345.330, "
-                                // TODO fix FIXED
-                                + "1.2345678987654322E32, 1.2345678987654322E32, 1.2345678987654322E32, "
-                                // TODO fix BIG DECIMAL
-                                + "11111, 22222, 33333, 2222222222222222400000000000.0000000000, "
+                                + "123456789876543212345678987654321.11, 123456789876543212345678987654321.22, 123456789876543212345678987654321.33, "
+                                + "11111, 22222, 33333, 2222222222222222300000001111.1234567890, "
                                 + "19439, "
                                 // display value of datetime is not affected by timezone
                                 + "2023-03-23T14:30:05, 2023-03-23T14:30:05.123, 2023-03-23T14:30:05.123456, "
@@ -952,16 +815,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
     protected void testTableFiledValNull(String format) throws Exception {
         final String topic = "table_filed_val_null";
         createTestTopic(topic, 1, 1);
-        // ---------- Write the data into Kafka -------------------
-        List<String> lines =
-                readLines(
-                        String.format(
-                                "kafka/%s/table/schemaevolution/%s-data-4.txt", format, format));
-        try {
-            writeRecordsToKafka(topic, lines);
-        } catch (Exception e) {
-            throw new Exception(String.format("Failed to write %s data to Kafka.", format), e);
-        }
+        writeRecordsToKafka(topic, "kafka/%s/table/schemaevolution/%s-data-4.txt", format, format);
+
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
         kafkaConfig.put(TOPIC.key(), topic);

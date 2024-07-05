@@ -35,6 +35,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadOnceTableScan;
+import org.apache.paimon.table.source.SingletonSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.BigIntType;
@@ -70,8 +71,8 @@ public class BranchesTable implements ReadonlyTable {
                             new DataField(
                                     0, "branch_name", SerializationUtils.newStringType(false)),
                             new DataField(
-                                    1, "created_from_tag", SerializationUtils.newStringType(false)),
-                            new DataField(2, "created_from_snapshot", new BigIntType(false)),
+                                    1, "created_from_tag", SerializationUtils.newStringType(true)),
+                            new DataField(2, "created_from_snapshot", new BigIntType(true)),
                             new DataField(3, "create_time", new TimestampType(false, 3))));
 
     private final FileIO fileIO;
@@ -122,26 +123,17 @@ public class BranchesTable implements ReadonlyTable {
 
         @Override
         public Plan innerPlan() {
-            FileStoreTable table = FileStoreTableFactory.create(fileIO, location);
-            long rowCount = table.branchManager().branchCount();
-            return () -> Collections.singletonList(new BranchesSplit(rowCount, location));
+            return () -> Collections.singletonList(new BranchesSplit(location));
         }
     }
 
-    private static class BranchesSplit implements Split {
+    private static class BranchesSplit extends SingletonSplit {
         private static final long serialVersionUID = 1L;
 
-        private final long rowCount;
         private final Path location;
 
-        private BranchesSplit(long rowCount, Path location) {
-            this.rowCount = rowCount;
+        private BranchesSplit(Path location) {
             this.location = location;
-        }
-
-        @Override
-        public long rowCount() {
-            return rowCount;
         }
 
         @Override

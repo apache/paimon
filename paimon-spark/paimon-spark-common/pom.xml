@@ -25,7 +25,7 @@ under the License.
     <parent>
         <artifactId>paimon-spark</artifactId>
         <groupId>org.apache.paimon</groupId>
-        <version>0.8-SNAPSHOT</version>
+        <version>0.9-SNAPSHOT</version>
     </parent>
 
     <packaging>jar</packaging>
@@ -52,11 +52,6 @@ under the License.
             <groupId>org.scala-lang</groupId>
             <artifactId>scala-compiler</artifactId>
             <version>${scala.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.github.davidmoten</groupId>
-            <artifactId>hilbert-curve</artifactId>
-            <version>0.2.2</version>
         </dependency>
 
         <dependency>
@@ -91,6 +86,10 @@ under the License.
                 <exclusion>
                     <groupId>org.apache.orc</groupId>
                     <artifactId>orc-mapreduce</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.parquet</groupId>
+                    <artifactId>parquet-column</artifactId>
                 </exclusion>
             </exclusions>
         </dependency>
@@ -138,6 +137,10 @@ under the License.
                 <exclusion>
                     <groupId>org.apache.orc</groupId>
                     <artifactId>orc-core</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.parquet</groupId>
+                    <artifactId>parquet-column</artifactId>
                 </exclusion>
             </exclusions>
         </dependency>

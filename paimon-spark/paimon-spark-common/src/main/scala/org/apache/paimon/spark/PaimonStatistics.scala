@@ -22,7 +22,7 @@ import org.apache.paimon.stats
 import org.apache.paimon.stats.ColStats
 import org.apache.paimon.types.DataType
 
-import org.apache.spark.sql.Utils
+import org.apache.spark.sql.PaimonUtils
 import org.apache.spark.sql.catalyst.plans.logical.ColumnStat
 import org.apache.spark.sql.connector.expressions.NamedReference
 import org.apache.spark.sql.connector.read.Statistics
@@ -34,7 +34,7 @@ import scala.collection.JavaConverters._
 
 case class PaimonStatistics[T <: PaimonBaseScan](scan: T) extends Statistics {
 
-  private lazy val rowCount: Long = scan.getSplits.map(_.rowCount).sum
+  private lazy val rowCount: Long = scan.getInputPartitions.map(_.rowCount()).sum
 
   private lazy val scannedTotalSize: Long = rowCount * scan.readSchema().defaultSize
 
@@ -48,19 +48,21 @@ case class PaimonStatistics[T <: PaimonBaseScan](scan: T) extends Statistics {
     if (paimonStats.isPresent) paimonStats.get().mergedRecordCount() else OptionalLong.of(rowCount)
 
   override def columnStats(): java.util.Map[NamedReference, ColumnStatistics] = {
-    val requiredFields = scan.readSchema().fieldNames.toList.asJava
+    val requiredFields = scan.requiredStatsSchema.fieldNames
     val resultMap = new java.util.HashMap[NamedReference, ColumnStatistics]()
     if (paimonStats.isPresent) {
       val paimonColStats = paimonStats.get().colStats()
-      scan.tableRowType.getFields
-        .stream()
-        .filter(
-          field => requiredFields.contains(field.name) && paimonColStats.containsKey(field.name()))
-        .forEach(
-          f =>
+      scan.tableRowType.getFields.asScala
+        .filter {
+          field => requiredFields.contains(field.name) && paimonColStats.containsKey(field.name())
+        }
+        .foreach {
+          field =>
             resultMap.put(
-              Utils.fieldReference(f.name()),
-              PaimonColumnStats(f.`type`(), paimonColStats.get(f.name()))))
+              PaimonUtils.fieldReference(field.name()),
+              PaimonColumnStats(field.`type`(), paimonColStats.get(field.name()))
+            )
+        }
     }
     resultMap
   }

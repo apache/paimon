@@ -19,38 +19,25 @@
 package org.apache.paimon.lookup;
 
 /** Strategy for lookup. */
-public enum LookupStrategy {
-    NO_LOOKUP(false, false),
-
-    CHANGELOG_ONLY(true, false),
-
-    DELETION_VECTOR_ONLY(false, true),
-
-    CHANGELOG_AND_DELETION_VECTOR(true, true);
+public class LookupStrategy {
 
     public final boolean needLookup;
+
+    public final boolean isFirstRow;
 
     public final boolean produceChangelog;
 
     public final boolean deletionVector;
 
-    LookupStrategy(boolean produceChangelog, boolean deletionVector) {
+    private LookupStrategy(boolean isFirstRow, boolean produceChangelog, boolean deletionVector) {
+        this.isFirstRow = isFirstRow;
         this.produceChangelog = produceChangelog;
         this.deletionVector = deletionVector;
-        this.needLookup = produceChangelog || deletionVector;
+        this.needLookup = produceChangelog || deletionVector || isFirstRow;
     }
 
-    public static LookupStrategy from(boolean produceChangelog, boolean deletionVector) {
-        for (LookupStrategy strategy : values()) {
-            if (strategy.produceChangelog == produceChangelog
-                    && strategy.deletionVector == deletionVector) {
-                return strategy;
-            }
-        }
-        throw new IllegalArgumentException(
-                "Invalid combination of produceChangelog : "
-                        + produceChangelog
-                        + " and deletionVector : "
-                        + deletionVector);
+    public static LookupStrategy from(
+            boolean isFirstRow, boolean produceChangelog, boolean deletionVector) {
+        return new LookupStrategy(isFirstRow, produceChangelog, deletionVector);
     }
 }

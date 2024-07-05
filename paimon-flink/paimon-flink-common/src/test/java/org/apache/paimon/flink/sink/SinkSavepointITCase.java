@@ -29,12 +29,7 @@ import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.core.execution.SavepointFormatType;
 import org.apache.flink.runtime.jobgraph.SavepointRestoreSettings;
 import org.apache.flink.runtime.scheduler.stopwithsavepoint.StopWithSavepointStoppingException;
-import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
-import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
-import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.apache.flink.util.ExceptionUtils;
@@ -42,7 +37,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
-import java.time.Duration;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -135,20 +129,19 @@ public class SinkSavepointITCase extends AbstractTestBase {
             SavepointRestoreSettings.toConfiguration(savepointRestoreSettings, conf);
         }
 
-        EnvironmentSettings settings = EnvironmentSettings.newInstance().inStreamingMode().build();
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment(conf);
-        StreamTableEnvironment tEnv = StreamTableEnvironment.create(env, settings);
-        tEnv.getConfig()
-                .getConfiguration()
-                .set(ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL, Duration.ofMillis(500));
-        tEnv.getConfig().getConfiguration().set(StateBackendOptions.STATE_BACKEND, "filesystem");
-        tEnv.getConfig()
-                .getConfiguration()
-                .set(CheckpointingOptions.CHECKPOINTS_DIRECTORY, "file://" + path + "/checkpoint");
-        // input data must be strictly ordered for us to check changelog results
-        tEnv.getConfig()
-                .getConfiguration()
-                .set(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 1);
+        TableEnvironment tEnv =
+                tableEnvironmentBuilder()
+                        .streamingMode()
+                        .checkpointIntervalMs(500)
+                        // input data must be strictly ordered for us to check changelog results
+                        .parallelism(1)
+                        .allowRestart()
+                        .setConf(conf)
+                        .setConf(StateBackendOptions.STATE_BACKEND, "filesystem")
+                        .setConf(
+                                CheckpointingOptions.CHECKPOINTS_DIRECTORY,
+                                "file://" + path + "/checkpoint")
+                        .build();
 
         String createCatalogSql =
                 String.join(
@@ -205,9 +198,7 @@ public class SinkSavepointITCase extends AbstractTestBase {
     }
 
     private void checkRecoverFromSavepointBatchResult() throws Exception {
-        EnvironmentSettings settings = EnvironmentSettings.newInstance().inBatchMode().build();
-        TableEnvironment tEnv = TableEnvironment.create(settings);
-
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql(
                 String.join(
                         "\n",
@@ -234,9 +225,7 @@ public class SinkSavepointITCase extends AbstractTestBase {
     }
 
     private void checkRecoverFromSavepointStreamingResult() throws Exception {
-        EnvironmentSettings settings = EnvironmentSettings.newInstance().inStreamingMode().build();
-        TableEnvironment tEnv = TableEnvironment.create(settings);
-
+        TableEnvironment tEnv = tableEnvironmentBuilder().streamingMode().build();
         tEnv.executeSql(
                 String.join(
                         "\n",

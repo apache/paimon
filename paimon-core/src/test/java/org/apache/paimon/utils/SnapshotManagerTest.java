@@ -18,11 +18,13 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.Changelog;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -71,7 +73,7 @@ public class SnapshotManagerTest {
         int firstSnapshotId = random.nextInt(1, 100);
         for (int i = 0; i < numSnapshots; i++) {
             Snapshot snapshot = createSnapshotWithMillis(firstSnapshotId + i, millis.get(i));
-            localFileIO.writeFileUtf8(
+            localFileIO.tryToWriteAtomic(
                     snapshotManager.snapshotPath(firstSnapshotId + i), snapshot.toJson());
         }
 
@@ -84,7 +86,7 @@ public class SnapshotManagerTest {
                 // pick a random time equal to one of the snapshots
                 time = millis.get(random.nextInt(numSnapshots));
             }
-            Long actual = snapshotManager.earlierThanTimeMills(time);
+            Long actual = snapshotManager.earlierThanTimeMills(time, false);
 
             if (millis.get(numSnapshots - 1) < time) {
                 assertThat(actual).isEqualTo(firstSnapshotId + numSnapshots - 1);
@@ -108,7 +110,7 @@ public class SnapshotManagerTest {
         // create 10 snapshots
         for (long i = 0; i < 10; i++) {
             Snapshot snapshot = createSnapshotWithMillis(i, millis + i * 1000);
-            localFileIO.writeFileUtf8(snapshotManager.snapshotPath(i), snapshot.toJson());
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
         }
         // smaller than the second snapshot return the first snapshot
         assertThat(snapshotManager.earlierOrEqualTimeMills(millis + 999).timeMillis())
@@ -119,6 +121,21 @@ public class SnapshotManagerTest {
         // larger than the second snapshot return the second snapshot
         assertThat(snapshotManager.earlierOrEqualTimeMills(millis + 1001).timeMillis())
                 .isEqualTo(millis + 1000);
+    }
+
+    @Test
+    public void testlaterOrEqualWatermark() throws IOException {
+        long millis = Long.MIN_VALUE;
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                new SnapshotManager(localFileIO, new Path(tempDir.toString()));
+        // create 10 snapshots
+        for (long i = 0; i < 10; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, millis, Long.MIN_VALUE);
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+        // smaller than the second snapshot
+        assertThat(snapshotManager.laterOrEqualWatermark(millis + 999)).isNull();
     }
 
     private Snapshot createSnapshotWithMillis(long id, long millis) {
@@ -139,6 +156,47 @@ public class SnapshotManagerTest {
                 null,
                 null,
                 null);
+    }
+
+    private Snapshot createSnapshotWithMillis(long id, long millis, long watermark) {
+        return new Snapshot(
+                id,
+                0L,
+                null,
+                null,
+                null,
+                null,
+                null,
+                0L,
+                Snapshot.CommitKind.APPEND,
+                millis,
+                null,
+                null,
+                null,
+                null,
+                watermark,
+                null);
+    }
+
+    private Changelog createChangelogWithMillis(long id, long millis) {
+        return new Changelog(
+                new Snapshot(
+                        id,
+                        0L,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        0L,
+                        Snapshot.CommitKind.APPEND,
+                        millis,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null));
     }
 
     @Test
@@ -166,7 +224,7 @@ public class SnapshotManagerTest {
                             null,
                             null,
                             null);
-            localFileIO.writeFileUtf8(snapshotManager.snapshotPath(i), snapshot.toJson());
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
         }
 
         // read all
@@ -233,5 +291,30 @@ public class SnapshotManagerTest {
         thread.join();
 
         assertThat(exception.get()).hasMessageContaining("Fails to read snapshot from path");
+    }
+
+    @Test
+    public void testLongLivedChangelog() throws Exception {
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                new SnapshotManager(localFileIO, new Path(tempDir.toString()));
+        long millis = 1L;
+        for (long i = 1; i <= 5; i++) {
+            Changelog changelog = createChangelogWithMillis(i, millis + i * 1000);
+            localFileIO.tryToWriteAtomic(
+                    snapshotManager.longLivedChangelogPath(i), changelog.toJson());
+        }
+
+        for (long i = 6; i <= 10; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, millis + i * 1000);
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+
+        Assertions.assertThat(snapshotManager.earliestLongLivedChangelogId()).isEqualTo(1);
+        Assertions.assertThat(snapshotManager.latestChangelogId()).isEqualTo(10);
+        Assertions.assertThat(snapshotManager.latestLongLivedChangelogId()).isEqualTo(5);
+        Assertions.assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(6);
+        Assertions.assertThat(snapshotManager.latestSnapshotId()).isEqualTo(10);
+        Assertions.assertThat(snapshotManager.changelog(1)).isNotNull();
     }
 }

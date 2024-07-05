@@ -18,7 +18,4 @@
 
 package org.apache.paimon.spark.sql
 
-class AnalyzeTableTest extends AnalyzeTableTestBase {
-
-  override protected def supportsColStats(): Boolean = false
-}
+class AnalyzeTableTest extends AnalyzeTableTestBase {}

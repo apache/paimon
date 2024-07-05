@@ -25,16 +25,18 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatWriterFactory;
-import org.apache.paimon.format.TableStatsExtractor;
+import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.statistics.FieldStatsCollector;
+import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.StatsCollectorFactories;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -81,9 +83,12 @@ public class KeyValueFileWriterFactory {
         return formatContext.pathFactory(level);
     }
 
-    public RollingFileWriter<KeyValue, DataFileMeta> createRollingMergeTreeFileWriter(int level) {
+    public RollingFileWriter<KeyValue, DataFileMeta> createRollingMergeTreeFileWriter(
+            int level, FileSource fileSource) {
         return new RollingFileWriter<>(
-                () -> createDataFileWriter(formatContext.pathFactory(level).newPath(), level),
+                () ->
+                        createDataFileWriter(
+                                formatContext.pathFactory(level).newPath(), level, fileSource),
                 suggestedFileSize);
     }
 
@@ -91,11 +96,14 @@ public class KeyValueFileWriterFactory {
         return new RollingFileWriter<>(
                 () ->
                         createDataFileWriter(
-                                formatContext.pathFactory(level).newChangelogPath(), level),
+                                formatContext.pathFactory(level).newChangelogPath(),
+                                level,
+                                FileSource.APPEND),
                 suggestedFileSize);
     }
 
-    private KeyValueDataFileWriter createDataFileWriter(Path path, int level) {
+    private KeyValueDataFileWriter createDataFileWriter(
+            Path path, int level, FileSource fileSource) {
         KeyValueSerializer kvSerializer = new KeyValueSerializer(keyType, valueType);
         return new KeyValueDataFileWriter(
                 fileIO,
@@ -108,11 +116,27 @@ public class KeyValueFileWriterFactory {
                 schemaId,
                 level,
                 formatContext.compression(level),
-                options);
+                options,
+                fileSource);
     }
 
     public void deleteFile(String filename, int level) {
         fileIO.deleteQuietly(formatContext.pathFactory(level).toPath(filename));
+    }
+
+    public void copyFile(String sourceFileName, String targetFileName, int level)
+            throws IOException {
+        Path sourcePath = formatContext.pathFactory(level).toPath(sourceFileName);
+        Path targetPath = formatContext.pathFactory(level).toPath(targetFileName);
+        fileIO.copyFile(sourcePath, targetPath, true);
+    }
+
+    public FileIO getFileIO() {
+        return fileIO;
+    }
+
+    public Path newChangelogPath(int level) {
+        return formatContext.pathFactory(level).newChangelogPath();
     }
 
     public static Builder builder(
@@ -182,7 +206,7 @@ public class KeyValueFileWriterFactory {
         private final Function<Integer, String> level2Format;
         private final Function<Integer, String> level2Compress;
 
-        private final Map<String, Optional<TableStatsExtractor>> format2Extractor;
+        private final Map<String, Optional<SimpleStatsExtractor>> format2Extractor;
         private final Map<String, DataFilePathFactory> format2PathFactory;
         private final Map<String, FormatWriterFactory> format2WriterFactory;
 
@@ -207,7 +231,7 @@ public class KeyValueFileWriterFactory {
             this.format2Extractor = new HashMap<>();
             this.format2PathFactory = new HashMap<>();
             this.format2WriterFactory = new HashMap<>();
-            FieldStatsCollector.Factory[] statsCollectorFactories =
+            SimpleColStatsCollector.Factory[] statsCollectorFactories =
                     StatsCollectorFactories.createStatsFactories(options, rowType.getFieldNames());
             for (String format : parentFactories.keySet()) {
                 format2PathFactory.put(
@@ -216,7 +240,7 @@ public class KeyValueFileWriterFactory {
 
                 FileFormat fileFormat = FileFormat.getFileFormat(options.toConfiguration(), format);
                 // In avro format, minValue, maxValue, and nullCount are not counted, set
-                // StatsExtractor is Optional.empty() and will use TableStatsCollector to collect
+                // StatsExtractor is Optional.empty() and will use SimpleStatsExtractor to collect
                 // stats
                 format2Extractor.put(
                         format,
@@ -229,7 +253,7 @@ public class KeyValueFileWriterFactory {
         }
 
         @Nullable
-        private TableStatsExtractor extractor(int level) {
+        private SimpleStatsExtractor extractor(int level) {
             return format2Extractor.get(level2Format.apply(level)).orElse(null);
         }
 

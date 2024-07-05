@@ -18,30 +18,43 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.io.CompactIncrement;
-import org.apache.paimon.io.NewFilesIncrement;
+import org.apache.paimon.io.DataIncrement;
+
+import javax.annotation.Nullable;
 
 /** Changes to commit. */
 public class CommitIncrement {
 
-    private final NewFilesIncrement newFilesIncrement;
+    private final DataIncrement dataIncrement;
     private final CompactIncrement compactIncrement;
+    @Nullable private final CompactDeletionFile compactDeletionFile;
 
-    public CommitIncrement(NewFilesIncrement newFilesIncrement, CompactIncrement compactIncrement) {
-        this.newFilesIncrement = newFilesIncrement;
+    public CommitIncrement(
+            DataIncrement dataIncrement,
+            CompactIncrement compactIncrement,
+            @Nullable CompactDeletionFile compactDeletionFile) {
+        this.dataIncrement = dataIncrement;
         this.compactIncrement = compactIncrement;
+        this.compactDeletionFile = compactDeletionFile;
     }
 
-    public NewFilesIncrement newFilesIncrement() {
-        return newFilesIncrement;
+    public DataIncrement newFilesIncrement() {
+        return dataIncrement;
     }
 
     public CompactIncrement compactIncrement() {
         return compactIncrement;
     }
 
+    @Nullable
+    public CompactDeletionFile compactDeletionFile() {
+        return compactDeletionFile;
+    }
+
     @Override
     public String toString() {
-        return newFilesIncrement.toString() + "\n" + compactIncrement;
+        return dataIncrement.toString() + "\n" + compactIncrement + "\n" + compactDeletionFile;
     }
 }

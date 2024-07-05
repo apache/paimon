@@ -25,7 +25,6 @@ import org.apache.paimon.annotation.Documentation.ExcludeFromDocumentation;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.MemorySize;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.Description;
 import org.apache.paimon.options.description.InlineElement;
@@ -36,7 +35,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.STREAMING_READ_MODE;
 import static org.apache.paimon.options.ConfigOptions.key;
 import static org.apache.paimon.options.description.TextElement.text;
@@ -47,6 +45,8 @@ public class FlinkConnectorOptions {
     public static final String NONE = "none";
 
     public static final String TABLE_DYNAMIC_OPTION_PREFIX = "paimon";
+
+    public static final int MIN_CLUSTERING_SAMPLE_FACTOR = 20;
 
     @ExcludeFromDocumentation("Confused without log system")
     public static final ConfigOption<String> LOG_SYSTEM =
@@ -145,17 +145,6 @@ public class FlinkConnectorOptions {
                                     + " is set to "
                                     + ChangelogProducer.FULL_COMPACTION.name()
                                     + ", full compaction will be constantly triggered after this interval.");
-
-    public static final ConfigOption<Boolean> CHANGELOG_PRODUCER_LOOKUP_WAIT =
-            key("changelog-producer.lookup-wait")
-                    .booleanType()
-                    .defaultValue(true)
-                    .withDescription(
-                            "When "
-                                    + CoreOptions.CHANGELOG_PRODUCER.key()
-                                    + " is set to "
-                                    + ChangelogProducer.LOOKUP.name()
-                                    + ", commit will wait for changelog generation by lookup.");
 
     public static final ConfigOption<WatermarkEmitStrategy> SCAN_WATERMARK_EMIT_STRATEGY =
             key("scan.watermark.emit.strategy")
@@ -311,6 +300,19 @@ public class FlinkConnectorOptions {
                             "Specific dynamic partition refresh interval for lookup, "
                                     + "scan all partitions and obtain corresponding partition.");
 
+    public static final ConfigOption<Boolean> LOOKUP_REFRESH_ASYNC =
+            ConfigOptions.key("lookup.refresh.async")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to refresh lookup table in an async thread.");
+
+    public static final ConfigOption<Integer> LOOKUP_REFRESH_ASYNC_PENDING_SNAPSHOT_COUNT =
+            ConfigOptions.key("lookup.refresh.async.pending-snapshot-count")
+                    .intType()
+                    .defaultValue(5)
+                    .withDescription(
+                            "If the pending snapshot count exceeds the threshold, lookup operator will refresh the table in sync.");
+
     public static final ConfigOption<Boolean> SINK_AUTO_TAG_FOR_SAVEPOINT =
             ConfigOptions.key("sink.savepoint.auto-tag")
                     .booleanType()
@@ -332,6 +334,97 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "Sink committer memory to control heap memory of global committer.");
 
+    public static final ConfigOption<Boolean> SINK_COMMITTER_OPERATOR_CHAINING =
+            ConfigOptions.key("sink.committer-operator-chaining")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Allow sink committer and writer operator to be chained together");
+
+    public static final ConfigOption<Duration> PARTITION_IDLE_TIME_TO_DONE =
+            key("partition.idle-time-to-done")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Set a time duration when a partition has no new data after this time duration, "
+                                    + "mark the done status to indicate that the data is ready.");
+
+    public static final ConfigOption<Duration> PARTITION_TIME_INTERVAL =
+            key("partition.time-interval")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "You can specify time interval for partition, for example, "
+                                    + "daily partition is '1 d', hourly partition is '1 h'.");
+
+    public static final ConfigOption<String> PARTITION_MARK_DONE_ACTION =
+            key("partition.mark-done-action")
+                    .stringType()
+                    .defaultValue("success-file")
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "Action to mark a partition done is to notify the downstream application that the partition"
+                                                    + " has finished writing, the partition is ready to be read.")
+                                    .linebreak()
+                                    .text("1. 'success-file': add '_success' file to directory.")
+                                    .linebreak()
+                                    .text(
+                                            "2. 'done-partition': add 'xxx.done' partition to metastore.")
+                                    .linebreak()
+                                    .text(
+                                            "Both can be configured at the same time: 'done-partition,success-file'.")
+                                    .build());
+
+    public static final ConfigOption<Boolean> PARTITION_MARK_DONE_WHEN_END_INPUT =
+            ConfigOptions.key("partition.end-input-to-done")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether mark the done status to indicate that the data is ready when end input.");
+
+    public static final ConfigOption<String> CLUSTERING_COLUMNS =
+            key("sink.clustering.by-columns")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Specifies the column name(s) used for comparison during range partitioning, in the format 'columnName1,columnName2'. "
+                                    + "If not set or set to an empty string, it indicates that the range partitioning feature is not enabled. "
+                                    + "This option will be effective only for bucket unaware table without primary keys and batch execution mode.");
+
+    public static final ConfigOption<String> CLUSTERING_STRATEGY =
+            key("sink.clustering.strategy")
+                    .stringType()
+                    .defaultValue("auto")
+                    .withDescription(
+                            "Specifies the comparison algorithm used for range partitioning, including 'zorder', 'hilbert', and 'order', "
+                                    + "corresponding to the z-order curve algorithm, hilbert curve algorithm, and basic type comparison algorithm, "
+                                    + "respectively. When not configured, it will automatically determine the algorithm based on the number of columns "
+                                    + "in 'sink.clustering.by-columns'. 'order' is used for 1 column, 'zorder' for less than 5 columns, "
+                                    + "and 'hilbert' for 5 or more columns.");
+
+    public static final ConfigOption<Boolean> CLUSTERING_SORT_IN_CLUSTER =
+            key("sink.clustering.sort-in-cluster")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Indicates whether to further sort data belonged to each sink task after range partitioning.");
+
+    public static final ConfigOption<Integer> CLUSTERING_SAMPLE_FACTOR =
+            key("sink.clustering.sample-factor")
+                    .intType()
+                    .defaultValue(100)
+                    .withDescription(
+                            "Specifies the sample factor. Let S represent the total number of samples, F represent the sample factor, "
+                                    + "and P represent the sink parallelism, then S=F×P. The minimum allowed sample factor is 20.");
+
+    public static final ConfigOption<Long> END_INPUT_WATERMARK =
+            key("end-input.watermark")
+                    .longType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Optional endInput watermark used in case of batch mode or bounded stream.");
+
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();
         final List<ConfigOption<?>> list = new ArrayList<>(fields.length);
@@ -345,20 +438,6 @@ public class FlinkConnectorOptions {
             }
         }
         return list;
-    }
-
-    public static boolean prepareCommitWaitCompaction(Options options) {
-        if (options.get(DELETION_VECTORS_ENABLED)) {
-            // DeletionVector (DV) is maintained in the compaction thread, but it needs to be
-            // read into a file during prepareCommit (write thread) to commit it.
-            // We must set waitCompaction to true so that there are no multiple threads
-            // operating DV simultaneously.
-            return true;
-        }
-
-        ChangelogProducer changelogProducer = options.get(CoreOptions.CHANGELOG_PRODUCER);
-        return changelogProducer == ChangelogProducer.LOOKUP
-                && options.get(CHANGELOG_PRODUCER_LOOKUP_WAIT);
     }
 
     /** The mode of lookup cache. */

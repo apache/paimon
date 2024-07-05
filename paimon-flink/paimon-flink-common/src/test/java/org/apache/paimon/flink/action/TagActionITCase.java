@@ -53,6 +53,7 @@ public class TagActionITCase extends ActionITCaseBase {
                         rowType,
                         Collections.emptyList(),
                         Collections.singletonList("k"),
+                        Collections.emptyList(),
                         Collections.emptyMap());
 
         StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
@@ -125,6 +126,7 @@ public class TagActionITCase extends ActionITCaseBase {
                         rowType,
                         Collections.emptyList(),
                         Collections.singletonList("k"),
+                        Collections.emptyList(),
                         Collections.emptyMap());
 
         StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
@@ -153,7 +155,7 @@ public class TagActionITCase extends ActionITCaseBase {
                     .run();
         } else {
             callProcedure(
-                    String.format("CALL sys.create_tag('%s.%s', 'tag2', 2)", database, tableName));
+                    String.format("CALL sys.create_tag('%s.%s', 'tag2',  2)", database, tableName));
         }
         assertThat(tagManager.tagExists("tag2")).isTrue();
     }

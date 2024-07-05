@@ -209,7 +209,7 @@ public class PrimaryKeyFileDataTableTest extends FileDataFilterTestBase {
                                             .read()
                                             .dataSplits());
                     // filter with "kt" = 116 in schema0
-                    TableRead read = table.newRead().withFilter(builder.equal(4, 116));
+                    TableRead read = table.newRead().withFilter(builder.equal(4, 116L));
 
                     assertThat(getResult(read, splits, STREAMING_SCHEMA_0_ROW_TO_STRING))
                             .hasSameElementsAs(

@@ -26,6 +26,9 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Random;
 
+import static org.apache.paimon.utils.RandomUtil.randomBytes;
+import static org.apache.paimon.utils.RandomUtil.randomString;
+
 /* This file is based on source code from the Iceberg Project (http://iceberg.apache.org/), licensed by the Apache
  * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
  * additional information regarding copyright ownership. */
@@ -352,8 +355,8 @@ public class TestZOrderByteUtil {
         ByteBuffer aBuffer = ByteBuffer.allocate(128);
         ByteBuffer bBuffer = ByteBuffer.allocate(128);
         for (int i = 0; i < NUM_TESTS; i++) {
-            String aString = randomString();
-            String bString = randomString();
+            String aString = randomString(50);
+            String bString = randomString(50);
             int stringCompare = Integer.signum(aString.compareTo(bString));
             byte[] aBytes = ZOrderByteUtils.stringToOrderedBytes(aString, 128, aBuffer).array();
             byte[] bBytes = ZOrderByteUtils.stringToOrderedBytes(bString, 128, bBuffer).array();
@@ -380,8 +383,8 @@ public class TestZOrderByteUtil {
         ByteBuffer aBuffer = ByteBuffer.allocate(128);
         ByteBuffer bBuffer = ByteBuffer.allocate(128);
         for (int i = 0; i < NUM_TESTS; i++) {
-            byte[] aBytesRaw = randomBytes();
-            byte[] bBytesRaw = randomBytes();
+            byte[] aBytesRaw = randomBytes(50);
+            byte[] bBytesRaw = randomBytes(50);
             int stringCompare =
                     Integer.signum(
                             UnsignedBytes.lexicographicalComparator()
@@ -404,22 +407,5 @@ public class TestZOrderByteUtil {
                     stringCompare,
                     byteCompare);
         }
-    }
-
-    private byte[] randomBytes() {
-        byte[] binary = new byte[random.nextInt(50)];
-        random.nextBytes(binary);
-        return binary;
-    }
-
-    private String randomString() {
-        int length = random.nextInt(50);
-        byte[] buffer = new byte[length];
-
-        for (int i = 0; i < length; i += 1) {
-            buffer[i] = (byte) ('a' + random.nextInt(26));
-        }
-
-        return new String(buffer);
     }
 }

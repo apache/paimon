@@ -38,10 +38,16 @@ public class FieldCountAgg extends FieldAggregator {
     public Object agg(Object accumulator, Object inputField) {
         Object count;
         if (accumulator == null || inputField == null) {
-            count = (accumulator == null ? 1 : accumulator);
+            count = (accumulator == null ? (inputField == null ? 0 : 1) : accumulator);
         } else {
             // ordered by type root definition
             switch (fieldType.getTypeRoot()) {
+                case TINYINT:
+                    count = (byte) ((byte) accumulator + 1);
+                    break;
+                case SMALLINT:
+                    count = (short) ((short) accumulator + 1);
+                    break;
                 case INTEGER:
                     count = (int) accumulator + 1;
                     break;
@@ -59,10 +65,16 @@ public class FieldCountAgg extends FieldAggregator {
     public Object retract(Object accumulator, Object inputField) {
         Object count;
         if (accumulator == null || inputField == null) {
-            count = (accumulator == null ? 1 : accumulator);
+            count = (accumulator == null ? (inputField == null ? 0 : -1) : accumulator);
         } else {
             // ordered by type root definition
             switch (fieldType.getTypeRoot()) {
+                case TINYINT:
+                    count = (byte) ((byte) accumulator - 1);
+                    break;
+                case SMALLINT:
+                    count = (short) ((short) accumulator - 1);
+                    break;
                 case INTEGER:
                     count = (int) accumulator - 1;
                     break;

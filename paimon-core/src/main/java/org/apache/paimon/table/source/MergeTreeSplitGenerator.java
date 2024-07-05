@@ -61,6 +61,11 @@ public class MergeTreeSplitGenerator implements SplitGenerator {
     }
 
     @Override
+    public boolean alwaysRawConvertible() {
+        return deletionVectorsEnabled || mergeEngine == FIRST_ROW;
+    }
+
+    @Override
     public List<SplitGroup> splitForBatch(List<DataFileMeta> files) {
         boolean rawConvertible =
                 files.stream().allMatch(file -> file.level() != 0 && withoutDeleteRow(file));
@@ -144,6 +149,7 @@ public class MergeTreeSplitGenerator implements SplitGenerator {
     }
 
     private boolean withoutDeleteRow(DataFileMeta dataFileMeta) {
-        return dataFileMeta.deleteRowCount().map(count -> count == 0L).orElse(false);
+        // null to true to be compatible with old version
+        return dataFileMeta.deleteRowCount().map(count -> count == 0L).orElse(true);
     }
 }

@@ -25,12 +25,14 @@ import org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ArrayNode;
 
+import org.apache.flink.api.java.tuple.Tuple3;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -82,9 +84,8 @@ public class CanalRecordParser extends RecordParser {
         return !isNull(node) && node.asBoolean();
     }
 
-    public CanalRecordParser(
-            boolean caseSensitive, TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        super(caseSensitive, typeMapping, computedColumns);
+    public CanalRecordParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
+        super(typeMapping, computedColumns);
     }
 
     @Override
@@ -140,15 +141,6 @@ public class CanalRecordParser extends RecordParser {
                 schema, new TypeReference<LinkedHashMap<String, String>>() {});
     }
 
-    private LinkedHashMap<String, DataType> toPaimonFieldTypes(
-            LinkedHashMap<String, String> originalFieldTypes) {
-        LinkedHashMap<String, DataType> paimonFieldTypes = new LinkedHashMap<>();
-        originalFieldTypes.forEach(
-                (name, type) ->
-                        paimonFieldTypes.put(name, MySqlTypeUtils.toDataType(type, typeMapping)));
-        return paimonFieldTypes;
-    }
-
     @Override
     protected String primaryField() {
         return "pkNames";
@@ -160,30 +152,35 @@ public class CanalRecordParser extends RecordParser {
     }
 
     @Override
-    protected Map<String, String> extractRowData(
-            JsonNode record, LinkedHashMap<String, DataType> paimonFieldTypes) {
+    protected Map<String, String> extractRowData(JsonNode record, RowType.Builder rowTypeBuilder) {
         LinkedHashMap<String, String> originalFieldTypes = tryExtractOriginalFieldTypes();
         Map<String, Object> recordMap =
                 JsonSerdeUtil.convertValue(record, new TypeReference<Map<String, Object>>() {});
         Map<String, String> rowData = new HashMap<>();
 
         if (originalFieldTypes != null) {
-            paimonFieldTypes.putAll(toPaimonFieldTypes(originalFieldTypes));
-            for (Map.Entry<String, Object> entry : recordMap.entrySet()) {
-                String fieldName = entry.getKey();
-                String originalType = originalFieldTypes.get(fieldName);
-                String newValue =
-                        transformValue(Objects.toString(entry.getValue(), null), originalType);
-                rowData.put(fieldName, newValue);
+            for (Map.Entry<String, String> e : originalFieldTypes.entrySet()) {
+                String originalName = e.getKey();
+                String originalType = e.getValue();
+                Tuple3<String, Integer, Integer> typeInfo =
+                        MySqlTypeUtils.getTypeInfo(originalType);
+                DataType paimonDataType =
+                        MySqlTypeUtils.toDataType(
+                                typeInfo.f0, typeInfo.f1, typeInfo.f2, typeMapping);
+                rowTypeBuilder.field(originalName, paimonDataType);
+
+                String filedValue = Objects.toString(recordMap.get(originalName), null);
+                String newValue = transformValue(filedValue, typeInfo.f0, originalType);
+                rowData.put(originalName, newValue);
             }
         } else {
-            paimonFieldTypes.putAll(fillDefaultTypes(record));
+            fillDefaultTypes(record, rowTypeBuilder);
             for (Map.Entry<String, Object> entry : recordMap.entrySet()) {
                 rowData.put(entry.getKey(), Objects.toString(entry.getValue(), null));
             }
         }
 
-        evalComputedColumns(rowData, paimonFieldTypes);
+        evalComputedColumns(rowData, rowTypeBuilder);
         return rowData;
     }
 
@@ -198,12 +195,10 @@ public class CanalRecordParser extends RecordParser {
                 .collect(Collectors.toMap(newData::get, oldData::get));
     }
 
-    private String transformValue(@Nullable String oldValue, String mySqlType) {
+    private String transformValue(@Nullable String oldValue, String shortType, String mySqlType) {
         if (oldValue == null) {
             return null;
         }
-
-        String shortType = MySqlTypeUtils.getShortType(mySqlType);
 
         if (MySqlTypeUtils.isSetType(shortType)) {
             return CanalFieldParser.convertSet(oldValue, mySqlType);

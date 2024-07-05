@@ -34,6 +34,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.TraceableFileIO;
 
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -111,6 +112,13 @@ public class CdcMultiplexRecordChannelComputerTest {
 
         for (Tuple2<Identifier, Schema> tableAndSchema : tables) {
             catalog.createTable(tableAndSchema.f0, tableAndSchema.f1, false);
+        }
+    }
+
+    @AfterEach
+    public void after() throws Exception {
+        if (catalog != null) {
+            catalog.close();
         }
     }
 

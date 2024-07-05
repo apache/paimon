@@ -29,9 +29,7 @@ import javax.annotation.Nullable;
 import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -46,6 +44,13 @@ public interface DeletionVector {
      * @param position The position of the row to be marked as deleted.
      */
     void delete(long position);
+
+    /**
+     * merge another {@link DeletionVector} to this current one.
+     *
+     * @param deletionVector the other {@link DeletionVector}
+     */
+    void merge(DeletionVector deletionVector);
 
     /**
      * Marks the row at the specified position as deleted.
@@ -76,6 +81,9 @@ public interface DeletionVector {
      * @return true if the deletion vector is empty, false if it contains deletions.
      */
     boolean isEmpty();
+
+    /** @return the number of distinct integers added to the DeletionVector. */
+    long getCardinality();
 
     /**
      * Serializes the deletion vector to a byte array for storage or transmission.
@@ -115,7 +123,9 @@ public interface DeletionVector {
                         "Size not match, actual size: "
                                 + actualLength
                                 + ", expert size: "
-                                + deletionFile.length());
+                                + deletionFile.length()
+                                + ", file path: "
+                                + path);
             }
             int magicNum = dis.readInt();
             if (magicNum == BitmapDeletionVector.MAGIC_NUMBER) {
@@ -139,23 +149,13 @@ public interface DeletionVector {
 
     static Factory factory(
             FileIO fileIO, List<DataFileMeta> files, @Nullable List<DeletionFile> deletionFiles) {
-        if (deletionFiles == null) {
-            return emptyFactory();
-        }
-        Map<String, DeletionFile> fileToDeletion = new HashMap<>();
-        for (int i = 0; i < files.size(); i++) {
-            DeletionFile deletionFile = deletionFiles.get(i);
-            if (deletionFile != null) {
-                fileToDeletion.put(files.get(i).fileName(), deletionFile);
-            }
-        }
+        DeletionFile.Factory factory = DeletionFile.factory(files, deletionFiles);
         return fileName -> {
-            DeletionFile deletionFile = fileToDeletion.get(fileName);
-            if (deletionFile == null) {
-                return Optional.empty();
+            Optional<DeletionFile> deletionFile = factory.create(fileName);
+            if (deletionFile.isPresent()) {
+                return Optional.of(DeletionVector.read(fileIO, deletionFile.get()));
             }
-
-            return Optional.of(DeletionVector.read(fileIO, deletionFile));
+            return Optional.empty();
         };
     }
 

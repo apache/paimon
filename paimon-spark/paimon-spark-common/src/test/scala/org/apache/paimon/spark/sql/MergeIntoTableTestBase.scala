@@ -618,7 +618,31 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase {
                      |THEN INSERT (a, b, c) values (a, b, c)
                      |""".stripMargin)
       }.getMessage
-      assert(error.contains("Only support to merge into table with primary keys."))
+      assert(error.contains("Only support to MergeInto table with primary keys."))
+    }
+  }
+
+  test(s"Paimon MergeInto: update on source eq target condition") {
+    withTable("source", "target") {
+      Seq((1, 100, "c11"), (3, 300, "c33")).toDF("a", "b", "c").createOrReplaceTempView("source")
+
+      sql(s"""
+             |CREATE TABLE target (a INT, b INT, c STRING)
+             |TBLPROPERTIES ('primary-key'='a')
+             |""".stripMargin)
+      sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
+
+      sql(s"""
+             |MERGE INTO target
+             |USING source
+             |ON source.a = target.a
+             |WHEN MATCHED THEN
+             |UPDATE SET a = source.a, b = source.b, c = source.c
+             |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT * FROM target ORDER BY a, b"),
+        Row(1, 100, "c11") :: Row(2, 20, "c2") :: Nil)
     }
   }
 }

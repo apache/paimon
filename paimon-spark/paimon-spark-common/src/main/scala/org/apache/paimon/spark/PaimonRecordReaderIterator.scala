@@ -18,22 +18,31 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.data.{InternalRow => PaimonInternalRow}
+import org.apache.paimon.data.{BinaryString, GenericRow, InternalRow => PaimonInternalRow, JoinedRow}
 import org.apache.paimon.fs.Path
 import org.apache.paimon.reader.{FileRecordIterator, RecordReader}
+import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.utils.CloseableIterator
 
-import org.apache.spark.sql.Utils
+import org.apache.spark.sql.PaimonUtils
 
 import java.io.IOException
 
-case class PaimonRecordReaderIterator(reader: RecordReader[PaimonInternalRow])
+case class PaimonRecordReaderIterator(
+    reader: RecordReader[PaimonInternalRow],
+    metadataColumns: Seq[PaimonMetadataColumn])
   extends CloseableIterator[PaimonInternalRow] {
 
   private var lastFilePath: Path = _
+  private var isFileRecordIterator: Boolean = false
   private var currentIterator: RecordReader.RecordIterator[PaimonInternalRow] = readBatch()
   private var advanced = false
   private var currentResult: PaimonInternalRow = _
+
+  private val needMetadata = metadataColumns.nonEmpty
+  private val metadataRow: GenericRow =
+    GenericRow.of(Array.fill(metadataColumns.size)(null.asInstanceOf[AnyRef]): _*)
+  private val joinedRow: JoinedRow = JoinedRow.join(null, metadataRow)
 
   override def hasNext: Boolean = {
     if (currentIterator == null) {
@@ -61,7 +70,7 @@ case class PaimonRecordReaderIterator(reader: RecordReader[PaimonInternalRow])
       }
     } finally {
       reader.close()
-      Utils.unsetInputFileName()
+      PaimonUtils.unsetInputFileName()
     }
   }
 
@@ -69,11 +78,13 @@ case class PaimonRecordReaderIterator(reader: RecordReader[PaimonInternalRow])
     val iter = reader.readBatch()
     iter match {
       case fileRecordIterator: FileRecordIterator[_] =>
+        isFileRecordIterator = true
         if (lastFilePath != fileRecordIterator.filePath()) {
-          Utils.setInputFileName(fileRecordIterator.filePath().toUri.toString)
+          PaimonUtils.setInputFileName(fileRecordIterator.filePath().toUri.toString)
           lastFilePath = fileRecordIterator.filePath()
         }
       case _ =>
+        isFileRecordIterator = false
     }
     iter
   }
@@ -84,7 +95,22 @@ case class PaimonRecordReaderIterator(reader: RecordReader[PaimonInternalRow])
       try {
         var stop = false
         while (!stop) {
-          currentResult = currentIterator.next
+          val dataRow = currentIterator.next()
+          if (dataRow != null) {
+            if (needMetadata) {
+              if (!isFileRecordIterator) {
+                throw new RuntimeException(
+                  "There need be FileRecoredIterator when metadata columns are required.")
+              }
+              updateMetadataRow(currentIterator.asInstanceOf[FileRecordIterator[PaimonInternalRow]])
+              currentResult = joinedRow.replace(dataRow, metadataRow)
+            } else {
+              currentResult = dataRow
+            }
+          } else {
+            currentResult = null
+          }
+
           if (currentResult != null) {
             stop = true
           } else {
@@ -100,6 +126,18 @@ case class PaimonRecordReaderIterator(reader: RecordReader[PaimonInternalRow])
         case e: IOException =>
           throw new RuntimeException(e)
       }
+    }
+  }
+
+  private def updateMetadataRow(fileRecordIterator: FileRecordIterator[PaimonInternalRow]): Unit = {
+    metadataColumns.zipWithIndex.foreach {
+      case (metadataColumn, index) =>
+        metadataColumn.name match {
+          case PaimonMetadataColumn.ROW_INDEX.name =>
+            metadataRow.setField(index, fileRecordIterator.returnedPosition())
+          case PaimonMetadataColumn.FILE_PATH.name =>
+            metadataRow.setField(index, BinaryString.fromString(lastFilePath.toUri.toString))
+        }
     }
   }
 }

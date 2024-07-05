@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.FileSystemCatalogOptions;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.schema.SchemaChange;
@@ -51,6 +52,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
@@ -295,11 +297,11 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         + "MODIFY COLUMN v1 VARCHAR(20), "
                         // I'd love to change COMMENT to DEFAULT
                         // however debezium parser seems to have a bug here
-                        + "ADD COLUMN (v5 DOUBLE, v6 DECIMAL(5, 3), `$% ^,& *(` VARCHAR(10) COMMENT 'Hi, v700 DOUBLE \\', v701 INT a test'), "
+                        + "ADD COLUMN (v5 DOUBLE, v6 DECIMAL(5, 3), `$% ^,& *(` VARCHAR(10), v7 INTEGER COMMENT 'Hi, v700 DOUBLE \\', v701 INT a test'), "
                         + "MODIFY v2 BIGINT");
         statement.executeUpdate(
                 "INSERT INTO schema_evolution_multiple VALUES "
-                        + "(2, 'long_string_two', 2000000000000, 'string_2', 20, 20.5, 20.002, 'test_2')");
+                        + "(2, 'long_string_two', 2000000000000, 'string_2', 20, 20.5, 20.002, 'test_2', 200)");
         rowType =
                 RowType.of(
                         new DataType[] {
@@ -310,13 +312,16 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             DataTypes.INT(),
                             DataTypes.DOUBLE(),
                             DataTypes.DECIMAL(5, 3),
-                            DataTypes.VARCHAR(10)
+                            DataTypes.VARCHAR(10),
+                            DataTypes.INT(),
                         },
-                        new String[] {"_id", "v1", "v2", "v3", "v4", "v5", "v6", "$% ^,& *("});
+                        new String[] {
+                            "_id", "v1", "v2", "v3", "v4", "v5", "v6", "$% ^,& *(", "v7"
+                        });
         expected =
                 Arrays.asList(
-                        "+I[1, one, 10, string_1, NULL, NULL, NULL, NULL]",
-                        "+I[2, long_string_two, 2000000000000, string_2, 20, 20.5, 20.002, test_2]");
+                        "+I[1, one, 10, string_1, NULL, NULL, NULL, NULL, NULL]",
+                        "+I[2, long_string_two, 2000000000000, string_2, 20, 20.5, 20.002, test_2, 200]");
         waitForResult(expected, table, rowType, primaryKeys);
     }
 
@@ -649,6 +654,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         new String[] {"a", "b", "c"}),
                 Collections.emptyList(),
                 Collections.singletonList("a"),
+                Collections.emptyList(),
                 new HashMap<>());
 
         MySqlSyncTableAction action =
@@ -674,7 +680,9 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                 .satisfies(
                         anyCauseMatches(
                                 IllegalArgumentException.class,
-                                "Specified primary key 'pk' does not exist in source tables or computed columns [pt, _id, v1]."));
+                                "For sink table "
+                                        + tableName
+                                        + ", not all specified primary keys '[pk]' exist in source tables or computed columns '[pt, _id, v1]'."));
     }
 
     @Test
@@ -689,8 +697,9 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                 .satisfies(
                         anyCauseMatches(
                                 IllegalArgumentException.class,
-                                "Primary keys are not specified. "
-                                        + "Also, can't infer primary keys from source table schemas because "
+                                "Failed to set specified primary keys for sink table "
+                                        + tableName
+                                        + ". Also, can't infer primary keys from source table schemas because "
                                         + "source tables have no primary keys or have different primary keys."));
     }
 
@@ -734,7 +743,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         "_date_format_timestamp=date_format(_timestamp,yyyyMMdd)",
                         "_substring_date1=substring(_date,2)",
                         "_substring_date2=substring(_timestamp,5,10)",
-                        "_truncate_date=trUNcate(pk,2)"); // test case-insensitive too
+                        "_truncate_date=trUNcate(pk,2)", // test case-insensitive too
+                        "_constant=cast(11,INT)");
 
         MySqlSyncTableAction action =
                 syncTableActionBuilder(mySqlConfig)
@@ -785,7 +795,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             DataTypes.STRING(),
                             DataTypes.STRING(),
                             DataTypes.STRING(),
-                            DataTypes.INT().notNull()
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT()
                         },
                         new String[] {
                             "pk",
@@ -815,12 +826,13 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             "_date_format_timestamp",
                             "_substring_date1",
                             "_substring_date2",
-                            "_truncate_date"
+                            "_truncate_date",
+                            "_constant"
                         });
         List<String> expected =
                 Arrays.asList(
-                        "+I[1, 19439, 2022-01-01T14:30, 2021-09-15T15:00:10, 2023, 2022, 2021, 3, 1, 9, 23, 1, 15, 0, 14, 15, 0, 30, 0, 0, 0, 10, 2023, 2022-01-01, 20210915, 23-03-23, 09-15, 0]",
-                        "+I[2, 19439, NULL, NULL, 2023, NULL, NULL, 3, NULL, NULL, 23, NULL, NULL, 0, NULL, NULL, 0, NULL, NULL, 0, NULL, NULL, 2023, NULL, NULL, 23-03-23, NULL, 2]");
+                        "+I[1, 19439, 2022-01-01T14:30, 2021-09-15T15:00:10, 2023, 2022, 2021, 3, 1, 9, 23, 1, 15, 0, 14, 15, 0, 30, 0, 0, 0, 10, 2023, 2022-01-01, 20210915, 23-03-23, 09-15, 0, 11]",
+                        "+I[2, 19439, NULL, NULL, 2023, NULL, NULL, 3, NULL, NULL, 23, NULL, NULL, 0, NULL, NULL, 0, NULL, NULL, 0, NULL, NULL, 2023, NULL, NULL, 23-03-23, NULL, 2, 11]");
         waitForResult(expected, table, rowType, Arrays.asList("pk", "_year_date"));
     }
 
@@ -1098,6 +1110,50 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
+    public void testOptionsChangeInExistingTable() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put("bucket", "1");
+        options.put("sink.parallelism", "1");
+        options.put("sequence.field", "_timestamp");
+
+        createFileStoreTable(
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(), DataTypes.DATE(), DataTypes.TIMESTAMP(0)
+                        },
+                        new String[] {"pk", "_date", "_timestamp"}),
+                Collections.emptyList(),
+                Collections.singletonList("pk"),
+                Collections.emptyList(),
+                options);
+
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", DATABASE_NAME);
+        mySqlConfig.put("table-name", "test_exist_options_change");
+        Map<String, String> tableConfig = new HashMap<>();
+        // update immutable options
+        tableConfig.put("sequence.field", "_date");
+        // update existing options
+        tableConfig.put("sink.parallelism", "2");
+        // add new options
+        tableConfig.put("snapshot.expire.limit", "1000");
+
+        MySqlSyncTableAction action =
+                syncTableActionBuilder(mySqlConfig)
+                        .withPrimaryKeys("pk")
+                        .withTableConfig(tableConfig)
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        FileStoreTable table = getFileStoreTable();
+
+        assertThat(table.options().get("bucket")).isEqualTo("1");
+        assertThat(table.options().get("sequence.field")).isEqualTo("_timestamp");
+        assertThat(table.options().get("sink.parallelism")).isEqualTo("2");
+        assertThat(table.options().get("snapshot.expire.limit")).isEqualTo("1000");
+    }
+
+    @Test
     @Timeout(60)
     public void testMetadataColumns() throws Exception {
         try (Statement statement = getStatement()) {
@@ -1262,6 +1318,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                 RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"k"}),
                 Collections.emptyList(),
                 Collections.singletonList("k"),
+                Collections.emptyList(),
                 Collections.singletonMap(BUCKET.key(), "1"));
 
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
@@ -1277,5 +1334,89 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
         FileStoreTable table = getFileStoreTable();
         assertThat(table.options().get(BUCKET.key())).isEqualTo("1");
+    }
+
+    @Test
+    @Timeout(60)
+    public void testColumnCommentChangeInExistingTable() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put("bucket", "1");
+        options.put("sink.parallelism", "1");
+
+        RowType rowType =
+                RowType.builder()
+                        .field("pk", DataTypes.INT().notNull(), "pk comment")
+                        .field("c1", DataTypes.DATE(), "c1 comment")
+                        .field("c2", DataTypes.VARCHAR(10).notNull(), "c2 comment")
+                        .build();
+
+        createFileStoreTable(
+                rowType,
+                Collections.emptyList(),
+                Collections.singletonList("pk"),
+                Collections.emptyList(),
+                options);
+
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", DATABASE_NAME);
+        mySqlConfig.put("table-name", "test_exist_column_comment_change");
+
+        // Flink cdc 2.3 does not support collecting field comments, and existing paimon table field
+        // comments will not be changed.
+        MySqlSyncTableAction action =
+                syncTableActionBuilder(mySqlConfig)
+                        .withPrimaryKeys("pk")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        FileStoreTable table = getFileStoreTable();
+        Map<String, DataField> actual =
+                table.schema().fields().stream()
+                        .collect(Collectors.toMap(DataField::name, Function.identity()));
+        assertThat(actual.get("pk").description()).isEqualTo("pk comment");
+        assertThat(actual.get("c1").description()).isEqualTo("c1 comment");
+        assertThat(actual.get("c2").description()).isEqualTo("c2 comment");
+    }
+
+    @Test
+    @Timeout(60)
+    public void testWriteOnlyAndSchemaEvolution() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "write_only_and_schema_evolution");
+        mySqlConfig.put("table-name", "t");
+
+        Map<String, String> tableConfig = getBasicTableConfig();
+        tableConfig.put(CoreOptions.WRITE_ONLY.key(), "true");
+
+        MySqlSyncTableAction action =
+                syncTableActionBuilder(mySqlConfig).withTableConfig(tableConfig).build();
+
+        runActionWithDefaultEnv(action);
+        FileStoreTable table = getFileStoreTable();
+
+        try (Statement statement = getStatement()) {
+            statement.executeUpdate("USE write_only_and_schema_evolution");
+            statement.executeUpdate("INSERT INTO t VALUES (1, 'one'), (2, 'two')");
+            RowType rowType =
+                    RowType.of(
+                            new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                            new String[] {"k", "v1"});
+            List<String> primaryKeys = Collections.singletonList("k");
+            List<String> expected = Arrays.asList("+I[1, one]", "+I[2, two]");
+            waitForResult(expected, table, rowType, primaryKeys);
+
+            statement.executeUpdate("ALTER TABLE t ADD COLUMN v2 INT");
+            statement.executeUpdate("UPDATE t SET v2 = 1 WHERE k = 1");
+
+            rowType =
+                    RowType.of(
+                            new DataType[] {
+                                DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.INT()
+                            },
+                            new String[] {"k", "v1", "v2"});
+            expected = Arrays.asList("+I[1, one, 1]", "+I[2, two, NULL]");
+            waitForResult(expected, table, rowType, primaryKeys);
+        }
     }
 }
