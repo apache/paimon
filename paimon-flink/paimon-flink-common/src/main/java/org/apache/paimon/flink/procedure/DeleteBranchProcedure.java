@@ -40,10 +40,13 @@ public class DeleteBranchProcedure extends ProcedureBase {
         return IDENTIFIER;
     }
 
-    public String[] call(ProcedureContext procedureContext, String tableId, String branchName)
+    public String[] call(ProcedureContext procedureContext, String tableId, String branchStr)
             throws Catalog.TableNotExistException {
-        Table table = catalog.getTable(Identifier.fromString(tableId));
-        table.deleteBranch(branchName);
+        String[] branchs = branchStr.split(",");
+        for (String branch : branchs) {
+            Table table = catalog.getTable(Identifier.fromString(tableId));
+            table.deleteBranch(branch);
+        }
 
         return new String[] {"Success"};
     }

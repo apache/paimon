@@ -68,7 +68,7 @@ class CreateAndDeleteBranchProcedureTest extends PaimonSparkTestBase with Stream
             stream.processAllAvailable()
             checkAnswer(query(), Row(1, "a") :: Row(2, "b2") :: Nil)
 
-            // create tag
+            // create tags
             checkAnswer(
               spark.sql(
                 "CALL paimon.sys.create_tag(table => 'test.T', tag => 'test_tag', snapshot => 2)"),
@@ -106,6 +106,29 @@ class CreateAndDeleteBranchProcedureTest extends PaimonSparkTestBase with Stream
                 "CALL paimon.sys.delete_branch(table => 'test.T', branch => 'test_branch')"),
               Row(true) :: Nil)
             assert(!branchManager.branchExists("test_branch"))
+
+            // create branch with snapshot2
+            checkAnswer(
+              spark.sql(
+                "CALL paimon.sys.create_branch(table => 'test.T', branch => 'snapshot_branch_2', snapshot => 2)"),
+              Row(true) :: Nil)
+            assert(branchManager.branchExists("snapshot_branch_2"))
+
+            // create branch with snapshot3
+            checkAnswer(
+              spark.sql(
+                "CALL paimon.sys.create_branch(table => 'test.T', branch => 'snapshot_branch_3', snapshot => 3)"),
+              Row(true) :: Nil)
+            assert(branchManager.branchExists("snapshot_branch_3"))
+
+            // delete branch:snapshot_branch_2 and snapshot_branch_3
+            checkAnswer(
+              spark.sql(
+                "CALL paimon.sys.delete_branch(table => 'test.T', branch => 'snapshot_branch_2,snapshot_branch_3')"),
+              Row(true) :: Nil)
+            assert(!branchManager.branchExists("snapshot_branch_2"))
+            assert(!branchManager.branchExists("snapshot_branch_3"))
+
           } finally {
             stream.stop()
           }

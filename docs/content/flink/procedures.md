@@ -127,7 +127,7 @@ All available procedures are listed below.
       <td>
          To delete a tag. Arguments:
             <li>identifier: the target table identifier. Cannot be empty.</li>
-            <li>tagName: name of the tag to be deleted.</li>
+            <li>tagName: name of the tag to be deleted.If you specify multiple tags, delimiter is ','.</li>
       </td>
       <td>
          CALL sys.delete_tag('default.T', 'my_tag')
@@ -331,7 +331,7 @@ All available procedures are listed below.
       <td>
          To delete a branch. Arguments:
             <li>identifier: the target table identifier. Cannot be empty.</li>
-            <li>branchName: name of the branch to be deleted.</li>
+            <li>branchName: name of the branch to be deleted.If you specify multiple branches, delimiter is ','.</li>
       </td>
       <td>
          CALL sys.delete_branch('default.T', 'branch1')
