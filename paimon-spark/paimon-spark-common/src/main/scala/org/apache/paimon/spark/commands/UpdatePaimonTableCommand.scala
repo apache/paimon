@@ -25,6 +25,7 @@ import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.schema.SparkSystemColumns.ROW_KIND_COL
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.CommitMessage
+import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.types.RowKind
 
 import org.apache.spark.sql.{Column, Row, SparkSession}
@@ -32,7 +33,7 @@ import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.catalyst.expressions.{Alias, Expression, If}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.{Assignment, Filter, Project, SupportsSubquery}
-import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2ScanRelation}
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.lit
 
 case class UpdatePaimonTableCommand(
@@ -77,50 +78,101 @@ case class UpdatePaimonTableCommand(
   private def performUpdateForNonPkTable(sparkSession: SparkSession): Seq[CommitMessage] = {
     // Step1: the candidate data splits which are filtered by Paimon Predicate.
     val candidateDataSplits = findCandidateDataSplits(condition, relation.output)
-    val fileNameToMeta = candidateFileMap(candidateDataSplits)
+    val dataFilePathToMeta = candidateFileMap(candidateDataSplits)
 
-    val commitMessages = if (candidateDataSplits.isEmpty) {
+    if (candidateDataSplits.isEmpty) {
       // no data spilt need to be rewrote
-      logDebug("No file need to rerote. It's an empty Commit.")
+      logDebug("No file need to rewrote. It's an empty Commit.")
       Seq.empty[CommitMessage]
     } else {
-      // Step2: extract out the exactly files, which must have at least one record to delete.
-      val touchedFilePaths =
-        findTouchedFiles(candidateDataSplits, condition, relation, sparkSession)
+      val pathFactory = fileStore.pathFactory()
+      if (deletionVectorsEnabled) {
+        // Step2: collect all the deletion vectors that marks the deleted rows.
+        val deletionVectors = collectDeletionVectors(
+          candidateDataSplits,
+          dataFilePathToMeta,
+          condition,
+          relation,
+          sparkSession)
 
-      // Step3: the smallest range of data files that need to be rewritten.
-      val touchedFiles = touchedFilePaths.map {
-        file => fileNameToMeta.getOrElse(file, throw new RuntimeException(s"Missing file: $file"))
-      }
-
-      // Step4: build a dataframe that contains the unchanged and updated data, and write out them.
-      val columns = updateExpressions.zip(relation.output).map {
-        case (update, origin) =>
-          val updated = if (condition == TrueLiteral) {
-            update
-          } else {
-            If(condition, update, origin)
+        deletionVectors.cache()
+        try {
+          // Step3: write these updated data
+          val touchedDataSplits = deletionVectors.collect().map {
+            SparkDeletionVectors.toDataSplit(_, root, pathFactory, dataFilePathToMeta)
           }
-          new Column(updated).as(origin.name, origin.metadata)
+          val addCommitMessage = writeOnlyUpdatedData(sparkSession, touchedDataSplits)
+
+          // Step4: write these deletion vectors.
+          val indexCommitMsg = updateDeletionVector(deletionVectors, dataFilePathToMeta, writer)
+
+          addCommitMessage ++ indexCommitMsg
+        } finally {
+          deletionVectors.unpersist()
+        }
+      } else {
+        // Step2: extract out the exactly files, which must have at least one record to delete.
+        val touchedFilePaths =
+          findTouchedFiles(candidateDataSplits, condition, relation, sparkSession)
+
+        // Step3: the smallest range of data files that need to be rewritten.
+        val touchedFiles = touchedFilePaths.map {
+          file =>
+            dataFilePathToMeta.getOrElse(file, throw new RuntimeException(s"Missing file: $file"))
+        }
+
+        // Step4: build a dataframe that contains the unchanged and updated data, and write out them.
+        val touchedDataSplits =
+          SparkDataFileMeta.convertToDataSplits(touchedFiles, rawConvertible = true, pathFactory)
+        val addCommitMessage = writeUpdatedAndUnchangedData(sparkSession, touchedDataSplits)
+
+        // Step5: convert the deleted files that need to be wrote to commit message.
+        val deletedCommitMessage = buildDeletedCommitMessage(touchedFiles)
+
+        addCommitMessage ++ deletedCommitMessage
       }
-      // append only file always set rawConvertible true.
-      val touchedDataSplits = SparkDataFileMeta.convertToDataSplits(
-        touchedFiles,
-        rawConvertible = true,
-        table.store().pathFactory())
-      val toUpdateScanRelation = Compatibility.createDataSourceV2ScanRelation(
-        relation,
-        PaimonSplitScan(table, touchedDataSplits),
-        relation.output)
-      val data = createDataset(sparkSession, toUpdateScanRelation).select(columns: _*)
-      val addCommitMessage = writer.write(data)
-
-      // Step5: convert the deleted files that need to be wrote to commit message.
-      val deletedCommitMessage = buildDeletedCommitMessage(touchedFiles)
-
-      addCommitMessage ++ deletedCommitMessage
     }
-    commitMessages
   }
 
+  private def writeOnlyUpdatedData(
+      sparkSession: SparkSession,
+      touchedDataSplits: Array[DataSplit]): Seq[CommitMessage] = {
+    val updateColumns = updateExpressions.zip(relation.output).map {
+      case (update, origin) =>
+        new Column(update).as(origin.name, origin.metadata)
+    }
+
+    val toUpdateScanRelation = Compatibility.createDataSourceV2ScanRelation(
+      relation,
+      PaimonSplitScan(table, touchedDataSplits),
+      relation.output)
+    val newPlan = if (condition == TrueLiteral) {
+      toUpdateScanRelation
+    } else {
+      Filter(condition, toUpdateScanRelation)
+    }
+    val data = createDataset(sparkSession, newPlan).select(updateColumns: _*)
+    writer.write(data)
+  }
+
+  private def writeUpdatedAndUnchangedData(
+      sparkSession: SparkSession,
+      touchedDataSplits: Array[DataSplit]): Seq[CommitMessage] = {
+    val updateColumns = updateExpressions.zip(relation.output).map {
+      case (update, origin) =>
+        val updated = if (condition == TrueLiteral) {
+          update
+        } else {
+          If(condition, update, origin)
+        }
+        new Column(updated).as(origin.name, origin.metadata)
+    }
+
+    val toUpdateScanRelation = Compatibility.createDataSourceV2ScanRelation(
+      relation,
+      PaimonSplitScan(table, touchedDataSplits),
+      relation.output)
+    val data = createDataset(sparkSession, toUpdateScanRelation).select(updateColumns: _*)
+    writer.write(data)
+  }
 }

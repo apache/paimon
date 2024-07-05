@@ -134,19 +134,7 @@ case class DeleteFromPaimonTableCommand(
 
       deletionVectors.cache()
       try {
-        // Step3: write these deletion vectors.
-        val newIndexCommitMsg = writer.persistDeletionVectors(deletionVectors)
-
-        // Step4: mark the touched index files as DELETE if needed.
-        val rewriteIndexCommitMsg = fileStore.bucketMode() match {
-          case BucketMode.BUCKET_UNAWARE =>
-            val indexEntries = getDeletedIndexFiles(dataFilePathToMeta, deletionVectors)
-            writer.buildCommitMessageFromIndexManifestEntry(indexEntries)
-          case _ =>
-            Seq.empty[CommitMessage]
-        }
-
-        newIndexCommitMsg ++ rewriteIndexCommitMsg
+        updateDeletionVector(deletionVectors, dataFilePathToMeta, writer)
       } finally {
         deletionVectors.unpersist()
       }
