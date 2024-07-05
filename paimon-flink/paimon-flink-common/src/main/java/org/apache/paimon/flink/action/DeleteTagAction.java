@@ -23,20 +23,23 @@ import java.util.Map;
 /** Delete tag action for Flink. */
 public class DeleteTagAction extends TableActionBase {
 
-    private final String tagName;
+    private final String tagNameStr;
 
     public DeleteTagAction(
             String warehouse,
             String databaseName,
             String tableName,
             Map<String, String> catalogConfig,
-            String tagName) {
+            String tagNameStr) {
         super(warehouse, databaseName, tableName, catalogConfig);
-        this.tagName = tagName;
+        this.tagNameStr = tagNameStr;
     }
 
     @Override
     public void run() throws Exception {
-        table.deleteTag(tagName);
+        String[] tagNames = tagNameStr.split(",");
+        for (String tagName : tagNames) {
+            table.deleteTag(tagName);
+        }
     }
 }

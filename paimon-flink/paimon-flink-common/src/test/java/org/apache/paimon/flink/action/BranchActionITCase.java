@@ -159,6 +159,27 @@ class BranchActionITCase extends ActionITCaseBase {
                         database, tableName));
         assertThat(branchManager.branchExists("branch_name_with_snapshotId")).isFalse();
 
+        // create branch1 and branch3
+        callProcedure(
+                String.format(
+                        "CALL sys.create_branch('%s.%s', 'branch_name_with_snapshotId_1', 1)",
+                        database, tableName));
+        assertThat(branchManager.branchExists("branch_name_with_snapshotId_1")).isTrue();
+
+        callProcedure(
+                String.format(
+                        "CALL sys.create_branch('%s.%s', 'branch_name_with_snapshotId_3', 3)",
+                        database, tableName));
+        assertThat(branchManager.branchExists("branch_name_with_snapshotId_3")).isTrue();
+
+        // delete branch1 and branch3 batch
+        callProcedure(
+                String.format(
+                        "CALL sys.delete_branch('%s.%s', 'branch_name_with_snapshotId_1,branch_name_with_snapshotId_3')",
+                        database, tableName));
+        assertThat(branchManager.branchExists("branch_name_with_snapshotId_1")).isFalse();
+        assertThat(branchManager.branchExists("branch_name_with_snapshotId_3")).isFalse();
+
         createAction(
                         CreateBranchAction.class,
                         "create_branch",

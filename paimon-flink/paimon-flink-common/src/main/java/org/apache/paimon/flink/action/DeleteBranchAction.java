@@ -23,20 +23,23 @@ import java.util.Map;
 /** Delete branch action for Flink. */
 public class DeleteBranchAction extends TableActionBase {
 
-    private final String branchName;
+    private final String branchNames;
 
     public DeleteBranchAction(
             String warehouse,
             String databaseName,
             String tableName,
             Map<String, String> catalogConfig,
-            String branchName) {
+            String branchNames) {
         super(warehouse, databaseName, tableName, catalogConfig);
-        this.branchName = branchName;
+        this.branchNames = branchNames;
     }
 
     @Override
     public void run() throws Exception {
-        table.deleteBranch(branchName);
+        String[] branches = branchNames.split(",");
+        for (String branch : branches) {
+            table.deleteBranch(branch);
+        }
     }
 }

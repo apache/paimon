@@ -168,7 +168,7 @@ This section introduce all available spark procedures about paimon.
       <td>
          To merge a branch to main branch. Arguments:
             <li>table: the target table identifier. Cannot be empty.</li>
-            <li>branch: name of the branch to be merged.</li>
+            <li>branch: name of the branch to be merged.If you specify multiple branches, delimiter is ','.</li>
       </td>
       <td>
           CALL sys.delete_branch(table => 'test_db.T', branch => 'test_branch')
