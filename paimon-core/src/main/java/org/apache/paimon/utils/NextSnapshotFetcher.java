@@ -33,10 +33,7 @@ public class NextSnapshotFetcher {
     private final SnapshotManager snapshotManager;
     private final boolean changelogDecoupled;
 
-    public NextSnapshotFetcher(
-            SnapshotManager snapshotManager,
-            boolean changelogDecoupled,
-            boolean changelogAsFollowup) {
+    public NextSnapshotFetcher(SnapshotManager snapshotManager, boolean changelogDecoupled) {
         this.snapshotManager = snapshotManager;
         this.changelogDecoupled = changelogDecoupled;
     }

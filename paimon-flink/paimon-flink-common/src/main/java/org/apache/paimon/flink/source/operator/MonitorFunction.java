@@ -135,7 +135,6 @@ public class MonitorFunction extends RichSourceFunction<Split>
             }
 
             // given that the parallelism of the function is 1, we can only have 1 retrieved items.
-
             Preconditions.checkArgument(
                     retrievedStates.size() <= 1,
                     getClass().getSimpleName() + " retrieved invalid state.");

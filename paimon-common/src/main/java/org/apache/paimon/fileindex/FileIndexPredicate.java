@@ -154,7 +154,6 @@ public class FileIndexPredicate implements Closeable {
                                     : compoundResult.or(predicate1.visit(this));
                 }
                 return compoundResult == null ? REMAIN : compoundResult;
-
             } else {
                 FileIndexResult compoundResult = null;
                 for (Predicate predicate1 : predicate.children()) {
