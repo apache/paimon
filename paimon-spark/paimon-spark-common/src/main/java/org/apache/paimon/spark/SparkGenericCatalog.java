@@ -35,7 +35,6 @@ import org.apache.spark.sql.catalyst.analysis.NoSuchTableException;
 import org.apache.spark.sql.catalyst.analysis.NonEmptyNamespaceException;
 import org.apache.spark.sql.catalyst.analysis.TableAlreadyExistsException;
 import org.apache.spark.sql.catalyst.catalog.ExternalCatalog;
-import org.apache.spark.sql.catalyst.catalog.InMemoryCatalog;
 import org.apache.spark.sql.catalyst.catalog.SessionCatalog;
 import org.apache.spark.sql.connector.catalog.CatalogExtension;
 import org.apache.spark.sql.connector.catalog.CatalogPlugin;
@@ -236,7 +235,8 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
 
     @Override
     public final void initialize(String name, CaseInsensitiveStringMap options) {
-        SessionState sessionState = SparkSession.active().sessionState();
+        SparkSession sparkSession = SparkSession.active();
+        SessionState sessionState = sparkSession.sessionState();
         Configuration hadoopConf = sessionState.newHadoopConf();
         SparkConf sparkConf = new SparkConf();
         if (options.containsKey(METASTORE.key())
@@ -253,8 +253,8 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
                 }
             }
         }
-        if (SparkSession.active().sharedState().externalCatalog().unwrapped()
-                instanceof InMemoryCatalog) {
+        if ("in-memory"
+                .equals(sparkSession.conf().get(StaticSQLConf.CATALOG_IMPLEMENTATION().key()))) {
             LOG.warn("InMemoryCatalog here may cause bad effect.");
         }
 
