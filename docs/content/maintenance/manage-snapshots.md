@@ -296,7 +296,15 @@ submit a `remove_orphan_files` job to clean them:
 
 {{< tabs "remove_orphan_files" >}}
 
-{{< tab "Flink" >}}
+{{< tab "Spark SQL/Flink SQL" >}}
+```sql
+CALL sys.remove_orphan_files(table => "my_db.my_table", [older_than => "2023-10-31 12:00:00"])
+
+CALL sys.remove_orphan_files(table => "my_db.*", [older_than => "2023-10-31 12:00:00"])
+```
+{{< /tab >}}
+
+{{< tab "Flink Action" >}}
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -322,12 +330,8 @@ To avoid deleting files that are newly added by other writing jobs, this action 
     --older_than '2023-10-31 12:00:00'
 ```
 
-{{< /tab >}}
+The table can be `*` to clean all tables in the database.
 
-{{< tab "Spark" >}}
-```sql
-CALL sys.remove_orphan_files(table => "tableId", [older_than => "2023-10-31 12:00:00"])
-```
 {{< /tab >}}
 
 {{< /tabs >}}
