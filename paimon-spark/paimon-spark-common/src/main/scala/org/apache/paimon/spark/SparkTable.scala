@@ -44,7 +44,7 @@ case class SparkTable(table: Table)
 
   def getTable: Table = table
 
-  override def name: String = table.name
+  override def name: String = table.fullName
 
   override lazy val schema: StructType = SparkTypeUtils.fromPaimonRowType(table.rowType)
 

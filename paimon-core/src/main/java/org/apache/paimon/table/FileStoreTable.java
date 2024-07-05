@@ -22,6 +22,7 @@ import org.apache.paimon.FileStore;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestCacheFilter;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.query.LocalTableQuery;
@@ -43,6 +44,11 @@ public interface FileStoreTable extends DataTable {
     @Override
     default String name() {
         return location().getName();
+    }
+
+    @Override
+    default String fullName() {
+        return SchemaManager.fromPath(location().toUri().toString(), true).getFullName();
     }
 
     @Override
