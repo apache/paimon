@@ -29,6 +29,7 @@ import org.junit.jupiter.api.Timeout;
 
 import java.sql.Statement;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -55,8 +56,14 @@ public class MySqlSyncDatabaseTableListITCase extends MySqlActionITCaseBase {
                         : "shard_1|shard_2|shard_3|x_shard_1");
 
         MultiTablesSinkMode mode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
+
+        Map<String, String> catalogConfig = new HashMap<>();
+        catalogConfig.put("metastore", "hive");
+        catalogConfig.put("uri", "thrift://localhost:9083");
+
         MySqlSyncDatabaseAction action =
                 syncDatabaseActionBuilder(mySqlConfig)
+                        .withCatalogConfig(catalogConfig)
                         .withTableConfig(getBasicTableConfig())
                         .mergeShards(false)
                         .withMode(mode.configString())
