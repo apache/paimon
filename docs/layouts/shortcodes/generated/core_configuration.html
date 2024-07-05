@@ -721,6 +721,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td>Whether to read the changes from overwrite in streaming mode. Cannot be set to true when changelog producer is full-compaction or lookup because it will read duplicated changes.</td>
         </tr>
         <tr>
+            <td><h5>tag.automatic-completion</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to automatically complete missing tags.</td>
+        </tr>
+        <tr>
             <td><h5>tag.automatic-creation</h5></td>
             <td style="word-wrap: break-word;">none</td>
             <td><p>Enum</p></td>

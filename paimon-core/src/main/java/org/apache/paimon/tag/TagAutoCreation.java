@@ -59,6 +59,7 @@ public class TagAutoCreation {
     @Nullable private final Duration defaultTimeRetained;
     private final List<TagCallback> callbacks;
     private final Duration idlenessTimeout;
+    private final boolean automaticCompletion;
 
     private LocalDateTime nextTag;
     private long nextSnapshot;
@@ -73,6 +74,7 @@ public class TagAutoCreation {
             @Nullable Integer numRetainedMax,
             @Nullable Duration defaultTimeRetained,
             Duration idlenessTimeout,
+            boolean automaticCompletion,
             List<TagCallback> callbacks) {
         this.snapshotManager = snapshotManager;
         this.tagManager = tagManager;
@@ -84,6 +86,7 @@ public class TagAutoCreation {
         this.defaultTimeRetained = defaultTimeRetained;
         this.callbacks = callbacks;
         this.idlenessTimeout = idlenessTimeout;
+        this.automaticCompletion = automaticCompletion;
 
         this.periodHandler.validateDelay(delay);
 
@@ -155,6 +158,9 @@ public class TagAutoCreation {
         if (nextTag == null
                 || isAfterOrEqual(time.minus(delay), periodHandler.nextTagTime(nextTag))) {
             LocalDateTime thisTag = periodHandler.normalizeToPreviousTag(time);
+            if (automaticCompletion && nextTag != null) {
+                thisTag = nextTag;
+            }
             String tagName = periodHandler.timeToTag(thisTag);
             if (!tagManager.tagExists(tagName)) {
                 tagManager.createTag(snapshot, tagName, defaultTimeRetained, callbacks);
@@ -221,6 +227,7 @@ public class TagAutoCreation {
                 options.tagNumRetainedMax(),
                 options.tagDefaultTimeRetained(),
                 options.snapshotWatermarkIdleTimeout(),
+                options.tagAutomaticCompletion(),
                 callbacks);
     }
 }
