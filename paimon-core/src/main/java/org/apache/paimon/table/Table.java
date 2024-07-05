@@ -45,6 +45,10 @@ public interface Table extends Serializable {
     /** A name to identify this table. */
     String name();
 
+    default String fullName() {
+        return name();
+    }
+
     /** Returns the row type of this table. */
     RowType rowType();
 
