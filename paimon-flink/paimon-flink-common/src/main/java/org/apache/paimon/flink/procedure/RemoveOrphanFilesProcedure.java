@@ -20,14 +20,13 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.operation.OrphanFilesClean;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.procedure.ProcedureContext;
 
 import java.util.List;
 
-import static org.apache.paimon.flink.action.RemoveOrphanFilesAction.executeOrphanFilesClean;
+import static org.apache.paimon.operation.OrphanFilesClean.executeOrphanFilesClean;
 
 /**
  * Remove orphan files procedure. Usage:
@@ -63,18 +62,18 @@ public class RemoveOrphanFilesProcedure extends ProcedureBase {
         String databaseName = identifier.getDatabaseName();
         String tableName = identifier.getObjectName();
 
-        List<Pair<String, OrphanFilesClean>> tableOrphanFilesCleans =
-                OrphanFilesClean.constructOrphanFilesCleans(catalog, databaseName, tableName);
+        List<OrphanFilesClean> tableCleans =
+                OrphanFilesClean.createOrphanFilesCleans(catalog, databaseName, tableName);
 
         if (!StringUtils.isBlank(olderThan)) {
-            OrphanFilesClean.initOlderThan(olderThan, tableOrphanFilesCleans);
+            tableCleans.forEach(clean -> clean.olderThan(olderThan));
         }
 
         if (dryRun) {
-            OrphanFilesClean.initDryRun(tableOrphanFilesCleans);
+            tableCleans.forEach(clean -> clean.fileCleaner(path -> {}));
         }
 
-        return executeOrphanFilesClean(tableOrphanFilesCleans);
+        return executeOrphanFilesClean(tableCleans);
     }
 
     @Override

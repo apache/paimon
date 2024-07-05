@@ -18,12 +18,8 @@
 
 package org.apache.paimon.spark.procedure;
 
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.OrphanFilesClean;
 import org.apache.paimon.spark.catalog.WithPaimonCatalog;
-import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.ExecutorThreadFactory;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
@@ -37,15 +33,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 
-import static org.apache.paimon.operation.OrphanFilesClean.SHOW_LIMIT;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.operation.OrphanFilesClean.executeOrphanFilesClean;
 import static org.apache.spark.sql.types.DataTypes.BooleanType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
@@ -108,10 +99,10 @@ public class RemoveOrphanFilesProcedure extends BaseProcedure {
         }
         LOG.info("identifier is {}.", identifier);
 
-        List<Pair<String, OrphanFilesClean>> tableOrphanFilesCleans;
+        List<OrphanFilesClean> tableCleans;
         try {
-            tableOrphanFilesCleans =
-                    OrphanFilesClean.constructOrphanFilesCleans(
+            tableCleans =
+                    OrphanFilesClean.createOrphanFilesCleans(
                             ((WithPaimonCatalog) tableCatalog()).paimonCatalog(),
                             identifier.getDatabaseName(),
                             identifier.getObjectName());
@@ -121,64 +112,20 @@ public class RemoveOrphanFilesProcedure extends BaseProcedure {
 
         String olderThan = args.isNullAt(1) ? null : args.getString(1);
         if (!StringUtils.isBlank(olderThan)) {
-            OrphanFilesClean.initOlderThan(olderThan, tableOrphanFilesCleans);
+            tableCleans.forEach(clean -> clean.olderThan(olderThan));
         }
 
         boolean dryRun = !args.isNullAt(2) && args.getBoolean(2);
         if (dryRun) {
-            OrphanFilesClean.initDryRun(tableOrphanFilesCleans);
+            tableCleans.forEach(clean -> clean.fileCleaner(path -> {}));
         }
 
-        int availableProcessors = Runtime.getRuntime().availableProcessors();
-        ExecutorService executePool =
-                new ThreadPoolExecutor(
-                        availableProcessors,
-                        availableProcessors,
-                        1,
-                        TimeUnit.SECONDS,
-                        new LinkedBlockingQueue<>(),
-                        new ExecutorThreadFactory(
-                                Thread.currentThread().getName() + "-RemoveOrphanFiles"));
-        List<Future<List<Path>>> tasks = new ArrayList<>();
-        for (Pair<String, OrphanFilesClean> tableOrphanFilesClean : tableOrphanFilesCleans) {
-            String tableName = tableOrphanFilesClean.getLeft();
-            OrphanFilesClean orphanFilesClean = tableOrphanFilesClean.getRight();
-            Future<List<Path>> task =
-                    executePool.submit(
-                            () ->
-                                    modifyPaimonTable(
-                                            toIdentifier(tableName, tableName),
-                                            table -> {
-                                                checkArgument(table instanceof FileStoreTable);
-                                                try {
-                                                    return orphanFilesClean.clean();
-                                                } catch (Exception e) {
-                                                    throw new RuntimeException(
-                                                            "Call remove_orphan_files error", e);
-                                                }
-                                            }));
-            tasks.add(task);
-        }
+        String[] result = executeOrphanFilesClean(tableCleans);
+        List<InternalRow> rows = new ArrayList<>();
+        Arrays.stream(result)
+                .forEach(line -> rows.add(newInternalRow(UTF8String.fromString(line))));
 
-        List<Path> cleanOrphanFiles = new ArrayList<>();
-        for (Future<List<Path>> task : tasks) {
-            try {
-                cleanOrphanFiles.addAll(task.get());
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-        }
-
-        executePool.shutdownNow();
-
-        List<InternalRow> showLimitedDeletedFiles = new ArrayList<>(cleanOrphanFiles.size());
-        OrphanFilesClean.showDeletedFiles(cleanOrphanFiles, SHOW_LIMIT)
-                .forEach(
-                        deletedFile ->
-                                showLimitedDeletedFiles.add(
-                                        newInternalRow(UTF8String.fromString(deletedFile))));
-
-        return showLimitedDeletedFiles.toArray(new InternalRow[0]);
+        return rows.toArray(new InternalRow[0]);
     }
 
     public static ProcedureBuilder builder() {
