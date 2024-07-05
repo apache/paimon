@@ -50,7 +50,7 @@ CREATE TABLE my_table (
 {{< /tabs >}}
 
 The record with the largest `sequence.field` value will be the last to merge, if the values are the same, the input
-order will be used to determine which one is the last one.
+order will be used to determine which one is the last one. `sequence.field` supports fields of all data types.
 
 You can define multiple fields for `sequence.field`, for example `'update_time,flag'`, multiple fields will be compared in order.
 

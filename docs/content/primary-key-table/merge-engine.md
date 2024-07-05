@@ -354,8 +354,8 @@ By specifying `'merge-engine' = 'first-row'`, users can keep the first row of th
 `deduplicate` merge engine that in the `first-row` merge engine, it will generate insert only changelog.
 
 {{< hint info >}}
-1. You can not specify `sequence.field`.
+1. You can not specify [sequence.field]({{< ref "primary-key-table/sequence-rowkind#sequence-field" >}}).
 2. Not accept `DELETE` and `UPDATE_BEFORE` message. You can config `ignore-delete` to ignore these two kinds records.
-   {{< /hint >}}
+{{< /hint >}}
 
 This is of great help in replacing log deduplication in streaming computation.
