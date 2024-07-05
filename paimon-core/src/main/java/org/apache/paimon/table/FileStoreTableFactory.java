@@ -69,7 +69,6 @@ public class FileStoreTableFactory {
         return create(fileIO, tablePath, tableSchema, new Options(), CatalogEnvironment.empty());
     }
 
-    // 可以加 identifier
     public static FileStoreTable create(
             FileIO fileIO,
             Path tablePath,
