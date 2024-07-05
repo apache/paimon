@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.spark.PaimonHiveTestBase
+import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.{Row, SparkSession}
 import org.junit.jupiter.api.Assertions
@@ -47,6 +48,12 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                 Assertions.assertEquals(
                   getTableLocation("paimon_db.paimon_tbl"),
                   s"${dBLocation.getCanonicalPath}/paimon_tbl")
+
+                Assertions.assertEquals(
+                  "paimon_db.paimon_tbl",
+                  getPaimonScan("SELECT * FROM paimon_db.paimon_tbl").table
+                    .asInstanceOf[FileStoreTable]
+                    .fullName())
               }
             }
         }

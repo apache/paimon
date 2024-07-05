@@ -32,7 +32,6 @@ import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.operation.FileStoreCommitImpl;
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
@@ -80,7 +79,7 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
                 bucketType,
                 rowType,
                 tableName,
-                new CatalogEnvironment(Lock.emptyFactory(), null, null));
+                CatalogEnvironment.empty());
 
         this.fileIO = fileIO;
         this.commitUser = UUID.randomUUID().toString();

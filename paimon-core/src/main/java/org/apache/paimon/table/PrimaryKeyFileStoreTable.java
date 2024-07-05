@@ -28,7 +28,6 @@ import org.apache.paimon.mergetree.compact.LookupMergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.KeyValueFileStoreScan;
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
@@ -56,7 +55,7 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
     private transient KeyValueFileStore lazyStore;
 
     PrimaryKeyFileStoreTable(FileIO fileIO, Path path, TableSchema tableSchema) {
-        this(fileIO, path, tableSchema, new CatalogEnvironment(Lock.emptyFactory(), null, null));
+        this(fileIO, path, tableSchema, CatalogEnvironment.empty());
     }
 
     PrimaryKeyFileStoreTable(

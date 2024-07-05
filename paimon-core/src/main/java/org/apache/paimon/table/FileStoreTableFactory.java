@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -63,23 +62,14 @@ public class FileStoreTableFactory {
                                                 "Schema file not found in location "
                                                         + tablePath
                                                         + ". Please create table first."));
-        return create(
-                fileIO,
-                tablePath,
-                tableSchema,
-                options,
-                new CatalogEnvironment(Lock.emptyFactory(), null, null));
+        return create(fileIO, tablePath, tableSchema, options, CatalogEnvironment.empty());
     }
 
     public static FileStoreTable create(FileIO fileIO, Path tablePath, TableSchema tableSchema) {
-        return create(
-                fileIO,
-                tablePath,
-                tableSchema,
-                new Options(),
-                new CatalogEnvironment(Lock.emptyFactory(), null, null));
+        return create(fileIO, tablePath, tableSchema, new Options(), CatalogEnvironment.empty());
     }
 
+    // 可以加 identifier
     public static FileStoreTable create(
             FileIO fileIO,
             Path tablePath,

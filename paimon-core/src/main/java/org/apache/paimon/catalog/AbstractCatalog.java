@@ -350,6 +350,7 @@ public abstract class AbstractCatalog implements Catalog {
                 getDataTableLocation(identifier),
                 tableSchema,
                 new CatalogEnvironment(
+                        identifier,
                         Lock.factory(
                                 lockFactory().orElse(null), lockContext().orElse(null), identifier),
                         metastoreClientFactory(identifier).orElse(null),
