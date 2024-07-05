@@ -39,7 +39,6 @@ import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.operation.FileStoreScan;
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.MemorySize;
@@ -133,7 +132,7 @@ public class TestFileStore extends KeyValueFileStore {
                 keyValueFieldsExtractor,
                 mfFactory,
                 (new Path(root)).getName(),
-                new CatalogEnvironment(Lock.emptyFactory(), null, null));
+                CatalogEnvironment.empty());
         this.root = root;
         this.fileIO = FileIOFinder.find(new Path(root));
         this.keySerializer = new InternalRowSerializer(keyType);

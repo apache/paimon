@@ -24,7 +24,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.ManifestCommittable;
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -125,7 +124,7 @@ public class TableCommitTest {
                         new FailingFileIO(),
                         new Path(path),
                         tableSchema,
-                        new CatalogEnvironment(Lock.emptyFactory(), null, null));
+                        CatalogEnvironment.empty());
 
         String commitUser = UUID.randomUUID().toString();
         StreamTableWrite write = table.newWrite(commitUser);
@@ -212,7 +211,7 @@ public class TableCommitTest {
                         LocalFileIO.create(),
                         new Path(path),
                         tableSchema,
-                        new CatalogEnvironment(Lock.emptyFactory(), null, null));
+                        CatalogEnvironment.empty());
 
         String commitUser = UUID.randomUUID().toString();
         StreamTableWrite write = table.newWrite(commitUser);

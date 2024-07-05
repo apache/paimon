@@ -62,6 +62,16 @@ public class PrivilegedFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public String name() {
+        return wrapped.name();
+    }
+
+    @Override
+    public String fullName() {
+        return wrapped.fullName();
+    }
+
+    @Override
     public SnapshotReader newSnapshotReader() {
         privilegeChecker.assertCanSelect(identifier);
         return wrapped.newSnapshotReader();

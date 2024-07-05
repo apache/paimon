@@ -24,7 +24,6 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.operation.KeyValueFileStoreWrite;
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -132,6 +131,6 @@ public class FlinkSinkTest {
                 tablePath,
                 tableSchema,
                 options,
-                new CatalogEnvironment(Lock.emptyFactory(), null, null));
+                CatalogEnvironment.empty());
     }
 }

@@ -27,7 +27,6 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -369,10 +368,6 @@ public class SnapshotReaderTest {
                                 options.toMap(),
                                 ""));
         return FileStoreTableFactory.create(
-                fileIO,
-                tablePath,
-                tableSchema,
-                options,
-                new CatalogEnvironment(Lock.emptyFactory(), null, null));
+                fileIO, tablePath, tableSchema, options, CatalogEnvironment.empty());
     }
 }

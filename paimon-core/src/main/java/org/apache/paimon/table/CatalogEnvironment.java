@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.lineage.LineageMetaFactory;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.Lock;
@@ -34,17 +35,29 @@ public class CatalogEnvironment implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
+    @Nullable private final Identifier identifier;
     private final Lock.Factory lockFactory;
     @Nullable private final MetastoreClient.Factory metastoreClientFactory;
     @Nullable private final LineageMetaFactory lineageMetaFactory;
 
     public CatalogEnvironment(
+            @Nullable Identifier identifier,
             Lock.Factory lockFactory,
             @Nullable MetastoreClient.Factory metastoreClientFactory,
             @Nullable LineageMetaFactory lineageMetaFactory) {
+        this.identifier = identifier;
         this.lockFactory = lockFactory;
         this.metastoreClientFactory = metastoreClientFactory;
         this.lineageMetaFactory = lineageMetaFactory;
+    }
+
+    public static CatalogEnvironment empty() {
+        return new CatalogEnvironment(null, Lock.emptyFactory(), null, null);
+    }
+
+    @Nullable
+    public Identifier identifier() {
+        return identifier;
     }
 
     public Lock.Factory lockFactory() {

@@ -21,7 +21,6 @@ package org.apache.paimon.table.source.snapshot;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMetaSerializer;
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -145,10 +144,6 @@ public class ContinuousAppendAndCompactFollowUpScannerTest extends ScannerTestBa
                                 conf.toMap(),
                                 ""));
         return FileStoreTableFactory.create(
-                fileIO,
-                tablePath,
-                tableSchema,
-                conf,
-                new CatalogEnvironment(Lock.emptyFactory(), null, null));
+                fileIO, tablePath, tableSchema, conf, CatalogEnvironment.empty());
     }
 }
