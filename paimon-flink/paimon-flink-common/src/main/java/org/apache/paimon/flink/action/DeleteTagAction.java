@@ -37,9 +37,6 @@ public class DeleteTagAction extends TableActionBase {
 
     @Override
     public void run() throws Exception {
-        String[] tagNames = tagNameStr.split(",");
-        for (String tagName : tagNames) {
-            table.deleteTag(tagName);
-        }
+        table.deleteTags(tagNameStr);
     }
 }

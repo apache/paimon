@@ -38,11 +38,7 @@ public class DeleteTagProcedure extends ProcedureBase {
     public String[] call(ProcedureContext procedureContext, String tableId, String tagNameStr)
             throws Catalog.TableNotExistException {
         Table table = catalog.getTable(Identifier.fromString(tableId));
-        String[] tagNames = tagNameStr.split(",");
-        for (String tagName : tagNames) {
-            table.deleteTag(tagName);
-        }
-
+        table.deleteTags(tagNameStr);
         return new String[] {"Success"};
     }
 

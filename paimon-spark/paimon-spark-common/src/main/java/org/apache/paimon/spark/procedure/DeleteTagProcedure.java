@@ -61,14 +61,10 @@ public class DeleteTagProcedure extends BaseProcedure {
     public InternalRow[] call(InternalRow args) {
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
         String tagStr = args.getString(1);
-        String[] tags = tagStr.split(",");
-
         return modifyPaimonTable(
                 tableIdent,
                 table -> {
-                    for (String tag : tags) {
-                        table.deleteTag(tag);
-                    }
+                    table.deleteTags(tagStr);
                     InternalRow outputRow = newInternalRow(true);
                     return new InternalRow[] {outputRow};
                 });

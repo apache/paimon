@@ -37,9 +37,6 @@ public class DeleteBranchAction extends TableActionBase {
 
     @Override
     public void run() throws Exception {
-        String[] branches = branchNames.split(",");
-        for (String branch : branches) {
-            table.deleteBranch(branch);
-        }
+        table.deleteBranches(branchNames);
     }
 }
