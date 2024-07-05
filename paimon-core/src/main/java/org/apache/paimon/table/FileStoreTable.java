@@ -41,11 +41,6 @@ import java.util.Optional;
 public interface FileStoreTable extends DataTable {
 
     @Override
-    default String name() {
-        return location().getName();
-    }
-
-    @Override
     default RowType rowType() {
         return schema().logicalRowType();
     }

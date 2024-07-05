@@ -49,11 +49,10 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                   getTableLocation("paimon_db.paimon_tbl"),
                   s"${dBLocation.getCanonicalPath}/paimon_tbl")
 
-                Assertions.assertEquals(
-                  "paimon_db.paimon_tbl",
-                  getPaimonScan("SELECT * FROM paimon_db.paimon_tbl").table
-                    .asInstanceOf[FileStoreTable]
-                    .fullName())
+                val fileStoreTable = getPaimonScan("SELECT * FROM paimon_db.paimon_tbl").table
+                  .asInstanceOf[FileStoreTable]
+                Assertions.assertEquals("paimon_tbl", fileStoreTable.name())
+                Assertions.assertEquals("paimon_db.paimon_tbl", fileStoreTable.fullName())
               }
             }
         }
