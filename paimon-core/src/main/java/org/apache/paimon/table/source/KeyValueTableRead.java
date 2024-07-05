@@ -47,6 +47,7 @@ import java.util.function.Supplier;
 public final class KeyValueTableRead extends AbstractDataTableRead<KeyValue> {
 
     private final List<SplitReadProvider> readProviders;
+    private final boolean scanIgnoreDelete;
 
     private int[][] projection = null;
     private boolean forceKeepDelete = false;
@@ -56,7 +57,8 @@ public final class KeyValueTableRead extends AbstractDataTableRead<KeyValue> {
     public KeyValueTableRead(
             Supplier<MergeFileSplitRead> mergeReadSupplier,
             Supplier<RawFileSplitRead> batchRawReadSupplier,
-            TableSchema schema) {
+            TableSchema schema,
+            boolean scanIgnoreDelete) {
         super(schema);
         this.readProviders =
                 Arrays.asList(
@@ -64,6 +66,7 @@ public final class KeyValueTableRead extends AbstractDataTableRead<KeyValue> {
                         new MergeFileSplitReadProvider(mergeReadSupplier, this::assignValues),
                         new IncrementalChangelogReadProvider(mergeReadSupplier, this::assignValues),
                         new IncrementalDiffReadProvider(mergeReadSupplier, this::assignValues));
+        this.scanIgnoreDelete = scanIgnoreDelete;
     }
 
     private List<SplitRead<InternalRow>> initialized() {
@@ -115,7 +118,11 @@ public final class KeyValueTableRead extends AbstractDataTableRead<KeyValue> {
         DataSplit dataSplit = (DataSplit) split;
         for (SplitReadProvider readProvider : readProviders) {
             if (readProvider.match(dataSplit, forceKeepDelete)) {
-                return readProvider.getOrCreate().createReader(dataSplit);
+                RecordReader<InternalRow> reader =
+                        readProvider.getOrCreate().createReader(dataSplit);
+                return scanIgnoreDelete
+                        ? reader.filter(internalRow -> internalRow.getRowKind().isAdd())
+                        : reader;
             }
         }
 

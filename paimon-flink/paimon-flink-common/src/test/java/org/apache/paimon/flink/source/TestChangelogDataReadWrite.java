@@ -139,7 +139,7 @@ public class TestChangelogDataReadWrite {
                         FileFormatDiscover.of(options),
                         pathFactory,
                         options.fileIndexReadEnabled());
-        return new KeyValueTableRead(() -> read, () -> rawFileRead, null);
+        return new KeyValueTableRead(() -> read, () -> rawFileRead, null, false);
     }
 
     public List<DataFileMeta> writeFiles(

@@ -169,6 +169,13 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     @Test
+    @Timeout(1200)
+    public void testLookupChangelogIgnoreDelete() throws Exception {
+        innerTestChangelogProducing(
+                Collections.singletonList("'changelog-producer' = 'lookup'"), true);
+    }
+
+    @Test
     public void testTableReadWriteBranch() throws Exception {
         TableEnvironment sEnv =
                 tableEnvironmentBuilder()
@@ -224,6 +231,11 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     private void innerTestChangelogProducing(List<String> options) throws Exception {
+        innerTestChangelogProducing(options, false);
+    }
+
+    private void innerTestChangelogProducing(List<String> options, boolean scanIgnoreDelete)
+            throws Exception {
         TableEnvironment sEnv =
                 tableEnvironmentBuilder()
                         .streamingMode()
@@ -250,7 +262,11 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
 
         sEnv.executeSql(
                 "INSERT INTO T SELECT SUM(i) AS k, g AS v FROM `default_catalog`.`default_database`.`S` GROUP BY g");
-        CloseableIterator<Row> it = sEnv.executeSql("SELECT * FROM T").collect();
+        String selectSql =
+                scanIgnoreDelete
+                        ? "SELECT * FROM T /*+ OPTIONS('scan-ignore-delete' = 'true') */"
+                        : "SELECT * FROM T";
+        CloseableIterator<Row> it = sEnv.executeSql(selectSql).collect();
 
         // write initial data
         sEnv.executeSql(
@@ -273,22 +289,32 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                                 + "VALUES (1, 'D'), (1, 'C'), (1, 'B'), (1, 'A')")
                 .await();
 
-        // read update data
         actual.clear();
-        for (int i = 0; i < 8; i++) {
-            actual.add(it.next().toString());
-        }
+        if (scanIgnoreDelete) {
+            // read update data and ignore delete record
+            for (int i = 0; i < 4; i++) {
+                actual.add(it.next().toString());
+            }
 
-        assertThat(actual)
-                .containsExactlyInAnyOrder(
-                        "-D[1, A]",
-                        "-U[2, B]",
-                        "+U[2, A]",
-                        "-U[3, C]",
-                        "+U[3, B]",
-                        "-U[4, D]",
-                        "+U[4, C]",
-                        "+I[5, D]");
+            assertThat(actual)
+                    .containsExactlyInAnyOrder("+U[2, A]", "+U[3, B]", "+U[4, C]", "+I[5, D]");
+        } else {
+            // read update data
+            for (int i = 0; i < 8; i++) {
+                actual.add(it.next().toString());
+            }
+
+            assertThat(actual)
+                    .containsExactlyInAnyOrder(
+                            "-D[1, A]",
+                            "-U[2, B]",
+                            "+U[2, A]",
+                            "-U[3, C]",
+                            "+U[3, B]",
+                            "-U[4, D]",
+                            "+U[4, C]",
+                            "+I[5, D]");
+        }
 
         it.close();
     }

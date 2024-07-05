@@ -321,6 +321,13 @@ public class CoreOptions implements Serializable {
                             "partial-update.ignore-delete")
                     .withDescription("Whether to ignore delete records.");
 
+    public static final ConfigOption<Boolean> SCAN_IGNORE_DELETE =
+            key("scan-ignore-delete")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to ignore delete records when read changelog in streaming mode.");
+
     public static final ConfigOption<SortEngine> SORT_ENGINE =
             key("sort-engine")
                     .enumType(SortEngine.class)
@@ -1465,6 +1472,10 @@ public class CoreOptions implements Serializable {
 
     public boolean ignoreDelete() {
         return options.get(IGNORE_DELETE);
+    }
+
+    public boolean scanIgnoreDelete() {
+        return options.get(SCAN_IGNORE_DELETE);
     }
 
     public SortEngine sortEngine() {
