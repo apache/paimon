@@ -121,4 +121,12 @@ public class CombinedAwareStreamingSourceFunction
                         split -> ((DataSplit) split.f0).bucket())
                 .transform(name, typeInfo, new MultiTablesReadOperator(catalogLoader, true));
     }
+
+    @Override
+    public void close() throws Exception {
+        super.close();
+        if (tableScan != null) {
+            tableScan.close();
+        }
+    }
 }

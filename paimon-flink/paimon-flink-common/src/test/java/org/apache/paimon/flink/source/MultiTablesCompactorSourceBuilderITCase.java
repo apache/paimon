@@ -499,14 +499,15 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
             List<String> primaryKeys,
             Map<String, String> options)
             throws Exception {
-        Catalog catalog = catalogLoader().load();
-        Identifier identifier = Identifier.create(databaseName, tableName);
-        catalog.createDatabase(databaseName, true);
-        catalog.createTable(
-                identifier,
-                new Schema(rowType.getFields(), partitionKeys, primaryKeys, options, ""),
-                false);
-        return (FileStoreTable) catalog.getTable(identifier);
+        try (Catalog catalog = catalogLoader().load()) {
+            Identifier identifier = Identifier.create(databaseName, tableName);
+            catalog.createDatabase(databaseName, true);
+            catalog.createTable(
+                    identifier,
+                    new Schema(rowType.getFields(), partitionKeys, primaryKeys, options, ""),
+                    false);
+            return (FileStoreTable) catalog.getTable(identifier);
+        }
     }
 
     private GenericRow rowData(Object... values) {

@@ -58,6 +58,7 @@ import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -143,6 +144,13 @@ class StoreMultiCommitterTest {
                 Tuple2.of(secondTable, secondTableSchema));
         firstTablePath = ((FileStoreTable) catalog.getTable(firstTable)).location();
         secondTablePath = ((FileStoreTable) catalog.getTable(secondTable)).location();
+    }
+
+    @AfterEach
+    public void after() throws Exception {
+        if (catalog != null) {
+            catalog.close();
+        }
     }
 
     // ------------------------------------------------------------------------

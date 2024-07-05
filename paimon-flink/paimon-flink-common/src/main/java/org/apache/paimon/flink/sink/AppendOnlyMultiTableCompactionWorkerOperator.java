@@ -164,6 +164,11 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
             }
         }
 
+        if (catalog != null) {
+            catalog.close();
+            catalog = null;
+        }
+
         ExceptionUtils.throwMultiException(exceptions);
     }
 }

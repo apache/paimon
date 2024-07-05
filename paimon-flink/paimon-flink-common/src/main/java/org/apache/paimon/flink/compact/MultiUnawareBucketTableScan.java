@@ -25,9 +25,6 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -41,8 +38,6 @@ import java.util.regex.Pattern;
  */
 public class MultiUnawareBucketTableScan
         extends MultiTableScanBase<MultiTableAppendOnlyCompactionTask> {
-
-    private static final Logger LOG = LoggerFactory.getLogger(MultiUnawareBucketTableScan.class);
 
     protected transient Map<Identifier, AppendOnlyTableCompactionCoordinator> tablesMap;
 

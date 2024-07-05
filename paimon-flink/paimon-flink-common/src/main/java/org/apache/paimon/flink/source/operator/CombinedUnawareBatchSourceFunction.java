@@ -121,4 +121,12 @@ public class CombinedUnawareBatchSourceFunction
 
         return new DataStream<>(env, transformation);
     }
+
+    @Override
+    public void close() throws Exception {
+        super.close();
+        if (tableScan != null) {
+            tableScan.close();
+        }
+    }
 }
