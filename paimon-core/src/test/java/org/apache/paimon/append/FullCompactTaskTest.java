@@ -123,7 +123,7 @@ public class FullCompactTaskTest {
                 Collection<DataFileMeta> inputs,
                 long targetFileSize,
                 BucketedAppendCompactManager.CompactRewriter rewriter) {
-            super(inputs, targetFileSize, rewriter, null);
+            super(null, inputs, targetFileSize, rewriter, null);
         }
     }
 

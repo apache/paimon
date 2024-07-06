@@ -46,6 +46,7 @@ public class UnawareAppendDeletionFileMaintainer implements AppendDeletionFileMa
     private final IndexFileHandler indexFileHandler;
 
     private final BinaryRow partition;
+    private final Map<String, DeletionFile> dataFileToDeletionFile;
     private final Map<String, IndexManifestEntry> indexNameToEntry = new HashMap<>();
 
     private final Map<String, Map<String, DeletionFile>> indexFileToDeletionFiles = new HashMap<>();
@@ -61,6 +62,7 @@ public class UnawareAppendDeletionFileMaintainer implements AppendDeletionFileMa
             Map<String, DeletionFile> deletionFiles) {
         this.indexFileHandler = indexFileHandler;
         this.partition = partition;
+        this.dataFileToDeletionFile = deletionFiles;
         // the deletion of data files is independent
         // just create an empty maintainer
         this.maintainer = new DeletionVectorsMaintainer.Factory(indexFileHandler).create();
@@ -102,19 +104,29 @@ public class UnawareAppendDeletionFileMaintainer implements AppendDeletionFileMa
         return UNAWARE_BUCKET;
     }
 
+    public DeletionFile getDeletionFile(String dataFile) {
+        return this.dataFileToDeletionFile.get(dataFile);
+    }
+
     @Override
-    public void notifyDeletionFiles(String dataFile, DeletionVector deletionVector) {
-        DeletionVectorsIndexFile deletionVectorsIndexFile = indexFileHandler.deletionVectorsIndex();
-        DeletionFile previous = null;
-        if (dataFileToIndexFile.containsKey(dataFile)) {
-            String indexFileName = dataFileToIndexFile.get(dataFile);
-            touchedIndexFiles.add(indexFileName);
-            if (indexFileToDeletionFiles.containsKey(indexFileName)) {
-                previous = indexFileToDeletionFiles.get(indexFileName).remove(dataFile);
-            }
+    public DeletionVector getDeletionVector(String dataFile) {
+        DeletionFile deletionFile = getDeletionFile(dataFile);
+        if (deletionFile != null) {
+            return indexFileHandler.deletionVectorsIndex().readDeletionVector(deletionFile);
         }
+        return null;
+    }
+
+    public void notifyRemovedDeletionVector(String dataFile) {
+        getRemovedDeletionFile(dataFile);
+    }
+
+    @Override
+    public void notifyNewDeletionVector(String dataFile, DeletionVector deletionVector) {
+        DeletionVectorsIndexFile deletionVectorsIndexFile = indexFileHandler.deletionVectorsIndex();
+        DeletionFile previous = getRemovedDeletionFile(dataFile);
         if (previous != null) {
-            deletionVector.merge(deletionVectorsIndexFile.readDeletionVector(dataFile, previous));
+            deletionVector.merge(deletionVectorsIndexFile.readDeletionVector(previous));
         }
         maintainer.notifyNewDeletion(dataFile, deletionVector);
     }
@@ -131,6 +143,28 @@ public class UnawareAppendDeletionFileMaintainer implements AppendDeletionFileMa
                         .collect(Collectors.toList());
         result.addAll(newIndexFileEntries);
         return result;
+    }
+
+    private DeletionFile getRemovedDeletionFile(String dataFile) {
+        if (dataFileToIndexFile.containsKey(dataFile)) {
+            String indexFileName = dataFileToIndexFile.get(dataFile);
+            touchedIndexFiles.add(indexFileName);
+            if (indexFileToDeletionFiles.containsKey(indexFileName)) {
+                return indexFileToDeletionFiles.get(indexFileName).remove(dataFile);
+            }
+        }
+        return null;
+    }
+
+    public IndexFileMeta getIndexFile(String dataFile) {
+        DeletionFile deletionFile = getDeletionFile(dataFile);
+        if (deletionFile == null) {
+            return null;
+        } else {
+            IndexManifestEntry entry =
+                    this.indexNameToEntry.get(new Path(deletionFile.path()).getName());
+            return entry == null ? null : entry.indexFile();
+        }
     }
 
     @VisibleForTesting
