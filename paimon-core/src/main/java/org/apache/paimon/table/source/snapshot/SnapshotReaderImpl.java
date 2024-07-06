@@ -253,6 +253,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
             SplitGenerator splitGenerator,
             Map<BinaryRow, Map<Integer, List<DataFileMeta>>> groupedDataFiles) {
         List<DataSplit> splits = new ArrayList<>();
+        // Read deletion indexes at once to reduce file IO
+        Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> deletionIndexFilesMap =
+                deletionVectors
+                        ? indexFileHandler.scanPartitions(
+                                snapshotId, DELETION_VECTORS_INDEX, groupedDataFiles.keySet())
+                        : Collections.emptyMap();
         for (Map.Entry<BinaryRow, Map<Integer, List<DataFileMeta>>> entry :
                 groupedDataFiles.entrySet()) {
             BinaryRow partition = entry.getKey();
@@ -271,12 +277,15 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                 ? splitGenerator.splitForStreaming(bucketFiles)
                                 : splitGenerator.splitForBatch(bucketFiles);
 
+                List<IndexFileMeta> deletionIndexFiles =
+                        deletionIndexFilesMap.getOrDefault(
+                                Pair.of(partition, bucket), Collections.emptyList());
+                if (deletionIndexFiles.size() > 1) {
+                    throw new IllegalArgumentException(
+                            "Find multiple index files for one bucket: " + deletionIndexFiles);
+                }
                 IndexFileMeta deletionIndexFile =
-                        deletionVectors
-                                ? indexFileHandler
-                                        .scan(snapshotId, DELETION_VECTORS_INDEX, partition, bucket)
-                                        .orElse(null)
-                                : null;
+                        deletionIndexFiles.isEmpty() ? null : deletionIndexFiles.get(0);
                 for (SplitGenerator.SplitGroup splitGroup : splitGroups) {
                     List<DataFileMeta> dataFiles = splitGroup.files;
                     String bucketPath = pathFactory.bucketPath(partition, bucket).toString();
@@ -335,6 +344,18 @@ public class SnapshotReaderImpl implements SnapshotReader {
                         buckets.computeIfAbsent(part, k -> new HashSet<>())
                                 .addAll(bucketMap.keySet()));
 
+        // Read deletion indexes at once to reduce file IO
+        Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> beforDeletionIndexFilesMap =
+                deletionVectors
+                        ? indexFileHandler.scanPartitions(
+                                beforeSnapshotId, DELETION_VECTORS_INDEX, beforeFiles.keySet())
+                        : Collections.emptyMap();
+        Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> deletionIndexFilesMap =
+                deletionVectors
+                        ? indexFileHandler.scanPartitions(
+                                plan.snapshotId(), DELETION_VECTORS_INDEX, dataFiles.keySet())
+                        : Collections.emptyMap();
+
         for (Map.Entry<BinaryRow, Set<Integer>> entry : buckets.entrySet()) {
             BinaryRow part = entry.getKey();
             for (Integer bucket : entry.getValue()) {
@@ -360,14 +381,16 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                 .isStreaming(isStreaming)
                                 .withBucketPath(pathFactory.bucketPath(part, bucket).toString());
                 if (deletionVectors) {
+                    List<IndexFileMeta> beforeDeletionIndexes =
+                            beforDeletionIndexFilesMap.getOrDefault(
+                                    Pair.of(part, bucket), Collections.emptyList());
                     IndexFileMeta beforeDeletionIndex =
-                            indexFileHandler
-                                    .scan(beforeSnapshotId, DELETION_VECTORS_INDEX, part, bucket)
-                                    .orElse(null);
+                            beforeDeletionIndexes.isEmpty() ? null : beforeDeletionIndexes.get(0);
+                    List<IndexFileMeta> deletionIndexes =
+                            deletionIndexFilesMap.getOrDefault(
+                                    Pair.of(part, bucket), Collections.emptyList());
                     IndexFileMeta deletionIndex =
-                            indexFileHandler
-                                    .scan(plan.snapshotId(), DELETION_VECTORS_INDEX, part, bucket)
-                                    .orElse(null);
+                            deletionIndexes.isEmpty() ? null : deletionIndexes.get(0);
                     builder.withBeforeDeletionFiles(getDeletionFiles(before, beforeDeletionIndex));
                     builder.withDataDeletionFiles(getDeletionFiles(data, deletionIndex));
                 }

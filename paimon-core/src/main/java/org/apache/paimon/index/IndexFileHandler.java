@@ -34,10 +34,12 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
@@ -102,6 +104,28 @@ public class IndexFileHandler {
             if (file.indexFile().indexType().equals(indexType)
                     && file.partition().equals(partition)) {
                 result.add(file);
+            }
+        }
+
+        return result;
+    }
+
+    public Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> scanPartitions(
+            long snapshotId, String indexType, Set<BinaryRow> partitions) {
+        Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> result = new HashMap<>();
+        Snapshot snapshot = snapshotManager.snapshot(snapshotId);
+        String indexManifest = snapshot.indexManifest();
+        if (indexManifest == null) {
+            return Collections.emptyMap();
+        }
+
+        List<IndexManifestEntry> allFiles = indexManifestFile.read(indexManifest);
+        for (IndexManifestEntry file : allFiles) {
+            if (file.indexFile().indexType().equals(indexType)
+                    && partitions.contains(file.partition())) {
+                result.computeIfAbsent(
+                                Pair.of(file.partition(), file.bucket()), k -> new ArrayList<>())
+                        .add(file.indexFile());
             }
         }
 
