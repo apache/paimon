@@ -595,6 +595,7 @@ public class AppendOnlyWriterTest {
                         Executors.newSingleThreadScheduledExecutor(
                                 new ExecutorThreadFactory("compaction-thread")),
                         toCompact,
+                        null,
                         MIN_FILE_NUM,
                         MAX_FILE_NUM,
                         targetFileSize,

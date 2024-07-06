@@ -369,7 +369,7 @@ public class CompactProcedure extends BaseProcedure {
                                                                     taskIterator.next());
                                                     messages.add(
                                                             messageSer.serialize(
-                                                                    task.doCompact(write)));
+                                                                    task.doCompact(table, write)));
                                                 }
                                                 return messages.iterator();
                                             } finally {

@@ -208,6 +208,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 WriterContainer<T> writerContainer = entry.getValue();
 
                 CommitIncrement increment = writerContainer.writer.prepareCommit(waitCompaction);
+                List<IndexFileMeta> deletedIndexFiles = new ArrayList<>();
                 List<IndexFileMeta> newIndexFiles = new ArrayList<>();
                 if (writerContainer.indexMaintainer != null) {
                     newIndexFiles.addAll(writerContainer.indexMaintainer.prepareCommit());
@@ -216,13 +217,17 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 if (compactDeletionFile != null) {
                     compactDeletionFile.getOrCompute().ifPresent(newIndexFiles::add);
                 }
+                if (increment.indexIncrement() != null) {
+                    newIndexFiles.addAll(increment.indexIncrement().newIndexFiles());
+                    deletedIndexFiles.addAll(increment.indexIncrement().deletedIndexFiles());
+                }
                 CommitMessageImpl committable =
                         new CommitMessageImpl(
                                 partition,
                                 bucket,
                                 increment.newFilesIncrement(),
                                 increment.compactIncrement(),
-                                new IndexIncrement(newIndexFiles));
+                                new IndexIncrement(newIndexFiles, deletedIndexFiles));
                 result.add(committable);
 
                 if (committable.isEmpty()) {
@@ -333,6 +338,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         for (State<T> state : states) {
             RecordWriter<T> writer =
                     createWriter(
+                            state.baseSnapshotId,
                             state.partition,
                             state.bucket,
                             state.dataFiles,
@@ -408,6 +414,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                                 ignorePreviousFiles ? null : latestSnapshotId, partition, bucket);
         RecordWriter<T> writer =
                 createWriter(
+                        latestSnapshotId,
                         partition.copy(),
                         bucket,
                         restoreFiles,
@@ -460,6 +467,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     protected void notifyNewWriter(RecordWriter<T> writer) {}
 
     protected abstract RecordWriter<T> createWriter(
+            @Nullable Long snapshotId,
             BinaryRow partition,
             int bucket,
             List<DataFileMeta> restoreFiles,
