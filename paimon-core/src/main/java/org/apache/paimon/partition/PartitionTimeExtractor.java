@@ -18,6 +18,8 @@
 
 package org.apache.paimon.partition;
 
+import org.apache.paimon.CoreOptions;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -112,15 +114,18 @@ public class PartitionTimeExtractor {
             }
             dateTime = toLocalDateTime(timestampString, this.formatter);
         } catch (Exception e) {
-            String paritionInfos =
+            String partitionInfos =
                     IntStream.range(0, partitionKeys.size())
                             .mapToObj(i -> partitionKeys.get(i) + ":" + partitionValues.get(i))
                             .collect(Collectors.joining(","));
             LOG.warn(
-                    "Partition {} can't be extract datetime to expire."
+                    "Partition {} can't uses '{}' formatter to extract datetime to expire."
                             + " Please check the partition expiration configuration or"
-                            + " manually delete the partition using the drop-partition command.",
-                    paritionInfos);
+                            + " manually delete the partition using the drop-partition command or"
+                            + " use 'update-time' expiration strategy by set {}, the strategy support non-date formatted partition.",
+                    partitionInfos,
+                    this.formatter,
+                    CoreOptions.PARTITION_EXPIRATION_STRATEGY.key());
         }
         return dateTime;
     }

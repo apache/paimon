@@ -251,19 +251,20 @@ All available procedures are listed below.
 <tr>
       <td>expire_partitions</td>
       <td>
-         CALL sys.expire_partitions(table, expiration_time, timestamp_formatter)<br/><br/>
+         CALL sys.expire_partitions(table, expiration_time, timestamp_formatter, expire_strategy)<br/><br/>
       </td>
       <td>
          To expire partitions. Argument:
             <li>table: the target table identifier. Cannot be empty.</li>
             <li>expiration_time: the expiration interval of a partition. A partition will be expired if it‘s lifetime is over this value. Partition time is extracted from the partition value.</li>
             <li>timestamp_formatter: the formatter to format timestamp from string.</li>
+            <li>expire_strategy: the expiration strategy for partition expiration.</li>
       </td>
       <td>
          -- for Flink 1.18<br/><br/>
-         CALL sys.expire_partitions('default.T', '1 d', 'yyyy-MM-dd')<br/><br/>
+         CALL sys.expire_partitions('default.T', '1 d', 'yyyy-MM-dd', 'values-time')<br/><br/>
          -- for Flink 1.19 and later<br/><br/>
-         CALL sys.expire_partitions(`table` => 'default.T', expiration_time => '1 d', timestamp_formatter => 'yyyy-MM-dd')<br/><br/>
+         CALL sys.expire_partitions(`table` => 'default.T', expiration_time => '1 d', timestamp_formatter => 'yyyy-MM-dd', expire_strategy => 'values-time')<br/><br/>
       </td>
    </tr>
     <tr>
