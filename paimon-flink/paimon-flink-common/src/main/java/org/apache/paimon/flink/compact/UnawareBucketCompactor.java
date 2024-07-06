@@ -60,7 +60,7 @@ public class UnawareBucketCompactor {
     }
 
     public void processElement(AppendOnlyCompactionTask task) throws Exception {
-        result.add(compactExecutorsupplier.get().submit(() -> task.doCompact(write)));
+        result.add(compactExecutorsupplier.get().submit(() -> task.doCompact(table, write)));
     }
 
     public void close() throws Exception {

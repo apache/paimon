@@ -23,9 +23,15 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compact.CompactFutureManager;
 import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.compact.CompactTask;
+import org.apache.paimon.deletionvectors.append.AppendDeletionFileMaintainer;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.IndexIncrement;
+import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.operation.metrics.CompactionMetrics;
 import org.apache.paimon.operation.metrics.MetricUtils;
+import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.utils.Preconditions;
 
 import org.slf4j.Logger;
@@ -36,6 +42,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedList;
 import java.util.List;
@@ -52,6 +59,7 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
     private static final int FULL_COMPACT_MIN_FILE = 3;
 
     private final ExecutorService executor;
+    private final AppendDeletionFileMaintainer dvIndexFileMaintainer;
     private final TreeSet<DataFileMeta> toCompact;
     private final int minFileNum;
     private final int maxFileNum;
@@ -65,12 +73,14 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
     public AppendOnlyCompactManager(
             ExecutorService executor,
             List<DataFileMeta> restored,
+            @Nullable AppendDeletionFileMaintainer dvIndexFileMaintainer,
             int minFileNum,
             int maxFileNum,
             long targetFileSize,
             CompactRewriter rewriter,
             @Nullable CompactionMetrics.Reporter metricsReporter) {
         this.executor = executor;
+        this.dvIndexFileMaintainer = dvIndexFileMaintainer;
         this.toCompact = new TreeSet<>(fileComparator(false));
         this.toCompact.addAll(restored);
         this.minFileNum = minFileNum;
@@ -94,13 +104,20 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
                 taskFuture == null,
                 "A compaction task is still running while the user "
                         + "forces a new compaction. This is unexpected.");
-        if (toCompact.size() < FULL_COMPACT_MIN_FILE) {
+        // if deletion vector enables, always trigger compaction.
+        if (toCompact.isEmpty()
+                || (dvIndexFileMaintainer == null && toCompact.size() < FULL_COMPACT_MIN_FILE)) {
             return;
         }
 
         taskFuture =
                 executor.submit(
-                        new FullCompactTask(toCompact, targetFileSize, rewriter, metricsReporter));
+                        new FullCompactTask(
+                                dvIndexFileMaintainer,
+                                toCompact,
+                                targetFileSize,
+                                rewriter,
+                                metricsReporter));
         compacting = new ArrayList<>(toCompact);
         toCompact.clear();
     }
@@ -113,7 +130,9 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
         if (picked.isPresent()) {
             compacting = picked.get();
             taskFuture =
-                    executor.submit(new AutoCompactTask(compacting, rewriter, metricsReporter));
+                    executor.submit(
+                            new AutoCompactTask(
+                                    dvIndexFileMaintainer, compacting, rewriter, metricsReporter));
         }
     }
 
@@ -207,17 +226,20 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
     /** A {@link CompactTask} impl for full compaction of append-only table. */
     public static class FullCompactTask extends CompactTask {
 
-        private final LinkedList<DataFileMeta> inputs;
+        private final AppendDeletionFileMaintainer dvIndexFileMaintainer;
+        private final LinkedList<DataFileMeta> toCompact;
         private final long targetFileSize;
         private final CompactRewriter rewriter;
 
         public FullCompactTask(
+                AppendDeletionFileMaintainer dvIndexFileMaintainer,
                 Collection<DataFileMeta> inputs,
                 long targetFileSize,
                 CompactRewriter rewriter,
                 @Nullable CompactionMetrics.Reporter metricsReporter) {
             super(metricsReporter);
-            this.inputs = new LinkedList<>(inputs);
+            this.dvIndexFileMaintainer = dvIndexFileMaintainer;
+            this.toCompact = new LinkedList<>(inputs);
             this.targetFileSize = targetFileSize;
             this.rewriter = rewriter;
         }
@@ -225,34 +247,42 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
         @Override
         protected CompactResult doCompact() throws Exception {
             // remove large files
-            while (!inputs.isEmpty()) {
-                DataFileMeta file = inputs.peekFirst();
-                if (file.fileSize() >= targetFileSize) {
-                    inputs.poll();
+            while (!toCompact.isEmpty()) {
+                DataFileMeta file = toCompact.peekFirst();
+                // the data file with deletion file always need to be compacted.
+                if (file.fileSize() >= targetFileSize && !hasDeletionFile(file)) {
+                    toCompact.poll();
                     continue;
                 }
                 break;
             }
 
-            // compute small files
-            int big = 0;
-            int small = 0;
-            for (DataFileMeta file : inputs) {
-                if (file.fileSize() >= targetFileSize) {
-                    big++;
+            // do compaction
+            if (dvIndexFileMaintainer != null) {
+                // if deletion vector enables, always trigger compaction.
+                return compact(dvIndexFileMaintainer, toCompact, rewriter);
+            } else {
+                // compute small files
+                int big = 0;
+                int small = 0;
+                for (DataFileMeta file : toCompact) {
+                    if (file.fileSize() >= targetFileSize) {
+                        big++;
+                    } else {
+                        small++;
+                    }
+                }
+                if (small > big && toCompact.size() >= FULL_COMPACT_MIN_FILE) {
+                    return compact(dvIndexFileMaintainer, toCompact, rewriter);
                 } else {
-                    small++;
+                    return result(Collections.emptyList(), Collections.emptyList());
                 }
             }
+        }
 
-            // do compaction
-            List<DataFileMeta> compactBefore = new ArrayList<>();
-            List<DataFileMeta> compactAfter = new ArrayList<>();
-            if (small > big && inputs.size() >= FULL_COMPACT_MIN_FILE) {
-                compactBefore = new ArrayList<>(inputs);
-                compactAfter = rewriter.rewrite(inputs);
-            }
-            return result(new ArrayList<>(compactBefore), compactAfter);
+        private boolean hasDeletionFile(DataFileMeta file) {
+            return dvIndexFileMaintainer != null
+                    && dvIndexFileMaintainer.getDeletionFile(file.fileName()) == null;
         }
     }
 
@@ -265,41 +295,86 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
      */
     public static class AutoCompactTask extends CompactTask {
 
+        private final AppendDeletionFileMaintainer dvIndexFileMaintainer;
         private final List<DataFileMeta> toCompact;
         private final CompactRewriter rewriter;
 
         public AutoCompactTask(
+                AppendDeletionFileMaintainer dvIndexFileMaintainer,
                 List<DataFileMeta> toCompact,
                 CompactRewriter rewriter,
                 @Nullable CompactionMetrics.Reporter metricsReporter) {
             super(metricsReporter);
+            this.dvIndexFileMaintainer = dvIndexFileMaintainer;
             this.toCompact = toCompact;
             this.rewriter = rewriter;
         }
 
         @Override
         protected CompactResult doCompact() throws Exception {
+            return compact(dvIndexFileMaintainer, toCompact, rewriter);
+        }
+    }
+
+    private static CompactResult compact(
+            AppendDeletionFileMaintainer dvIndexFileMaintainer,
+            List<DataFileMeta> toCompact,
+            CompactRewriter rewriter)
+            throws Exception {
+        if (dvIndexFileMaintainer == null) {
             return result(toCompact, rewriter.rewrite(toCompact));
+        } else {
+            List<DeletionFile> deletionFiles = new ArrayList<>();
+            for (DataFileMeta dataFile : toCompact) {
+                deletionFiles.add(dvIndexFileMaintainer.getDeletionFile(dataFile.fileName()));
+            }
+            List<DataFileMeta> compactAfter = rewriter.rewrite(toCompact, deletionFiles);
+            toCompact.forEach(f -> dvIndexFileMaintainer.notify(f.fileName()));
+
+            List<IndexManifestEntry> indexManifestEntries = dvIndexFileMaintainer.persist();
+            if (indexManifestEntries.isEmpty()) {
+                return result(toCompact, compactAfter);
+            } else {
+                List<IndexFileMeta> indexFilesBefore = new ArrayList<>();
+                List<IndexFileMeta> indexFilesAfter = new ArrayList<>();
+                for (IndexManifestEntry entry : indexManifestEntries) {
+                    if (entry.kind() == FileKind.ADD) {
+                        indexFilesAfter.add(entry.indexFile());
+                    } else {
+                        indexFilesBefore.add(entry.indexFile());
+                    }
+                }
+                return result(toCompact, indexFilesBefore, compactAfter, indexFilesAfter);
+            }
         }
     }
 
     private static CompactResult result(List<DataFileMeta> before, List<DataFileMeta> after) {
-        return new CompactResult() {
-            @Override
-            public List<DataFileMeta> before() {
-                return before;
-            }
+        return new CompactResult(before, after);
+    }
 
-            @Override
-            public List<DataFileMeta> after() {
-                return after;
-            }
-        };
+    private static CompactResult result(
+            List<DataFileMeta> before,
+            @Nullable List<IndexFileMeta> indexFilesBefore,
+            List<DataFileMeta> after,
+            @Nullable List<IndexFileMeta> indexFilesAfter) {
+        CompactResult result = new CompactResult(before, after);
+        if (indexFilesBefore != null || indexFilesAfter != null) {
+            IndexIncrement indexIncrement = new IndexIncrement(indexFilesAfter, indexFilesBefore);
+            result.setIndexIncrement(indexIncrement);
+        }
+        return result;
     }
 
     /** Compact rewriter for append-only table. */
     public interface CompactRewriter {
         List<DataFileMeta> rewrite(List<DataFileMeta> compactBefore) throws Exception;
+
+        default List<DataFileMeta> rewrite(
+                List<DataFileMeta> compactBefore, List<DeletionFile> deletionFiles)
+                throws Exception {
+            throw new Exception("If call here, please implement it first");
+        }
     }
 
     /**

@@ -203,6 +203,7 @@ public class AppendOnlyCompactManagerTest {
                 new AppendOnlyCompactManager(
                         null, // not used
                         toCompactBeforePick,
+                        null,
                         minFileNum,
                         maxFileNum,
                         targetFileSize,
