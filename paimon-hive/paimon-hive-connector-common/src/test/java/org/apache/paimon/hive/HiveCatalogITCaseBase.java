@@ -1223,6 +1223,9 @@ public abstract class HiveCatalogITCaseBase {
                 .containsExactlyInAnyOrder("dt=2020-01-02/hh=09");
 
         alterTableInFileSystem(fileCatalog);
+        // When the Hive table exists, specify the paimon table to update hive table in hive
+        // metastore.
+        tEnv.executeSql("CALL sys.repair('test_db.t_repair_hive')");
 
         assertThat(
                         hiveShell
