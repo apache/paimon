@@ -1209,8 +1209,51 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
+    public void testRepairDatabasesOrTables() throws Exception {
+        TableEnvironment fileCatalog = useFileCatalog("test_db");
+        TableEnvironment fileCatalog01 = useFileCatalog("test_db_01");
+        // Database test_db exists in hive metastore
+        hiveShell.execute("use test_db");
+        // When the Hive table does not exist, specify the paimon table to create hive table in hive
+        // metastore.
+        tEnv.executeSql("CALL sys.repair('test_db.t_repair_hive,test_db_01')");
+
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS test_db.t_repair_hive"))
+                .containsExactlyInAnyOrder("dt=2020-01-02/hh=09");
+
+        alterTableInFileSystem(fileCatalog);
+
+        assertThat(
+                        hiveShell
+                                .executeQuery("DESC FORMATTED test_db.t_repair_hive")
+                                .contains("item_id\tbigint\titem id"))
+                .isTrue();
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS test_db.t_repair_hive"))
+                .containsExactlyInAnyOrder("dt=2020-01-02/hh=09", "dt=2020-01-03/hh=10");
+
+        // Database test_db_01 exists in hive metastore
+        hiveShell.execute("use test_db_01");
+
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS test_db_01.t_repair_hive"))
+                .containsExactlyInAnyOrder("dt=2020-01-02/hh=09");
+
+        alterTableInFileSystem(fileCatalog01);
+
+        // When the Hive table exists, specify the paimon table to update hive table in hive
+        // metastore.
+        tEnv.executeSql("CALL sys.repair('test_db_01.t_repair_hive')");
+        assertThat(
+                        hiveShell
+                                .executeQuery("DESC FORMATTED test_db_01.t_repair_hive")
+                                .contains("item_id\tbigint\titem id"))
+                .isTrue();
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS test_db_01.t_repair_hive"))
+                .containsExactlyInAnyOrder("dt=2020-01-02/hh=09", "dt=2020-01-03/hh=10");
+    }
+
+    @Test
     public void testRepairTable() throws Exception {
-        TableEnvironment fileCatalog = useFileCatalog();
+        TableEnvironment fileCatalog = useFileCatalog("test_db");
         // Database test_db exists in hive metastore
         hiveShell.execute("use test_db");
         // When the Hive table does not exist, specify the paimon table to create hive table in hive
@@ -1236,7 +1279,7 @@ public abstract class HiveCatalogITCaseBase {
 
     @Test
     public void testRepairTableWithCustomLocation() throws Exception {
-        TableEnvironment fileCatalog = useFileCatalog();
+        TableEnvironment fileCatalog = useFileCatalog("test_db");
         // Database exists in hive metastore and uses custom location.
         String databaseLocation = path + "test_db.db";
         hiveShell.execute("CREATE DATABASE my_database\n" + "LOCATION '" + databaseLocation + "';");
@@ -1313,7 +1356,7 @@ public abstract class HiveCatalogITCaseBase {
                 .await();
     }
 
-    private TableEnvironment useFileCatalog() throws Exception {
+    private TableEnvironment useFileCatalog(String database) throws Exception {
         String fileCatalog =
                 "CREATE CATALOG my_file WITH ( "
                         + "'type' = 'paimon',\n"
@@ -1329,8 +1372,10 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql("USE CATALOG my_file").await();
 
         // Prepare a paimon table with a custom path in the paimon file system.
-        tEnv.executeSql("CREATE DATABASE IF NOT EXISTS test_db;").await();
-        tEnv.executeSql("USE test_db").await();
+        String createDBSql = String.format("CREATE DATABASE IF NOT EXISTS %s;", database);
+        tEnv.executeSql(createDBSql).await();
+        String useDBSql = String.format("USE %s;", database);
+        tEnv.executeSql(useDBSql).await();
         tEnv.executeSql(
                         "CREATE TABLE t_repair_hive (\n"
                                 + "    user_id BIGINT,\n"

@@ -19,7 +19,6 @@
 package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.spark.catalog.WithPaimonCatalog;
 import org.apache.paimon.utils.StringUtils;
 
@@ -74,20 +73,7 @@ public class RepairProcedure extends BaseProcedure {
                 return new InternalRow[] {newInternalRow(true)};
             }
 
-            String[] paths = identifier.split("\\.");
-            switch (paths.length) {
-                case 1:
-                    paimonCatalog.repairDatabase(paths[0]);
-                    break;
-                case 2:
-                    paimonCatalog.repairTable(Identifier.create(paths[0], paths[1]));
-                    break;
-                default:
-                    throw new IllegalArgumentException(
-                            String.format(
-                                    "Cannot get splits from '%s' to get database and table",
-                                    identifier));
-            }
+            paimonCatalog.repairDatabasesOrTables(identifier);
 
         } catch (Exception e) {
             throw new RuntimeException("Call repair error", e);

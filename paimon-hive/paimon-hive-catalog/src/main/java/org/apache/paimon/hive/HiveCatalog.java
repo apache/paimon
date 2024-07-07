@@ -513,6 +513,27 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
+    public void repairDatabasesOrTables(String databaseOrTables) throws TableNotExistException {
+        String[] databaseOrTableSplits = databaseOrTables.split(",");
+        for (String split : databaseOrTableSplits) {
+            String[] paths = split.split("\\.");
+            switch (paths.length) {
+                case 1:
+                    repairDatabase(paths[0]);
+                    break;
+                case 2:
+                    repairTable(Identifier.create(paths[0], paths[1]));
+                    break;
+                default:
+                    throw new IllegalArgumentException(
+                            String.format(
+                                    "Cannot get splits from '%s' to get database and table",
+                                    split));
+            }
+        }
+    }
+
+    @Override
     public void repairDatabase(String databaseName) {
         checkNotSystemDatabase(databaseName);
 
