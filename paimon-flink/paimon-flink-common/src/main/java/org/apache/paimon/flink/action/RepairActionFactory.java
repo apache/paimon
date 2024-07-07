@@ -67,6 +67,7 @@ public class RepairActionFactory implements ActionFactory {
         System.out.println("  repair --warehouse hdfs:///path/to/warehouse");
         System.out.println("  repair --warehouse hdfs:///path/to/warehouse --identifier test_db");
         System.out.println("  repair --warehouse hdfs:///path/to/warehouse --identifier test_db.T");
-        System.out.println("  repair --warehouse hdfs:///path/to/warehouse --identifier test_db.T,test_db01,test_db.T1");
+        System.out.println(
+                "  repair --warehouse hdfs:///path/to/warehouse --identifier test_db.T,test_db01,test_db.T1");
     }
 }
