@@ -1214,6 +1214,7 @@ public abstract class HiveCatalogITCaseBase {
         TableEnvironment fileCatalog01 = useFileCatalog("test_db_01");
         // Database test_db exists in hive metastore
         hiveShell.execute("use test_db");
+        tEnv.executeSql("USE test_db").await();
         // When the Hive table does not exist, specify the paimon table to create hive table in hive
         // metastore.
         tEnv.executeSql("CALL sys.repair('test_db.t_repair_hive,test_db_01')");
@@ -1233,7 +1234,7 @@ public abstract class HiveCatalogITCaseBase {
 
         // Database test_db_01 exists in hive metastore
         hiveShell.execute("use test_db_01");
-
+        tEnv.executeSql("USE test_db_01").await();
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS test_db_01.t_repair_hive"))
                 .containsExactlyInAnyOrder("dt=2020-01-02/hh=09");
 
