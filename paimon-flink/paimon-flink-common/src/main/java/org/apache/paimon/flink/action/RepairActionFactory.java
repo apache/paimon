@@ -59,11 +59,14 @@ public class RepairActionFactory implements ActionFactory {
                 "If --identifier is a database name, all tables in that database will be synchronized.");
         System.out.println(
                 "If --identifier is a databaseName.tableName, only that specific table will be synchronized.");
+        System.out.println(
+                "If --identifier is a string combine with format as databaseName.tableName or databaseName delimiter by ',', specific table and database will be synchronized.");
         System.out.println();
 
         System.out.println("Examples:");
         System.out.println("  repair --warehouse hdfs:///path/to/warehouse");
         System.out.println("  repair --warehouse hdfs:///path/to/warehouse --identifier test_db");
         System.out.println("  repair --warehouse hdfs:///path/to/warehouse --identifier test_db.T");
+        System.out.println("  repair --warehouse hdfs:///path/to/warehouse --identifier test_db.T,test_db01,test_db.T1");
     }
 }
