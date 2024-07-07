@@ -702,17 +702,17 @@ public class StreamWriteTable {
 
 ## Predicate Types
 
-| SQL Predicate| Paimon Predicate                                             | 
-|:-------------|:-------------------------------------------------------------|
-| and          | org.apache.paimon.predicate.PredicateBuilder.And             |
-| or           | org.apache.paimon.predicate.PredicateBuilder.Or              |
-| is null      | org.apache.paimon.predicate.PredicateBuilder.IsNull          |
-| is not null  | org.apache.paimon.predicate.PredicateBuilder.IsNotNull       |
-| in           | org.apache.paimon.predicate.PredicateBuildere.In             |
-| not in       | org.apache.paimon.predicate.PredicateBuilder.NotIn           |
-| =            | org.apache.paimon.predicate.PredicateBuilder.Equal           |
-| <>           | org.apache.paimon.predicate.PredicateBuilder.NotEqual        |
-| <            | org.apache.paimon.predicate.PredicateBuilder.LessThan        |
-| <=           | org.apache.paimon.predicate.PredicateBuilder.LessOrEqual     |
-| >            | org.apache.paimon.predicate.PredicateBuilder.GreaterThan     |
-| >=           | org.apache.paimon.predicate.PredicateBuilder.GreaterOrEqual  |
+| SQL Predicate| Paimon Predicate                                            | 
+|:-------------|:------------------------------------------------------------|
+| and          | org.apache.paimon.predicate.PredicateBuilder.And            |
+| or           | org.apache.paimon.predicate.PredicateBuilder.Or             |
+| is null      | org.apache.paimon.predicate.PredicateBuilder.IsNull         |
+| is not null  | org.apache.paimon.predicate.PredicateBuilder.IsNotNull      |
+| in           | org.apache.paimon.predicate.PredicateBuilder.In             |
+| not in       | org.apache.paimon.predicate.PredicateBuilder.NotIn          |
+| =            | org.apache.paimon.predicate.PredicateBuilder.Equal          |
+| <>           | org.apache.paimon.predicate.PredicateBuilder.NotEqual       |
+| <            | org.apache.paimon.predicate.PredicateBuilder.LessThan       |
+| <=           | org.apache.paimon.predicate.PredicateBuilder.LessOrEqual    |
+| >            | org.apache.paimon.predicate.PredicateBuilder.GreaterThan    |
+| >=           | org.apache.paimon.predicate.PredicateBuilder.GreaterOrEqual |
