@@ -112,7 +112,7 @@ You can find [How to config jindo sdk on trino](https://github.com/aliyun/alibab
 Please note that:
   * Use paimon to replace hive-hadoop2 when you decompress the plugin jar and find location to put in.
   * You can specify the `core-site.xml` in `paimon.properties` on configuration [hive.config.resources](https://trino.io/docs/current/connector/hive.html#hdfs-configuration).
-  * Presto and Jindo are in the same configuration method.
+  * Presto and Jindo use the same configuration method.
 
 
 {{< /tab >}}
