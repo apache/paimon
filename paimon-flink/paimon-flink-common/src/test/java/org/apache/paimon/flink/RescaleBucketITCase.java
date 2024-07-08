@@ -198,7 +198,7 @@ public class RescaleBucketITCase extends CatalogITCaseBase {
 
         // check write without rescale
         assertThatThrownBy(() -> batchSql("INSERT INTO %s VALUES (6)", tableName))
-                .getRootCause()
+                .rootCause()
                 .isInstanceOf(RuntimeException.class)
                 .hasMessage(
                         "Try to write table with a new bucket num 4, but the previous bucket num is 2. "
