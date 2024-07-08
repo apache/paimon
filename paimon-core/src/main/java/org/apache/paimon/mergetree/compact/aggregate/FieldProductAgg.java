@@ -79,7 +79,11 @@ public class FieldProductAgg extends FieldAggregator {
                     product = (double) accumulator * (double) inputField;
                     break;
                 default:
-                    throw new IllegalArgumentException();
+                    String msg =
+                            String.format(
+                                    "type %s not support in %s",
+                                    fieldType.getTypeRoot().toString(), this.getClass().getName());
+                    throw new IllegalArgumentException(msg);
             }
         }
         return product;
@@ -124,7 +128,11 @@ public class FieldProductAgg extends FieldAggregator {
                     product = (double) accumulator / (double) inputField;
                     break;
                 default:
-                    throw new IllegalArgumentException();
+                    String msg =
+                            String.format(
+                                    "type %s not support in %s",
+                                    fieldType.getTypeRoot().toString(), this.getClass().getName());
+                    throw new IllegalArgumentException(msg);
             }
         }
         return product;

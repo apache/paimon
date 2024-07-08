@@ -209,7 +209,11 @@ public interface BinaryWriter {
                         writer.writeRow(
                                 pos, (InternalRow) value, (InternalRowSerializer) rowSerializer);
             default:
-                throw new IllegalArgumentException();
+                String msg =
+                        String.format(
+                                "type %s not support in %s",
+                                elementType.getTypeRoot().toString(), BinaryArray.class.getName());
+                throw new IllegalArgumentException(msg);
         }
     }
 

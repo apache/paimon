@@ -253,7 +253,12 @@ public final class BinaryArrayWriter extends AbstractBinaryWriter {
             case DOUBLE:
                 return BinaryArrayWriter::setNullDouble;
             default:
-                throw new IllegalArgumentException();
+                String msg =
+                        String.format(
+                                "type %s not support in %s",
+                                elementType.getTypeRoot().toString(),
+                                BinaryArrayWriter.class.getName());
+                throw new IllegalArgumentException(msg);
         }
     }
 

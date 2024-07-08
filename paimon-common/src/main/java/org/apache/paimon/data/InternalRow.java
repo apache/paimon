@@ -222,7 +222,11 @@ public interface InternalRow extends DataGetters {
                 fieldGetter = row -> row.getRow(fieldPos, rowFieldCount);
                 break;
             default:
-                throw new IllegalArgumentException();
+                String msg =
+                        String.format(
+                                "type %s not support in %s",
+                                fieldType.getTypeRoot().toString(), InternalRow.class.getName());
+                throw new IllegalArgumentException(msg);
         }
         if (!fieldType.isNullable()) {
             return fieldGetter;
