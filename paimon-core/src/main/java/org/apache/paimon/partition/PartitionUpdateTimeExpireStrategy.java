@@ -21,9 +21,9 @@ package org.apache.paimon.partition;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.DateTimeUtils;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -40,12 +40,10 @@ public class PartitionUpdateTimeExpireStrategy extends PartitionExpireStrategy {
     @Override
     public List<PartitionEntry> selectExpiredPartitions(
             FileStoreScan scan, LocalDateTime expirationTime) {
+        long expirationMilli =
+                expirationTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
         return scan.readPartitionEntries().stream()
-                .filter(
-                        partitionEntry ->
-                                expirationTime.isAfter(
-                                        DateTimeUtils.toLocalDateTime(
-                                                partitionEntry.lastFileCreationTime())))
+                .filter(partitionEntry -> expirationMilli > partitionEntry.lastFileCreationTime())
                 .collect(Collectors.toList());
     }
 }
