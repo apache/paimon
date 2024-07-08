@@ -213,9 +213,10 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
             // in the middle.
             // If the job is restarted from the commit operator, endInput will be called again, and
             // the same commit messages will be committed again.
-            // So when `endInput` is called, we must check if these commit messages are already
-            // committed.
-            committer.filterAndCommit(committables);
+            // So when `endInput` is called, we must check if the corresponding snapshot exists.
+            // However, if the snapshot does not exist, then append files must be new files. So
+            // there is no need to check for duplicated append files.
+            committer.filterAndCommit(committables, false);
         } else {
             committer.commit(committables);
         }

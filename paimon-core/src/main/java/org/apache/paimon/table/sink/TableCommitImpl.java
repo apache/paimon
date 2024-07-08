@@ -230,6 +230,11 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     public int filterAndCommitMultiple(List<ManifestCommittable> committables) {
+        return filterAndCommitMultiple(committables, true);
+    }
+
+    public int filterAndCommitMultiple(
+            List<ManifestCommittable> committables, boolean checkAppendFiles) {
         Set<Long> retryIdentifiers =
                 commit.filterCommitted(
                         committables.stream()
@@ -252,7 +257,7 @@ public class TableCommitImpl implements InnerTableCommit {
                         .collect(Collectors.toList());
         if (retryCommittables.size() > 0) {
             checkFilesExistence(retryCommittables);
-            commitMultiple(retryCommittables, true);
+            commitMultiple(retryCommittables, checkAppendFiles);
         }
         return retryCommittables.size();
     }
