@@ -103,7 +103,7 @@ public class HadoopUtils {
         }
 
         for (String possibleHadoopConfPath : possibleHadoopConfPaths) {
-            if (possibleHadoopConfPath != null) {
+            if (!StringUtils.isNullOrWhitespaceOnly(possibleHadoopConfPath)) {
                 foundHadoopConfiguration =
                         addHadoopConfIfFound(result, possibleHadoopConfPath, options);
             }
@@ -111,7 +111,7 @@ public class HadoopUtils {
 
         // Approach 2: Paimon Catalog Option
         final String hadoopConfigPath = options.getString(PATH_HADOOP_CONFIG, null);
-        if (hadoopConfigPath != null && loader.loadOption()) {
+        if (!StringUtils.isNullOrWhitespaceOnly(hadoopConfigPath) && loader.loadOption()) {
             LOG.debug(
                     "Searching Hadoop configuration files in Paimon config: {}", hadoopConfigPath);
             foundHadoopConfiguration =
@@ -121,7 +121,7 @@ public class HadoopUtils {
 
         // Approach 3: HADOOP_CONF_DIR environment variable
         String hadoopConfDir = System.getenv(HADOOP_CONF_ENV);
-        if (hadoopConfDir != null && loader.loadEnv()) {
+        if (!StringUtils.isNullOrWhitespaceOnly(hadoopConfDir) && loader.loadEnv()) {
             LOG.debug("Searching Hadoop configuration files in HADOOP_CONF_DIR: {}", hadoopConfDir);
             foundHadoopConfiguration =
                     addHadoopConfIfFound(result, hadoopConfDir, options)
