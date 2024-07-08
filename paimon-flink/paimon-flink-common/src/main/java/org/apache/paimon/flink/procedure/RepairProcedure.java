@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.utils.StringUtils;
 
@@ -63,8 +64,29 @@ public class RepairProcedure extends ProcedureBase {
             return new String[] {"Success"};
         }
 
-        catalog.repairDatabasesOrTables(identifier);
+        repairDatabasesOrTables(identifier);
 
         return new String[] {"Success"};
+    }
+
+    public void repairDatabasesOrTables(String databaseOrTables)
+            throws Catalog.TableNotExistException {
+        String[] databaseOrTableSplits = databaseOrTables.split(",");
+        for (String split : databaseOrTableSplits) {
+            String[] paths = split.split("\\.");
+            switch (paths.length) {
+                case 1:
+                    catalog.repairDatabase(paths[0]);
+                    break;
+                case 2:
+                    catalog.repairTable(Identifier.create(paths[0], paths[1]));
+                    break;
+                default:
+                    throw new IllegalArgumentException(
+                            String.format(
+                                    "Cannot get splits from '%s' to get database and table",
+                                    split));
+            }
+        }
     }
 }

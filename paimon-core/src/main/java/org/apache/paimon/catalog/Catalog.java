@@ -18,7 +18,6 @@
 
 package org.apache.paimon.catalog;
 
-import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.metastore.MetastoreClient;
@@ -260,12 +259,6 @@ public interface Catalog extends AutoCloseable {
     }
 
     default void repairCatalog() {
-        throw new UnsupportedOperationException();
-    }
-
-    /** Repair databases or tables separated by commas. */
-    @Experimental
-    default void repairDatabasesOrTables(String databaseOrTables) throws TableNotExistException {
         throw new UnsupportedOperationException();
     }
 

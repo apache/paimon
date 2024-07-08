@@ -276,7 +276,7 @@ All available procedures are listed below.
          -- repair a table<br/>
          CALL sys.repair('databaseName.tableName')<br/><br/>
          -- repair database and table in a string if you specify multiple tags, delimiter is ','<br/>
-         CALL sys.repari('databaseName01,database02.tableName01,database03')
+         CALL sys.repair('databaseName01,database02.tableName01,database03')
       </td>
       <td>
          Synchronize information from the file system to Metastore. Argument:
