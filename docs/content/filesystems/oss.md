@@ -106,13 +106,13 @@ SELECT COUNT(1) FROM test_table;
 
 {{< tab "Trino" >}}
 
-From version 0.8, paimon-trino use trino filesystem as basic file read and write system. We strongly recommend you to use jindo-sdk in trino.
+From version 0.8, paimon-trino uses trino filesystem as basic file read and write system. We strongly recommend you to use jindo-sdk in trino.
 
 You can find [How to config jindo sdk on trino](https://github.com/aliyun/alibabacloud-jindodata/blob/master/docs/user/4.x/4.6.x/4.6.12/oss/presto/jindosdk_on_presto.md) here.
 Please note that:
   * Use paimon to replace hive-hadoop2 when you decompress the plugin jar and find location to put in.
   * You can specify the `core-site.xml` in `paimon.properties` on configuration [hive.config.resources](https://trino.io/docs/current/connector/hive.html#hdfs-configuration).
-  * Presto and Jindo are the in the same configaration method.
+  * Presto and Jindo use the same configuration method.
 
 
 {{< /tab >}}
