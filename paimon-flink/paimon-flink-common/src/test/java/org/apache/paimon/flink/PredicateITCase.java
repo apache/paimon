@@ -27,13 +27,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class PredicateITCase extends CatalogITCaseBase {
 
     @Test
-    public void testConsumerIdException() throws Exception {
-        sql("CREATE TABLE T (a INT PRIMARY KEY NOT ENFORCED, b INT) WITH ('bucket' = '5')");
-        writeRecords();
-        innerTestSingleFieldOnce();
-    }
-
-    @Test
     public void testPkFilterBucket() throws Exception {
         sql("CREATE TABLE T (a INT PRIMARY KEY NOT ENFORCED, b INT) WITH ('bucket' = '5')");
         writeRecords();
@@ -80,10 +73,5 @@ public class PredicateITCase extends CatalogITCaseBase {
                 .containsExactlyInAnyOrder(Row.of(7, 8));
         assertThat(sql("SELECT * FROM T WHERE a = 9 and b = 10"))
                 .containsExactlyInAnyOrder(Row.of(9, 10));
-    }
-
-    private void innerTestSingleFieldOnce() throws Exception {
-        assertThat(sql("SELECT * FROM T /*+ OPTIONS('consumer-id' = 'test-id') */ WHERE a = 1"))
-                .containsExactlyInAnyOrder(Row.of(1, 2));
     }
 }

@@ -18,23 +18,6 @@
 
 package org.apache.paimon.flink.source;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.CoreOptions.StartupMode;
-import org.apache.paimon.CoreOptions.StreamingReadMode;
-import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.flink.Projection;
-import org.apache.paimon.flink.log.LogSourceProvider;
-import org.apache.paimon.flink.sink.FlinkSink;
-import org.apache.paimon.flink.source.align.AlignedContinuousFileStoreSource;
-import org.apache.paimon.flink.source.operator.MonitorFunction;
-import org.apache.paimon.flink.utils.TableScanUtils;
-import org.apache.paimon.options.Options;
-import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.table.BucketMode;
-import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.Table;
-import org.apache.paimon.table.source.ReadBuilder;
-
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
@@ -55,9 +38,24 @@ import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.Row;
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.StartupMode;
+import org.apache.paimon.CoreOptions.StreamingReadMode;
+import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.flink.Projection;
+import org.apache.paimon.flink.log.LogSourceProvider;
+import org.apache.paimon.flink.sink.FlinkSink;
+import org.apache.paimon.flink.source.align.AlignedContinuousFileStoreSource;
+import org.apache.paimon.flink.source.operator.MonitorFunction;
+import org.apache.paimon.flink.utils.TableScanUtils;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.table.source.ReadBuilder;
 
 import javax.annotation.Nullable;
-
 import java.util.List;
 import java.util.Optional;
 
@@ -250,8 +248,9 @@ public class FlinkSourceBuilder {
         if (env == null) {
             throw new IllegalArgumentException("StreamExecutionEnvironment should not be null.");
         }
-        if (!conf.contains(CoreOptions.CONSUMER_ID)) {
-            throw new IllegalArgumentException("consumer id should be specified.");
+        if (conf.contains(CoreOptions.CONSUMER_ID)
+                && !conf.contains(CoreOptions.CONSUMER_EXPIRATION_TIME)) {
+            throw new IllegalArgumentException("consumer.expiration-time should be specified.");
         }
         if (sourceBounded) {
             return buildStaticFileSource();
