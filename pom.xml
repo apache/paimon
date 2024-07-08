@@ -775,6 +775,7 @@ under the License.
                         <compilerArgs>
                             <!-- Prevents recompilation due to missing package-info.class, see MCOMPILER-205 -->
                             <arg>-Xpkginfo:always</arg>
+                            <arg>-Xlint:deprecation</arg>
                         </compilerArgs>
                     </configuration>
                 </plugin>
