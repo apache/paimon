@@ -143,10 +143,13 @@ This section introduce all available spark procedures about paimon.
       <td>repair</td>
       <td>
          Synchronize information from the file system to Metastore. Argument:
-            <li>database_or_table: empty or the target database name or the target table identifier.</li>
+            <li>database_or_table: empty or the target database name or the target table identifier, if you specify multiple tags, delimiter is ','</li>
       </td>
       <td>
           CALL sys.repair('test_db.T')
+      </td>
+      <td>
+          CALL sys.repair('test_db.T,test_db01,test_db.T2')
       </td>
     </tr>
     <tr>

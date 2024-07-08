@@ -74,7 +74,19 @@ public class RepairProcedure extends BaseProcedure {
                 return new InternalRow[] {newInternalRow(true)};
             }
 
-            String[] paths = identifier.split("\\.");
+            repairDatabasesOrTables(identifier, paimonCatalog);
+
+        } catch (Exception e) {
+            throw new RuntimeException("Call repair error", e);
+        }
+        return new InternalRow[] {newInternalRow(true)};
+    }
+
+    public void repairDatabasesOrTables(String databaseOrTables, Catalog paimonCatalog)
+            throws Catalog.TableNotExistException {
+        String[] databaseOrTableSplits = databaseOrTables.split(",");
+        for (String split : databaseOrTableSplits) {
+            String[] paths = split.split("\\.");
             switch (paths.length) {
                 case 1:
                     paimonCatalog.repairDatabase(paths[0]);
@@ -86,13 +98,9 @@ public class RepairProcedure extends BaseProcedure {
                     throw new IllegalArgumentException(
                             String.format(
                                     "Cannot get splits from '%s' to get database and table",
-                                    identifier));
+                                    split));
             }
-
-        } catch (Exception e) {
-            throw new RuntimeException("Call repair error", e);
         }
-        return new InternalRow[] {newInternalRow(true)};
     }
 
     public static ProcedureBuilder builder() {
