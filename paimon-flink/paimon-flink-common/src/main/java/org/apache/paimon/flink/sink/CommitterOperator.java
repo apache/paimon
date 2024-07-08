@@ -156,8 +156,8 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
     @Override
     public void processWatermark(Watermark mark) throws Exception {
         super.processWatermark(mark);
-        // Do not consume END_INPUT_CHECKPOINT_ID watermark in case of batch or bounded stream
-        if (mark.getTimestamp() != END_INPUT_CHECKPOINT_ID) {
+        // Do not consume Long.MAX_VALUE watermark in case of batch or bounded stream
+        if (mark.getTimestamp() != Long.MAX_VALUE) {
             this.currentWatermark = mark.getTimestamp();
         }
     }
