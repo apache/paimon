@@ -132,12 +132,8 @@ case class DeleteFromPaimonTableCommand(
         relation,
         sparkSession)
 
-      deletionVectors.cache()
-      try {
-        updateDeletionVector(deletionVectors, dataFilePathToMeta, writer)
-      } finally {
-        deletionVectors.unpersist()
-      }
+      // Step3: update the touched deletion vectors and index files
+      writer.persistDeletionVectors(deletionVectors)
 
     } else {
       // Step2: extract out the exactly files, which must have at least one record to be updated.

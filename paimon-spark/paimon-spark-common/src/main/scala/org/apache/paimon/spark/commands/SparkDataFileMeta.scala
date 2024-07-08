@@ -39,13 +39,7 @@ case class SparkDataFileMeta(
       .toUri
       .toString + "/" + dataFileMeta.fileName()
   }
-
-  def toSparkDeletionFile: SparkDeletionFile = {
-    SparkDeletionFile(partition, bucket, deletionFile)
-  }
 }
-
-case class SparkDeletionFile(partition: BinaryRow, bucket: Int, deletionFile: Option[DeletionFile])
 
 object SparkDataFileMeta {
   def convertToSparkDataFileMeta(
