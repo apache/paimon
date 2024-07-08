@@ -78,7 +78,11 @@ public class FieldSumAgg extends FieldAggregator {
                     sum = (double) accumulator + (double) inputField;
                     break;
                 default:
-                    throw new IllegalArgumentException();
+                    String msg =
+                            String.format(
+                                    "type %s not support in %s",
+                                    fieldType.getTypeRoot().toString(), this.getClass().getName());
+                    throw new IllegalArgumentException(msg);
             }
         }
         return sum;
@@ -125,7 +129,11 @@ public class FieldSumAgg extends FieldAggregator {
                     sum = (double) accumulator - (double) inputField;
                     break;
                 default:
-                    throw new IllegalArgumentException();
+                    String msg =
+                            String.format(
+                                    "type %s not support in %s",
+                                    fieldType.getTypeRoot().toString(), this.getClass().getName());
+                    throw new IllegalArgumentException(msg);
             }
         }
         return sum;
@@ -153,7 +161,11 @@ public class FieldSumAgg extends FieldAggregator {
             case DOUBLE:
                 return -((double) value);
             default:
-                throw new IllegalArgumentException();
+                String msg =
+                        String.format(
+                                "type %s not support in %s",
+                                fieldType.getTypeRoot().toString(), this.getClass().getName());
+                throw new IllegalArgumentException(msg);
         }
     }
 }

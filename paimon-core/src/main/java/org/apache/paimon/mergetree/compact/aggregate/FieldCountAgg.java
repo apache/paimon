@@ -55,7 +55,11 @@ public class FieldCountAgg extends FieldAggregator {
                     count = (long) accumulator + 1L;
                     break;
                 default:
-                    throw new IllegalArgumentException();
+                    String msg =
+                            String.format(
+                                    "type %s not support in %s",
+                                    fieldType.getTypeRoot().toString(), this.getClass().getName());
+                    throw new IllegalArgumentException(msg);
             }
         }
         return count;
@@ -82,7 +86,11 @@ public class FieldCountAgg extends FieldAggregator {
                     count = (long) accumulator - 1L;
                     break;
                 default:
-                    throw new IllegalArgumentException();
+                    String msg =
+                            String.format(
+                                    "type %s not support in %s",
+                                    fieldType.getTypeRoot().toString(), this.getClass().getName());
+                    throw new IllegalArgumentException(msg);
             }
         }
         return count;
