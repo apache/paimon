@@ -663,7 +663,7 @@ public class HiveCatalog extends AbstractCatalog {
 
     @Override
     public void close() throws Exception {
-        clients.execute(IMetaStoreClient::close);
+        // do nothing
     }
 
     @Override
