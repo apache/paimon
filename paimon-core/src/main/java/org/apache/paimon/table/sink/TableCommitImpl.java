@@ -255,7 +255,7 @@ public class TableCommitImpl implements InnerTableCommit {
                         // identifier must be in increasing order
                         .sorted(Comparator.comparingLong(ManifestCommittable::identifier))
                         .collect(Collectors.toList());
-        if (retryCommittables.size() > 0) {
+        if (!retryCommittables.isEmpty() || overwritePartition != null) {
             checkFilesExistence(retryCommittables);
             commitMultiple(retryCommittables, checkAppendFiles);
         }
