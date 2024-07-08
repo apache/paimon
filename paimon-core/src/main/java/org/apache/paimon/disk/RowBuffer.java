@@ -61,7 +61,7 @@ public interface RowBuffer {
             boolean spillable,
             MemorySize maxDiskSize,
             String compression) {
-        if (spillable) {
+        if (spillable && ioManager != null) {
             return new ExternalBuffer(ioManager, memoryPool, serializer, maxDiskSize, compression);
         } else {
             return new InMemoryBuffer(memoryPool, serializer);

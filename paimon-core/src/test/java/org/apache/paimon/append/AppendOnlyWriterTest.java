@@ -26,6 +26,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.ChannelWithMeta;
 import org.apache.paimon.disk.ExternalBuffer;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.disk.InMemoryBuffer;
 import org.apache.paimon.disk.RowBuffer;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
@@ -341,6 +342,27 @@ public class AppendOnlyWriterTest {
     }
 
     @Test
+    public void testWithoutIoManager() throws Exception {
+        AppendOnlyWriter writer = createEmptyWriterWithoutIoManager(Long.MAX_VALUE, true);
+
+        // we give it a small Memory Pool, force it to spill
+        writer.setMemoryPool(new HeapMemorySegmentPool(16384L, 1024));
+
+        char[] s = new char[990];
+        Arrays.fill(s, 'a');
+
+        // set the record that much larger than the maxMemory
+        for (int j = 0; j < 100; j++) {
+            writer.write(row(j, String.valueOf(s), PART));
+        }
+
+        RowBuffer buffer = writer.getWriteBuffer();
+
+        Assertions.assertThat(buffer instanceof InMemoryBuffer).isTrue();
+        writer.close();
+    }
+
+    @Test
     public void testSpillWorksAndMoreSmallFilesGenerated() throws Exception {
         List<AppendOnlyWriter> writers = new ArrayList<>();
         HeapMemorySegmentPool heapMemorySegmentPool = new HeapMemorySegmentPool(2501024L, 1024);
@@ -531,10 +553,29 @@ public class AppendOnlyWriterTest {
                 .getLeft();
     }
 
+    private AppendOnlyWriter createEmptyWriterWithoutIoManager(
+            long targetFileSize, boolean spillable) {
+        return createWriter(
+                        targetFileSize,
+                        false,
+                        true,
+                        spillable,
+                        false,
+                        Collections.emptyList(),
+                        new CountDownLatch(0))
+                .getLeft();
+    }
+
     private Pair<AppendOnlyWriter, List<DataFileMeta>> createWriter(
             long targetFileSize, boolean forceCompact, List<DataFileMeta> scannedFiles) {
         return createWriter(
-                targetFileSize, forceCompact, true, true, scannedFiles, new CountDownLatch(0));
+                targetFileSize,
+                forceCompact,
+                true,
+                true,
+                true,
+                scannedFiles,
+                new CountDownLatch(0));
     }
 
     private Pair<AppendOnlyWriter, List<DataFileMeta>> createWriter(
@@ -548,6 +589,7 @@ public class AppendOnlyWriterTest {
                 forceCompact,
                 useWriteBuffer,
                 spillable,
+                true,
                 scannedFiles,
                 new CountDownLatch(0));
     }
@@ -557,7 +599,7 @@ public class AppendOnlyWriterTest {
             boolean forceCompact,
             List<DataFileMeta> scannedFiles,
             CountDownLatch latch) {
-        return createWriter(targetFileSize, forceCompact, false, false, scannedFiles, latch);
+        return createWriter(targetFileSize, forceCompact, false, false, true, scannedFiles, latch);
     }
 
     private Pair<AppendOnlyWriter, List<DataFileMeta>> createWriter(
@@ -565,6 +607,7 @@ public class AppendOnlyWriterTest {
             boolean forceCompact,
             boolean useWriteBuffer,
             boolean spillable,
+            boolean hasIoManager,
             List<DataFileMeta> scannedFiles,
             CountDownLatch latch) {
         FileFormat fileFormat = FileFormat.fromIdentifier(AVRO, new Options());
@@ -589,7 +632,7 @@ public class AppendOnlyWriterTest {
         AppendOnlyWriter writer =
                 new AppendOnlyWriter(
                         LocalFileIO.create(),
-                        IOManager.create(tempDir.toString()),
+                        hasIoManager ? IOManager.create(tempDir.toString()) : null,
                         SCHEMA_ID,
                         fileFormat,
                         targetFileSize,
