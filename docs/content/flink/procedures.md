@@ -51,7 +51,7 @@ All available procedures are listed below.
    <tr>
       <th class="text-left" style="width: 4%">Procedure Name</th>
       <th class="text-left" style="width: 4%">Usage</th>
-      <th class="text-left" style="width: 20%">Explaination</th>
+      <th class="text-left" style="width: 20%">Explanation</th>
       <th class="text-left" style="width: 4%">Example</th>
    </tr>
    </thead>

@@ -708,7 +708,7 @@ public class StreamWriteTable {
 | or           | org.apache.paimon.predicate.PredicateBuilder.Or              |
 | is null      | org.apache.paimon.predicate.PredicateBuilder.IsNull          |
 | is not null  | org.apache.paimon.predicate.PredicateBuilder.IsNotNull       |
-| in           | org.apache.paimon.predicate.PredicateBuildere.In             |
+| in           | org.apache.paimon.predicate.PredicateBuilder.In              |
 | not in       | org.apache.paimon.predicate.PredicateBuilder.NotIn           |
 | =            | org.apache.paimon.predicate.PredicateBuilder.Equal           |
 | <>           | org.apache.paimon.predicate.PredicateBuilder.NotEqual        |
