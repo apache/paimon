@@ -53,6 +53,7 @@ public class HadoopUtilsITCase {
         assertThat(conf.get("paimon.test.key")).isEqualTo("test.value");
     }
 
+    /** {@link FileIOLoader} for this test. */
     public static class TestFileIOLoader implements FileIOLoader {
 
         private static final String SCHEME = "hadoop-utils-test-file-io";
