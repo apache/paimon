@@ -59,8 +59,7 @@ public class ParquetRowDataWriter {
 
     public ParquetRowDataWriter(RecordConsumer recordConsumer, RowType rowType, GroupType schema) {
         this.recordConsumer = recordConsumer;
-
-        rowWriter = new RowWriter(rowType, schema);
+        this.rowWriter = new RowWriter(rowType, schema);
     }
 
     /**
@@ -427,6 +426,11 @@ public class ParquetRowDataWriter {
                         recordConsumer.startField(keyName, 0);
                         keyWriter.write(keyArray, i);
                         recordConsumer.endField(keyName, 0);
+                    } else {
+                        throw new IllegalArgumentException(
+                                "Parquet does not support null keys in maps. "
+                                        + "See https://github.com/apache/parquet-format/blob/master/LogicalTypes.md#maps "
+                                        + "for more details.");
                     }
 
                     if (!valueArray.isNullAt(i)) {
