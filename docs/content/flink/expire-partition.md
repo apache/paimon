@@ -55,10 +55,17 @@ CREATE TABLE t (...) PARTITIONED BY (dt) WITH (
     'partition.expiration-time' = '7 d',
     'partition.expiration-check-interval' = '1 d',
     'partition.timestamp-formatter' = 'yyyyMMdd'   -- this is required in `values-time` strategy.
-    'partition.expiration-strategy' = 'values-time' 
 );
 -- Let's say now the date is 2024-07-09，so before the date of 2024-07-02 will expire.
 insert into t values('pk', '2024-07-01');
+
+-- An example for multiple partition fields
+CREATE TABLE t (...) PARTITIONED BY (other_key, dt) WITH (
+    'partition.expiration-time' = '7 d',
+    'partition.expiration-check-interval' = '1 d',
+    'partition.timestamp-formatter' = 'yyyyMMdd',
+    'partition.timestamp-pattern' = '$dt'
+);
 ```
 
 `update-time` strategy.
@@ -74,16 +81,6 @@ insert into t values('pk', '2024-01-01');
 -- Support non-date formatted partition.
 insert into t values('pk', 'par-1'); 
 
-```
-
-An example for multiple partition fields:
-```sql
-CREATE TABLE t (...) PARTITIONED BY (other_key, dt) WITH (
-    'partition.expiration-time' = '7 d',
-    'partition.expiration-check-interval' = '1 d',
-    'partition.timestamp-formatter' = 'yyyyMMdd',
-    'partition.timestamp-pattern' = '$dt'
-);
 ```
 
 More options:

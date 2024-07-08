@@ -48,18 +48,18 @@ public class PartitionExpire {
 
     private LocalDateTime lastCheck;
 
-    private final PartitionExpireStrategy partitionExpireStrategy;
+    private final PartitionExpireStrategy strategy;
 
     public PartitionExpire(
             Duration expirationTime,
             Duration checkInterval,
-            PartitionExpireStrategy partitionExpireStrategy,
+            PartitionExpireStrategy strategy,
             FileStoreScan scan,
             FileStoreCommit commit,
             @Nullable MetastoreClient metastoreClient) {
         this.expirationTime = expirationTime;
         this.checkInterval = checkInterval;
-        this.partitionExpireStrategy = partitionExpireStrategy;
+        this.strategy = strategy;
         this.scan = scan;
         this.commit = commit;
         this.metastoreClient = metastoreClient;
@@ -94,9 +94,9 @@ public class PartitionExpire {
     private List<Map<String, String>> doExpire(
             LocalDateTime expireDateTime, long commitIdentifier) {
         List<Map<String, String>> expired = new ArrayList<>();
-        for (PartitionEntry partition : readPartitions(expireDateTime)) {
-            Object[] array = partitionExpireStrategy.convertPartition(partition.partition());
-            Map<String, String> partString = partitionExpireStrategy.toPartitionString(array);
+        for (PartitionEntry partition : strategy.selectExpiredPartitions(scan, expireDateTime)) {
+            Object[] array = strategy.convertPartition(partition.partition());
+            Map<String, String> partString = strategy.toPartitionString(array);
             expired.add(partString);
             LOG.info("Expire Partition: {}", partition);
         }
@@ -120,13 +120,5 @@ public class PartitionExpire {
                         }
                     });
         }
-    }
-
-    private List<PartitionEntry> readPartitions(LocalDateTime expireDateTime) {
-        return partitionExpireStrategy.filterPartitionEntry(
-                scan.withPartitionFilter(
-                                partitionExpireStrategy.createPartitionPredicate(expireDateTime))
-                        .readPartitionEntries(),
-                expireDateTime);
     }
 }

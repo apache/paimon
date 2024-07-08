@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.types.RowType;
 
 import java.time.LocalDateTime;
@@ -38,21 +39,17 @@ public class PartitionValuesTimeExpireStrategy extends PartitionExpireStrategy {
     private final PartitionTimeExtractor timeExtractor;
 
     public PartitionValuesTimeExpireStrategy(CoreOptions options, RowType partitionType) {
-        super(options, partitionType);
+        super(partitionType);
         String timePattern = options.partitionTimestampPattern();
         String timeFormatter = options.partitionTimestampFormatter();
         this.timeExtractor = new PartitionTimeExtractor(timePattern, timeFormatter);
     }
 
     @Override
-    public PartitionPredicate createPartitionPredicate(LocalDateTime expirationTime) {
-        return new PartitionValuesTimePredicate(expirationTime);
-    }
-
-    @Override
-    public List<PartitionEntry> filterPartitionEntry(
-            List<PartitionEntry> partitionEntries, LocalDateTime expirationTime) {
-        return partitionEntries;
+    public List<PartitionEntry> selectExpiredPartitions(
+            FileStoreScan scan, LocalDateTime expirationTime) {
+        return scan.withPartitionFilter(new PartitionValuesTimePredicate(expirationTime))
+                .readPartitionEntries();
     }
 
     /** The expired partition predicate uses the date-format value of the partition. */
@@ -66,7 +63,7 @@ public class PartitionValuesTimeExpireStrategy extends PartitionExpireStrategy {
 
         @Override
         public boolean test(BinaryRow partition) {
-            Object[] array = toObjectArrayConverter.convert(partition);
+            Object[] array = convertPartition(partition);
             LocalDateTime partTime = timeExtractor.extract(partitionKeys, Arrays.asList(array));
             return partTime != null && expireDateTime.isAfter(partTime);
         }

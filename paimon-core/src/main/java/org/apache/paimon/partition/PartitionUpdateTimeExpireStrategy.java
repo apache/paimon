@@ -18,11 +18,8 @@
 
 package org.apache.paimon.partition;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.InternalArray;
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DateTimeUtils;
 
@@ -36,46 +33,19 @@ import java.util.stream.Collectors;
  */
 public class PartitionUpdateTimeExpireStrategy extends PartitionExpireStrategy {
 
-    public PartitionUpdateTimeExpireStrategy(CoreOptions options, RowType partitionType) {
-        super(options, partitionType);
+    public PartitionUpdateTimeExpireStrategy(RowType partitionType) {
+        super(partitionType);
     }
 
     @Override
-    public PartitionPredicate createPartitionPredicate(LocalDateTime expirationTime) {
-        return new PartitionUpdateTimePredicate(expirationTime);
-    }
-
-    @Override
-    public List<PartitionEntry> filterPartitionEntry(
-            List<PartitionEntry> partitionEntries, LocalDateTime expirationTime) {
-        return partitionEntries.stream()
+    public List<PartitionEntry> selectExpiredPartitions(
+            FileStoreScan scan, LocalDateTime expirationTime) {
+        return scan.readPartitionEntries().stream()
                 .filter(
                         partitionEntry ->
                                 expirationTime.isAfter(
                                         DateTimeUtils.toLocalDateTime(
                                                 partitionEntry.lastFileCreationTime())))
                 .collect(Collectors.toList());
-    }
-
-    /** Use the partition's last update time to compare with the current time. */
-    private class PartitionUpdateTimePredicate implements PartitionPredicate {
-
-        private PartitionUpdateTimePredicate(LocalDateTime ignore) {}
-
-        // Always expired, we need to aggregate all partition files creation time and then filter
-        // it.
-        @Override
-        public boolean test(BinaryRow part) {
-            return true;
-        }
-
-        @Override
-        public boolean test(
-                long rowCount,
-                InternalRow minValues,
-                InternalRow maxValues,
-                InternalArray nullCounts) {
-            return true;
-        }
     }
 }

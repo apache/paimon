@@ -21,6 +21,7 @@ package org.apache.paimon.partition;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
@@ -32,12 +33,10 @@ import java.util.Map;
 /** Strategy for partition expiration. */
 public abstract class PartitionExpireStrategy {
 
-    public List<String> partitionKeys;
-    public CoreOptions options;
-    public RowDataToObjectArrayConverter toObjectArrayConverter;
+    protected final List<String> partitionKeys;
+    private final RowDataToObjectArrayConverter toObjectArrayConverter;
 
-    public PartitionExpireStrategy(CoreOptions options, RowType partitionType) {
-        this.options = options;
+    public PartitionExpireStrategy(RowType partitionType) {
         this.toObjectArrayConverter = new RowDataToObjectArrayConverter(partitionType);
         this.partitionKeys = partitionType.getFieldNames();
     }
@@ -54,22 +53,14 @@ public abstract class PartitionExpireStrategy {
         return toObjectArrayConverter.convert(partition);
     }
 
-    public abstract PartitionPredicate createPartitionPredicate(LocalDateTime expirationTime);
-
-    /**
-     * We need to filter the partition based on the complete information of the partition rather
-     * than on a file-by-file filter under the partition, such as the last update time of the
-     * partition.
-     */
-    public abstract List<PartitionEntry> filterPartitionEntry(
-            List<PartitionEntry> partitionEntries, LocalDateTime expirationTime);
+    public abstract List<PartitionEntry> selectExpiredPartitions(
+            FileStoreScan scan, LocalDateTime expirationTime);
 
     public static PartitionExpireStrategy createPartitionExpireStrategy(
             CoreOptions options, RowType partitionType) {
-
         switch (options.partitionExpireStrategy()) {
             case UPDATE_TIME:
-                return new PartitionUpdateTimeExpireStrategy(options, partitionType);
+                return new PartitionUpdateTimeExpireStrategy(partitionType);
             case VALUES_TIME:
             default:
                 return new PartitionValuesTimeExpireStrategy(options, partitionType);

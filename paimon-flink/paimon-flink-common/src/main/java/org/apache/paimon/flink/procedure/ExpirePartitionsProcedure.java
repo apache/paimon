@@ -23,7 +23,6 @@ import org.apache.paimon.FileStore;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.PartitionExpire;
-import org.apache.paimon.partition.PartitionExpireStrategy;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.TimeUtils;
 
@@ -38,6 +37,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+
+import static org.apache.paimon.partition.PartitionExpireStrategy.createPartitionExpireStrategy;
 
 /** A procedure to expire partitions. */
 public class ExpirePartitionsProcedure extends ProcedureBase {
@@ -76,7 +77,7 @@ public class ExpirePartitionsProcedure extends ProcedureBase {
                 new PartitionExpire(
                         TimeUtils.parseDuration(expirationTime),
                         Duration.ofMillis(0L),
-                        PartitionExpireStrategy.createPartitionExpireStrategy(
+                        createPartitionExpireStrategy(
                                 CoreOptions.fromMap(map), fileStore.partitionType()),
                         fileStore.newScan(),
                         fileStore.newCommit(""),
