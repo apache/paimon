@@ -29,8 +29,17 @@ under the License.
 You can set `partition.expiration-time` when creating a partitioned table. Paimon streaming sink will periodically check
 the status of partitions and delete expired partitions according to time.
 
-How to determine whether a partition has expired: compare the time extracted from the partition with the current
-time to see if survival time has exceeded the `partition.expiration-time`.
+How to determine whether a partition has expired: you can set `partition.expiration-strategy` when creating a partitioned table,
+this strategy determines how to extract the partition time and compare it with the current time to see if survival time
+has exceeded the `partition.expiration-time`. Expiration strategy supported values are:
+
+- `values-time` : The strategy compares the time extracted from the partition value with the current time,
+this strategy as the default.
+- `update-time` : The strategy compares the last update time of the partition with the current time. 
+What is the scenario for this strategy:
+   - Your partition value is non-date formatted.
+   - You only want to keep data that has been updated in the last n days/months/years.
+   - Data initialization imports a large amount of historical data.
 
 {{< hint info >}}
 __Note:__ After the partition expires, it is logically deleted and the latest snapshot cannot query its data. But the
@@ -39,12 +48,32 @@ See [Expire Snapshots]({{< ref "/maintenance/manage-snapshots#expire-snapshots" 
 {{< /hint >}}
 
 An example for single partition field:
+
+`values-time` strategy.
 ```sql
 CREATE TABLE t (...) PARTITIONED BY (dt) WITH (
     'partition.expiration-time' = '7 d',
     'partition.expiration-check-interval' = '1 d',
-    'partition.timestamp-formatter' = 'yyyyMMdd'
+    'partition.timestamp-formatter' = 'yyyyMMdd'   -- this is required in `values-time` strategy.
+    'partition.expiration-strategy' = 'values-time' 
 );
+-- Let's say now the date is 2024-07-09，so before the date of 2024-07-02 will expire.
+insert into t values('pk', '2024-07-01');
+```
+
+`update-time` strategy.
+```sql
+CREATE TABLE t (...) PARTITIONED BY (dt) WITH (
+    'partition.expiration-time' = '7 d',
+    'partition.expiration-check-interval' = '1 d',
+    'partition.expiration-strategy' = 'update-time'
+);
+
+-- The last update time of the partition is now, so it will not expire.
+insert into t values('pk', '2024-01-01');
+-- Support non-date formatted partition.
+insert into t values('pk', 'par-1'); 
+
 ```
 
 An example for multiple partition fields:
@@ -69,6 +98,17 @@ More options:
     </tr>
     </thead>
     <tbody>
+        <tr>
+            <td><h5>partition.expiration-strategy</h5></td>
+            <td style="word-wrap: break-word;">values-time</td>
+            <td>String</td>
+            <td>
+                Specifies the expiration strategy for partition expiration. 
+                Possible values:
+                <li>values-time: The strategy compares the time extracted from the partition value with the current time.</li>
+                <li>update-time: The strategy compares the last update time of the partition with the current time.</li>
+            </td>
+        </tr>
         <tr>
             <td><h5>partition.expiration-check-interval</h5></td>
             <td style="word-wrap: break-word;">1 h</td>

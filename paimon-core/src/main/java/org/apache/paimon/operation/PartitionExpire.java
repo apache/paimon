@@ -19,14 +19,9 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.InternalArray;
-import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metastore.MetastoreClient;
-import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.partition.PartitionTimeExtractor;
-import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.RowDataToObjectArrayConverter;
+import org.apache.paimon.partition.PartitionExpireStrategy;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,7 +31,6 @@ import javax.annotation.Nullable;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -46,31 +40,26 @@ public class PartitionExpire {
 
     private static final Logger LOG = LoggerFactory.getLogger(PartitionExpire.class);
 
-    private final List<String> partitionKeys;
-    private final RowDataToObjectArrayConverter toObjectArrayConverter;
     private final Duration expirationTime;
     private final Duration checkInterval;
-    private final PartitionTimeExtractor timeExtractor;
     private final FileStoreScan scan;
     private final FileStoreCommit commit;
     private final MetastoreClient metastoreClient;
 
     private LocalDateTime lastCheck;
 
+    private final PartitionExpireStrategy partitionExpireStrategy;
+
     public PartitionExpire(
-            RowType partitionType,
             Duration expirationTime,
             Duration checkInterval,
-            String timePattern,
-            String timeFormatter,
+            PartitionExpireStrategy partitionExpireStrategy,
             FileStoreScan scan,
             FileStoreCommit commit,
             @Nullable MetastoreClient metastoreClient) {
-        this.partitionKeys = partitionType.getFieldNames();
-        this.toObjectArrayConverter = new RowDataToObjectArrayConverter(partitionType);
         this.expirationTime = expirationTime;
         this.checkInterval = checkInterval;
-        this.timeExtractor = new PartitionTimeExtractor(timePattern, timeFormatter);
+        this.partitionExpireStrategy = partitionExpireStrategy;
         this.scan = scan;
         this.commit = commit;
         this.metastoreClient = metastoreClient;
@@ -105,13 +94,13 @@ public class PartitionExpire {
     private List<Map<String, String>> doExpire(
             LocalDateTime expireDateTime, long commitIdentifier) {
         List<Map<String, String>> expired = new ArrayList<>();
-        for (BinaryRow partition : readPartitions(expireDateTime)) {
-            Object[] array = toObjectArrayConverter.convert(partition);
-            Map<String, String> partString = toPartitionString(array);
+        for (PartitionEntry partition : readPartitions(expireDateTime)) {
+            Object[] array = partitionExpireStrategy.convertPartition(partition.partition());
+            Map<String, String> partString = partitionExpireStrategy.toPartitionString(array);
             expired.add(partString);
             LOG.info("Expire Partition: {}", partition);
         }
-        if (expired.size() > 0) {
+        if (!expired.isEmpty()) {
             if (metastoreClient != null) {
                 deleteMetastorePartitions(expired);
             }
@@ -133,41 +122,11 @@ public class PartitionExpire {
         }
     }
 
-    private Map<String, String> toPartitionString(Object[] array) {
-        Map<String, String> map = new LinkedHashMap<>();
-        for (int i = 0; i < partitionKeys.size(); i++) {
-            map.put(partitionKeys.get(i), array[i].toString());
-        }
-        return map;
-    }
-
-    private List<BinaryRow> readPartitions(LocalDateTime expireDateTime) {
-        return scan.withPartitionFilter(new PartitionTimePredicate(expireDateTime))
-                .listPartitions();
-    }
-
-    private class PartitionTimePredicate implements PartitionPredicate {
-
-        private final LocalDateTime expireDateTime;
-
-        private PartitionTimePredicate(LocalDateTime expireDateTime) {
-            this.expireDateTime = expireDateTime;
-        }
-
-        @Override
-        public boolean test(BinaryRow partition) {
-            Object[] array = toObjectArrayConverter.convert(partition);
-            LocalDateTime partTime = timeExtractor.extract(partitionKeys, Arrays.asList(array));
-            return partTime != null && expireDateTime.isAfter(partTime);
-        }
-
-        @Override
-        public boolean test(
-                long rowCount,
-                InternalRow minValues,
-                InternalRow maxValues,
-                InternalArray nullCounts) {
-            return true;
-        }
+    private List<PartitionEntry> readPartitions(LocalDateTime expireDateTime) {
+        return partitionExpireStrategy.filterPartitionEntry(
+                scan.withPartitionFilter(
+                                partitionExpireStrategy.createPartitionPredicate(expireDateTime))
+                        .readPartitionEntries(),
+                expireDateTime);
     }
 }

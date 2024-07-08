@@ -486,6 +486,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>The default partition name in case the dynamic partition column value is null/empty string.</td>
         </tr>
         <tr>
+            <td><h5>partition.expiration-strategy</h5></td>
+            <td style="word-wrap: break-word;">values-time</td>
+            <td>String</td>
+            <td>Specifies the expiration strategy for partition expiration.<br />Possible values:<ul><li>values-time: A partition expiration policy that compares the time extracted from the partition value with the current time.</li></ul><ul><li>update-time: A partition expiration policy that compares the last update time of the partition with the current time.</li></ul><br /><br />Possible values:<ul><li>"values-time": The strategy compares the time extracted from the partition value with the current time.</li><li>"update-time": The strategy compares the last update time of the partition with the current time.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>partition.expiration-check-interval</h5></td>
             <td style="word-wrap: break-word;">1 h</td>
             <td>Duration</td>

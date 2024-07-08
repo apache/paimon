@@ -18,10 +18,12 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.PartitionExpire;
+import org.apache.paimon.partition.PartitionExpireStrategy;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.TimeUtils;
 
@@ -32,6 +34,7 @@ import org.apache.flink.table.procedure.ProcedureContext;
 import org.apache.flink.types.Row;
 
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -47,23 +50,34 @@ public class ExpirePartitionsProcedure extends ProcedureBase {
             argument = {
                 @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
                 @ArgumentHint(name = "expiration_time", type = @DataTypeHint(value = "STRING")),
-                @ArgumentHint(name = "timestamp_formatter", type = @DataTypeHint("STRING"))
+                @ArgumentHint(
+                        name = "timestamp_formatter",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "expire_strategy",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
             })
     public @DataTypeHint("ROW< expired_partitions STRING>") Row[] call(
             ProcedureContext procedureContext,
             String tableId,
             String expirationTime,
-            String timestampFormatter)
+            String timestampFormatter,
+            String expireStrategy)
             throws Catalog.TableNotExistException {
         FileStoreTable fileStoreTable = (FileStoreTable) table(tableId);
         FileStore fileStore = fileStoreTable.store();
+        Map<String, String> map = new HashMap<>();
+        map.put(CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(), expireStrategy);
+        map.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), timestampFormatter);
+
         PartitionExpire partitionExpire =
                 new PartitionExpire(
-                        fileStore.partitionType(),
                         TimeUtils.parseDuration(expirationTime),
                         Duration.ofMillis(0L),
-                        null,
-                        timestampFormatter,
+                        PartitionExpireStrategy.createPartitionExpireStrategy(
+                                CoreOptions.fromMap(map), fileStore.partitionType()),
                         fileStore.newScan(),
                         fileStore.newCommit(""),
                         Optional.ofNullable(

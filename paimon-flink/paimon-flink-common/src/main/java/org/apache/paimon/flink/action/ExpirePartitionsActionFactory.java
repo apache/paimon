@@ -41,6 +41,7 @@ public class ExpirePartitionsActionFactory implements ActionFactory {
         checkRequiredArgument(params, TIMESTAMPFORMATTER);
         String expirationTime = params.get(EXPIRATIONTIME);
         String timestampFormatter = params.get(TIMESTAMPFORMATTER);
+        String expireStrategy = params.get(EXPIRE_STRATEGY);
 
         Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
 
@@ -51,7 +52,8 @@ public class ExpirePartitionsActionFactory implements ActionFactory {
                         tablePath.f2,
                         catalogConfig,
                         expirationTime,
-                        timestampFormatter));
+                        timestampFormatter,
+                        expireStrategy));
     }
 
     @Override
