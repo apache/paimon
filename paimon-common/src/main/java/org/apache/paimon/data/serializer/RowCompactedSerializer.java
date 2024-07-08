@@ -233,7 +233,8 @@ public class RowCompactedSerializer implements Serializer<InternalRow> {
                 String msg =
                         String.format(
                                 "type %s not support in %s",
-                                fieldType.getTypeRoot().toString(), this.getClass().getName());
+                                fieldType.getTypeRoot().toString(),
+                                RowCompactedSerializer.class.getName());
                 throw new IllegalArgumentException(msg);
         }
 
