@@ -230,7 +230,11 @@ public class RowCompactedSerializer implements Serializer<InternalRow> {
                         (writer, pos, value) -> writer.writeRow((InternalRow) value, rowSerializer);
                 break;
             default:
-                throw new IllegalArgumentException();
+                String msg =
+                        String.format(
+                                "type %s not support in %s",
+                                fieldType.getTypeRoot().toString(), this.getClass().getName());
+                throw new IllegalArgumentException(msg);
         }
 
         if (!fieldType.isNullable()) {
@@ -302,7 +306,12 @@ public class RowCompactedSerializer implements Serializer<InternalRow> {
                 fieldReader = (reader, pos) -> reader.readRow(serializer);
                 break;
             default:
-                throw new IllegalArgumentException();
+                String msg =
+                        String.format(
+                                "type %s not support in %s",
+                                fieldType.getTypeRoot().toString(),
+                                RowCompactedSerializer.class.getName());
+                throw new IllegalArgumentException(msg);
         }
         if (!fieldType.isNullable()) {
             return fieldReader;

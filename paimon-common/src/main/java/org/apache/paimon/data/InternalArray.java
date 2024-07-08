@@ -131,7 +131,12 @@ public interface InternalArray extends DataGetters {
                 elementGetter = (array, pos) -> array.getRow(pos, rowFieldCount);
                 break;
             default:
-                throw new IllegalArgumentException();
+                String msg =
+                        String.format(
+                                "type %s not support in %s",
+                                elementType.getTypeRoot().toString(),
+                                InternalArray.class.getName());
+                throw new IllegalArgumentException(msg);
         }
         if (!elementType.isNullable()) {
             return elementGetter;
