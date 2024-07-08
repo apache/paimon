@@ -49,14 +49,14 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         sql("CREATE TABLE T1 (a STRING, b STRING, c STRING)");
 
         assertThatThrownBy(() -> sql("ALTER TABLE T1 SET ('bucket-key' = 'c')"))
-                .getRootCause()
+                .rootCause()
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage("Change 'bucket-key' is not supported yet.");
 
         sql(
                 "CREATE TABLE T2 (a STRING, b STRING, c STRING) WITH ('bucket' = '1', 'bucket-key' = 'c')");
         assertThatThrownBy(() -> sql("ALTER TABLE T2 RESET ('bucket-key')"))
-                .getRootCause()
+                .rootCause()
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage("Change 'bucket-key' is not supported yet.");
 
@@ -64,14 +64,14 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         sql(
                 "CREATE TABLE T4 (a STRING, b STRING, c STRING) WITH ('merge-engine' = 'partial-update')");
         assertThatThrownBy(() -> sql("ALTER TABLE T4 RESET ('merge-engine')"))
-                .getRootCause()
+                .rootCause()
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage("Change 'merge-engine' is not supported yet.");
 
         // sequence.field is immutable
         sql("CREATE TABLE T5 (a STRING, b STRING, c STRING) WITH ('sequence.field' = 'b')");
         assertThatThrownBy(() -> sql("ALTER TABLE T5 SET ('sequence.field' = 'c')"))
-                .getRootCause()
+                .rootCause()
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage("Change 'sequence.field' is not supported yet.");
     }

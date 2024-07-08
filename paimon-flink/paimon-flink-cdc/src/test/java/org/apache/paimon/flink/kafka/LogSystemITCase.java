@@ -195,7 +195,7 @@ public class LogSystemITCase extends KafkaTableTestBase {
                         () ->
                                 tEnv.executeSql(
                                         "INSERT INTO kafka_file_single_sink SELECT word, COUNT(*) FROM word_table GROUP BY word;"))
-                .getRootCause()
+                .rootCause()
                 .isInstanceOf(ValidationException.class)
                 .hasMessage(
                         "File store continuous reading does not support the log streaming read mode.");
