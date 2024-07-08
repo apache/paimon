@@ -41,10 +41,12 @@ import org.apache.paimon.table.sink.CallbackUtils;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.DynamicBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
+import org.apache.paimon.table.sink.FixedBucketWriteSelector;
 import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.RowKindGenerator;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.UnawareBucketRowKeyExtractor;
+import org.apache.paimon.table.sink.WriteSelector;
 import org.apache.paimon.table.source.DataTableBatchScan;
 import org.apache.paimon.table.source.DataTableStreamScan;
 import org.apache.paimon.table.source.SplitGenerator;
@@ -131,6 +133,19 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public BucketMode bucketMode() {
         return store().bucketMode();
+    }
+
+    @Override
+    public Optional<WriteSelector> newWriteSelector() {
+        switch (bucketMode()) {
+            case HASH_FIXED:
+                return Optional.of(new FixedBucketWriteSelector(schema()));
+            case BUCKET_UNAWARE:
+                return Optional.empty();
+            default:
+                throw new UnsupportedOperationException(
+                        "Currently, write selector does not support table mode: " + bucketMode());
+        }
     }
 
     @Override

@@ -46,6 +46,7 @@ import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.table.sink.WriteSelector;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -135,6 +136,19 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                     rowData.getRowKind().shortString()
                             + " "
                             + COMPATIBILITY_BATCH_ROW_TO_STRING.apply(rowData);
+
+    @Test
+    public void testMultipleWriters() throws Exception {
+        WriteSelector selector =
+                createFileStoreTable(options -> options.set("bucket", "5"))
+                        .newBatchWriteBuilder()
+                        .newWriteSelector()
+                        .orElse(null);
+        assertThat(selector).isNotNull();
+        assertThat(selector.select(rowData(1, 1, 2L), 3)).isEqualTo(1);
+        assertThat(selector.select(rowData(1, 3, 4L), 3)).isEqualTo(1);
+        assertThat(selector.select(rowData(1, 5, 6L), 3)).isEqualTo(2);
+    }
 
     @Test
     public void testAsyncReader() throws Exception {

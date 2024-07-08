@@ -23,6 +23,7 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.InnerTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.table.sink.WriteSelector;
 import org.apache.paimon.table.source.StreamDataTableScan;
 
 import java.time.Duration;
@@ -67,6 +68,14 @@ public interface ReadonlyTable extends InnerTable {
         throw new UnsupportedOperationException(
                 String.format(
                         "Readonly Table %s does not support newStreamWriteBuilder.",
+                        this.getClass().getSimpleName()));
+    }
+
+    @Override
+    default Optional<WriteSelector> newWriteSelector() {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support newWriteSelector.",
                         this.getClass().getSimpleName()));
     }
 
