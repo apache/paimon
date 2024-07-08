@@ -217,7 +217,6 @@ public class TestHiveMetastore {
         conf.set(
                 HiveConf.ConfVars.METASTORE_DISALLOW_INCOMPATIBLE_COL_TYPE_CHANGES.varname,
                 "false");
-        conf.set("iceberg.hive.client-pool-size", "2");
         conf.set(
                 HiveConf.ConfVars.HIVE_IN_TEST.varname,
                 HiveConf.ConfVars.HIVE_IN_TEST.getDefaultValue());

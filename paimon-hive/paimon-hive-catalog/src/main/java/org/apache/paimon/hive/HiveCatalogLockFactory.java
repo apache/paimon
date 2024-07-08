@@ -27,6 +27,7 @@ import org.apache.hadoop.hive.conf.HiveConf;
 import static org.apache.paimon.hive.HiveCatalogLock.LOCK_IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalogLock.acquireTimeout;
 import static org.apache.paimon.hive.HiveCatalogLock.checkMaxSleep;
+import static org.apache.paimon.hive.HiveCatalogLock.createClients;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Catalog lock factory for hive. */
@@ -40,7 +41,7 @@ public class HiveCatalogLockFactory implements CatalogLockFactory {
         HiveCatalogLockContext hiveLockContext = (HiveCatalogLockContext) context;
         HiveConf conf = hiveLockContext.hiveConf().conf();
         return new HiveCatalogLock(
-                HiveCatalog.createClient(conf, hiveLockContext.clientClassName()),
+                createClients(conf, hiveLockContext.options(), hiveLockContext.clientClassName()),
                 checkMaxSleep(conf),
                 acquireTimeout(conf));
     }
