@@ -250,7 +250,9 @@ public class FlinkSourceBuilder {
         if (env == null) {
             throw new IllegalArgumentException("StreamExecutionEnvironment should not be null.");
         }
-
+        if (!conf.contains(CoreOptions.CONSUMER_ID)) {
+            throw new IllegalArgumentException("consumer id should be specified.");
+        }
         if (sourceBounded) {
             return buildStaticFileSource();
         }
