@@ -27,6 +27,7 @@ import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.ExternalBuffer;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
@@ -59,6 +60,7 @@ public class AppendOnlyFileStoreWriteTest {
         FileStoreTable table = createFileStoreTable();
 
         AppendOnlyFileStoreWrite write = (AppendOnlyFileStoreWrite) table.store().newWrite("ss");
+        write.withIOManager(IOManager.create(tempDir.toString()));
         write.withExecutionMode(false);
 
         write.write(partition(0), 0, GenericRow.of(0, 0, 0));
