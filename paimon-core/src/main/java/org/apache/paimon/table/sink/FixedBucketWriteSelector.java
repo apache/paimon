@@ -22,7 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 
-/** A {@link WriteSelector} for {@link BucketMode#HASH_FIXED} */
+/** A {@link WriteSelector} for {@link BucketMode#HASH_FIXED}. */
 public class FixedBucketWriteSelector implements WriteSelector {
 
     private static final long serialVersionUID = 1L;
