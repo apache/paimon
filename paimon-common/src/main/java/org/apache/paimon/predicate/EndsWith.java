@@ -26,7 +26,7 @@ import java.util.Optional;
 
 /**
  * A {@link NullFalseLeafBinaryFunction} to evaluate {@code filter like '%abc' or filter like
- * 'abc_'}.
+ * '_abc'}.
  */
 public class EndsWith extends NullFalseLeafBinaryFunction {
 
