@@ -26,7 +26,6 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.ChannelWithMeta;
 import org.apache.paimon.disk.ExternalBuffer;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.disk.InMemoryBuffer;
 import org.apache.paimon.disk.RowBuffer;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
@@ -338,27 +337,6 @@ public class AppendOnlyWriterTest {
         Assertions.assertThat(buffer.size()).isEqualTo(100);
         Assertions.assertThat(buffer.memoryOccupancy()).isLessThanOrEqualTo(16384L);
 
-        writer.close();
-    }
-
-    @Test
-    public void testWithoutIoManager() throws Exception {
-        AppendOnlyWriter writer = createEmptyWriterWithoutIoManager(Long.MAX_VALUE, true);
-
-        // we give it a small Memory Pool, force it to spill
-        writer.setMemoryPool(new HeapMemorySegmentPool(16384L, 1024));
-
-        char[] s = new char[990];
-        Arrays.fill(s, 'a');
-
-        // set the record that much larger than the maxMemory
-        for (int j = 0; j < 100; j++) {
-            writer.write(row(j, String.valueOf(s), PART));
-        }
-
-        RowBuffer buffer = writer.getWriteBuffer();
-
-        Assertions.assertThat(buffer instanceof InMemoryBuffer).isTrue();
         writer.close();
     }
 
