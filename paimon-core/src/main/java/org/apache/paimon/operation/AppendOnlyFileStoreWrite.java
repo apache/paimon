@@ -224,6 +224,9 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
 
     @Override
     protected void forceBufferSpill() throws Exception {
+        if (ioManager == null) {
+            return;
+        }
         forceBufferSpill = true;
         for (Map<Integer, WriterContainer<InternalRow>> bucketWriters : writers.values()) {
             for (WriterContainer<InternalRow> writerContainer : bucketWriters.values()) {
