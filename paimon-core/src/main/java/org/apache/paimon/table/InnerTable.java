@@ -24,11 +24,14 @@ import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.InnerTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.sink.StreamWriteBuilderImpl;
+import org.apache.paimon.table.sink.WriteSelector;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.ReadBuilderImpl;
 import org.apache.paimon.table.source.StreamDataTableScan;
+
+import java.util.Optional;
 
 /** Inner table for implementation, provide newScan, newRead ... directly. */
 public interface InnerTable extends Table {
@@ -38,6 +41,8 @@ public interface InnerTable extends Table {
     StreamDataTableScan newStreamScan();
 
     InnerTableRead newRead();
+
+    Optional<WriteSelector> newWriteSelector();
 
     InnerTableWrite newWrite(String commitUser);
 

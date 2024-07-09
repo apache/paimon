@@ -25,6 +25,7 @@ import org.apache.paimon.types.RowType;
 import javax.annotation.Nullable;
 
 import java.util.Map;
+import java.util.Optional;
 
 import static org.apache.paimon.CoreOptions.createCommitUser;
 
@@ -51,6 +52,11 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
     @Override
     public RowType rowType() {
         return table.rowType();
+    }
+
+    @Override
+    public Optional<WriteSelector> newWriteSelector() {
+        return table.newWriteSelector();
     }
 
     @Override

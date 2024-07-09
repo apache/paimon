@@ -80,6 +80,15 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
 
     @Test
+    public void testMultipleWriters() throws Exception {
+        assertThat(
+                        createFileStoreTable(options -> options.set("bucket", "-1"))
+                                .newBatchWriteBuilder()
+                                .newWriteSelector())
+                .isEmpty();
+    }
+
+    @Test
     public void testReadDeletedFiles() throws Exception {
         writeData();
         FileStoreTable table = createFileStoreTable();

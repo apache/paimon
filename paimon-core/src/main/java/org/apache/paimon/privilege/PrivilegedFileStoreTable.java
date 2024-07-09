@@ -34,6 +34,7 @@ import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.table.sink.WriteSelector;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.StreamDataTableScan;
@@ -260,6 +261,12 @@ public class PrivilegedFileStoreTable implements FileStoreTable {
     public InnerTableRead newRead() {
         privilegeChecker.assertCanSelect(identifier);
         return wrapped.newRead();
+    }
+
+    @Override
+    public Optional<WriteSelector> newWriteSelector() {
+        privilegeChecker.assertCanInsert(identifier);
+        return wrapped.newWriteSelector();
     }
 
     @Override

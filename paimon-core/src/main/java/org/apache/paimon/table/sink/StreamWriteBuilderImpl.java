@@ -22,6 +22,8 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.RowType;
 
+import java.util.Optional;
+
 import static org.apache.paimon.CoreOptions.createCommitUser;
 
 /** Implementation for {@link WriteBuilder}. */
@@ -46,6 +48,11 @@ public class StreamWriteBuilderImpl implements StreamWriteBuilder {
     @Override
     public RowType rowType() {
         return table.rowType();
+    }
+
+    @Override
+    public Optional<WriteSelector> newWriteSelector() {
+        return table.newWriteSelector();
     }
 
     @Override

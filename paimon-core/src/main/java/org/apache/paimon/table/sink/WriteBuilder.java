@@ -18,11 +18,13 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.RowType;
 
 import java.io.Serializable;
+import java.util.Optional;
 
 /**
  * An interface for building the {@link TableWrite} and {@link TableCommit}.
@@ -37,6 +39,16 @@ public interface WriteBuilder extends Serializable {
 
     /** Returns the row type of this table. */
     RowType rowType();
+
+    /**
+     * Create a {@link WriteSelector} to partition records before writers.
+     *
+     * @return empty if no data distribution is required.
+     * @throws UnsupportedOperationException if this table mode does not support building writes
+     *     through upper level APIs.
+     */
+    @Experimental
+    Optional<WriteSelector> newWriteSelector();
 
     /** Create a {@link TableWrite} to write {@link InternalRow}s. */
     TableWrite newWrite();
