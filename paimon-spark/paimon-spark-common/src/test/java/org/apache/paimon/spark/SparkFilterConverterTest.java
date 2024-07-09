@@ -28,17 +28,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarCharType;
 
-import org.apache.spark.sql.sources.EqualNullSafe;
-import org.apache.spark.sql.sources.EqualTo;
-import org.apache.spark.sql.sources.GreaterThan;
-import org.apache.spark.sql.sources.GreaterThanOrEqual;
-import org.apache.spark.sql.sources.In;
-import org.apache.spark.sql.sources.IsNotNull;
-import org.apache.spark.sql.sources.IsNull;
-import org.apache.spark.sql.sources.LessThan;
-import org.apache.spark.sql.sources.LessThanOrEqual;
-import org.apache.spark.sql.sources.Not;
-import org.apache.spark.sql.sources.StringStartsWith;
+import org.apache.spark.sql.sources.*;
 import org.junit.jupiter.api.Test;
 
 import java.sql.Date;
@@ -192,6 +182,11 @@ public class SparkFilterConverterTest {
 
     @Test
     public void testIgnoreFailure() {
+        testStartsWith();
+        testEndsWith();
+    }
+
+    public void testStartsWith() {
         List<DataField> dataFields = new ArrayList<>();
         dataFields.add(new DataField(0, "id", new IntType()));
         dataFields.add(new DataField(1, "name", new VarCharType(VarCharType.MAX_LENGTH)));
@@ -199,6 +194,18 @@ public class SparkFilterConverterTest {
         SparkFilterConverter converter = new SparkFilterConverter(rowType);
 
         Not not = Not.apply(StringStartsWith.apply("name", "paimon"));
+        catchThrowableOfType(() -> converter.convert(not), UnsupportedOperationException.class);
+        assertThat(converter.convertIgnoreFailure(not)).isNull();
+    }
+
+    public void testEndsWith() {
+        List<DataField> dataFields = new ArrayList<>();
+        dataFields.add(new DataField(0, "id", new IntType()));
+        dataFields.add(new DataField(1, "name", new VarCharType(VarCharType.MAX_LENGTH)));
+        RowType rowType = new RowType(dataFields);
+        SparkFilterConverter converter = new SparkFilterConverter(rowType);
+
+        Not not = Not.apply(StringEndsWith.apply("name", "paimon"));
         catchThrowableOfType(() -> converter.convert(not), UnsupportedOperationException.class);
         assertThat(converter.convertIgnoreFailure(not)).isNull();
     }

@@ -47,6 +47,11 @@ public abstract class FileIndexReader implements FunctionVisitor<FileIndexResult
     }
 
     @Override
+    public FileIndexResult visitEndsWith(FieldRef fieldRef, Object literal) {
+        return REMAIN;
+    }
+
+    @Override
     public FileIndexResult visitLessThan(FieldRef fieldRef, Object literal) {
         return REMAIN;
     }
