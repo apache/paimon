@@ -185,11 +185,10 @@ public class MongoDBContainer extends org.testcontainers.containers.MongoDBConta
     }
 
     public String getConnectionString() {
-        return String.format(
-                "mongodb://%s:%d", getContainerIpAddress(), getMappedPort(MONGODB_PORT));
+        return String.format("mongodb://%s:%d", getHost(), getMappedPort(MONGODB_PORT));
     }
 
     public String getHostAndPort() {
-        return String.format("%s:%s", getContainerIpAddress(), getMappedPort(MONGODB_PORT));
+        return String.format("%s:%s", getHost(), getMappedPort(MONGODB_PORT));
     }
 }
