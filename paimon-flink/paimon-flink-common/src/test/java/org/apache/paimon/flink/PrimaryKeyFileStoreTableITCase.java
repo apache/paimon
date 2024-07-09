@@ -293,6 +293,42 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         it.close();
     }
 
+    @Test
+    public void testBatchJobWithConflictAndRestart() throws Exception {
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().allowRestart(10).build();
+        tEnv.executeSql(
+                "CREATE CATALOG mycat WITH ( 'type' = 'paimon', 'warehouse' = '"
+                        + getTempDirPath()
+                        + "' )");
+        tEnv.executeSql("USE CATALOG mycat");
+        tEnv.executeSql(
+                "CREATE TABLE t ( k INT, v INT, PRIMARY KEY (k) NOT ENFORCED ) "
+                        // force compaction for each commit
+                        + "WITH ( 'bucket' = '2', 'full-compaction.delta-commits' = '1' )");
+        // write some basic records
+        tEnv.executeSql("INSERT INTO t VALUES (1, 10), (2, 20), (3, 30)").await();
+
+        // two batch jobs compact at the same time
+        // let writer's parallelism > 1, so it cannot be chained with committer
+        TableResult result1 =
+                tEnv.executeSql(
+                        "INSERT INTO t /*+ OPTIONS('sink.parallelism' = '2') */ VALUES (1, 11), (2, 21), (3, 31)");
+        TableResult result2 =
+                tEnv.executeSql(
+                        "INSERT INTO t /*+ OPTIONS('sink.parallelism' = '2') */ VALUES (1, 12), (2, 22), (3, 32)");
+
+        result1.await();
+        result2.await();
+
+        try (CloseableIterator<Row> it = tEnv.executeSql("SELECT * FROM t").collect()) {
+            for (int i = 0; i < 3; i++) {
+                assertThat(it).hasNext();
+                Row row = it.next();
+                assertThat(row.getField(1)).isNotEqualTo((int) row.getField(0) * 10);
+            }
+        }
+    }
+
     // ------------------------------------------------------------------------
     //  Random Tests
     // ------------------------------------------------------------------------

@@ -118,7 +118,7 @@ public class AbstractTestBase {
         private boolean streamingMode = true;
         private Integer parallelism = null;
         private Integer checkpointIntervalMs = null;
-        private boolean allowRestart = false;
+        private int numRestarts = 0;
         private Configuration conf = new Configuration();
 
         public TableEnvironmentBuilder batchMode() {
@@ -142,12 +142,11 @@ public class AbstractTestBase {
         }
 
         public TableEnvironmentBuilder allowRestart() {
-            this.allowRestart = true;
-            return this;
+            return allowRestart(Integer.MAX_VALUE);
         }
 
-        public TableEnvironmentBuilder allowRestart(boolean allowRestart) {
-            this.allowRestart = allowRestart;
+        public TableEnvironmentBuilder allowRestart(int numRestarts) {
+            this.numRestarts = numRestarts;
             return this;
         }
 
@@ -192,7 +191,7 @@ public class AbstractTestBase {
                                 parallelism);
             }
 
-            if (allowRestart) {
+            if (numRestarts > 0) {
                 tEnv.getConfig()
                         .getConfiguration()
                         .set(RestartStrategyOptions.RESTART_STRATEGY, "fixed-delay");
@@ -200,7 +199,7 @@ public class AbstractTestBase {
                         .getConfiguration()
                         .set(
                                 RestartStrategyOptions.RESTART_STRATEGY_FIXED_DELAY_ATTEMPTS,
-                                Integer.MAX_VALUE);
+                                numRestarts);
                 tEnv.getConfig()
                         .getConfiguration()
                         .set(
