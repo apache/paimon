@@ -21,8 +21,7 @@ package org.apache.paimon.format.parquet.writer;
 import org.apache.parquet.io.PositionOutputStream;
 
 import java.io.IOException;
-
-import static org.apache.parquet.Preconditions.checkNotNull;
+import java.util.Objects;
 
 /** An adapter to turn Paimon's {@link PositionOutputStream} into a {@link PositionOutputStream}. */
 class PositionOutputStreamAdapter extends PositionOutputStream {
@@ -36,7 +35,7 @@ class PositionOutputStreamAdapter extends PositionOutputStream {
      * @param out The Paimon stream written to.
      */
     PositionOutputStreamAdapter(org.apache.paimon.fs.PositionOutputStream out) {
-        this.out = checkNotNull(out, "out");
+        this.out = Objects.requireNonNull(out, "out should not be null");
     }
 
     @Override
