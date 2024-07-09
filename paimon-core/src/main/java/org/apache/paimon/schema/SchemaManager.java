@@ -339,28 +339,7 @@ public class SchemaManager implements Serializable {
                 } else if (change instanceof UpdateColumnPosition) {
                     UpdateColumnPosition update = (UpdateColumnPosition) change;
                     SchemaChange.Move move = update.move();
-
-                    // key: name ; value : index
-                    Map<String, Integer> map = new HashMap<>();
-                    for (int i = 0; i < newFields.size(); i++) {
-                        map.put(newFields.get(i).name(), i);
-                    }
-
-                    int fieldIndex = map.get(move.fieldName());
-                    int refIndex = 0;
-                    if (move.type().equals(SchemaChange.Move.MoveType.FIRST)) {
-                        checkMoveIndexEqual(move, fieldIndex, refIndex);
-                        newFields.add(refIndex, newFields.remove(fieldIndex));
-                    } else if (move.type().equals(SchemaChange.Move.MoveType.AFTER)) {
-                        refIndex = map.get(move.referenceFieldName());
-                        checkMoveIndexEqual(move, fieldIndex, refIndex);
-                        if (fieldIndex > refIndex) {
-                            newFields.add(refIndex + 1, newFields.remove(fieldIndex));
-                        } else {
-                            newFields.add(refIndex, newFields.remove(fieldIndex));
-                        }
-                    }
-
+                    applyMove(newFields, move);
                 } else {
                     throw new UnsupportedOperationException(
                             "Unsupported change: " + change.getClass());
@@ -388,6 +367,70 @@ public class SchemaManager implements Serializable {
         }
     }
 
+    public void applyMove(List<DataField> newFields, SchemaChange.Move move) {
+        Map<String, Integer> map = new HashMap<>();
+        for (int i = 0; i < newFields.size(); i++) {
+            map.put(newFields.get(i).name(), i);
+        }
+
+        int fieldIndex = map.getOrDefault(move.fieldName(), -1);
+        if (fieldIndex == -1) {
+            throw new IllegalArgumentException("Field name not found: " + move.fieldName());
+        }
+
+        // Handling FIRST and LAST cases directly since they don't need refIndex
+        switch (move.type()) {
+            case FIRST:
+                checkMoveIndexEqual(move, fieldIndex, 0);
+                moveField(newFields, fieldIndex, 0);
+                return;
+            case LAST:
+                checkMoveIndexEqual(move, fieldIndex, newFields.size() - 1);
+                moveField(newFields, fieldIndex, newFields.size() - 1);
+                return;
+        }
+
+        Integer refIndex = map.getOrDefault(move.referenceFieldName(), -1);
+        if (refIndex == -1) {
+            throw new IllegalArgumentException(
+                    "Reference field name not found: " + move.referenceFieldName());
+        }
+
+        checkMoveIndexEqual(move, fieldIndex, refIndex);
+
+        // For AFTER and BEFORE, adjust the target index based on current and reference positions
+        int targetIndex = refIndex;
+        if (move.type() == SchemaChange.Move.MoveType.AFTER && fieldIndex > refIndex) {
+            targetIndex++;
+        }
+        // Ensure adjustments for moving element forwards or backwards
+        if (move.type() == SchemaChange.Move.MoveType.BEFORE && fieldIndex < refIndex) {
+            targetIndex--;
+        }
+
+        if (targetIndex > (newFields.size() - 1)) {
+            targetIndex = newFields.size() - 1;
+        }
+
+        moveField(newFields, fieldIndex, targetIndex);
+    }
+
+    // Utility method to move a field within the list, handling range checks
+    private void moveField(List<DataField> newFields, int fromIndex, int toIndex) {
+        if (fromIndex < 0 || fromIndex >= newFields.size() || toIndex < 0) {
+            return;
+        }
+        DataField fieldToMove = newFields.remove(fromIndex);
+        newFields.add(toIndex, fieldToMove);
+    }
+
+    private static void checkMoveIndexEqual(SchemaChange.Move move, int fieldIndex, int refIndex) {
+        if (refIndex == fieldIndex) {
+            throw new UnsupportedOperationException(
+                    String.format("Cannot move itself for column %s", move.fieldName()));
+        }
+    }
+
     public boolean mergeSchema(RowType rowType, boolean allowExplicitCast) {
         TableSchema current =
                 latest().orElseThrow(
@@ -403,13 +446,6 @@ public class SchemaManager implements Serializable {
             } catch (Exception e) {
                 throw new RuntimeException("Failed to commit the schema.", e);
             }
-        }
-    }
-
-    private static void checkMoveIndexEqual(SchemaChange.Move move, int fieldIndex, int refIndex) {
-        if (refIndex == fieldIndex) {
-            throw new UnsupportedOperationException(
-                    String.format("Cannot move itself for column %s", move.fieldName()));
         }
     }
 
