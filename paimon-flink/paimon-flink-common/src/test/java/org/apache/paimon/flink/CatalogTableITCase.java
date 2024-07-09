@@ -745,13 +745,52 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                         streamSqlIter("SELECT * FROM T /*+ OPTIONS('consumer-id'='my1') */"));
 
         batchSql("INSERT INTO T VALUES (5, 6), (7, 8)");
-        assertThat(iterator.collect(2)).containsExactlyInAnyOrder(Row.of(1, 2), Row.of(3, 4));
+        assertThat(iterator.collect(3))
+                .containsExactlyInAnyOrder(Row.of(1, 2), Row.of(3, 4), Row.of(5, 6));
         iterator.close();
 
         List<Row> result = sql("SELECT * FROM T$consumers");
         assertThat(result).hasSize(1);
         assertThat(result.get(0).getField(0)).isEqualTo("my1");
         assertThat((Long) result.get(0).getField(1)).isGreaterThanOrEqualTo(3);
+    }
+
+    @Test
+    public void testConsumerIdExpInBatchMode() {
+        batchSql("CREATE TABLE T (a INT, b INT)");
+        batchSql("INSERT INTO T VALUES (1, 2)");
+        batchSql("INSERT INTO T VALUES (3, 4)");
+        batchSql("INSERT INTO T VALUES (5, 6), (7, 8)");
+        assertThat(
+                        sql(
+                                "SELECT * FROM T /*+ OPTIONS('consumer-id' = 'test-id','consumer.expiration-time'='3d') */ WHERE a = 1"))
+                .containsExactlyInAnyOrder(Row.of(1, 2));
+        List<Row> result = sql("SELECT * FROM T$consumers");
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getField(0)).isEqualTo("test-id");
+        assertThat((Long) result.get(0).getField(1)).isEqualTo(4);
+    }
+
+    @Test
+    public void testConsumerIdExpInStreamingMode() throws Exception {
+        batchSql("CREATE TABLE T (a INT, b INT)");
+        batchSql("INSERT INTO T VALUES (1, 2)");
+        batchSql("INSERT INTO T VALUES (3, 4)");
+
+        BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(
+                        streamSqlIter(
+                                "SELECT * FROM T /*+ OPTIONS('consumer-id'='test-id','consumer.expiration-time'='3d') */"));
+
+        batchSql("INSERT INTO T VALUES (5, 6), (7, 8)");
+        assertThat(iterator.collect(3))
+                .containsExactlyInAnyOrder(Row.of(1, 2), Row.of(3, 4), Row.of(5, 6));
+        iterator.close();
+
+        List<Row> result = sql("SELECT * FROM T$consumers");
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getField(0)).isEqualTo("test-id");
+        assertThat((Long) result.get(0).getField(1)).isEqualTo(4);
     }
 
     @Test
