@@ -28,7 +28,18 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarCharType;
 
-import org.apache.spark.sql.sources.*;
+import org.apache.spark.sql.sources.EqualNullSafe;
+import org.apache.spark.sql.sources.EqualTo;
+import org.apache.spark.sql.sources.GreaterThan;
+import org.apache.spark.sql.sources.GreaterThanOrEqual;
+import org.apache.spark.sql.sources.In;
+import org.apache.spark.sql.sources.IsNotNull;
+import org.apache.spark.sql.sources.IsNull;
+import org.apache.spark.sql.sources.LessThan;
+import org.apache.spark.sql.sources.LessThanOrEqual;
+import org.apache.spark.sql.sources.Not;
+import org.apache.spark.sql.sources.StringEndsWith;
+import org.apache.spark.sql.sources.StringStartsWith;
 import org.junit.jupiter.api.Test;
 
 import java.sql.Date;

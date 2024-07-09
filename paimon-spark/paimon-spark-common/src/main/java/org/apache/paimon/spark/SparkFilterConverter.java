@@ -23,7 +23,21 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 
-import org.apache.spark.sql.sources.*;
+import org.apache.spark.sql.sources.And;
+import org.apache.spark.sql.sources.EqualNullSafe;
+import org.apache.spark.sql.sources.EqualTo;
+import org.apache.spark.sql.sources.Filter;
+import org.apache.spark.sql.sources.GreaterThan;
+import org.apache.spark.sql.sources.GreaterThanOrEqual;
+import org.apache.spark.sql.sources.In;
+import org.apache.spark.sql.sources.IsNotNull;
+import org.apache.spark.sql.sources.IsNull;
+import org.apache.spark.sql.sources.LessThan;
+import org.apache.spark.sql.sources.LessThanOrEqual;
+import org.apache.spark.sql.sources.Not;
+import org.apache.spark.sql.sources.Or;
+import org.apache.spark.sql.sources.StringEndsWith;
+import org.apache.spark.sql.sources.StringStartsWith;
 
 import java.util.Arrays;
 import java.util.List;
