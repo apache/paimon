@@ -102,8 +102,9 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     }
 
     @Override
-    public int filterAndCommit(List<ManifestCommittable> globalCommittables) {
-        return commit.filterAndCommitMultiple(globalCommittables);
+    public int filterAndCommit(
+            List<ManifestCommittable> globalCommittables, boolean checkAppendFiles) {
+        return commit.filterAndCommitMultiple(globalCommittables, checkAppendFiles);
     }
 
     @Override
