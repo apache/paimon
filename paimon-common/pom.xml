@@ -64,6 +64,12 @@ under the License.
             <version>${lz4.version}</version>
         </dependency>
 
+        <dependency>
+            <groupId>com.github.luben</groupId>
+            <artifactId>zstd-jni</artifactId>
+            <version>${zstd-jni.version}</version>
+        </dependency>
+
         <!-- Java compiler -->
         <dependency>
             <groupId>org.codehaus.janino</groupId>
