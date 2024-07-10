@@ -124,6 +124,20 @@ public abstract class FieldAggregator implements Serializable {
                                 fieldType);
                         fieldAggregator = new FieldThetaSketchAgg((VarBinaryType) fieldType);
                         break;
+                    case FieldRoaringBitmap32Agg.NAME:
+                        checkArgument(
+                                fieldType instanceof VarBinaryType,
+                                "Data type for roaring bitmap column must be 'VarBinaryType' but was '%s'.",
+                                fieldType);
+                        fieldAggregator = new FieldRoaringBitmap32Agg((VarBinaryType) fieldType);
+                        break;
+                    case FieldRoaringBitmap64Agg.NAME:
+                        checkArgument(
+                                fieldType instanceof VarBinaryType,
+                                "Data type for roaring bitmap column must be 'VarBinaryType' but was '%s'.",
+                                fieldType);
+                        fieldAggregator = new FieldRoaringBitmap64Agg((VarBinaryType) fieldType);
+                        break;
                     default:
                         throw new RuntimeException(
                                 String.format(
