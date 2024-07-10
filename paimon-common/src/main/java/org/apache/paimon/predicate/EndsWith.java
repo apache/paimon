@@ -48,11 +48,8 @@ public class EndsWith extends NullFalseLeafBinaryFunction {
             Object max,
             Long nullCount,
             Object patternLiteral) {
-        BinaryString minStr = (BinaryString) min;
-        BinaryString maxStr = (BinaryString) max;
-        BinaryString pattern = (BinaryString) patternLiteral;
-        return (minStr.endsWith(pattern) || minStr.compareTo(pattern) <= 0)
-                && (maxStr.endsWith(pattern) || maxStr.compareTo(pattern) >= 0);
+        // Can not support min max test in EndsWith
+        return true;
     }
 
     @Override
