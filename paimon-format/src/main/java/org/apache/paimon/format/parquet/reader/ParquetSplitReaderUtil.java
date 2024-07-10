@@ -58,7 +58,7 @@ import org.apache.parquet.io.PrimitiveColumnIO;
 import org.apache.parquet.schema.GroupType;
 import org.apache.parquet.schema.InvalidSchemaException;
 import org.apache.parquet.schema.LogicalTypeAnnotation;
-import org.apache.parquet.schema.OriginalType;
+import org.apache.parquet.schema.LogicalTypeAnnotation.DecimalLogicalTypeAnnotation;
 import org.apache.parquet.schema.PrimitiveType;
 import org.apache.parquet.schema.Type;
 
@@ -233,7 +233,8 @@ public class ParquetSplitReaderUtil {
                     checkArgument(
                             (typeName == PrimitiveType.PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY
                                             || typeName == PrimitiveType.PrimitiveTypeName.INT32)
-                                    && primitiveType.getOriginalType() == OriginalType.DECIMAL,
+                                    && primitiveType.getLogicalTypeAnnotation()
+                                            instanceof DecimalLogicalTypeAnnotation,
                             "Unexpected type: %s",
                             typeName);
                     return new HeapIntVector(batchSize);
@@ -241,7 +242,8 @@ public class ParquetSplitReaderUtil {
                     checkArgument(
                             (typeName == PrimitiveType.PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY
                                             || typeName == PrimitiveType.PrimitiveTypeName.INT64)
-                                    && primitiveType.getOriginalType() == OriginalType.DECIMAL,
+                                    && primitiveType.getLogicalTypeAnnotation()
+                                            instanceof DecimalLogicalTypeAnnotation,
                             "Unexpected type: %s",
                             typeName);
                     return new HeapLongVector(batchSize);
@@ -249,7 +251,8 @@ public class ParquetSplitReaderUtil {
                     checkArgument(
                             (typeName == PrimitiveType.PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY
                                             || typeName == PrimitiveType.PrimitiveTypeName.BINARY)
-                                    && primitiveType.getOriginalType() == OriginalType.DECIMAL,
+                                    && primitiveType.getLogicalTypeAnnotation()
+                                            instanceof DecimalLogicalTypeAnnotation,
                             "Unexpected type: %s",
                             typeName);
                     return new HeapBytesVector(batchSize);
