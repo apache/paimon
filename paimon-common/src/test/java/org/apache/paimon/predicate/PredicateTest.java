@@ -387,8 +387,8 @@ public class PredicateTest {
         GenericRow row = GenericRow.of(fromString("aabc"));
         assertThat(predicate.test(row)).isEqualTo(true);
 
-        GenericRow max = GenericRow.of(fromString("xasxwsa"));
-        GenericRow min = GenericRow.of(fromString("aaaaa"));
+        GenericRow max = GenericRow.of(fromString("www"));
+        GenericRow min = GenericRow.of(fromString("aaa"));
         Integer[] nullCount = {null};
         assertThat(predicate.test(10, min, max, new GenericArray(nullCount))).isEqualTo(true);
     }
