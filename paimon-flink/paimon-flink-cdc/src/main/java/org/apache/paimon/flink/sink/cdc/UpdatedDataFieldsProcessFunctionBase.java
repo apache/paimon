@@ -192,8 +192,13 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
         return ConvertAction.EXCEPTION;
     }
 
-    protected List<SchemaChange> extractSchemaChanges(
+    public List<SchemaChange> extractSchemaChanges(
             SchemaManager schemaManager, List<DataField> updatedDataFields) {
+        return extractSchemaChanges(schemaManager, updatedDataFields, caseSensitive);
+    }
+
+    public static List<SchemaChange> extractSchemaChanges(
+            SchemaManager schemaManager, List<DataField> updatedDataFields, boolean caseSensitive) {
         RowType oldRowType = schemaManager.latest().get().logicalRowType();
         Map<String, DataField> oldFields = new HashMap<>();
         for (DataField oldField : oldRowType.getFields()) {

@@ -229,6 +229,15 @@ CREATE TABLE test_options_change (
 ALTER TABLE test_options_change
     REPLICA IDENTITY FULL;
 
+CREATE TABLE test_exist_column_alter (
+    pk INT,
+    a BIGINT,
+    b VARCHAR(30),
+    c INT,
+    PRIMARY KEY (pk)
+);
+
+
 -- ################################################################################
 --  testMetadataColumns
 -- ################################################################################

@@ -81,18 +81,23 @@ public class CdcActionCommonUtils {
         for (DataField field : sourceTableFields) {
             int idx = paimonSchema.fieldNames().indexOf(field.name());
             if (idx < 0) {
-                LOG.info("Cannot find field '{}' in Paimon table.", field.name());
-                return false;
-            }
-            DataType type = paimonSchema.fields().get(idx).type();
-            if (UpdatedDataFieldsProcessFunction.canConvert(field.type(), type)
-                    != UpdatedDataFieldsProcessFunction.ConvertAction.CONVERT) {
-                LOG.info(
-                        "Cannot convert field '{}' from source table type '{}' to Paimon type '{}'.",
-                        field.name(),
-                        field.type(),
-                        type);
-                return false;
+                if (!field.type().isNullable()) {
+                    LOG.info(
+                            "Add column '{}' cannot specify NOT NULL in the Paimon table.",
+                            field.name());
+                    return false;
+                }
+            } else {
+                DataType type = paimonSchema.fields().get(idx).type();
+                if (UpdatedDataFieldsProcessFunction.canConvert(type, field.type())
+                        != UpdatedDataFieldsProcessFunction.ConvertAction.CONVERT) {
+                    LOG.info(
+                            "Cannot convert field '{}' from source table type '{}' to Paimon type '{}'.",
+                            field.name(),
+                            field.type(),
+                            type);
+                    return false;
+                }
             }
         }
         return true;

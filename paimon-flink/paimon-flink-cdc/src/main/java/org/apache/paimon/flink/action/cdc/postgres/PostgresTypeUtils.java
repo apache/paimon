@@ -136,18 +136,14 @@ public class PostgresTypeUtils {
                 return DataTypes.ARRAY(DataTypes.DECIMAL(DecimalType.MAX_PRECISION, 18));
             case PG_CHAR:
             case PG_CHARACTER:
-                return DataTypes.CHAR(precision);
-            case PG_CHAR_ARRAY:
-            case PG_CHARACTER_ARRAY:
-                return DataTypes.ARRAY(DataTypes.CHAR(precision));
             case PG_CHARACTER_VARYING:
-                return DataTypes.VARCHAR(precision);
-            case PG_CHARACTER_VARYING_ARRAY:
-                return DataTypes.ARRAY(DataTypes.VARCHAR(precision));
             case PG_TEXT:
             case PG_JSON:
             case PG_ENUM:
                 return DataTypes.STRING();
+            case PG_CHAR_ARRAY:
+            case PG_CHARACTER_ARRAY:
+            case PG_CHARACTER_VARYING_ARRAY:
             case PG_TEXT_ARRAY:
                 return DataTypes.ARRAY(DataTypes.STRING());
             case PG_TIMESTAMP:
