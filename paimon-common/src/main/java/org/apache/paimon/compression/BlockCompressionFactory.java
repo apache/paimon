@@ -20,8 +20,6 @@ package org.apache.paimon.compression;
 
 import io.airlift.compress.lzo.LzoCompressor;
 import io.airlift.compress.lzo.LzoDecompressor;
-import io.airlift.compress.zstd.ZstdCompressor;
-import io.airlift.compress.zstd.ZstdDecompressor;
 
 import javax.annotation.Nullable;
 
@@ -46,7 +44,7 @@ public interface BlockCompressionFactory {
             case "LZO":
                 return new AirCompressorFactory(new LzoCompressor(), new LzoDecompressor());
             case "ZSTD":
-                return new AirCompressorFactory(new ZstdCompressor(), new ZstdDecompressor());
+                return new ZstdBlockCompressionFactory();
             default:
                 throw new IllegalStateException("Unknown CompressionMethod " + compression);
         }
