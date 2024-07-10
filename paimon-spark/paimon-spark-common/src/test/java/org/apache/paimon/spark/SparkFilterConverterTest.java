@@ -18,6 +18,8 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -52,6 +54,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
+import static org.apache.paimon.data.BinaryString.fromString;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
@@ -150,6 +153,20 @@ public class SparkFilterConverterTest {
         Predicate expectedLargeIn = builder.in(0, Arrays.asList(literals));
         Predicate actualLargeIn = converter.convert(largeIn);
         assertThat(actualLargeIn).isEqualTo(expectedLargeIn);
+
+        RowType rowType01 =
+                new RowType(Collections.singletonList(new DataField(0, "id", new VarCharType())));
+        SparkFilterConverter converter01 = new SparkFilterConverter(rowType01);
+        StringEndsWith endsWith = StringEndsWith.apply("id", "abc");
+        Predicate endsWithPre = converter01.convert(endsWith);
+        GenericRow row = GenericRow.of(fromString("aabc"));
+        GenericRow max = GenericRow.of(fromString("xasxwsa"));
+        GenericRow min = GenericRow.of(fromString("aaaaa"));
+        boolean test = endsWithPre.test(row);
+        Integer[] nullCount = {null};
+        boolean test1 = endsWithPre.test(10, min, max, new GenericArray(nullCount));
+        assertThat(test).isEqualTo(true);
+        assertThat(test1).isEqualTo(true);
     }
 
     @Test
