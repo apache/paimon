@@ -1,9 +1,9 @@
 ---
-title: "Deletion Vectors"
-weight: 5
+title: "Update"
+weight: 4
 type: docs
 aliases:
-- /append-table/deletion-vectors.html
+- /append-table/update.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -24,23 +24,18 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Deletion Vectors
+# Update
 
-{{< hint info >}}
-Currently only Spark SQL supports `DELETE`, `UPDATE` for append table.
-{{< /hint >}}
+Now, only Spark SQL supports DELETE & UPDATE, you can take a look to [Spark Write]({{< ref "spark/sql-write" >}}).
 
-Consider SQL:
+Example:
 ```sql
 DELETE FROM my_table WHERE currency = 'UNKNOWN';
 ```
 
-By default, it will search for the hit files and then rewrite each file to remove the
-data that needs to be deleted from the files. This operation is costly.
+Update append table has two modes:
 
-Deletion vectors mode only marks certain records of the corresponding file for deletion
-and writes the deletion file, without rewriting the entire file.
-
-## Usage
-
-By specifying `'deletion-vectors.enabled' = 'true'`, the Deletion Vectors mode can be enabled.
+1. COW (Copy on Write): search for the hit files and then rewrite each file to remove the data that needs to be deleted
+   from the files. This operation is costly.
+2. MOW (Merge on Write): By specifying `'deletion-vectors.enabled' = 'true'`, the Deletion Vectors mode can be enabled.
+   Only marks certain records of the corresponding file for deletion and writes the deletion file, without rewriting the entire file.
