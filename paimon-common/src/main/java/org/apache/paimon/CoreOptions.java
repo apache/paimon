@@ -157,7 +157,7 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .defaultValue("zstd")
                     .withDescription(
-                            "Default file compression. For faster read and write, it is recommended to use LZ4.");
+                            "Default file compression. For faster read and write, it is recommended to use zstd.");
 
     public static final ConfigOption<Integer> FILE_COMPRESSION_ZSTD_LEVEL =
             key("file.compression.zstd-level")
@@ -344,9 +344,9 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<String> SPILL_COMPRESSION =
             key("spill-compression")
                     .stringType()
-                    .defaultValue("LZ4")
+                    .defaultValue("zstd")
                     .withDescription(
-                            "Compression for spill, currently lz4, lzo and zstd are supported.");
+                            "Compression for spill, currently zstd, lzo and zstd are supported.");
 
     public static final ConfigOption<Boolean> WRITE_ONLY =
             key("write-only")
@@ -814,9 +814,9 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<String> LOOKUP_CACHE_SPILL_COMPRESSION =
             key("lookup.cache-spill-compression")
                     .stringType()
-                    .defaultValue("lz4")
+                    .defaultValue("zstd")
                     .withDescription(
-                            "Spill compression for lookup cache, currently none, lz4, lzo and zstd are supported.");
+                            "Spill compression for lookup cache, currently zstd, none, lz4 and lzo are supported.");
 
     public static final ConfigOption<MemorySize> LOOKUP_CACHE_MAX_MEMORY_SIZE =
             key("lookup.cache-max-memory-size")
