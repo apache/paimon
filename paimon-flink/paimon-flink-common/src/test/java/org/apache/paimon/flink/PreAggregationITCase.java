@@ -23,6 +23,7 @@ import org.apache.paimon.mergetree.compact.aggregate.FieldMergeMapAgg;
 import org.apache.paimon.mergetree.compact.aggregate.FieldNestedUpdateAgg;
 import org.apache.paimon.utils.BlockingIterator;
 
+import org.apache.commons.codec.binary.Hex;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
@@ -46,6 +47,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static org.apache.paimon.utils.ThetaSketch.sketchOf;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -1808,6 +1810,51 @@ public class PreAggregationITCase {
             assertThatThrownBy(
                     () -> sEnv.from("test_default_agg_func").execute().print(),
                     "Pre-aggregate continuous reading is not supported");
+        }
+    }
+
+    /** ITCase for {@link org.apache.paimon.mergetree.compact.aggregate.FieldThetaSketchAgg}. */
+    public static class ThetaSketchAggAggregationITCase extends CatalogITCaseBase {
+
+        @Test
+        public void testThetaSketchAgg() {
+            sql(
+                    "CREATE TABLE test_collect("
+                            + "  id INT PRIMARY KEY NOT ENFORCED,"
+                            + "  f0 VARBINARY"
+                            + ") WITH ("
+                            + "  'merge-engine' = 'aggregation',"
+                            + "  'fields.f0.aggregate-function' = 'theta_sketch'"
+                            + ")");
+
+            String str1 = Hex.encodeHexString(sketchOf(1)).toUpperCase();
+            String str2 = Hex.encodeHexString(sketchOf(2)).toUpperCase();
+            String str3 = Hex.encodeHexString(sketchOf(3)).toUpperCase();
+
+            sql(
+                    String.format(
+                            "INSERT INTO test_collect VALUES (1, CAST (NULL AS VARBINARY)),(2, CAST(x'%s' AS VARBINARY)), (3, CAST(x'%s' AS VARBINARY))",
+                            str1, str2));
+
+            List<Row> result = queryAndSort("SELECT * FROM test_collect");
+            checkOneRecord(result.get(0), 1, null);
+            checkOneRecord(result.get(1), 2, sketchOf(1));
+            checkOneRecord(result.get(2), 3, sketchOf(2));
+
+            sql(
+                    String.format(
+                            "INSERT INTO test_collect VALUES (1, CAST (x'%s' AS VARBINARY)),(2, CAST(x'%s' AS VARBINARY)), (2, CAST(x'%s' AS VARBINARY)), (3, CAST(x'%s' AS VARBINARY))",
+                            str1, str2, str2, str3));
+
+            result = queryAndSort("SELECT * FROM test_collect");
+            checkOneRecord(result.get(0), 1, sketchOf(1));
+            checkOneRecord(result.get(1), 2, sketchOf(1, 2));
+            checkOneRecord(result.get(2), 3, sketchOf(2, 3));
+        }
+
+        private void checkOneRecord(Row row, int id, byte[] expected) {
+            assertThat(row.getField(0)).isEqualTo(id);
+            assertThat(row.getField(1)).isEqualTo(expected);
         }
     }
 }

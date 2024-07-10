@@ -52,6 +52,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static org.apache.paimon.utils.ThetaSketch.sketchOf;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** test whether {@link FieldAggregator}' subclasses behaviors are expected. */
@@ -723,6 +724,29 @@ public class FieldAggregatorTest {
                         new GenericMap(toMap(1, "A", 2, "B", 3, "C")),
                         new GenericMap(toMap(1, "A", 2, "A")));
         assertThat(toJavaMap(result)).containsExactlyInAnyOrderEntriesOf(toMap(3, "C"));
+    }
+
+    @Test
+    public void testFieldThetaSketchAgg() {
+        FieldThetaSketchAgg agg = new FieldThetaSketchAgg(DataTypes.VARBINARY(20));
+
+        byte[] inputVal = sketchOf(1);
+        byte[] acc1 = sketchOf(2, 3);
+        byte[] acc2 = sketchOf(1, 2, 3);
+
+        assertThat(agg.agg(null, null)).isNull();
+
+        byte[] result1 = (byte[]) agg.agg(null, inputVal);
+        assertThat(inputVal).isEqualTo(result1);
+
+        byte[] result2 = (byte[]) agg.agg(acc1, null);
+        assertThat(result2).isEqualTo(acc1);
+
+        byte[] result3 = (byte[]) agg.agg(acc1, inputVal);
+        assertThat(result3).isEqualTo(acc2);
+
+        byte[] result4 = (byte[]) agg.agg(acc2, inputVal);
+        assertThat(result4).isEqualTo(acc2);
     }
 
     private Map<Object, Object> toMap(Object... kvs) {

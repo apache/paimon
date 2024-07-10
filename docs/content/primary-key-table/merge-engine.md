@@ -247,6 +247,10 @@ Current supported aggregate functions and data types are:
   The first_non_null_value function selects the first non-null value in a data set.
   It supports all data types.
 
+* `theta_sketch`:
+  The theta_sketch function aggregates multiple serialized Sketch objects into a single Sketch.
+  It supports VARBINARY data type.
+
 * `nested_update`:
   The nested_update function collects multiple rows into one array<row> (so-called 'nested table'). It supports ARRAY<ROW> data types.
 

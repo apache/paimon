@@ -23,6 +23,7 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VarBinaryType;
 
 import javax.annotation.Nullable;
 
@@ -115,6 +116,13 @@ public abstract class FieldAggregator implements Serializable {
                                 "Data type of merge map column must be 'MAP' but was '%s'",
                                 fieldType);
                         fieldAggregator = new FieldMergeMapAgg((MapType) fieldType);
+                        break;
+                    case FieldThetaSketchAgg.NAME:
+                        checkArgument(
+                                fieldType instanceof VarBinaryType,
+                                "Data type for theta sketch column must be 'VarBinaryType' but was '%s'.",
+                                fieldType);
+                        fieldAggregator = new FieldThetaSketchAgg((VarBinaryType) fieldType);
                         break;
                     default:
                         throw new RuntimeException(

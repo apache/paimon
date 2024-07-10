@@ -153,6 +153,12 @@ under the License.
             <version>0.2.2</version>
         </dependency>
 
+        <dependency>
+            <groupId>org.apache.datasketches</groupId>
+            <artifactId>datasketches-java</artifactId>
+            <version>4.2.0</version>
+        </dependency>
+
         <!-- Test -->
 
         <dependency>
@@ -288,6 +294,7 @@ under the License.
                                     <include>net.openhft:zero-allocation-hashing</include>
                                     <include>com.github.davidmoten:hilbert-curve</include>
                                     <include>com.github.davidmoten:guava-mini</include>
+                                    <include>org.apache.datasketches:*</include>
                                 </includes>
                             </artifactSet>
                             <filters>
@@ -338,6 +345,10 @@ under the License.
                                 <relocation>
                                     <pattern>com.github.davidmoten.guavamini</pattern>
                                     <shadedPattern>org.apache.paimon.shade.com.github.davidmoten.guavamini</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.apache.datasketches</pattern>
+                                    <shadedPattern>org.apache.paimon.shade.org.apache.datasketches</shadedPattern>
                                 </relocation>
                             </relocations>
                             <minimizeJar>true</minimizeJar>
