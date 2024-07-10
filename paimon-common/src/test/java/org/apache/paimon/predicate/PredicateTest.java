@@ -383,14 +383,14 @@ public class PredicateTest {
     @Test
     public void testEndsWith() {
         PredicateBuilder builder = new PredicateBuilder(RowType.of(new VarCharType()));
-        Predicate predicate = builder.endsWith(0, fromString("abc"));
-        GenericRow row = GenericRow.of(fromString("aabc"));
-        assertThat(predicate.test(row)).isEqualTo(true);
+        Predicate predicate = builder.endsWith(0, fromString("bcc"));
+        GenericRow row = GenericRow.of(fromString("aabbcc"));
 
-        GenericRow max = GenericRow.of(fromString("www"));
-        GenericRow min = GenericRow.of(fromString("aaa"));
+        GenericRow max = GenericRow.of(fromString("aaba"));
+        GenericRow min = GenericRow.of(fromString("aabb"));
         Integer[] nullCount = {null};
-        assertThat(predicate.test(10, min, max, new GenericArray(nullCount))).isEqualTo(true);
+        assertThat(predicate.test(row)).isEqualTo(true);
+        assertThat(predicate.test(10, min, max, new GenericArray(nullCount))).isEqualTo(false);
     }
 
     @Test
