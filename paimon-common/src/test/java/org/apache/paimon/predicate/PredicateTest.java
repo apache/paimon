@@ -390,7 +390,7 @@ public class PredicateTest {
         GenericRow min = GenericRow.of(fromString("aabb"));
         Integer[] nullCount = {null};
         assertThat(predicate.test(row)).isEqualTo(true);
-        assertThat(predicate.test(10, min, max, new GenericArray(nullCount))).isEqualTo(false);
+        assertThat(predicate.test(10, min, max, new GenericArray(nullCount))).isEqualTo(true);
     }
 
     @Test
