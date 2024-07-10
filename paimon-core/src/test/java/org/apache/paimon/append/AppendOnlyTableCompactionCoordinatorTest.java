@@ -69,7 +69,13 @@ public class AppendOnlyTableCompactionCoordinatorTest {
     public void testMinSizeCompactTask() {
         List<DataFileMeta> files =
                 generateNewFiles(
-                        100, appendOnlyFileStoreTable.coreOptions().targetFileSize() / 3 + 1);
+                        100,
+                        appendOnlyFileStoreTable
+                                                .coreOptions()
+                                                .targetFileSize(
+                                                        CoreOptions.TableType.APPEND_ONLY_TABLE)
+                                        / 3
+                                + 1);
         assertTasks(files, 100 / 3);
     }
 
@@ -77,7 +83,12 @@ public class AppendOnlyTableCompactionCoordinatorTest {
     public void testFilterMiddleFile() {
         List<DataFileMeta> files =
                 generateNewFiles(
-                        100, appendOnlyFileStoreTable.coreOptions().targetFileSize() / 10 * 8);
+                        100,
+                        appendOnlyFileStoreTable
+                                        .coreOptions()
+                                        .targetFileSize(CoreOptions.TableType.APPEND_ONLY_TABLE)
+                                / 10
+                                * 8);
         assertTasks(files, 0);
     }
 
