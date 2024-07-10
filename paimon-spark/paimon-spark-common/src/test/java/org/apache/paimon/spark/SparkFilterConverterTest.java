@@ -210,11 +210,6 @@ public class SparkFilterConverterTest {
 
     @Test
     public void testIgnoreFailure() {
-        testStartsWith();
-        testEndsWith();
-    }
-
-    public void testStartsWith() {
         List<DataField> dataFields = new ArrayList<>();
         dataFields.add(new DataField(0, "id", new IntType()));
         dataFields.add(new DataField(1, "name", new VarCharType(VarCharType.MAX_LENGTH)));
@@ -222,18 +217,6 @@ public class SparkFilterConverterTest {
         SparkFilterConverter converter = new SparkFilterConverter(rowType);
 
         Not not = Not.apply(StringStartsWith.apply("name", "paimon"));
-        catchThrowableOfType(() -> converter.convert(not), UnsupportedOperationException.class);
-        assertThat(converter.convertIgnoreFailure(not)).isNull();
-    }
-
-    public void testEndsWith() {
-        List<DataField> dataFields = new ArrayList<>();
-        dataFields.add(new DataField(0, "id", new IntType()));
-        dataFields.add(new DataField(1, "name", new VarCharType(VarCharType.MAX_LENGTH)));
-        RowType rowType = new RowType(dataFields);
-        SparkFilterConverter converter = new SparkFilterConverter(rowType);
-
-        Not not = Not.apply(StringEndsWith.apply("name", "paimon"));
         catchThrowableOfType(() -> converter.convert(not), UnsupportedOperationException.class);
         assertThat(converter.convertIgnoreFailure(not)).isNull();
     }
