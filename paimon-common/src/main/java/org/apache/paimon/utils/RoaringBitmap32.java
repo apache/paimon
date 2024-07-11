@@ -18,11 +18,14 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.annotation.VisibleForTesting;
+
 import org.roaringbitmap.RoaringBitmap;
 
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.Objects;
 
 /** A compressed bitmap for 32-bit integer. */
@@ -79,5 +82,29 @@ public class RoaringBitmap32 {
         }
         RoaringBitmap32 that = (RoaringBitmap32) o;
         return Objects.equals(this.roaringBitmap, that.roaringBitmap);
+    }
+
+    public void clear() {
+        roaringBitmap.clear();
+    }
+
+    public byte[] serialize() {
+        roaringBitmap.runOptimize();
+        ByteBuffer buffer = ByteBuffer.allocate(roaringBitmap.serializedSizeInBytes());
+        roaringBitmap.serialize(buffer);
+        return buffer.array();
+    }
+
+    public void deserialize(byte[] rbmBytes) throws IOException {
+        roaringBitmap.deserialize(ByteBuffer.wrap(rbmBytes));
+    }
+
+    @VisibleForTesting
+    public static RoaringBitmap32 bitmapOf(int... dat) {
+        RoaringBitmap32 roaringBitmap32 = new RoaringBitmap32();
+        for (int ele : dat) {
+            roaringBitmap32.add(ele);
+        }
+        return roaringBitmap32;
     }
 }
