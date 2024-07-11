@@ -34,9 +34,12 @@ public interface ChannelComputer<T> extends Serializable {
 
     int channel(T record);
 
+    static int hash(BinaryRow partition, int bucket, int numChannels) {
+        return Math.abs(partition.hashCode()) % numChannels + bucket;
+    }
+
     static int select(BinaryRow partition, int bucket, int numChannels) {
-        int startChannel = Math.abs(partition.hashCode()) % numChannels;
-        return (startChannel + bucket) % numChannels;
+        return hash(partition, bucket, numChannels) % numChannels;
     }
 
     static int select(int bucket, int numChannels) {

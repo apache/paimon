@@ -21,24 +21,26 @@ package org.apache.paimon.spark.commands
 import org.apache.paimon.CoreOptions.WRITE_ONLY
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.deletionvectors.{DeletionVector, DeletionVectorsMaintainer}
-import org.apache.paimon.index.{BucketAssigner, SimpleHashBucketAssigner}
+import org.apache.paimon.index.{BucketAssigner, HashBucketAssigner, SimpleHashBucketAssigner}
 import org.apache.paimon.io.{CompactIncrement, DataIncrement, IndexIncrement}
 import org.apache.paimon.manifest.{FileKind, IndexManifestEntry}
 import org.apache.paimon.spark.{SparkRow, SparkTableWrite}
-import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
+import org.apache.paimon.spark.schema.SparkSystemColumns.ROW_KIND_COL
 import org.apache.paimon.spark.util.SparkRowUtils
 import org.apache.paimon.table.{BucketMode, FileStoreTable}
-import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageImpl, CommitMessageSerializer, RowPartitionKeyExtractor}
+import org.apache.paimon.table.sink._
 import org.apache.paimon.utils.SerializationUtils
 
 import org.apache.spark.{Partitioner, TaskContext}
-import org.apache.spark.sql.{DataFrame, Dataset, Row, SparkSession}
-import org.apache.spark.sql.functions._
+import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.{Dataset, Row}
 
 import java.io.IOException
 import java.util.Collections.singletonMap
+import java.util.UUID
 
 import scala.collection.JavaConverters._
+import scala.reflect.ClassTag
 
 case class PaimonSparkWriter(table: FileStoreTable) {
 
@@ -49,6 +51,8 @@ case class PaimonSparkWriter(table: FileStoreTable) {
   private lazy val bucketMode = table.bucketMode
 
   private lazy val primaryKeyCols = tableSchema.trimmedPrimaryKeys().asScala
+
+  private lazy val coreOptions = table.coreOptions()
 
   @transient private lazy val serializer = new CommitMessageSerializer
 
@@ -67,14 +71,24 @@ case class PaimonSparkWriter(table: FileStoreTable) {
       rowKindColIdx == -1 || rowKindColIdx == data.schema.length - 1,
       "Row kind column should be the last field.")
 
-    // append _bucket_ column as placeholder
-    val withInitBucketCol = data.withColumn(BUCKET_COL, lit(-1))
-    val bucketColIdx = withInitBucketCol.schema.size - 1
-    val encoderGroupWithBucketCol = EncoderSerDeGroup(withInitBucketCol.schema)
-
     def newWrite(): SparkTableWrite = new SparkTableWrite(writeBuilder, rowType, rowKindColIdx)
 
-    def writeWithoutBucket(): Dataset[Array[Byte]] = {
+    def writeWithBucket(data: RDD[(Row, Int)]): RDD[Array[Byte]] = {
+      data.mapPartitions {
+        iter =>
+          {
+            val write = newWrite()
+            try {
+              iter.foreach(pair => write.write(pair._1, pair._2))
+              write.finish().asScala
+            } finally {
+              write.close()
+            }
+          }
+      }
+    }
+
+    def writeWithoutBucket(data: Dataset[Row]): RDD[Array[Byte]] = {
       data.mapPartitions {
         iter =>
           {
@@ -86,108 +100,44 @@ case class PaimonSparkWriter(table: FileStoreTable) {
               write.close()
             }
           }
-      }
+      }.rdd
     }
 
-    def writeWithBucketProcessor(
-        dataFrame: DataFrame,
-        processor: BucketProcessor): Dataset[Array[Byte]] = {
-      val repartitioned = repartitionByPartitionsAndBucket(
-        dataFrame.mapPartitions(processor.processPartition)(encoderGroupWithBucketCol.encoder))
-      repartitioned.mapPartitions {
-        iter =>
-          {
-            val write = newWrite()
-            try {
-              iter.foreach(row => write.write(row, row.getInt(bucketColIdx)))
-              write.finish().asScala
-            } finally {
-              write.close()
-            }
-          }
-      }
+    def sparkParallelism = {
+      val defaultParallelism = sparkSession.sparkContext.defaultParallelism
+      val numShufflePartitions = sparkSession.sessionState.conf.numShufflePartitions
+      Math.max(defaultParallelism, numShufflePartitions)
     }
 
-    def writeWithBucketAssigner(
-        dataFrame: DataFrame,
-        funcFactory: () => Row => Int): Dataset[Array[Byte]] = {
-      dataFrame.mapPartitions {
-        iter =>
-          {
-            val assigner = funcFactory.apply()
-            val write = newWrite()
-            try {
-              iter.foreach(row => write.write(row, assigner.apply(row)))
-              write.finish().asScala
-            } finally {
-              write.close()
-            }
-          }
-      }
-    }
-
-    val written: Dataset[Array[Byte]] = bucketMode match {
+    val written: RDD[Array[Byte]] = bucketMode match {
       case BucketMode.HASH_DYNAMIC =>
         assert(primaryKeyCols.nonEmpty, "Only primary-key table can support dynamic bucket.")
 
-        val numParallelism = Option(table.coreOptions.dynamicBucketAssignerParallelism)
+        val parallelism = Option(coreOptions.dynamicBucketAssignerParallelism)
           .map(_.toInt)
-          .getOrElse {
-            val defaultParallelism = sparkSession.sparkContext.defaultParallelism
-            val numShufflePartitions = sparkSession.sessionState.conf.numShufflePartitions
-            Math.max(defaultParallelism, numShufflePartitions)
-          }
-        val numAssigners = Option(table.coreOptions.dynamicBucketInitialBuckets)
-          .map(initialBuckets => Math.min(initialBuckets.toInt, numParallelism))
-          .getOrElse(numParallelism)
+          .getOrElse(sparkParallelism)
 
-        def partitionByKey(): DataFrame = {
-          repartitionByKeyPartitionHash(
-            sparkSession,
-            withInitBucketCol,
-            numParallelism,
-            numAssigners)
-        }
+        val numAssigners = Option(coreOptions.dynamicBucketInitialBuckets)
+          .map(initialBuckets => Math.min(initialBuckets.toInt, parallelism))
+          .getOrElse(parallelism)
+
+        val partitioned = repartitionForDynamicBucketAssign(data, parallelism, numAssigners)
 
         if (table.snapshotManager().latestSnapshot() == null) {
           // bootstrap mode
-          // Topology: input -> shuffle by special key & partition hash -> bucket-assigner
-          writeWithBucketAssigner(
-            partitionByKey(),
-            () => {
-              val extractor = new RowPartitionKeyExtractor(table.schema)
-              val assigner =
-                new SimpleHashBucketAssigner(
-                  numAssigners,
-                  TaskContext.getPartitionId(),
-                  table.coreOptions.dynamicBucketTargetRowNum)
-              row => {
-                val sparkRow = new SparkRow(rowType, row)
-                assigner.assign(
-                  extractor.partition(sparkRow),
-                  extractor.trimmedPrimaryKey(sparkRow).hashCode)
-              }
-            }
-          )
+          // Topology: input -> shuffle by key & partition -> bucket-assigner
+          writeWithBucket(assignDynamicBucket(partitioned, numAssigners))
         } else {
-          // Topology: input -> shuffle by special key & partition hash -> bucket-assigner -> shuffle by partition & bucket
-          writeWithBucketProcessor(
-            partitionByKey(),
-            DynamicBucketProcessor(
-              table,
-              bucketColIdx,
-              numParallelism,
-              numAssigners,
-              encoderGroupWithBucketCol))
+          // Topology: input -> shuffle by key & partition -> bucket-assigner -> shuffle by partition & bucket
+          writeWithBucket(
+            assignDynamicBucketAndRepartition(table, partitioned, parallelism, numAssigners))
         }
       case BucketMode.BUCKET_UNAWARE =>
         // Topology: input ->
-        writeWithoutBucket()
+        writeWithoutBucket(data)
       case BucketMode.HASH_FIXED =>
         // Topology: input -> bucket-assigner -> shuffle by partition & bucket
-        writeWithBucketProcessor(
-          withInitBucketCol,
-          CommonBucketProcessor(table, bucketColIdx, encoderGroupWithBucketCol))
+        writeWithBucket(assignFixedBucketAndRepartition(data, sparkParallelism))
       case _ =>
         throw new UnsupportedOperationException(s"Spark doesn't support $bucketMode mode.")
     }
@@ -288,42 +238,6 @@ case class PaimonSparkWriter(table: FileStoreTable) {
     }
   }
 
-  /** Compute bucket id in dynamic bucket mode. */
-  private def repartitionByKeyPartitionHash(
-      sparkSession: SparkSession,
-      data: DataFrame,
-      numParallelism: Int,
-      numAssigners: Int): DataFrame = {
-
-    sparkSession.createDataFrame(
-      data.rdd
-        .mapPartitions(
-          iterator => {
-            val rowPartitionKeyExtractor = new RowPartitionKeyExtractor(tableSchema)
-            iterator.map(
-              row => {
-                val sparkRow = new SparkRow(rowType, row)
-                val partitionHash = rowPartitionKeyExtractor.partition(sparkRow).hashCode
-                val keyHash = rowPartitionKeyExtractor.trimmedPrimaryKey(sparkRow).hashCode
-                (
-                  BucketAssigner
-                    .computeHashKey(partitionHash, keyHash, numParallelism, numAssigners),
-                  row)
-              })
-          },
-          preservesPartitioning = true
-        )
-        .partitionBy(ModPartitioner(numParallelism))
-        .map(_._2),
-      data.schema
-    )
-  }
-
-  private def repartitionByPartitionsAndBucket(ds: Dataset[Row]): Dataset[Row] = {
-    val partitionCols = tableSchema.partitionKeys().asScala.map(col)
-    ds.toDF().repartition(partitionCols ++ Seq(col(BUCKET_COL)): _*)
-  }
-
   private def deserializeCommitMessage(
       serializer: CommitMessageSerializer,
       bytes: Array[Byte]): CommitMessage = {
@@ -333,6 +247,119 @@ case class PaimonSparkWriter(table: FileStoreTable) {
       case e: IOException =>
         throw new RuntimeException("Failed to deserialize CommitMessage's object", e)
     }
+  }
+
+  private def repartitionForDynamicBucketAssign(
+      data: Dataset[Row],
+      parallelism: Int,
+      numAssigners: Int): RDD[Row] = {
+    hashRepartition(
+      data.rdd
+        .mapPartitions(
+          iterator => {
+            val rowPartitionKeyExtractor = new RowPartitionKeyExtractor(tableSchema)
+            iterator.map(
+              row => {
+                val sparkRow = new SparkRow(rowType, row)
+                val partition = rowPartitionKeyExtractor.partition(sparkRow)
+                val key = rowPartitionKeyExtractor.trimmedPrimaryKey(sparkRow)
+                (hash(partition, key, parallelism, numAssigners), row)
+              })
+          }),
+      parallelism
+    )
+  }
+
+  private def assignDynamicBucket(data: RDD[Row], numAssigners: Int): RDD[(Row, Int)] = {
+    data
+      .mapPartitions(
+        iterator => {
+          val extractor = new RowPartitionKeyExtractor(tableSchema)
+          val assigner = new SimpleHashBucketAssigner(
+            numAssigners,
+            TaskContext.getPartitionId(),
+            coreOptions.dynamicBucketTargetRowNum()
+          )
+          iterator.map(
+            row => {
+              val sparkRow = new SparkRow(rowType, row)
+              val partition = extractor.partition(sparkRow)
+              val key = extractor.trimmedPrimaryKey(sparkRow)
+              val bucket = assigner.assign(partition, key.hashCode)
+              (row, bucket)
+            })
+        })
+  }
+
+  private def assignDynamicBucketAndRepartition(
+      fileStoreTable: FileStoreTable,
+      data: RDD[Row],
+      parallelism: Int,
+      numAssigners: Int): RDD[(Row, Int)] = {
+    val targetBucketRowNumber = coreOptions.dynamicBucketTargetRowNum
+    val commitUser = UUID.randomUUID.toString
+    hashRepartition(
+      data
+        .mapPartitions(
+          iterator => {
+            val extractor = new RowPartitionKeyExtractor(tableSchema)
+            val assigner = new HashBucketAssigner(
+              fileStoreTable.snapshotManager(),
+              commitUser,
+              fileStoreTable.store.newIndexFileHandler,
+              parallelism,
+              numAssigners,
+              TaskContext.getPartitionId(),
+              targetBucketRowNumber
+            )
+            iterator.map(
+              row => {
+                val sparkRow = new SparkRow(rowType, row)
+                val partition = extractor.partition(sparkRow)
+                val key = extractor.trimmedPrimaryKey(sparkRow)
+                val bucket = assigner.assign(partition, key.hashCode)
+                (hash(partition, bucket, parallelism), (row, bucket))
+              })
+          }),
+      parallelism
+    )
+  }
+
+  private def assignFixedBucketAndRepartition(
+      data: Dataset[Row],
+      parallelism: Int): RDD[(Row, Int)] = {
+    hashRepartition(
+      data.rdd
+        .mapPartitions(
+          iterator => {
+            val extractor = new FixedBucketRowKeyExtractor(tableSchema)
+            iterator.map(
+              row => {
+                val sparkRow = new SparkRow(rowType, row)
+                extractor.setRecord(sparkRow)
+                val partition = extractor.partition()
+                val bucket = extractor.bucket()
+                (hash(partition, bucket, parallelism), (row, bucket))
+              })
+          }),
+      parallelism
+    )
+  }
+
+  private def hash(
+      partition: BinaryRow,
+      key: BinaryRow,
+      parallelism: Int,
+      numAssigners: Int): Int = {
+    BucketAssigner.computeHashKey(partition.hashCode(), key.hashCode(), parallelism, numAssigners)
+  }
+
+  private def hash(partition: BinaryRow, bucket: Int, parallelism: Int): Int = {
+    ChannelComputer.hash(partition, bucket, parallelism)
+  }
+
+  private def hashRepartition[T: ClassTag](rdd: RDD[(Int, T)], parallelism: Int): RDD[T] = {
+    rdd.partitionBy(ModPartitioner(parallelism)).map(_._2)
   }
 
   private case class ModPartitioner(partitions: Int) extends Partitioner {

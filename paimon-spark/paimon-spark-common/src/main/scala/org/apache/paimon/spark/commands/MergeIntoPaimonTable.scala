@@ -142,7 +142,7 @@ case class MergeIntoPaimonTable(
       joinedRowEncoder,
       outputEncoder
     )
-    joinedDS.mapPartitions(processor.processPartition)(outputEncoder)
+    joinedDS.mapPartitions(processor.processPartition)(outputEncoder).toDF()
   }
 
   private def checkMatchRationality(sparkSession: SparkSession): Unit = {
