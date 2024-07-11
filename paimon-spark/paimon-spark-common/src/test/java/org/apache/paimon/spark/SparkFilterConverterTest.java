@@ -45,7 +45,7 @@ import java.sql.Date;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -160,7 +160,7 @@ public class SparkFilterConverterTest {
 
         java.sql.Timestamp timestamp = java.sql.Timestamp.valueOf("2018-10-18 00:00:57.907");
         LocalDateTime localDateTime = LocalDateTime.parse("2018-10-18T00:00:57.907");
-        Instant instant = localDateTime.toInstant(ZoneOffset.UTC);
+        Instant instant = localDateTime.atZone(ZoneId.systemDefault()).toInstant();
 
         Predicate instantExpression = converter.convert(GreaterThan.apply("x", instant));
         Predicate timestampExpression = converter.convert(GreaterThan.apply("x", timestamp));

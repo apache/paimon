@@ -36,6 +36,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -46,7 +47,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import static java.util.Collections.singletonList;
@@ -283,9 +283,9 @@ public class PredicateBuilder {
                 if (o instanceof java.sql.Timestamp) {
                     timestamp = Timestamp.fromSQLTimestamp((java.sql.Timestamp) o);
                 } else if (o instanceof Instant) {
-                    timestamp =
-                            Timestamp.fromInstant(
-                                    ((Instant) o).plusMillis(TimeUnit.HOURS.toMillis(8)));
+                    Instant o1 = (Instant) o;
+                    LocalDateTime dateTime = o1.atZone(ZoneId.systemDefault()).toLocalDateTime();
+                    timestamp = Timestamp.fromLocalDateTime(dateTime);
                 } else if (o instanceof LocalDateTime) {
                     timestamp = Timestamp.fromLocalDateTime((LocalDateTime) o);
                 } else {
