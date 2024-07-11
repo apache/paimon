@@ -1253,6 +1253,14 @@ public class CoreOptions implements Serializable {
                                     + ChangelogProducer.LOOKUP.name()
                                     + ", commit will wait for changelog generation by lookup.");
 
+    public static final ConfigOption<Boolean> METADATA_ICEBERG_COMPATIBLE =
+            key("metadata.iceberg-compatible")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "When set to true, produce Iceberg metadata after a snapshot is committed, "
+                                    + "so that Iceberg readers can read Paimon's raw files.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -1976,6 +1984,10 @@ public class CoreOptions implements Serializable {
     public boolean prepareCommitWaitCompaction() {
         return changelogProducer() == ChangelogProducer.LOOKUP
                 && options.get(CHANGELOG_PRODUCER_LOOKUP_WAIT);
+    }
+
+    public boolean metadataIcebergCompatible() {
+        return options.get(METADATA_ICEBERG_COMPATIBLE);
     }
 
     /** Specifies the merge engine for table with primary key. */
