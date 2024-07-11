@@ -142,6 +142,11 @@ public class ParquetFilters {
         }
 
         @Override
+        public FilterPredicate visitEndsWith(FieldRef fieldRef, Object literal) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
         public FilterPredicate visitIn(FieldRef fieldRef, List<Object> literals) {
             throw new UnsupportedOperationException();
         }
