@@ -124,7 +124,8 @@ public class TableReadBenchmark extends TableBenchmark {
     @Test
     public void testParquetReadProjection1() throws Exception {
         innerTestProjection(
-                Collections.singletonMap("parquet", prepareData(parquet(), "parquet")), new int[] {10});
+                Collections.singletonMap("parquet", prepareData(parquet(), "parquet")),
+                new int[] {10});
         /*
          * OpenJDK 64-Bit Server VM 1.8.0_292-b10 on Mac OS X 10.16
          * Apple M1 Pro
