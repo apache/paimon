@@ -98,7 +98,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
         this.rowType = rowType;
         this.fileFormat = options.fileFormat();
         this.pathFactory = pathFactory;
-        this.targetFileSize = options.targetFileSize(CoreOptions.TableType.APPEND_ONLY_TABLE);
+        this.targetFileSize = options.targetFileSize(false);
         this.compactionMinFileNum = options.compactionMinFileNum();
         this.compactionMaxFileNum = options.compactionMaxFileNum();
         this.commitForceCompact = options.commitForceCompact();

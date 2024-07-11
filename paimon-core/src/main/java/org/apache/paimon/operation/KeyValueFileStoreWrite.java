@@ -154,7 +154,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         valueType,
                         options.fileFormat(),
                         format2PathFactory,
-                        options.targetFileSize(CoreOptions.TableType.PRIMARY_KEY_TABLE));
+                        options.targetFileSize(true));
         this.keyComparatorSupplier = keyComparatorSupplier;
         this.valueEqualiserSupplier = valueEqualiserSupplier;
         this.mfFactory = mfFactory;
@@ -243,7 +243,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                     levels,
                     compactStrategy,
                     keyComparator,
-                    options.compactionFileSize(CoreOptions.TableType.PRIMARY_KEY_TABLE),
+                    options.compactionFileSize(true),
                     options.numSortedRunStopTrigger(),
                     rewriter,
                     compactionMetrics == null

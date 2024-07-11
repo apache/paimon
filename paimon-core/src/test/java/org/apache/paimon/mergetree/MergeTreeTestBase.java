@@ -192,7 +192,7 @@ public abstract class MergeTreeTestBase {
                         valueType,
                         flushingAvro,
                         pathFactoryMap,
-                        this.options.targetFileSize(CoreOptions.TableType.PRIMARY_KEY_TABLE));
+                        this.options.targetFileSize(true));
         writerFactory = writerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0, this.options);
         compactWriterFactory = writerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0, this.options);
         writer = createMergeTreeWriter(Collections.emptyList());
@@ -289,7 +289,7 @@ public abstract class MergeTreeTestBase {
                                 options.sortedRunSizeRatio(),
                                 options.numSortedRunCompactionTrigger()),
                         comparator,
-                        options.targetFileSize(CoreOptions.TableType.PRIMARY_KEY_TABLE),
+                        options.targetFileSize(true),
                         options.numSortedRunStopTrigger(),
                         new TestRewriter());
         writer = createMergeTreeWriter(dataFileMetas, mockFailResultCompactionManager);
@@ -542,7 +542,7 @@ public abstract class MergeTreeTestBase {
                 new Levels(comparator, files, options.numLevels()),
                 strategy,
                 comparator,
-                options.compactionFileSize(CoreOptions.TableType.PRIMARY_KEY_TABLE),
+                options.compactionFileSize(true),
                 options.numSortedRunStopTrigger(),
                 new TestRewriter(),
                 null,

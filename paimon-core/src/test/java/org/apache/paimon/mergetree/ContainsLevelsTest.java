@@ -63,6 +63,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.apache.paimon.io.DataFileTestUtils.row;
+import static org.apache.paimon.options.MemorySize.VALUE_128_MB;
 import static org.apache.paimon.utils.FileStorePathFactoryTest.createNonPartFactory;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -226,7 +227,7 @@ public class ContainsLevelsTest {
                         rowType,
                         new FlushingFileFormat(identifier),
                         pathFactoryMap,
-                        CoreOptions.TableType.PRIMARY_KEY_TABLE.getDefaultMemorySize().getBytes())
+                        VALUE_128_MB.getBytes())
                 .build(BinaryRow.EMPTY_ROW, 0, new CoreOptions(new Options()));
     }
 
