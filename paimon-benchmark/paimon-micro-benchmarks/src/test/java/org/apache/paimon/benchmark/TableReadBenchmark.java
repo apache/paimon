@@ -110,27 +110,28 @@ public class TableReadBenchmark extends TableBenchmark {
     @Test
     public void testParquetReadProjection() throws Exception {
         innerTestProjection(
-                Collections.singletonMap("parquet", prepareData(orc(), "parquet")),
+                Collections.singletonMap("parquet", prepareData(parquet(), "parquet")),
                 new int[] {0, 5, 10, 14});
         /*
          * OpenJDK 64-Bit Server VM 1.8.0_292-b10 on Mac OS X 10.16
          * Apple M1 Pro
          * read:                            Best/Avg Time(ms)    Row Rate(K/s)      Per Row(ns)   Relative
          * ------------------------------------------------------------------------------------------------
-         * OPERATORTEST_read_read-orc            716 /  728           4187.4            238.8       1.0X
+         * OPERATORTEST_read_read-parquet            716 /  728           4187.4            238.8       1.0X
          */
     }
 
     @Test
     public void testParquetReadProjection1() throws Exception {
         innerTestProjection(
-                Collections.singletonMap("parquet", prepareData(orc(), "parquet")), new int[] {10});
+                Collections.singletonMap("parquet", prepareData(parquet(), "parquet")),
+                new int[] {10});
         /*
          * OpenJDK 64-Bit Server VM 1.8.0_292-b10 on Mac OS X 10.16
          * Apple M1 Pro
          * read:                            Best/Avg Time(ms)    Row Rate(K/s)      Per Row(ns)   Relative
          * ------------------------------------------------------------------------------------------------
-         * OPERATORTEST_read_read-orc            716 /  728           4187.4            238.8       1.0X
+         * OPERATORTEST_read_read-parquet            716 /  728           4187.4            238.8       1.0X
          */
     }
 
@@ -142,7 +143,7 @@ public class TableReadBenchmark extends TableBenchmark {
 
     private Options parquet() {
         Options options = new Options();
-        options.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_ORC);
+        options.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_PARQUET);
         return options;
     }
 
