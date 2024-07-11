@@ -323,6 +323,65 @@ Current supported aggregate functions and data types are:
 * `merge_map`:
   The merge_map function merge input maps. It only supports MAP type.
 
+* `theta_sketch`:
+  The theta_sketch function aggregates multiple serialized Sketch objects into a single Sketch.
+  It supports VARBINARY data type.
+
+  An example:
+
+  {{< tabs "nested_update-example" >}}
+  
+  {{< tab "Flink" >}}
+
+  ```sql
+  -- source table
+  CREATE TABLE VISITS (
+    id INT PRIMARY KEY NOT ENFORCED,
+    user_id STRING
+  );
+  
+  -- agg table
+  CREATE TABLE UV_AGG (
+    id INT PRIMARY KEY NOT ENFORCED,
+    uv VARBINARY
+  ) WITH (
+    'merge-engine' = 'aggregation',
+    'fields.f0.aggregate-function' = 'theta_sketch'
+  );
+  
+  -- Register the following class as a Flink function with the name "SKETCH" 
+  -- which is used to transform input to sketch bytes array:
+  --
+  -- public static class SketchFunction extends ScalarFunction {
+  --   public byte[] eval(String user_id) {
+  --     UpdateSketch updateSketch = UpdateSketch.builder().build();
+  --     updateSketch.update(user_id);
+  --     return updateSketch.compact().toByteArray();
+  --   }
+  -- }
+  --
+  INSERT INTO UV_AGG SELECT id, SKETCH(user_id) FROM VISITS;
+
+  -- Register the following class as a Flink function with the name "SKETCH_COUNT"
+  -- which is used to get cardinality from sketch bytes array:
+  -- 
+  -- public static class SketchCountFunction extends ScalarFunction { 
+  --   public Double eval(byte[] sketchBytes) {
+  --     if (sketchBytes == null) {
+  --       return 0d; 
+  --     } 
+  --     return Sketches.wrapCompactSketch(Memory.wrap(sketchBytes)).getEstimate(); 
+  --   } 
+  -- }
+  --
+  -- Then we can get user cardinality based on the aggregated field.
+  SELECT id, SKETCH_COUNT(UV) as uv FROM UV_AGG;
+  ```
+
+  {{< /tab >}}
+  
+  {{< /tabs >}}
+
 {{< hint info >}}
 For streaming queries, `aggregation` merge engine must be used together with `lookup` or `full-compaction`
 [changelog producer]({{< ref "primary-key-table/changelog-producer" >}}). ('input' changelog producer is also supported, but only returns input records.)
