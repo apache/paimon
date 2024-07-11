@@ -92,8 +92,9 @@ public class AppendOnlyTableCompactionCoordinator {
         }
         this.streamingMode = isStreaming;
         CoreOptions coreOptions = table.coreOptions();
-        this.targetFileSize = coreOptions.targetFileSize();
-        this.compactionFileSize = coreOptions.compactionFileSize();
+        this.targetFileSize = coreOptions.targetFileSize(CoreOptions.TableType.APPEND_ONLY_TABLE);
+        this.compactionFileSize =
+                coreOptions.compactionFileSize(CoreOptions.TableType.APPEND_ONLY_TABLE);
         this.minFileNum = coreOptions.compactionMinFileNum();
         this.maxFileNum = coreOptions.compactionMaxFileNum();
     }
