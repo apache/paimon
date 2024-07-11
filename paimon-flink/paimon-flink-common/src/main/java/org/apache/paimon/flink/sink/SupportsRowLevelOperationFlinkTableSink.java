@@ -23,6 +23,7 @@ import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.flink.PredicateConverter;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
+import org.apache.paimon.mergetree.compact.aggregate.FieldLastValueAgg;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.OnlyPartitionKeyEqualVisitor;
@@ -41,6 +42,7 @@ import org.apache.flink.table.connector.sink.abilities.SupportsRowLevelDelete;
 import org.apache.flink.table.connector.sink.abilities.SupportsRowLevelUpdate;
 import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.factories.DynamicTableFactory;
+import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
@@ -54,11 +56,13 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
+import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
-import static org.apache.paimon.CoreOptions.MergeEngine.PARTIAL_UPDATE;
 import static org.apache.paimon.CoreOptions.createCommitUser;
+import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.SEQUENCE_GROUP;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Flink table sink that supports row level update and delete. */
@@ -116,19 +120,66 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
                 });
 
         MergeEngine mergeEngine = options.get(MERGE_ENGINE);
-        boolean supportUpdate = mergeEngine == DEDUPLICATE || mergeEngine == PARTIAL_UPDATE;
-        if (!supportUpdate) {
-            throw new UnsupportedOperationException(
-                    String.format("Merge engine %s can not support batch update.", mergeEngine));
+        Set<String> requiredSet;
+        switch (mergeEngine) {
+            case DEDUPLICATE:
+                // need all fields
+                return new RowLevelUpdateInfo() {};
+            case PARTIAL_UPDATE:
+                requiredSet = new HashSet<>();
+                // fields updated with sequence-group and agg set to last_value
+                table.options()
+                        .forEach(
+                                (key, value) -> {
+                                    if ((key.startsWith(FIELDS_PREFIX)
+                                                    && key.endsWith(SEQUENCE_GROUP)
+                                                    && updatedColumns.stream()
+                                                            .anyMatch(
+                                                                    column ->
+                                                                            value.contains(
+                                                                                    column
+                                                                                            .getName())))
+                                            || FieldLastValueAgg.NAME.equals(value)) {
+                                        requiredSet.add(key.split("\\.")[1]);
+                                    }
+                                });
+                break;
+            case AGGREGATE:
+                requiredSet = new HashSet<>();
+                // only fields configured with last_value need to be selected
+                table.options()
+                        .forEach(
+                                (key, value) -> {
+                                    if (FieldLastValueAgg.NAME.equals(value)) {
+                                        requiredSet.add(key.split("\\.")[1]);
+                                    }
+                                });
+                break;
+            default:
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Merge engine %s can not support batch update.", mergeEngine));
         }
 
-        // Even with partial-update we still need all columns. Because the topology
-        // structure is source -> cal -> constraintEnforcer -> sink, in the
-        // constraintEnforcer operator, the constraint check will be performed according to
-        // the index, not according to the column. So we can't return only some columns,
-        // which will cause problems like ArrayIndexOutOfBoundsException.
-        // TODO: return partial columns after FLINK-32001 is resolved.
-        return new RowLevelUpdateInfo() {};
+        requiredSet.addAll(table.primaryKeys());
+        requiredSet.addAll(table.partitionKeys());
+        // include sequence field
+        requiredSet.addAll(CoreOptions.fromMap(table.options()).sequenceField());
+        updatedColumns.forEach(column -> requiredSet.add(column.getName()));
+
+        return new RowLevelUpdateInfo() {
+
+            @Override
+            public Optional<List<Column>> requiredColumns() {
+                return SupportsRowLevelOperationFlinkTableSink.this.requiredColumns(
+                        table.rowType().getFieldNames(),
+                        SupportsRowLevelOperationFlinkTableSink.super
+                                .context
+                                .getPhysicalRowDataType()
+                                .getChildren(),
+                        requiredSet);
+            }
+        };
     }
 
     @Override
@@ -213,5 +264,16 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
                 new OnlyPartitionKeyEqualVisitor(table.partitionKeys());
         deletePredicate.visit(visitor);
         return visitor.partitions();
+    }
+
+    private Optional<List<Column>> requiredColumns(
+            List<String> fieldNames, List<DataType> fieldDataTypes, Set<String> requiredSet) {
+        List<Column> requiredColumns =
+                IntStream.range(0, fieldNames.size())
+                        .filter(i -> requiredSet.contains(fieldNames.get(i)))
+                        .mapToObj(i -> Column.physical(fieldNames.get(i), fieldDataTypes.get(i)))
+                        .collect(Collectors.toList());
+
+        return Optional.of(requiredColumns);
     }
 }

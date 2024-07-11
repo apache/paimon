@@ -176,8 +176,7 @@ PARTITION (k0 = 0, k1 = 0) SELECT v FROM my_table WHERE false;
 {{< hint info >}}
 Important table properties setting:
 1. Only [primary key table]({{< ref "primary-key-table" >}}) supports this feature.
-2. [MergeEngine]({{< ref "primary-key-table/merge-engine" >}}) needs to be [deduplicate]({{< ref "primary-key-table/merge-engine#deduplicate" >}})
-   or [partial-update]({{< ref "primary-key-table/merge-engine#partial-update" >}}) to support this feature.
+2. Every [MergeEngine]({{< ref "primary-key-table/merge-engine" >}}) supports this feature.
 3. Do not support updating primary keys.
 {{< /hint >}}
 

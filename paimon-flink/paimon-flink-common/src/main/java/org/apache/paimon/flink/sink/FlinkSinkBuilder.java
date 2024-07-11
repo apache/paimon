@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.FlinkRowWrapper;
+import org.apache.paimon.flink.ReverseMappingFlinkRowWrapper;
 import org.apache.paimon.flink.sink.index.GlobalDynamicBucketSink;
 import org.apache.paimon.flink.sorter.TableSortInfo;
 import org.apache.paimon.flink.sorter.TableSorter;
@@ -31,6 +32,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 
 import org.apache.flink.api.common.functions.MapFunction;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.table.data.RowData;
@@ -49,6 +51,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_SAMPLE_FACTOR;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_STRATEGY;
@@ -250,7 +253,52 @@ public class FlinkSinkBuilder {
 
     protected DataStream<InternalRow> mapToInternalRow(
             DataStream<RowData> input, org.apache.paimon.types.RowType rowType) {
-        return input.map((MapFunction<RowData, InternalRow>) FlinkRowWrapper::new)
+        MapFunction<RowData, InternalRow> mapFunction;
+        TypeInformation<RowData> inputType = input.getType();
+        if (inputType instanceof org.apache.flink.table.runtime.typeutils.InternalTypeInfo) {
+            // extract upstream field names
+            List<String> fields =
+                    ((org.apache.flink.table.runtime.typeutils.InternalTypeInfo<?>) inputType)
+                            .toRowType().getFields().stream()
+                                    .map(
+                                            org.apache.flink.table.types.logical.RowType.RowField
+                                                    ::getName)
+                                    .collect(Collectors.toList());
+            // When the upstream field count does not match the table schema field count and the
+            // first field of the upstream is not equal to 'f0' (when the field types do not match,
+            // flink uses type conversion and renames the field names), use partial fields for
+            // update.
+            if (fields.size() != rowType.getFieldCount()) {
+                if (!"f0".equals(fields.get(0))) {
+                    int[] indexMapping = new int[rowType.getFieldCount()];
+
+                    int fieldsSize = fields.size();
+                    Map<String, Integer> fieldToIndex = new HashMap<>(fieldsSize);
+                    for (int i = 0; i < fieldsSize; i++) {
+                        fieldToIndex.put(fields.get(i), i);
+                    }
+
+                    List<String> fieldNames = rowType.getFieldNames();
+                    int fieldNamesSize = fieldNames.size();
+                    for (int i = 0; i < fieldNamesSize; i++) {
+                        indexMapping[i] = fieldToIndex.getOrDefault(fieldNames.get(i), -1);
+                    }
+
+                    mapFunction = row -> new ReverseMappingFlinkRowWrapper(row, indexMapping);
+                } else {
+                    throw new RuntimeException(
+                            "The data types of the source and sink are inconsistent. Please verify the data types of the corresponding fields. You can use functions like 'CAST' in SQL for data type conversion.");
+                }
+            } else {
+                // fall back to using the complete schema
+                mapFunction = FlinkRowWrapper::new;
+            }
+        } else {
+            // fall back to using the complete schema
+            mapFunction = FlinkRowWrapper::new;
+        }
+
+        return input.map(mapFunction)
                 .setParallelism(input.getParallelism())
                 .returns(org.apache.paimon.flink.utils.InternalTypeInfo.fromRowType(rowType));
     }
