@@ -46,6 +46,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import static java.util.Collections.singletonList;
@@ -283,7 +284,9 @@ public class PredicateBuilder {
                 if (o instanceof java.sql.Timestamp) {
                     timestamp = Timestamp.fromSQLTimestamp((java.sql.Timestamp) o);
                 } else if (o instanceof Instant) {
-                    timestamp = Timestamp.fromInstant((Instant) o);
+                    timestamp =
+                            Timestamp.fromInstant(
+                                    ((Instant) o).plusMillis(TimeUnit.HOURS.toMillis(8)));
                 } else if (o instanceof LocalDateTime) {
                     timestamp = Timestamp.fromLocalDateTime((LocalDateTime) o);
                 } else {
