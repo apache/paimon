@@ -49,8 +49,8 @@ This section introduce all available spark procedures about paimon.
             <li>max_concurrent_jobs: when sort compact is used, files in one partition are grouped and submitted as a single spark compact job. This parameter controls the maximum number of jobs that can be submitted simultaneously. The default value is 15.</li>
       </td>
       <td>
-         SET spark.sql.shuffle.partitions=10; --set the compact parallelism <br/>
-         CALL sys.compact(table => 'T', partitions => 'p=0;p=1',  order_strategy => 'zorder', order_by => 'a,b') <br/>
+         SET spark.sql.shuffle.partitions=10; --set the compact parallelism <br/><br/>
+         CALL sys.compact(table => 'T', partitions => 'p=0;p=1',  order_strategy => 'zorder', order_by => 'a,b') <br/><br/>
          CALL sys.compact(table => 'T', where => 'p>0 and p<3', order_strategy => 'zorder', order_by => 'a,b')
       </td>
     </tr>
@@ -87,7 +87,7 @@ This section introduce all available spark procedures about paimon.
       </td>
       <td>
          -- based on snapshot 10 with 1d <br/>
-         CALL sys.create_tag(table => 'default.T', tag => 'my_tag', snapshot => 10, time_retained => '1 d') <br/>
+         CALL sys.create_tag(table => 'default.T', tag => 'my_tag', snapshot => 10, time_retained => '1 d') <br/><br/>
          -- based on the latest snapshot <br/>
          CALL sys.create_tag(table => 'default.T', tag => 'my_tag')
       </td>
@@ -109,7 +109,7 @@ This section introduce all available spark procedures about paimon.
             <li>version: id of the snapshot or name of tag that will roll back to.</li>
       </td>
       <td>
-          CALL sys.rollback(table => 'default.T', version => 'my_tag')<br/>
+          CALL sys.rollback(table => 'default.T', version => 'my_tag')<br/><br/>
           CALL sys.rollback(table => 'default.T', version => 10)
       </td>
     </tr>
@@ -146,9 +146,7 @@ This section introduce all available spark procedures about paimon.
             <li>database_or_table: empty or the target database name or the target table identifier, if you specify multiple tags, delimiter is ','</li>
       </td>
       <td>
-          CALL sys.repair('test_db.T')
-      </td>
-      <td>
+          CALL sys.repair('test_db.T')<br/><br/>
           CALL sys.repair('test_db.T,test_db01,test_db.T2')
       </td>
     </tr>
@@ -162,8 +160,8 @@ This section introduce all available spark procedures about paimon.
             <li>snapshot(Long):  id of the snapshot which the new tag is based on.</li>
       </td>
       <td>
-          CALL sys.create_branch(table => 'test_db.T', branch => 'test_branch')<br/>
-          CALL sys.create_branch(table => 'test_db.T', branch => 'test_branch', tag => 'my_tag')<br/>
+          CALL sys.create_branch(table => 'test_db.T', branch => 'test_branch')<br/><br/>
+          CALL sys.create_branch(table => 'test_db.T', branch => 'test_branch', tag => 'my_tag')<br/><br/>
           CALL sys.create_branch(table => 'test_db.T', branch => 'test_branch', snapshot => 10)
       </td>
     </tr>

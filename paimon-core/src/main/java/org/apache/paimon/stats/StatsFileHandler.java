@@ -56,7 +56,7 @@ public class StatsFileHandler {
     public Optional<Statistics> readStats() {
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         if (latestSnapshotId == null) {
-            throw new IllegalStateException("Unable to obtain the latest schema");
+            throw new IllegalStateException("Unable to obtain the latest snapshot");
         }
         return readStats(latestSnapshotId);
     }
