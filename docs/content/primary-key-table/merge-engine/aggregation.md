@@ -1,9 +1,9 @@
 ---
-title: "Merge Engine"
-weight: 4
+title: "Aggregation"
+weight: 3
 type: docs
 aliases:
-- /primary-key-table/merge-engine.html
+- /cdc-ingestion/merge-engin/aggregation.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -24,147 +24,7 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Merge Engine
-
-When Paimon sink receives two or more records with the same primary keys, it will merge them into one record to keep primary keys unique. By specifying the `merge-engine` table property, users can choose how records are merged together.
-
-{{< hint info >}}
-Always set `table.exec.sink.upsert-materialize` to `NONE` in Flink SQL TableConfig, sink upsert-materialize may
-result in strange behavior. When the input is out of order, we recommend that you use
-[Sequence Field]({{< ref "primary-key-table/sequence-rowkind#sequence-field" >}}) to correct disorder.
-{{< /hint >}}
-
-## Deduplicate
-
-`deduplicate` merge engine is the default merge engine. Paimon will only keep the latest record and throw away other records with the same primary keys.
-
-Specifically, if the latest record is a `DELETE` record, all records with the same primary keys will be deleted.  You can config `ignore-delete` to ignore it.
-
-## Partial Update
-
-By specifying `'merge-engine' = 'partial-update'`,
-Users have the ability to update columns of a record through multiple updates until the record is complete. This is achieved by updating the value fields one by one, using the latest data under the same primary key. However, null values are not overwritten in the process.
-
-For example, suppose Paimon receives three records:
-- `<1, 23.0, 10, NULL>`-
-- `<1, NULL, NULL, 'This is a book'>`
-- `<1, 25.2, NULL, NULL>`
-
-Assuming that the first column is the primary key, the final result would be `<1, 25.2, 10, 'This is a book'>`.
-
-{{< hint info >}}
-For streaming queries, `partial-update` merge engine must be used together with `lookup` or `full-compaction`
-[changelog producer]({{< ref "primary-key-table/changelog-producer" >}}). ('input' changelog producer is also supported, but only returns input records.)
-{{< /hint >}}
-
-{{< hint info >}}
-By default, Partial update can not accept delete records, you can choose one of the following solutions:
-- Configure 'ignore-delete' to ignore delete records.
-- Configure 'sequence-group's to retract partial columns.
-  {{< /hint >}}
-
-### Sequence Group
-
-A sequence-field may not solve the disorder problem of partial-update tables with multiple stream updates, because
-the sequence-field may be overwritten by the latest data of another stream during multi-stream update.
-
-So we introduce sequence group mechanism for partial-update tables. It can solve:
-
-1. Disorder during multi-stream update. Each stream defines its own sequence-groups.
-2. A true partial-update, not just a non-null update.
-
-See example:
-
-```sql
-CREATE TABLE t (
-    k INT,
-    a INT,
-    b INT,
-    g_1 INT,
-    c INT,
-    d INT,
-    g_2 INT,
-    PRIMARY KEY (k) NOT ENFORCED
-) WITH (
-    'merge-engine'='partial-update',
-    'fields.g_1.sequence-group'='a,b',
-    'fields.g_2.sequence-group'='c,d'
-);
-
-INSERT INTO t VALUES (1, 1, 1, 1, 1, 1, 1);
-
--- g_2 is null, c, d should not be updated
-INSERT INTO t VALUES (1, 2, 2, 2, 2, 2, CAST(NULL AS INT));
-
-SELECT * FROM t; -- output 1, 2, 2, 2, 1, 1, 1
-
--- g_1 is smaller, a, b should not be updated
-INSERT INTO t VALUES (1, 3, 3, 1, 3, 3, 3);
-
-SELECT * FROM t; -- output 1, 2, 2, 2, 3, 3, 3
-```
-
-For `fields.<field-name>.sequence-group`, valid comparative data types include: DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, DOUBLE, DATE, TIME, TIMESTAMP, and TIMESTAMP_LTZ.
-
-### Aggregation For Partial Update
-
-You can specify aggregation function for the input field, all the functions in the [Aggregation]({{< ref "primary-key-table/merge-engine#aggregation" >}}) are supported.
-
-See example:
-
-```sql
-CREATE TABLE t (
-          k INT,
-          a INT,
-          b INT,
-          c INT,
-          d INT,
-          PRIMARY KEY (k) NOT ENFORCED
-) WITH (
-     'merge-engine'='partial-update',
-     'fields.a.sequence-group' = 'b',
-     'fields.b.aggregate-function' = 'first_value',
-     'fields.c.sequence-group' = 'd',
-     'fields.d.aggregate-function' = 'sum'
- );
-INSERT INTO t VALUES (1, 1, 1, CAST(NULL AS INT), CAST(NULL AS INT));
-INSERT INTO t VALUES (1, CAST(NULL AS INT), CAST(NULL AS INT), 1, 1);
-INSERT INTO t VALUES (1, 2, 2, CAST(NULL AS INT), CAST(NULL AS INT));
-INSERT INTO t VALUES (1, CAST(NULL AS INT), CAST(NULL AS INT), 2, 2);
-
-
-SELECT * FROM t; -- output 1, 2, 1, 2, 3
-```
-
-You can specify a default aggregation function for all the input fields with `fields.default-aggregate-function`, see example:
-
-```sql
-CREATE TABLE t (
-          k INT,
-          a INT,
-          b INT,
-          c INT,
-          d INT,
-          PRIMARY KEY (k) NOT ENFORCED
-) WITH (
-     'merge-engine'='partial-update',
-     'fields.a.sequence-group' = 'b',
-     'fields.c.sequence-group' = 'd',
-     'fields.default-aggregate-function' = 'last_non_null_value',
-     'fields.d.aggregate-function' = 'sum'
- );
-
-INSERT INTO t VALUES (1, 1, 1, CAST(NULL AS INT), CAST(NULL AS INT));
-INSERT INTO t VALUES (1, CAST(NULL AS INT), CAST(NULL AS INT), 1, 1);
-INSERT INTO t VALUES (1, 2, 2, CAST(NULL AS INT), CAST(NULL AS INT));
-INSERT INTO t VALUES (1, CAST(NULL AS INT), CAST(NULL AS INT), 2, 2);
-
-
-SELECT * FROM t; -- output 1, 2, 2, 2, 3
-
-```
-
-## Aggregation
+# Aggregation
 
 {{< hint info >}}
 NOTE: Always set `table.exec.sink.upsert-materialize` to `NONE` in Flink SQL TableConfig.
@@ -197,65 +57,68 @@ CREATE TABLE my_table (
 
 Field `price` will be aggregated by the `max` function, and field `sales` will be aggregated by the `sum` function. Given two input records `<1, 23.0, 15>` and `<1, 30.2, 20>`, the final result will be `<1, 30.2, 35>`.
 
+## Aggregation Functions
+
 Current supported aggregate functions and data types are:
 
-* `sum`:
+### sum
+
   The sum function aggregates the values across multiple rows.
   It supports DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, and DOUBLE data types.
 
-* `product`:
+### product
   The product function can compute product values across multiple lines.
   It supports DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, and DOUBLE data types.
 
-* `count`:
+### count
   The count function counts the values across multiple rows.
   It supports INTEGER, BIGINT data types.
 
-* `max`:
+### max
   The max function identifies and retains the maximum value.
   It supports CHAR, VARCHAR, DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, DOUBLE, DATE, TIME, TIMESTAMP, and TIMESTAMP_LTZ data types.
 
-* `min`:
+### min
   The min function identifies and retains the minimum value.
   It supports CHAR, VARCHAR, DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, DOUBLE, DATE, TIME, TIMESTAMP, and TIMESTAMP_LTZ data types.
 
-* `last_value`:
+### last_value
   The last_value function replaces the previous value with the most recently imported value.
   It supports all data types.
 
-* `last_non_null_value`:
+### last_non_null_value
   The last_non_null_value function replaces the previous value with the latest non-null value.
   It supports all data types.
 
-* `listagg`:
+### listagg
   The listagg function concatenates multiple string values into a single string.
   It supports STRING data type.
 
-* `bool_and`:
+### bool_and
   The bool_and function evaluates whether all values in a boolean set are true.
   It supports BOOLEAN data type.
 
-* `bool_or`:
+### bool_or
   The bool_or function checks if at least one value in a boolean set is true.
   It supports BOOLEAN data type.
 
-* `first_value`:
+### first_value
   The first_value function retrieves the first null value from a data set.
   It supports all data types.
 
-* `first_non_null_value`:
+### first_non_null_value
   The first_non_null_value function selects the first non-null value in a data set.
   It supports all data types.
 
-* `rbm32`:
+### rbm32
   The rbm32 function aggregates multiple serialized 32-bit RoaringBitmap into a single RoaringBitmap.
   It supports VARBINARY data type.
 
-* `rbm64`:
+### rbm64
   The rbm64 function aggregates multiple serialized 64-bit Roaring64Bitmap into a single Roaring64Bitmap.
   It supports VARBINARY data type.
 
-* `nested_update`:
+### nested_update
   The nested_update function collects multiple rows into one array<row> (so-called 'nested table'). It supports ARRAY<ROW> data types.
 
   Use `fields.<field-name>.nested-key=pk0,pk1,...` to specify the primary keys of the nested table. If no keys, row will be appended to array<row>.
@@ -324,21 +187,21 @@ Current supported aggregate functions and data types are:
 
   {{< /tabs >}}
 
-* `collect`:
+### collect
   The collect function collects elements into an Array. You can set `fields.<field-name>.distinct=true` to deduplicate elements.
   It only supports ARRAY type.
 
-* `merge_map`:
+### merge_map
   The merge_map function merge input maps. It only supports MAP type.
 
-* `theta_sketch`:
+### theta_sketch
   The theta_sketch function aggregates multiple serialized Sketch objects into a single Sketch.
   It supports VARBINARY data type.
 
   An example:
 
   {{< tabs "nested_update-example" >}}
-  
+
   {{< tab "Flink" >}}
 
   ```sql
@@ -387,7 +250,7 @@ Current supported aggregate functions and data types are:
   ```
 
   {{< /tab >}}
-  
+
   {{< /tabs >}}
 
 {{< hint info >}}
@@ -395,7 +258,7 @@ For streaming queries, `aggregation` merge engine must be used together with `lo
 [changelog producer]({{< ref "primary-key-table/changelog-producer" >}}). ('input' changelog producer is also supported, but only returns input records.)
 {{< /hint >}}
 
-### Retract
+## Retraction
 
 Only `sum`, `product`, `count`, `collect`, `merge_map`, `nested_update`, `last_value` and `last_non_null_value` supports retraction (`UPDATE_BEFORE` and `DELETE`), others aggregate functions do not support retraction.
 If you allow some functions to ignore retraction messages, you can configure:
@@ -403,26 +266,14 @@ If you allow some functions to ignore retraction messages, you can configure:
 
 The `last_value` and `last_non_null_value` just set field to null when accept retract messages.
 
-The `collect` and `merge_map` make a best-effort attempt to handle retraction messages, but the results are not 
+The `collect` and `merge_map` make a best-effort attempt to handle retraction messages, but the results are not
 guaranteed to be accurate. The following behaviors may occur when processing retraction messages:
 
-1. It might fail to handle retraction messages if records are disordered. For example, the table uses `collect`, and the 
-upstreams send `+I['A', 'B']` and `-U['A']` respectively. If the table receives `-U['A']` first, it can do nothing; then it receives
-`+I['A', 'B']`, the merge result will be `+I['A', 'B']` instead of `+I['B']`.
+1. It might fail to handle retraction messages if records are disordered. For example, the table uses `collect`, and the
+   upstreams send `+I['A', 'B']` and `-U['A']` respectively. If the table receives `-U['A']` first, it can do nothing; then it receives
+   `+I['A', 'B']`, the merge result will be `+I['A', 'B']` instead of `+I['B']`.
 
-2. The retract message from one upstream will retract the result merged from multiple upstreams. For example, the table 
-uses `merge_map`, and one upstream sends `+I[1->A]`, another upstream sends `+I[1->B]`, `-D[1->B]` later. The table will 
-merge two insert values to `+I[1->B]` first, and then the `-D[1->B]` will retract the whole result, so the final result 
-is an empty map instead of `+I[1->A]`
-
-## First Row
-
-By specifying `'merge-engine' = 'first-row'`, users can keep the first row of the same primary key. It differs from the
-`deduplicate` merge engine that in the `first-row` merge engine, it will generate insert only changelog.
-
-{{< hint info >}}
-1. You can not specify [sequence.field]({{< ref "primary-key-table/sequence-rowkind#sequence-field" >}}).
-2. Not accept `DELETE` and `UPDATE_BEFORE` message. You can config `ignore-delete` to ignore these two kinds records.
-{{< /hint >}}
-
-This is of great help in replacing log deduplication in streaming computation.
+2. The retract message from one upstream will retract the result merged from multiple upstreams. For example, the table
+   uses `merge_map`, and one upstream sends `+I[1->A]`, another upstream sends `+I[1->B]`, `-D[1->B]` later. The table will
+   merge two insert values to `+I[1->B]` first, and then the `-D[1->B]` will retract the whole result, so the final result
+   is an empty map instead of `+I[1->A]`
