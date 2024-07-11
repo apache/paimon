@@ -145,24 +145,23 @@ public class SearchArgumentToPredicateConverter {
         DataType columnType = columnTypes.get(idx);
         switch (leaf.getOperator()) {
             case EQUALS:
-                return builder.equal(idx, toLiteral(columnName, columnType, leaf.getLiteral()));
+                return builder.equal(idx, toLiteral(columnType, leaf.getLiteral()));
             case LESS_THAN:
-                return builder.lessThan(idx, toLiteral(columnName, columnType, leaf.getLiteral()));
+                return builder.lessThan(idx, toLiteral(columnType, leaf.getLiteral()));
             case LESS_THAN_EQUALS:
-                return builder.lessOrEqual(
-                        idx, toLiteral(columnName, columnType, leaf.getLiteral()));
+                return builder.lessOrEqual(idx, toLiteral(columnType, leaf.getLiteral()));
             case IN:
                 return builder.in(
                         idx,
                         leaf.getLiteralList().stream()
-                                .map(o -> toLiteral(columnName, columnType, o))
+                                .map(o -> toLiteral(columnType, o))
                                 .collect(Collectors.toList()));
             case BETWEEN:
                 List<Object> literalList = leaf.getLiteralList();
                 return builder.between(
                         idx,
-                        toLiteral(columnName, columnType, literalList.get(0)),
-                        toLiteral(columnName, columnType, literalList.get(1)));
+                        toLiteral(columnType, literalList.get(0)),
+                        toLiteral(columnType, literalList.get(1)));
             case IS_NULL:
                 return builder.isNull(idx);
             default:
@@ -171,21 +170,10 @@ public class SearchArgumentToPredicateConverter {
         }
     }
 
-    private Object toLiteral(String columnName, DataType literalType, Object o) {
+    private Object toLiteral(DataType literalType, Object o) {
         if (o instanceof HiveDecimalWritable) {
             o = ((HiveDecimalWritable) o).getHiveDecimal().bigDecimalValue();
         }
-        try {
-            return convertJavaObject(literalType, o);
-        } catch (Exception e) {
-            throw new RuntimeException(
-                    "Failed to convert column "
-                            + columnName
-                            + " with value "
-                            + o
-                            + " to object of type "
-                            + literalType,
-                    e);
-        }
+        return convertJavaObject(literalType, o);
     }
 }
