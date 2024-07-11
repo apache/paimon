@@ -279,7 +279,6 @@ public class PredicateBuilder {
                 int scale = decimalType.getScale();
                 return Decimal.fromBigDecimal((BigDecimal) o, precision, scale);
             case TIMESTAMP_WITHOUT_TIME_ZONE:
-            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 Timestamp timestamp;
                 if (o instanceof java.sql.Timestamp) {
                     timestamp = Timestamp.fromSQLTimestamp((java.sql.Timestamp) o);
@@ -287,6 +286,17 @@ public class PredicateBuilder {
                     timestamp =
                             Timestamp.fromInstant(
                                     ((Instant) o).plusMillis(TimeUnit.HOURS.toMillis(8)));
+                } else if (o instanceof LocalDateTime) {
+                    timestamp = Timestamp.fromLocalDateTime((LocalDateTime) o);
+                } else {
+                    throw new UnsupportedOperationException("Unsupported object: " + o);
+                }
+                return timestamp;
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                if (o instanceof java.sql.Timestamp) {
+                    timestamp = Timestamp.fromSQLTimestamp((java.sql.Timestamp) o);
+                } else if (o instanceof Instant) {
+                    timestamp = Timestamp.fromInstant((Instant) o);
                 } else if (o instanceof LocalDateTime) {
                     timestamp = Timestamp.fromLocalDateTime((LocalDateTime) o);
                 } else {
