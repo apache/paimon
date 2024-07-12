@@ -70,7 +70,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
 
         // use consumer streaming read table
         testStreamingRead(
-                        "SELECT * FROM `" + tableName + "` /*+ OPTIONS('consumer-id'='myid') */",
+                        "SELECT * FROM `" + tableName + "` /*+ OPTIONS('consumer-id'='myid','consumer.expiration-time'='3h') */",
                         Arrays.asList(
                                 changelogRow("+I", 1L, "Hi"),
                                 changelogRow("+I", 2L, "Hello"),

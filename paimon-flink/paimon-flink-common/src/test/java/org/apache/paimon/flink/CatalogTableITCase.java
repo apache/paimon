@@ -742,7 +742,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(
-                        streamSqlIter("SELECT * FROM T /*+ OPTIONS('consumer-id'='my1') */"));
+                        streamSqlIter("SELECT * FROM T /*+ OPTIONS('consumer-id'='my1','consumer.expiration-time'='3h') */"));
 
         batchSql("INSERT INTO T VALUES (5, 6), (7, 8)");
         assertThat(iterator.collect(2)).containsExactlyInAnyOrder(Row.of(1, 2), Row.of(3, 4));
