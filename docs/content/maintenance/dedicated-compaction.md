@@ -231,7 +231,7 @@ For more usage of the compact_database action, see
 ## Sort Compact
 
 If your table is configured with [dynamic bucket primary key table]({{< ref "primary-key-table/data-distribution#dynamic-bucket" >}})
-or [append table]({{< ref "append-table/append-table" >}}) ,
+or [append table]({{< ref "append-table/overview" >}}) ,
 you can trigger a compact with specified column sort to speed up queries.
 
 ```bash  

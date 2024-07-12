@@ -34,7 +34,7 @@ import java.util.Map;
 
 /**
  * {@link StoreSinkWrite} for tables with lookup changelog producer and {@link
- * org.apache.paimon.flink.FlinkConnectorOptions#CHANGELOG_PRODUCER_LOOKUP_WAIT} set to false.
+ * org.apache.paimon.CoreOptions#CHANGELOG_PRODUCER_LOOKUP_WAIT} set to false.
  */
 public class AsyncLookupSinkWrite extends StoreSinkWriteImpl {
 

@@ -270,7 +270,7 @@ under the License.
             <td><h5>file.compression</h5></td>
             <td style="word-wrap: break-word;">"zstd"</td>
             <td>String</td>
-            <td>Default file compression. For faster read and write, it is recommended to use LZ4.</td>
+            <td>Default file compression. For faster read and write, it is recommended to use zstd.</td>
         </tr>
         <tr>
             <td><h5>file.compression.per.level</h5></td>
@@ -359,9 +359,9 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
         </tr>
         <tr>
             <td><h5>lookup.cache-spill-compression</h5></td>
-            <td style="word-wrap: break-word;">"lz4"</td>
+            <td style="word-wrap: break-word;">"zstd"</td>
             <td>String</td>
-            <td>Spill compression for lookup cache, currently none, lz4, lzo and zstd are supported.</td>
+            <td>Spill compression for lookup cache, currently zstd, none, lz4 and lzo are supported.</td>
         </tr>
         <tr>
             <td><h5>lookup.cache.bloom.filter.enabled</h5></td>
@@ -416,6 +416,12 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td style="word-wrap: break-word;">deduplicate</td>
             <td><p>Enum</p></td>
             <td>Specify the merge engine for table with primary key.<br /><br />Possible values:<ul><li>"deduplicate": De-duplicate and keep the last row.</li><li>"partial-update": Partial update non-null fields.</li><li>"aggregation": Aggregate fields with same primary key.</li><li>"first-row": De-duplicate and keep the first row.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg-compatible</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>When set to true, produce Iceberg metadata after a snapshot is committed, so that Iceberg readers can read Paimon's raw files.</td>
         </tr>
         <tr>
             <td><h5>metadata.stats-mode</h5></td>
@@ -486,16 +492,16 @@ This config option does not affect the default filesystem metastore.</td>
             <td>The default partition name in case the dynamic partition column value is null/empty string.</td>
         </tr>
         <tr>
-            <td><h5>partition.expiration-strategy</h5></td>
-            <td style="word-wrap: break-word;">values-time</td>
-            <td>String</td>
-            <td>Specifies the expiration strategy for partition expiration.<br />Possible values:<ul><li>values-time: A partition expiration policy that compares the time extracted from the partition value with the current time.</li></ul><ul><li>update-time: A partition expiration policy that compares the last update time of the partition with the current time.</li></ul><br /><br />Possible values:<ul><li>"values-time": The strategy compares the time extracted from the partition value with the current time.</li><li>"update-time": The strategy compares the last update time of the partition with the current time.</li></ul></td>
-        </tr>
-        <tr>
             <td><h5>partition.expiration-check-interval</h5></td>
             <td style="word-wrap: break-word;">1 h</td>
             <td>Duration</td>
             <td>The check interval of partition expiration.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.expiration-strategy</h5></td>
+            <td style="word-wrap: break-word;">values-time</td>
+            <td><p>Enum</p></td>
+            <td>Specifies the expiration strategy for partition expiration.<br />Possible values:<ul><li>values-time: A partition expiration policy that compares the time extracted from the partition value with the current time.</li></ul><ul><li>update-time: A partition expiration policy that compares the last update time of the partition with the current time.</li></ul><br /><br />Possible values:<ul><li>"values-time": The strategy compares the time extracted from the partition value with the current time.</li><li>"update-time": The strategy compares the last update time of the partition with the current time.</li></ul></td>
         </tr>
         <tr>
             <td><h5>partition.expiration-time</h5></td>
@@ -710,9 +716,9 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
         </tr>
         <tr>
             <td><h5>spill-compression</h5></td>
-            <td style="word-wrap: break-word;">"LZ4"</td>
+            <td style="word-wrap: break-word;">"zstd"</td>
             <td>String</td>
-            <td>Compression for spill, currently lz4, lzo and zstd are supported.</td>
+            <td>Compression for spill, currently zstd, lzo and zstd are supported.</td>
         </tr>
         <tr>
             <td><h5>streaming-read-mode</h5></td>
@@ -782,9 +788,9 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
         </tr>
         <tr>
             <td><h5>target-file-size</h5></td>
-            <td style="word-wrap: break-word;">128 mb</td>
+            <td style="word-wrap: break-word;">(none)</td>
             <td>MemorySize</td>
-            <td>Target size of a file.</td>
+            <td>Target size of a file.<ul><li>primary key table: the default value is 128 MB.</li><li>append table: the default value is 256 MB.</li></ul></td>
         </tr>
         <tr>
             <td><h5>write-buffer-for-append</h5></td>

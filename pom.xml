@@ -105,6 +105,7 @@ under the License.
         <!-- TODO upgrade after connector releases x-1.19 version -->
         <test.flink.connector.kafka.version>3.0.1-1.18</test.flink.connector.kafka.version>
 
+        <zstd-jni.version>1.5.5-11</zstd-jni.version>
         <janino.version>3.0.11</janino.version>
         <mockito.version>3.4.6</mockito.version>
         <jaxb.api.version>2.3.1</jaxb.api.version>
@@ -342,12 +343,12 @@ under the License.
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>
-                <version>2.4</version><!--$NO-MVN-MAN-VER$-->
+                <version>3.4.2</version><!--$NO-MVN-MAN-VER$-->
                 <configuration>
                     <archive>
                         <manifestEntries>
                             <SCM-Revision>${git.commit.id}</SCM-Revision>
-                            <SCM-Branch>${git.branch}</SCM-Branch>
+                            <SCM-Branch>${git.branch}</SCM-Branch><!-- TODO: remove this non-reproducible config once maven-jar-plugin upgrade works -->
                         </manifestEntries>
                         <manifest>
                             <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
@@ -775,6 +776,7 @@ under the License.
                         <compilerArgs>
                             <!-- Prevents recompilation due to missing package-info.class, see MCOMPILER-205 -->
                             <arg>-Xpkginfo:always</arg>
+                            <arg>-Xlint:deprecation</arg>
                         </compilerArgs>
                     </configuration>
                 </plugin>

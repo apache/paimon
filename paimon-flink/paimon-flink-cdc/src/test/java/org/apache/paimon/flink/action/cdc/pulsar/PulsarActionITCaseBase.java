@@ -41,6 +41,7 @@ import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.PulsarContainer;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
+import org.testcontainers.utility.DockerImageName;
 
 import java.io.File;
 import java.io.IOException;
@@ -75,6 +76,8 @@ public class PulsarActionITCaseBase extends CdcActionITCaseBase {
     private static final Network NETWORK = Network.newNetwork();
     private static final String INTER_CONTAINER_PULSAR_ALIAS = "pulsar";
 
+    public static final String IMAGE = "apachepulsar/pulsar";
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private PulsarAdmin admin;
@@ -87,7 +90,7 @@ public class PulsarActionITCaseBase extends CdcActionITCaseBase {
 
     private static PulsarContainerExtension createPulsarContainerExtension() {
         PulsarContainerExtension container =
-                new PulsarContainerExtension("3.0.0") {
+                new PulsarContainerExtension(DockerImageName.parse(IMAGE + ":" + "3.0.0")) {
                     @Override
                     protected void doStart() {
                         super.doStart();
@@ -284,8 +287,8 @@ public class PulsarActionITCaseBase extends CdcActionITCaseBase {
     /** Pulsar container extension for junit5. */
     private static class PulsarContainerExtension extends PulsarContainer
             implements BeforeAllCallback, AfterAllCallback {
-        private PulsarContainerExtension(String pulsarVersion) {
-            super(pulsarVersion);
+        private PulsarContainerExtension(DockerImageName dockerImageName) {
+            super(dockerImageName);
         }
 
         @Override

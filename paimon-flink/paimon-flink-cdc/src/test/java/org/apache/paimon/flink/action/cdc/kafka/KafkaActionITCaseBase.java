@@ -202,7 +202,7 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
                             .filter(listing -> !listing.isInternal())
                             .map(TopicListing::name)
                             .collect(Collectors.toList());
-            return adminClient.describeTopics(topics).all().get();
+            return adminClient.describeTopics(topics).allTopicNames().get();
         } catch (Exception e) {
             throw new RuntimeException("Failed to list Kafka topics", e);
         }

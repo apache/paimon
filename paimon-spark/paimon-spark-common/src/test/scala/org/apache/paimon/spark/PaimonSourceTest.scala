@@ -746,8 +746,6 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
           mergedData += (row._1 -> row._2)
         case false =>
           unmergedData += row
-        case _ =>
-          throw new IllegalArgumentException("Please provide write mode explicitly.")
       }
     }
 
@@ -759,8 +757,6 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
           (mergedData.toArray[(Int, String)].map(toRow), latestChanges.map(toRow))
         case false =>
           (unmergedData.sorted.toArray.map(toRow), latestChanges.map(toRow))
-        case _ =>
-          throw new IllegalArgumentException("Please provide write mode explicitly.")
       }
     }
 

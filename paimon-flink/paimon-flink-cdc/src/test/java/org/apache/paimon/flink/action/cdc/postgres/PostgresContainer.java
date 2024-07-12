@@ -34,7 +34,7 @@ public class PostgresContainer
     protected void configure() {
         if (parameters.containsKey(SETUP_SQL_PARAM_NAME)) {
             optionallyMapResourceParameterAsVolume(
-                    SETUP_SQL_PARAM_NAME, "/docker-entrypoint-initdb.d/", "N/A");
+                    SETUP_SQL_PARAM_NAME, "/docker-entrypoint-initdb.d/", "N/A", null);
         }
         super.configure();
     }

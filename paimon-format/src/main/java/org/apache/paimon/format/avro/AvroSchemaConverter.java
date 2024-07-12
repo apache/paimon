@@ -35,6 +35,7 @@ import org.apache.avro.Schema;
 import org.apache.avro.SchemaBuilder;
 
 import java.util.List;
+import java.util.Map;
 
 /** Converts an Avro schema into Paimon's type information. */
 public class AvroSchemaConverter {
@@ -52,8 +53,8 @@ public class AvroSchemaConverter {
      *     nested type
      * @return Avro's {@link Schema} matching this logical type.
      */
-    public static Schema convertToSchema(DataType schema) {
-        return convertToSchema(schema, "org.apache.paimon.avro.generated.record");
+    public static Schema convertToSchema(DataType schema, Map<String, String> rowNameMapping) {
+        return convertToSchema(schema, "org.apache.paimon.avro.generated.record", rowNameMapping);
     }
 
     /**
@@ -66,7 +67,12 @@ public class AvroSchemaConverter {
      * @param rowName the record name
      * @return Avro's {@link Schema} matching this logical type.
      */
-    public static Schema convertToSchema(DataType dataType, String rowName) {
+    public static Schema convertToSchema(
+            DataType dataType, String rowName, Map<String, String> rowNameMapping) {
+        if (rowNameMapping.containsKey(rowName)) {
+            rowName = rowNameMapping.get(rowName);
+        }
+
         int precision;
         boolean nullable = dataType.isNullable();
         switch (dataType.getTypeRoot()) {
@@ -166,7 +172,11 @@ public class AvroSchemaConverter {
                     DataType fieldType = rowType.getTypeAt(i);
                     SchemaBuilder.GenericDefault<Schema> fieldBuilder =
                             builder.name(fieldName)
-                                    .type(convertToSchema(fieldType, rowName + "_" + fieldName));
+                                    .type(
+                                            convertToSchema(
+                                                    fieldType,
+                                                    rowName + "_" + fieldName,
+                                                    rowNameMapping));
 
                     if (fieldType.isNullable()) {
                         builder = fieldBuilder.withDefault(null);
@@ -183,14 +193,20 @@ public class AvroSchemaConverter {
                                 .map()
                                 .values(
                                         convertToSchema(
-                                                extractValueTypeToAvroMap(dataType), rowName));
+                                                extractValueTypeToAvroMap(dataType),
+                                                rowName,
+                                                rowNameMapping));
                 return nullable ? nullableSchema(map) : map;
             case ARRAY:
                 ArrayType arrayType = (ArrayType) dataType;
                 Schema array =
                         SchemaBuilder.builder()
                                 .array()
-                                .items(convertToSchema(arrayType.getElementType(), rowName));
+                                .items(
+                                        convertToSchema(
+                                                arrayType.getElementType(),
+                                                rowName,
+                                                rowNameMapping));
                 return nullable ? nullableSchema(array) : array;
             default:
                 throw new UnsupportedOperationException(

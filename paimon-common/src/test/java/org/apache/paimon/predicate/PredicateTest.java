@@ -18,10 +18,12 @@
 
 package org.apache.paimon.predicate;
 
+import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VarCharType;
 
 import org.junit.jupiter.api.Test;
 
@@ -29,6 +31,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+import static org.apache.paimon.data.BinaryString.fromString;
 import static org.apache.paimon.predicate.SimpleColStatsTestUtils.test;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -375,6 +378,19 @@ public class PredicateTest {
                 .isEqualTo(false);
         assertThat(test(predicate, 1, new SimpleColStats[] {new SimpleColStats(null, null, 1L)}))
                 .isEqualTo(false);
+    }
+
+    @Test
+    public void testEndsWith() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new VarCharType()));
+        Predicate predicate = builder.endsWith(0, fromString("bcc"));
+        GenericRow row = GenericRow.of(fromString("aabbcc"));
+
+        GenericRow max = GenericRow.of(fromString("aaba"));
+        GenericRow min = GenericRow.of(fromString("aabb"));
+        Integer[] nullCount = {null};
+        assertThat(predicate.test(row)).isEqualTo(true);
+        assertThat(predicate.test(10, min, max, new GenericArray(nullCount))).isEqualTo(true);
     }
 
     @Test

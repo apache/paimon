@@ -559,7 +559,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
 
         BlockingIterator<Row, Row> iterator =
                 streamSqlBlockIter(
-                        "SELECT * FROM ignore_delete /*+ OPTIONS('continuous.discovery-interval' = '1s') */");
+                        "SELECT * FROM ignore_delete /*+ OPTIONS('continuous.discovery-interval' = '1s', 'scan.snapshot-id' = '1') */");
 
         sql("INSERT INTO ignore_delete VALUES (1, 'A'), (2, 'B')");
         sql("DELETE FROM ignore_delete WHERE pk = 1");

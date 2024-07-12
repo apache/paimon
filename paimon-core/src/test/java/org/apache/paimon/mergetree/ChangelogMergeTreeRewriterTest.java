@@ -69,7 +69,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.CoreOptions.TARGET_FILE_SIZE;
+import static org.apache.paimon.options.MemorySize.VALUE_128_MB;
 import static org.apache.paimon.utils.FileStorePathFactoryTest.createNonPartFactory;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -201,7 +201,7 @@ public class ChangelogMergeTreeRewriterTest {
                         valueType,
                         new FlushingFileFormat(formatIdentifier),
                         Collections.singletonMap(formatIdentifier, createNonPartFactory(path)),
-                        TARGET_FILE_SIZE.defaultValue().getBytes())
+                        VALUE_128_MB.getBytes())
                 .build(BinaryRow.EMPTY_ROW, 0, new CoreOptions(new Options()));
     }
 

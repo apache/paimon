@@ -18,6 +18,8 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -38,6 +40,7 @@ import org.apache.spark.sql.sources.IsNull;
 import org.apache.spark.sql.sources.LessThan;
 import org.apache.spark.sql.sources.LessThanOrEqual;
 import org.apache.spark.sql.sources.Not;
+import org.apache.spark.sql.sources.StringEndsWith;
 import org.apache.spark.sql.sources.StringStartsWith;
 import org.junit.jupiter.api.Test;
 
@@ -45,12 +48,13 @@ import java.sql.Date;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
+import static org.apache.paimon.data.BinaryString.fromString;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
@@ -149,6 +153,20 @@ public class SparkFilterConverterTest {
         Predicate expectedLargeIn = builder.in(0, Arrays.asList(literals));
         Predicate actualLargeIn = converter.convert(largeIn);
         assertThat(actualLargeIn).isEqualTo(expectedLargeIn);
+
+        RowType rowType01 =
+                new RowType(Collections.singletonList(new DataField(0, "id", new VarCharType())));
+        SparkFilterConverter converter01 = new SparkFilterConverter(rowType01);
+        StringEndsWith endsWith = StringEndsWith.apply("id", "abc");
+        Predicate endsWithPre = converter01.convert(endsWith);
+        GenericRow row = GenericRow.of(fromString("aabc"));
+        GenericRow max = GenericRow.of(fromString("xasxwsa"));
+        GenericRow min = GenericRow.of(fromString("aaaaa"));
+        boolean test = endsWithPre.test(row);
+        Integer[] nullCount = {null};
+        boolean test1 = endsWithPre.test(10, min, max, new GenericArray(nullCount));
+        assertThat(test).isEqualTo(true);
+        assertThat(test1).isEqualTo(true);
     }
 
     @Test
@@ -160,7 +178,7 @@ public class SparkFilterConverterTest {
 
         java.sql.Timestamp timestamp = java.sql.Timestamp.valueOf("2018-10-18 00:00:57.907");
         LocalDateTime localDateTime = LocalDateTime.parse("2018-10-18T00:00:57.907");
-        Instant instant = localDateTime.toInstant(ZoneOffset.UTC);
+        Instant instant = localDateTime.atZone(ZoneId.systemDefault()).toInstant();
 
         Predicate instantExpression = converter.convert(GreaterThan.apply("x", instant));
         Predicate timestampExpression = converter.convert(GreaterThan.apply("x", timestamp));

@@ -411,7 +411,9 @@ public interface SchemaChange extends Serializable {
 
         public enum MoveType {
             FIRST,
-            AFTER
+            AFTER,
+            BEFORE,
+            LAST
         }
 
         public static Move first(String fieldName) {
@@ -420,6 +422,14 @@ public interface SchemaChange extends Serializable {
 
         public static Move after(String fieldName, String referenceFieldName) {
             return new Move(fieldName, referenceFieldName, MoveType.AFTER);
+        }
+
+        public static Move before(String fieldName, String referenceFieldName) {
+            return new Move(fieldName, referenceFieldName, MoveType.BEFORE);
+        }
+
+        public static Move last(String fieldName) {
+            return new Move(fieldName, null, MoveType.LAST);
         }
 
         private static final long serialVersionUID = 1L;

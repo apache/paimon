@@ -62,9 +62,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-import static org.apache.paimon.CoreOptions.TARGET_FILE_SIZE;
 import static org.apache.paimon.KeyValue.UNKNOWN_SEQUENCE;
 import static org.apache.paimon.io.DataFileTestUtils.row;
+import static org.apache.paimon.options.MemorySize.VALUE_128_MB;
 import static org.apache.paimon.utils.FileStorePathFactoryTest.createNonPartFactory;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -307,7 +307,7 @@ public class LookupLevelsTest {
                         rowType,
                         new FlushingFileFormat(identifier),
                         pathFactoryMap,
-                        TARGET_FILE_SIZE.defaultValue().getBytes())
+                        VALUE_128_MB.getBytes())
                 .build(BinaryRow.EMPTY_ROW, 0, new CoreOptions(new Options()));
     }
 

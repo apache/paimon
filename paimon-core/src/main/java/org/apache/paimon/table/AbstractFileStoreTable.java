@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.iceberg.IcebergCommitCallback;
 import org.apache.paimon.metastore.AddPartitionCommitCallback;
 import org.apache.paimon.metastore.AddPartitionTagCallback;
 import org.apache.paimon.metastore.MetastoreClient;
@@ -41,10 +42,12 @@ import org.apache.paimon.table.sink.CallbackUtils;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.DynamicBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
+import org.apache.paimon.table.sink.FixedBucketWriteSelector;
 import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.RowKindGenerator;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.UnawareBucketRowKeyExtractor;
+import org.apache.paimon.table.sink.WriteSelector;
 import org.apache.paimon.table.source.DataTableBatchScan;
 import org.apache.paimon.table.source.DataTableStreamScan;
 import org.apache.paimon.table.source.SplitGenerator;
@@ -131,6 +134,19 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public BucketMode bucketMode() {
         return store().bucketMode();
+    }
+
+    @Override
+    public Optional<WriteSelector> newWriteSelector() {
+        switch (bucketMode()) {
+            case HASH_FIXED:
+                return Optional.of(new FixedBucketWriteSelector(schema()));
+            case BUCKET_UNAWARE:
+                return Optional.empty();
+            default:
+                throw new UnsupportedOperationException(
+                        "Currently, write selector does not support table mode: " + bucketMode());
+        }
     }
 
     @Override
@@ -336,7 +352,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
         return new TableCommitImpl(
                 store().newCommit(commitUser),
-                createCommitCallbacks(),
+                createCommitCallbacks(commitUser),
                 snapshotExpire,
                 options.writeOnly() ? null : store().newPartitionExpire(commitUser),
                 options.writeOnly() ? null : store().newTagCreationManager(),
@@ -348,17 +364,19 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 coreOptions().forceCreatingSnapshot());
     }
 
-    private List<CommitCallback> createCommitCallbacks() {
+    private List<CommitCallback> createCommitCallbacks(String commitUser) {
         List<CommitCallback> callbacks =
                 new ArrayList<>(CallbackUtils.loadCommitCallbacks(coreOptions()));
         CoreOptions options = coreOptions();
         MetastoreClient.Factory metastoreClientFactory =
                 catalogEnvironment.metastoreClientFactory();
+
         if (options.partitionedTableInMetastore()
                 && metastoreClientFactory != null
                 && tableSchema.partitionKeys().size() > 0) {
             callbacks.add(new AddPartitionCommitCallback(metastoreClientFactory.create()));
         }
+
         TagPreview tagPreview = TagPreview.create(options);
         if (options.tagToPartitionField() != null
                 && tagPreview != null
@@ -371,6 +389,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                             tagPreview);
             callbacks.add(callback);
         }
+
+        if (options.metadataIcebergCompatible()) {
+            callbacks.add(new IcebergCommitCallback(this, commitUser));
+        }
+
         return callbacks;
     }
 

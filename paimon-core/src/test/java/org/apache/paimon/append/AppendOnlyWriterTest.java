@@ -531,10 +531,29 @@ public class AppendOnlyWriterTest {
                 .getLeft();
     }
 
+    private AppendOnlyWriter createEmptyWriterWithoutIoManager(
+            long targetFileSize, boolean spillable) {
+        return createWriter(
+                        targetFileSize,
+                        false,
+                        true,
+                        spillable,
+                        false,
+                        Collections.emptyList(),
+                        new CountDownLatch(0))
+                .getLeft();
+    }
+
     private Pair<AppendOnlyWriter, List<DataFileMeta>> createWriter(
             long targetFileSize, boolean forceCompact, List<DataFileMeta> scannedFiles) {
         return createWriter(
-                targetFileSize, forceCompact, true, true, scannedFiles, new CountDownLatch(0));
+                targetFileSize,
+                forceCompact,
+                true,
+                true,
+                true,
+                scannedFiles,
+                new CountDownLatch(0));
     }
 
     private Pair<AppendOnlyWriter, List<DataFileMeta>> createWriter(
@@ -548,6 +567,7 @@ public class AppendOnlyWriterTest {
                 forceCompact,
                 useWriteBuffer,
                 spillable,
+                true,
                 scannedFiles,
                 new CountDownLatch(0));
     }
@@ -557,7 +577,7 @@ public class AppendOnlyWriterTest {
             boolean forceCompact,
             List<DataFileMeta> scannedFiles,
             CountDownLatch latch) {
-        return createWriter(targetFileSize, forceCompact, false, false, scannedFiles, latch);
+        return createWriter(targetFileSize, forceCompact, false, false, true, scannedFiles, latch);
     }
 
     private Pair<AppendOnlyWriter, List<DataFileMeta>> createWriter(
@@ -565,6 +585,7 @@ public class AppendOnlyWriterTest {
             boolean forceCompact,
             boolean useWriteBuffer,
             boolean spillable,
+            boolean hasIoManager,
             List<DataFileMeta> scannedFiles,
             CountDownLatch latch) {
         FileFormat fileFormat = FileFormat.fromIdentifier(AVRO, new Options());
@@ -589,7 +610,7 @@ public class AppendOnlyWriterTest {
         AppendOnlyWriter writer =
                 new AppendOnlyWriter(
                         LocalFileIO.create(),
-                        IOManager.create(tempDir.toString()),
+                        hasIoManager ? IOManager.create(tempDir.toString()) : null,
                         SCHEMA_ID,
                         fileFormat,
                         targetFileSize,

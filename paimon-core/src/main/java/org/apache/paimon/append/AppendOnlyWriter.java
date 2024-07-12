@@ -79,7 +79,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     private final String spillCompression;
     private SinkWriter sinkWriter;
     private final SimpleColStatsCollector.Factory[] statsCollectors;
-    private final IOManager ioManager;
+    @Nullable private final IOManager ioManager;
     private final FileIndexOptions fileIndexOptions;
 
     private MemorySegmentPool memorySegmentPool;
@@ -87,7 +87,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
 
     public AppendOnlyWriter(
             FileIO fileIO,
-            IOManager ioManager,
+            @Nullable IOManager ioManager,
             long schemaId,
             FileFormat fileFormat,
             long targetFileSize,

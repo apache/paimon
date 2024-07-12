@@ -45,7 +45,7 @@ public class ScanParallelExecutor {
         if (queueSize == null) {
             queueSize = COMMON_IO_FORK_JOIN_POOL.getParallelism();
         } else if (queueSize <= 0) {
-            throw new NegativeArraySizeException("queue size should not be negetive");
+            throw new NegativeArraySizeException("queue size should not be negative");
         }
 
         final Queue<List<U>> stack = new ArrayDeque<>(Lists.partition(input, queueSize));

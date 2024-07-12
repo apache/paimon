@@ -424,14 +424,14 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     public void testConflictOption() {
         assertThatThrownBy(
                         () -> sql("CREATE TABLE T (a INT) WITH ('changelog-producer' = 'input')"))
-                .getRootCause()
+                .rootCause()
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining(
                         "Can not set changelog-producer on table without primary keys");
 
         sql("CREATE TABLE T (a INT)");
         assertThatThrownBy(() -> sql("ALTER TABLE T SET ('changelog-producer'='input')"))
-                .getRootCause()
+                .rootCause()
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining(
                         "Can not set changelog-producer on table without primary keys");
@@ -449,7 +449,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                         + "    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED\n"
                         + ")");
         assertThatThrownBy(() -> sql("SHOW PARTITIONS NoPartitionTable"))
-                .getRootCause()
+                .rootCause()
                 .isInstanceOf(TableNotPartitionedException.class)
                 .hasMessage("Table default.NoPartitionTable in catalog PAIMON is not partitioned.");
 
@@ -502,7 +502,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                         () ->
                                 sql(
                                         "ALTER TABLE PartitionTable DROP PARTITION (`dt` = '2020-10-10')"))
-                .getRootCause()
+                .rootCause()
                 .isInstanceOf(PartitionNotExistException.class)
                 .hasMessage(
                         "Partition CatalogPartitionSpec{{dt=2020-10-10}} of table default.PartitionTable in catalog PAIMON does not exist.");

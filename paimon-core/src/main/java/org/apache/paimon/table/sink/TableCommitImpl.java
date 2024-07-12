@@ -134,6 +134,9 @@ public class TableCommitImpl implements InnerTableCommit {
         if (this.forceCreatingSnapshot) {
             return true;
         }
+        if (overwritePartition != null) {
+            return true;
+        }
         return tagAutoManager != null
                 && tagAutoManager.getTagAutoCreation() != null
                 && tagAutoManager.getTagAutoCreation().forceCreatingSnapshot();
@@ -230,6 +233,11 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     public int filterAndCommitMultiple(List<ManifestCommittable> committables) {
+        return filterAndCommitMultiple(committables, true);
+    }
+
+    public int filterAndCommitMultiple(
+            List<ManifestCommittable> committables, boolean checkAppendFiles) {
         Set<Long> retryIdentifiers =
                 commit.filterCommitted(
                         committables.stream()
@@ -250,9 +258,9 @@ public class TableCommitImpl implements InnerTableCommit {
                         // identifier must be in increasing order
                         .sorted(Comparator.comparingLong(ManifestCommittable::identifier))
                         .collect(Collectors.toList());
-        if (retryCommittables.size() > 0) {
+        if (!retryCommittables.isEmpty()) {
             checkFilesExistence(retryCommittables);
-            commitMultiple(retryCommittables, true);
+            commitMultiple(retryCommittables, checkAppendFiles);
         }
         return retryCommittables.size();
     }

@@ -1,9 +1,9 @@
 ---
-title: "Bucketed Append"
-weight: 3
+title: "Streaming"
+weight: 2
 type: docs
 aliases:
-- /append-table/bucketed-append.html
+- /append-table/streaming.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -24,14 +24,45 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Bucketed Append
+# Streaming
 
-## Definition
+You can streaming write to the Append table in a very flexible way through Flink, or through read the Append table
+Flink, using it like a queue. The only difference is that its latency is in minutes. Its advantages are very low cost
+and the ability to push down filters and projection.
+
+## Automatic small file merging
+
+In streaming writing job, without bucket definition, there is no compaction in writer, instead, will use
+`Compact Coordinator` to scan the small files and pass compaction task to `Compact Worker`. In streaming mode, if you
+run insert sql in flink, the topology will be like this:
+
+{{< img src="/img/unaware-bucket-topo.png">}}
+
+Do not worry about backpressure, compaction never backpressure.
+
+If you set `write-only` to true, the `Compact Coordinator` and `Compact Worker` will be removed in the topology.
+
+The auto compaction is only supported in Flink engine streaming mode. You can also start a compaction job in flink by
+flink action in paimon and disable all the other compaction by set `write-only`.
+
+## Streaming Query
+
+You can stream the Append table and use it like a Message Queue. As with primary key tables, there are two options
+for streaming reads:
+1. By default, Streaming read produces the latest snapshot on the table upon first startup, and continue to read the
+   latest incremental records.
+2. You can specify `scan.mode` or `scan.snapshot-id` or `scan.timestamp-millis` or `scan.file-creation-time-millis` to
+   streaming read incremental only.
+
+Similar to flink-kafka, order is not guaranteed by default, if your data has some sort of order requirement, you also
+need to consider defining a `bucket-key`.
+
+## Bucketed Append
 
 An ordinary Append table has no strict ordering guarantees for its streaming writes and reads, but there are some cases
 where you need to define a key similar to Kafka's.
 
-You can define the `bucket` and `bucket-key` to get a bucketed append table. Every record in the same bucket is ordered 
+You can define the `bucket` and `bucket-key` to get a bucketed append table. Every record in the same bucket is ordered
 strictly, streaming read will transfer the record to down-stream exactly in the order of writing. To use this mode, you
 do not need to config special configurations, all the data will go into one bucket as a queue.
 
@@ -55,7 +86,7 @@ CREATE TABLE my_table (
 {{< /tab >}}
 {{< /tabs >}}
 
-## Compaction
+### Compaction in Bucket
 
 By default, the sink node will automatically perform compaction to control the number of files. The following options
 control the strategy of compaction:
@@ -97,17 +128,13 @@ control the strategy of compaction:
     </tbody>
 </table>
 
-## Streaming Source
-
-Streaming source behavior is only supported in Flink engine at present.
-
 ### Streaming Read Order
 
 For streaming reads, records are produced in the following order:
 
 * For any two records from two different partitions
-    * If `scan.plan-sort-partition` is set to true, the record with a smaller partition value will be produced first.
-    * Otherwise, the record with an earlier partition creation time will be produced first.
+   * If `scan.plan-sort-partition` is set to true, the record with a smaller partition value will be produced first.
+   * Otherwise, the record with an earlier partition creation time will be produced first.
 * For any two records from the same partition and the same bucket, the first written record will be produced first.
 * For any two records from the same partition but two different buckets, different buckets are processed by different tasks, there is no order guarantee between them.
 
