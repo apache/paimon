@@ -102,7 +102,6 @@ public class HiveCatalog extends AbstractCatalog {
     private static final Logger LOG = LoggerFactory.getLogger(HiveCatalog.class);
 
     // Reserved properties
-    public static final String COMMENT_PROP = "comment";
     public static final String TABLE_TYPE_PROP = "table_type";
     public static final String PAIMON_TABLE_TYPE_VALUE = "paimon";
 
