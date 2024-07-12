@@ -218,16 +218,21 @@ public class IcebergCompatibilityTest {
             List<TestRecord> round = new ArrayList<>();
             for (int i = 0; i < numRecords; i++) {
                 int pt = random.nextInt(0, 2);
-                boolean vBoolean = random.nextBoolean();
-                long vBigInt = random.nextLong();
-                float vFloat = random.nextFloat();
-                double vDouble = random.nextDouble();
-                Decimal vDecimal = Decimal.fromUnscaledLong(random.nextLong(0, 100000000), 8, 3);
-                String vChar = String.valueOf(random.nextInt());
-                String vVarChar = String.valueOf(random.nextInt());
-                byte[] vBinary = String.valueOf(random.nextInt()).getBytes();
-                byte[] vVarBinary = String.valueOf(random.nextInt()).getBytes();
-                int vDate = random.nextInt(0, 30000);
+                Boolean vBoolean = random.nextBoolean() ? random.nextBoolean() : null;
+                Long vBigInt = random.nextBoolean() ? random.nextLong() : null;
+                Float vFloat = random.nextBoolean() ? random.nextFloat() : null;
+                Double vDouble = random.nextBoolean() ? random.nextDouble() : null;
+                Decimal vDecimal =
+                        random.nextBoolean()
+                                ? Decimal.fromUnscaledLong(random.nextLong(0, 100000000), 8, 3)
+                                : null;
+                String vChar = random.nextBoolean() ? String.valueOf(random.nextInt()) : null;
+                String vVarChar = random.nextBoolean() ? String.valueOf(random.nextInt()) : null;
+                byte[] vBinary =
+                        random.nextBoolean() ? String.valueOf(random.nextInt()).getBytes() : null;
+                byte[] vVarBinary =
+                        random.nextBoolean() ? String.valueOf(random.nextInt()).getBytes() : null;
+                Integer vDate = random.nextBoolean() ? random.nextInt(0, 30000) : null;
 
                 String k =
                         String.format(
@@ -240,9 +245,9 @@ public class IcebergCompatibilityTest {
                                 vDecimal,
                                 vChar,
                                 vVarChar,
-                                new String(vBinary),
-                                new String(vVarBinary),
-                                LocalDate.ofEpochDay(vDate));
+                                vBinary == null ? null : new String(vBinary),
+                                vVarBinary == null ? null : new String(vVarBinary),
+                                vDate == null ? null : LocalDate.ofEpochDay(vDate));
                 round.add(
                         new TestRecord(
                                 binaryRow.apply(pt),
@@ -269,20 +274,23 @@ public class IcebergCompatibilityTest {
                 Collections.emptyList(),
                 Collections.emptyList(),
                 testRecords,
-                r ->
-                        String.format(
-                                "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s",
-                                r.get(0),
-                                r.get(1),
-                                r.get(2),
-                                r.get(3),
-                                r.get(4),
-                                r.get(5),
-                                r.get(6),
-                                r.get(7),
-                                new String(r.get(8, ByteBuffer.class).array()),
-                                new String(r.get(9, ByteBuffer.class).array()),
-                                r.get(10)),
+                r -> {
+                    ByteBuffer vBinary = r.get(8, ByteBuffer.class);
+                    ByteBuffer vVarBinary = r.get(9, ByteBuffer.class);
+                    return String.format(
+                            "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s",
+                            r.get(0),
+                            r.get(1),
+                            r.get(2),
+                            r.get(3),
+                            r.get(4),
+                            r.get(5),
+                            r.get(6),
+                            r.get(7),
+                            vBinary == null ? null : new String(vBinary.array()),
+                            vVarBinary == null ? null : new String(vVarBinary.array()),
+                            r.get(10));
+                },
                 r -> "");
     }
 
