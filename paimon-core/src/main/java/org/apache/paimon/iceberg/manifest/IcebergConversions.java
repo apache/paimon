@@ -18,13 +18,16 @@
 
 package org.apache.paimon.iceberg.manifest;
 
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DecimalType;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.CharBuffer;
 import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CharsetDecoder;
 import java.nio.charset.CharsetEncoder;
 import java.nio.charset.StandardCharsets;
 
@@ -40,6 +43,8 @@ public class IcebergConversions {
 
     private static final ThreadLocal<CharsetEncoder> ENCODER =
             ThreadLocal.withInitial(StandardCharsets.UTF_8::newEncoder);
+    private static final ThreadLocal<CharsetDecoder> DECODER =
+            ThreadLocal.withInitial(StandardCharsets.UTF_8::newDecoder);
 
     public static ByteBuffer toByteBuffer(DataType type, Object value) {
         switch (type.getTypeRoot()) {
@@ -76,6 +81,39 @@ public class IcebergConversions {
                 return ByteBuffer.wrap((decimal.toUnscaledBytes()));
             default:
                 throw new UnsupportedOperationException("Cannot serialize type: " + type);
+        }
+    }
+
+    public static Object toObject(DataType type, byte[] bytes) {
+        switch (type.getTypeRoot()) {
+            case BOOLEAN:
+                return bytes[0] != 0;
+            case INTEGER:
+            case DATE:
+                return ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getInt();
+            case BIGINT:
+                return ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getLong();
+            case FLOAT:
+                return ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getFloat();
+            case DOUBLE:
+                return ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getDouble();
+            case CHAR:
+            case VARCHAR:
+                try {
+                    return BinaryString.fromString(
+                            DECODER.get().decode(ByteBuffer.wrap(bytes)).toString());
+                } catch (CharacterCodingException e) {
+                    throw new RuntimeException("Failed to decode bytes as UTF-8", e);
+                }
+            case BINARY:
+            case VARBINARY:
+                return bytes;
+            case DECIMAL:
+                DecimalType decimalType = (DecimalType) type;
+                return Decimal.fromUnscaledBytes(
+                        bytes, decimalType.getPrecision(), decimalType.getScale());
+            default:
+                throw new UnsupportedOperationException("Cannot deserialize type: " + type);
         }
     }
 }

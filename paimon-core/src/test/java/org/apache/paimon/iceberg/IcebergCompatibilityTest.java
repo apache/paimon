@@ -76,20 +76,25 @@ public class IcebergCompatibilityTest {
                         },
                         new String[] {"k1", "k2", "v1", "v2"});
 
-        int numRecords = 1000;
+        int numRounds = 5;
+        int numRecords = 500;
         ThreadLocalRandom random = ThreadLocalRandom.current();
-        List<TestRecord> testRecords = new ArrayList<>();
-        for (int i = 0; i < numRecords; i++) {
-            int k1 = random.nextInt(0, 100);
-            String k2 = String.valueOf(random.nextInt(1000, 1010));
-            int v1 = random.nextInt();
-            long v2 = random.nextLong();
-            testRecords.add(
-                    new TestRecord(
-                            BinaryRow.EMPTY_ROW,
-                            String.format("%d|%s", k1, k2),
-                            String.format("%d|%d", v1, v2),
-                            GenericRow.of(k1, BinaryString.fromString(k2), v1, v2)));
+        List<List<TestRecord>> testRecords = new ArrayList<>();
+        for (int r = 0; r < numRounds; r++) {
+            List<TestRecord> round = new ArrayList<>();
+            for (int i = 0; i < numRecords; i++) {
+                int k1 = random.nextInt(0, 100);
+                String k2 = String.valueOf(random.nextInt(1000, 1010));
+                int v1 = random.nextInt();
+                long v2 = random.nextLong();
+                round.add(
+                        new TestRecord(
+                                BinaryRow.EMPTY_ROW,
+                                String.format("%d|%s", k1, k2),
+                                String.format("%d|%d", v1, v2),
+                                GenericRow.of(k1, BinaryString.fromString(k2), v1, v2)));
+            }
+            testRecords.add(round);
         }
 
         runCompatibilityTest(
@@ -124,26 +129,31 @@ public class IcebergCompatibilityTest {
                     return b;
                 };
 
-        int numRecords = 1000;
+        int numRounds = 5;
+        int numRecords = 500;
         ThreadLocalRandom random = ThreadLocalRandom.current();
-        List<TestRecord> testRecords = new ArrayList<>();
-        for (int i = 0; i < numRecords; i++) {
-            int pt1 = random.nextInt(0, 2);
-            String pt2 = String.valueOf(random.nextInt(10, 12));
-            String k = String.valueOf(random.nextInt(0, 100));
-            int v1 = random.nextInt();
-            long v2 = random.nextLong();
-            testRecords.add(
-                    new TestRecord(
-                            binaryRow.apply(pt1, pt2),
-                            String.format("%d|%s|%s", pt1, pt2, k),
-                            String.format("%d|%d", v1, v2),
-                            GenericRow.of(
-                                    pt1,
-                                    BinaryString.fromString(pt2),
-                                    BinaryString.fromString(k),
-                                    v1,
-                                    v2)));
+        List<List<TestRecord>> testRecords = new ArrayList<>();
+        for (int r = 0; r < numRounds; r++) {
+            List<TestRecord> round = new ArrayList<>();
+            for (int i = 0; i < numRecords; i++) {
+                int pt1 = random.nextInt(0, 2);
+                String pt2 = String.valueOf(random.nextInt(10, 12));
+                String k = String.valueOf(random.nextInt(0, 100));
+                int v1 = random.nextInt();
+                long v2 = random.nextLong();
+                round.add(
+                        new TestRecord(
+                                binaryRow.apply(pt1, pt2),
+                                String.format("%d|%s|%s", pt1, pt2, k),
+                                String.format("%d|%d", v1, v2),
+                                GenericRow.of(
+                                        pt1,
+                                        BinaryString.fromString(pt2),
+                                        BinaryString.fromString(k),
+                                        v1,
+                                        v2)));
+            }
+            testRecords.add(round);
         }
 
         runCompatibilityTest(
@@ -200,53 +210,58 @@ public class IcebergCompatibilityTest {
                     return b;
                 };
 
-        int numRecords = 1000;
+        int numRounds = 5;
+        int numRecords = 500;
         ThreadLocalRandom random = ThreadLocalRandom.current();
-        List<TestRecord> testRecords = new ArrayList<>();
-        for (int i = 0; i < numRecords; i++) {
-            int pt = random.nextInt(0, 2);
-            boolean vBoolean = random.nextBoolean();
-            long vBigInt = random.nextLong();
-            float vFloat = random.nextFloat();
-            double vDouble = random.nextDouble();
-            Decimal vDecimal = Decimal.fromUnscaledLong(random.nextLong(0, 100000000), 8, 3);
-            String vChar = String.valueOf(random.nextInt());
-            String vVarChar = String.valueOf(random.nextInt());
-            byte[] vBinary = String.valueOf(random.nextInt()).getBytes();
-            byte[] vVarBinary = String.valueOf(random.nextInt()).getBytes();
-            int vDate = random.nextInt(0, 30000);
+        List<List<TestRecord>> testRecords = new ArrayList<>();
+        for (int r = 0; r < numRounds; r++) {
+            List<TestRecord> round = new ArrayList<>();
+            for (int i = 0; i < numRecords; i++) {
+                int pt = random.nextInt(0, 2);
+                boolean vBoolean = random.nextBoolean();
+                long vBigInt = random.nextLong();
+                float vFloat = random.nextFloat();
+                double vDouble = random.nextDouble();
+                Decimal vDecimal = Decimal.fromUnscaledLong(random.nextLong(0, 100000000), 8, 3);
+                String vChar = String.valueOf(random.nextInt());
+                String vVarChar = String.valueOf(random.nextInt());
+                byte[] vBinary = String.valueOf(random.nextInt()).getBytes();
+                byte[] vVarBinary = String.valueOf(random.nextInt()).getBytes();
+                int vDate = random.nextInt(0, 30000);
 
-            String k =
-                    String.format(
-                            "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s",
-                            pt,
-                            vBoolean,
-                            vBigInt,
-                            vFloat,
-                            vDouble,
-                            vDecimal,
-                            vChar,
-                            vVarChar,
-                            new String(vBinary),
-                            new String(vVarBinary),
-                            LocalDate.ofEpochDay(vDate));
-            testRecords.add(
-                    new TestRecord(
-                            binaryRow.apply(pt),
-                            k,
-                            "",
-                            GenericRow.of(
-                                    pt,
-                                    vBoolean,
-                                    vBigInt,
-                                    vFloat,
-                                    vDouble,
-                                    vDecimal,
-                                    BinaryString.fromString(vChar),
-                                    BinaryString.fromString(vVarChar),
-                                    vBinary,
-                                    vVarBinary,
-                                    vDate)));
+                String k =
+                        String.format(
+                                "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s",
+                                pt,
+                                vBoolean,
+                                vBigInt,
+                                vFloat,
+                                vDouble,
+                                vDecimal,
+                                vChar,
+                                vVarChar,
+                                new String(vBinary),
+                                new String(vVarBinary),
+                                LocalDate.ofEpochDay(vDate));
+                round.add(
+                        new TestRecord(
+                                binaryRow.apply(pt),
+                                k,
+                                "",
+                                GenericRow.of(
+                                        pt,
+                                        vBoolean,
+                                        vBigInt,
+                                        vFloat,
+                                        vDouble,
+                                        vDecimal,
+                                        BinaryString.fromString(vChar),
+                                        BinaryString.fromString(vVarChar),
+                                        vBinary,
+                                        vVarBinary,
+                                        vDate)));
+            }
+            testRecords.add(round);
         }
 
         runCompatibilityTest(
@@ -275,7 +290,7 @@ public class IcebergCompatibilityTest {
             RowType rowType,
             List<String> partitionKeys,
             List<String> primaryKeys,
-            List<TestRecord> testRecords,
+            List<List<TestRecord>> testRecords,
             Function<Record, String> icebergRecordToKey,
             Function<Record, String> icebergRecordToValue)
             throws Exception {
@@ -302,34 +317,38 @@ public class IcebergCompatibilityTest {
         TableCommitImpl commit = table.newCommit(commitUser);
 
         Map<String, String> expected = new HashMap<>();
-        for (TestRecord testRecord : testRecords) {
-            expected.put(testRecord.key, testRecord.value);
-            write.write(testRecord.record);
-        }
+        for (List<TestRecord> round : testRecords) {
+            for (TestRecord testRecord : round) {
+                expected.put(testRecord.key, testRecord.value);
+                write.write(testRecord.record);
+            }
 
-        if (!primaryKeys.isEmpty()) {
-            for (BinaryRow partition :
-                    testRecords.stream().map(t -> t.partition).collect(Collectors.toSet())) {
-                for (int b = 0; b < 2; b++) {
-                    write.compact(partition, b, true);
+            if (!primaryKeys.isEmpty()) {
+                for (BinaryRow partition :
+                        round.stream().map(t -> t.partition).collect(Collectors.toSet())) {
+                    for (int b = 0; b < 2; b++) {
+                        write.compact(partition, b, true);
+                    }
                 }
             }
+            commit.commit(1, write.prepareCommit(true, 1));
+
+            HadoopCatalog icebergCatalog =
+                    new HadoopCatalog(new Configuration(), tempDir.toString());
+            TableIdentifier icebergIdentifier = TableIdentifier.of("mydb.db", "t");
+            org.apache.iceberg.Table icebergTable = icebergCatalog.loadTable(icebergIdentifier);
+            CloseableIterable<Record> result = IcebergGenerics.read(icebergTable).build();
+            Map<String, String> actual = new HashMap<>();
+            for (Record record : result) {
+                actual.put(icebergRecordToKey.apply(record), icebergRecordToValue.apply(record));
+            }
+            result.close();
+
+            assertThat(actual).isEqualTo(expected);
         }
-        commit.commit(1, write.prepareCommit(true, 1));
+
         write.close();
         commit.close();
-
-        HadoopCatalog icebergCatalog = new HadoopCatalog(new Configuration(), tempDir.toString());
-        TableIdentifier icebergIdentifier = TableIdentifier.of("mydb.db", "t");
-        org.apache.iceberg.Table icebergTable = icebergCatalog.loadTable(icebergIdentifier);
-        CloseableIterable<Record> result = IcebergGenerics.read(icebergTable).build();
-        Map<String, String> actual = new HashMap<>();
-        for (Record record : result) {
-            actual.put(icebergRecordToKey.apply(record), icebergRecordToValue.apply(record));
-        }
-        result.close();
-
-        assertThat(actual).isEqualTo(expected);
     }
 
     private static class TestRecord {

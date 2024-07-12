@@ -254,6 +254,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public SnapshotReader withPartitionFilter(List<BinaryRow> partitions) {
+            snapshotReader.withPartitionFilter(partitions);
+            return this;
+        }
+
+        @Override
         public SnapshotReader withMode(ScanMode scanMode) {
             snapshotReader.withMode(scanMode);
             return this;
