@@ -106,19 +106,27 @@ public class KvQueryTableTest extends PrimaryKeyTableTestBase {
     }
 
     @AfterEach
-    public void afterEach() {
+    public void afterEach() throws Exception {
         shutdownServers();
         if (client != null) {
-            client.shutdown();
+            client.shutdownFuture().get();
         }
     }
 
     private void shutdownServers() {
         if (server0 != null) {
-            server0.shutdown();
+            try {
+                server0.shutdownServer().get();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
         }
         if (server1 != null) {
-            server1.shutdown();
+            try {
+                server1.shutdownServer().get();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
         }
     }
 
