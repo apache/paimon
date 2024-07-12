@@ -258,7 +258,7 @@ All available procedures are listed below.
             <li>table: the target table identifier. Cannot be empty.</li>
             <li>expiration_time: the expiration interval of a partition. A partition will be expired if it‘s lifetime is over this value. Partition time is extracted from the partition value.</li>
             <li>timestamp_formatter: the formatter to format timestamp from string.</li>
-            <li>expire_strategy: the expiration strategy for partition expiration.</li>
+            <li>expire_strategy: specifies the expiration strategy for partition expiration, possible values: 'values-time' or 'update-time' , 'values-time' as default.</li>
       </td>
       <td>
          -- for Flink 1.18<br/><br/>
