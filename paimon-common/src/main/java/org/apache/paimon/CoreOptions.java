@@ -444,9 +444,7 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             Description.builder()
                                     .text("Target size of a file.")
-                                    .linebreak()
                                     .list(text("primary key table: the default value is 128 MB."))
-                                    .linebreak()
                                     .list(text("append table: the default value is 256 MB."))
                                     .build());
 
