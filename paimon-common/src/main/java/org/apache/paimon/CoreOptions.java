@@ -444,8 +444,9 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             Description.builder()
                                     .text("Target size of a file.")
-                                    .list(text("primary key table: the default value is 128 MB."))
-                                    .list(text("append table: the default value is 256 MB."))
+                                    .list(
+                                            text("primary key table: the default value is 128 MB."),
+                                            text("append table: the default value is 256 MB."))
                                     .build());
 
     public static final ConfigOption<Integer> NUM_SORTED_RUNS_COMPACTION_TRIGGER =
