@@ -343,12 +343,12 @@ under the License.
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>
-                <version>2.4</version><!--$NO-MVN-MAN-VER$-->
+                <version>3.4.2</version><!--$NO-MVN-MAN-VER$-->
                 <configuration>
                     <archive>
                         <manifestEntries>
                             <SCM-Revision>${git.commit.id}</SCM-Revision>
-                            <SCM-Branch>${git.branch}</SCM-Branch>
+                            <SCM-Branch>${git.branch}</SCM-Branch><!-- TODO: remove this non-reproducible config once maven-jar-plugin upgrade works -->
                         </manifestEntries>
                         <manifest>
                             <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
