@@ -119,8 +119,11 @@ public class RollbackHelper {
         List<Snapshot> toBeCleaned = new ArrayList<>();
         long to = Math.max(earliest, retainedSnapshot.id() + 1);
         for (long i = latest; i >= to; i--) {
-            toBeCleaned.add(snapshotManager.snapshot(i));
-            fileIO.deleteQuietly(snapshotManager.snapshotPath(i));
+            // Ignore the non-existent snapshots
+            if (snapshotManager.snapshotExists(i)) {
+                toBeCleaned.add(snapshotManager.snapshot(i));
+                fileIO.deleteQuietly(snapshotManager.snapshotPath(i));
+            }
         }
 
         // delete data files of snapshots
