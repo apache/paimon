@@ -36,6 +36,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -282,8 +283,20 @@ public class PredicateBuilder {
                 int scale = decimalType.getScale();
                 return Decimal.fromBigDecimal((BigDecimal) o, precision, scale);
             case TIMESTAMP_WITHOUT_TIME_ZONE:
-            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 Timestamp timestamp;
+                if (o instanceof java.sql.Timestamp) {
+                    timestamp = Timestamp.fromSQLTimestamp((java.sql.Timestamp) o);
+                } else if (o instanceof Instant) {
+                    Instant o1 = (Instant) o;
+                    LocalDateTime dateTime = o1.atZone(ZoneId.systemDefault()).toLocalDateTime();
+                    timestamp = Timestamp.fromLocalDateTime(dateTime);
+                } else if (o instanceof LocalDateTime) {
+                    timestamp = Timestamp.fromLocalDateTime((LocalDateTime) o);
+                } else {
+                    throw new UnsupportedOperationException("Unsupported object: " + o);
+                }
+                return timestamp;
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 if (o instanceof java.sql.Timestamp) {
                     timestamp = Timestamp.fromSQLTimestamp((java.sql.Timestamp) o);
                 } else if (o instanceof Instant) {
