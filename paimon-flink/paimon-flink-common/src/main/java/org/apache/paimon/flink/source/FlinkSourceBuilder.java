@@ -255,6 +255,7 @@ public class FlinkSourceBuilder {
                 && !conf.contains(CoreOptions.CONSUMER_EXPIRATION_TIME)) {
             throw new IllegalArgumentException("consumer.expiration-time should be specified.");
         }
+
         if (sourceBounded) {
             return buildStaticFileSource();
         }
