@@ -251,8 +251,9 @@ public class FlinkSourceBuilder {
             throw new IllegalArgumentException("StreamExecutionEnvironment should not be null.");
         }
 
-        if (sourceBounded) {
-            return buildStaticFileSource();
+        if (conf.contains(CoreOptions.CONSUMER_ID)
+                && !conf.contains(CoreOptions.CONSUMER_EXPIRATION_TIME)) {
+            throw new IllegalArgumentException("consumer.expiration-time should be specified.");
         }
 
         TableScanUtils.streamingReadingValidate(table);
