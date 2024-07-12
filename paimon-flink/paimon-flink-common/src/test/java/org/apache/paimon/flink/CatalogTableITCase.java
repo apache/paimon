@@ -770,7 +770,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testConsumerIdExpInStreamingMode() throws Exception {
+    public void testConsumerIdExpInStreamingMode() {
         batchSql("CREATE TABLE T (a INT, b INT)");
         batchSql("INSERT INTO T VALUES (1, 2)");
         batchSql("INSERT INTO T VALUES (3, 4)");
