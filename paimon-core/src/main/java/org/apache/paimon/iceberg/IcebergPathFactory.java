@@ -26,19 +26,19 @@ import java.util.UUID;
 /** Path factory for Iceberg metadata files. */
 public class IcebergPathFactory {
 
-    private final Path root;
+    private final Path metadataDirectory;
     private final String uuid;
 
     private int manifestFileCount;
     private int manifestListCount;
 
     public IcebergPathFactory(Path root) {
-        this.root = root;
+        this.metadataDirectory = new Path(root, "metadata");
         this.uuid = UUID.randomUUID().toString();
     }
 
     public Path metadataDirectory() {
-        return new Path(root, "metadata");
+        return metadataDirectory;
     }
 
     public Path newManifestFile() {
