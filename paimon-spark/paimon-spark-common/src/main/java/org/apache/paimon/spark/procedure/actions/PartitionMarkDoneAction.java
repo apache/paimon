@@ -34,7 +34,7 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 /** Action to mark partitions done. */
 public interface PartitionMarkDoneAction extends Closeable {
 
-    static final String PARTITION_MARK_DONE_ACTION = "partition.mark-done-action";
+    final String PARTITION_MARK_DONE_ACTION = "partition.mark-done-action";
 
     void markDone(String partition) throws Exception;
 

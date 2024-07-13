@@ -202,5 +202,19 @@ This section introduce all available spark procedures about paimon.
          CALL sys.reset_consumer(table => 'default.T', consumerId => 'myid')
       </td>
    </tr>
+    <tr>
+      <td>mark_partition_done</td>
+      <td>
+         To mark partition to be done. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>partitions: partitions need to be mark done, If you specify multiple partitions, delimiter is ';'.</li>
+      </td>
+      <td>
+         -- delete single partitions<br/>
+         CALL sys.mark_partition_done(table => 'default.T', parititions => 'day=2024-07-01')<br/><br/>
+         -- delete multiple partitions<br/>
+         CALL sys.mark_partition_done(table => 'default.T', parititions => 'day=2024-07-01;day=2024-07-02')
+      </td>
+   </tr>
     </tbody>
 </table>

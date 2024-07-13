@@ -27,7 +27,7 @@ import org.assertj.core.api.Assertions.assertThat
 
 class MarkPartitionDoneProcedureTest extends PaimonSparkTestBase {
 
-  test("Paimon procedure: fast forward test") {
+  test("Paimon procedure: mark_partition_done test") {
     spark.sql(s"""
                  |CREATE TABLE T (id STRING, name STRING, day STRING)
                  |USING PAIMON
@@ -53,7 +53,7 @@ class MarkPartitionDoneProcedureTest extends PaimonSparkTestBase {
     assertThat(successFile1).isNotNull
 
     val successPath2 = new Path(table.location, "day=2024-07-14/_SUCCESS")
-    val successFile2 = SuccessFile.safelyFromPath(table.fileIO, successPath1)
+    val successFile2 = SuccessFile.safelyFromPath(table.fileIO, successPath2)
     assertThat(successFile2).isNotNull
 
   }
