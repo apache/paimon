@@ -31,6 +31,7 @@ import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
+/** Action to mark partitions done. */
 public interface PartitionMarkDoneAction extends Closeable {
 
     public static final String PARTITION_MARK_DONE_ACTION = "partition.mark-done-action";
