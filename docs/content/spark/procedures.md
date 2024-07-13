@@ -210,9 +210,9 @@ This section introduce all available spark procedures about paimon.
             <li>partitions: partitions need to be mark done, If you specify multiple partitions, delimiter is ';'.</li>
       </td>
       <td>
-         -- delete single partitions<br/>
+         -- mark single partition done<br/>
          CALL sys.mark_partition_done(table => 'default.T', parititions => 'day=2024-07-01')<br/><br/>
-         -- delete multiple partitions<br/>
+         -- mark multiple partitions done<br/>
          CALL sys.mark_partition_done(table => 'default.T', parititions => 'day=2024-07-01;day=2024-07-02')
       </td>
    </tr>
