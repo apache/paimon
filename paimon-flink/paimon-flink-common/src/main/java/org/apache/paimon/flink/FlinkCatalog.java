@@ -455,11 +455,20 @@ public class FlinkCatalog extends AbstractCatalog {
 
             SchemaManager.checkAlterTablePath(key);
 
-            schemaChanges.add(SchemaChange.setOption(key, value));
+            if (Catalog.COMMENT_PROP.equals(key)) {
+                schemaChanges.add(SchemaChange.updateComment(value));
+            } else {
+                schemaChanges.add(SchemaChange.setOption(key, value));
+            }
             return schemaChanges;
         } else if (change instanceof ResetOption) {
             ResetOption resetOption = (ResetOption) change;
-            schemaChanges.add(SchemaChange.removeOption(resetOption.getKey()));
+            String key = resetOption.getKey();
+            if (Catalog.COMMENT_PROP.equals(key)) {
+                schemaChanges.add(SchemaChange.updateComment(null));
+            } else {
+                schemaChanges.add(SchemaChange.removeOption(resetOption.getKey()));
+            }
             return schemaChanges;
         } else if (change instanceof TableChange.ModifyColumn) {
             // let non-physical column handle by option
