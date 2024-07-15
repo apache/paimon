@@ -38,14 +38,23 @@ import java.util.function.Predicate;
 
 /** Delete changelog files. */
 public class ChangelogDeletion extends FileDeletionBase<Changelog> {
+
     public ChangelogDeletion(
             FileIO fileIO,
             FileStorePathFactory pathFactory,
             ManifestFile manifestFile,
             ManifestList manifestList,
             IndexFileHandler indexFileHandler,
-            StatsFileHandler statsFileHandler) {
-        super(fileIO, pathFactory, manifestFile, manifestList, indexFileHandler, statsFileHandler);
+            StatsFileHandler statsFileHandler,
+            boolean cleanEmptyDirectories) {
+        super(
+                fileIO,
+                pathFactory,
+                manifestFile,
+                manifestList,
+                indexFileHandler,
+                statsFileHandler,
+                cleanEmptyDirectories);
     }
 
     @Override

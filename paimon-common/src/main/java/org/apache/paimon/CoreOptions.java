@@ -282,14 +282,19 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The maximum number of snapshots allowed to expire at a time.");
 
-    public static final ConfigOption<Boolean> SNAPSHOT_EXPIRE_CLEAN_EMPTY_DIRECTORIES =
-            key("snapshot.expire.clean-empty-directories")
+    public static final ConfigOption<Boolean> SNAPSHOT_CLEAN_EMPTY_DIRECTORIES =
+            key("snapshot.clean-empty-directories")
                     .booleanType()
-                    .defaultValue(true)
+                    .defaultValue(false)
+                    .withDeprecatedKeys("snapshot.expire.clean-empty-directories")
                     .withDescription(
-                            "Whether to try to clean empty directories when expiring snapshots. "
-                                    + "Note that trying to clean directories might throw exceptions in filesystem, "
-                                    + "but in most cases it won't cause problems.");
+                            Description.builder()
+                                    .text(
+                                            "Whether to try to clean empty directories when expiring snapshots, if enabled, please note:")
+                                    .list(
+                                            text("hdfs: may print exceptions in NameNode."),
+                                            text("oss/s3: may cause performance issue."))
+                                    .build());
 
     public static final ConfigOption<Duration> CONTINUOUS_DISCOVERY_INTERVAL =
             key("continuous.discovery-interval")
@@ -1480,8 +1485,8 @@ public class CoreOptions implements Serializable {
         return options.get(SNAPSHOT_EXPIRE_LIMIT);
     }
 
-    public boolean snapshotExpireCleanEmptyDirectories() {
-        return options.get(SNAPSHOT_EXPIRE_CLEAN_EMPTY_DIRECTORIES);
+    public boolean cleanEmptyDirectories() {
+        return options.get(SNAPSHOT_CLEAN_EMPTY_DIRECTORIES);
     }
 
     public ExpireConfig expireConfig() {

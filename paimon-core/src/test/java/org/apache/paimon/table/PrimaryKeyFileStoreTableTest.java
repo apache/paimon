@@ -1516,7 +1516,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                         options ->
                                 options.setString(
                                         CoreOptions.CHANGELOG_PRODUCER.key(), changelogProducer));
-        prepareRollbackTable(commitTimes, table);
+        table = prepareRollbackTable(commitTimes, table);
 
         int t1 = 1;
         int t2 = commitTimes - 3;

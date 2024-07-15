@@ -70,6 +70,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     protected final ManifestList manifestList;
     protected final IndexFileHandler indexFileHandler;
     protected final StatsFileHandler statsFileHandler;
+    private final boolean cleanEmptyDirectories;
 
     protected final Map<BinaryRow, Set<Integer>> deletionBuckets;
     protected final Executor ioExecutor;
@@ -87,13 +88,15 @@ public abstract class FileDeletionBase<T extends Snapshot> {
             ManifestFile manifestFile,
             ManifestList manifestList,
             IndexFileHandler indexFileHandler,
-            StatsFileHandler statsFileHandler) {
+            StatsFileHandler statsFileHandler,
+            boolean cleanEmptyDirectories) {
         this.fileIO = fileIO;
         this.pathFactory = pathFactory;
         this.manifestFile = manifestFile;
         this.manifestList = manifestList;
         this.indexFileHandler = indexFileHandler;
         this.statsFileHandler = statsFileHandler;
+        this.cleanEmptyDirectories = cleanEmptyDirectories;
         this.deletionBuckets = new HashMap<>();
         this.ioExecutor = FileUtils.COMMON_IO_FORK_JOIN_POOL;
     }
@@ -121,8 +124,8 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     }
 
     /** Try to delete data directories that may be empty after data file deletion. */
-    public void cleanDataDirectories() {
-        if (deletionBuckets.isEmpty()) {
+    public void cleanEmptyDirectories() {
+        if (!cleanEmptyDirectories || deletionBuckets.isEmpty()) {
             return;
         }
 

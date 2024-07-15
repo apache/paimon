@@ -317,19 +317,13 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public ExpireSnapshots newExpireSnapshots() {
         return new ExpireSnapshotsImpl(
-                snapshotManager(),
-                store().newSnapshotDeletion(),
-                store().newTagManager(),
-                coreOptions().snapshotExpireCleanEmptyDirectories());
+                snapshotManager(), store().newSnapshotDeletion(), store().newTagManager());
     }
 
     @Override
     public ExpireSnapshots newExpireChangelog() {
         return new ExpireChangelogImpl(
-                snapshotManager(),
-                tagManager(),
-                store().newChangelogDeletion(),
-                coreOptions().snapshotExpireCleanEmptyDirectories());
+                snapshotManager(), tagManager(), store().newChangelogDeletion());
     }
 
     @Override
