@@ -767,7 +767,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                         "SELECT * FROM T /*+ OPTIONS('consumer-id' = 'test-id') */ WHERE a = 1"))
                 .rootCause()
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("consumer.expiration-time should be specified.");
+                .hasMessage("consumer.expiration-time should be specified when using consumer-id.");
     }
 
     @Test
@@ -780,7 +780,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                 streamSqlIter(
                                         "SELECT * FROM T /*+ OPTIONS('consumer-id'='test-id') */"))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("consumer.expiration-time should be specified.");
+                .hasMessage("consumer.expiration-time should be specified when using consumer-id.");
     }
 
     @Test
