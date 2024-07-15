@@ -18,7 +18,10 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.catalog.Identifier
+import org.apache.paimon.schema.Schema
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.types.DataTypes
 
 import org.apache.spark.sql.Row
 import org.junit.jupiter.api.Assertions
@@ -188,63 +191,121 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
   test("Paimon DDL: create table with timestamp/timestamp_ntz") {
     Seq("orc", "parquet", "avro").foreach {
       format =>
-        withTimeZone("Asia/Shanghai") {
-          withTable("paimon_tbl") {
-            // Spark support timestamp_ntz since 3.4
-            if (gteqSpark3_4) {
-              spark.sql(
-                s"""CREATE TABLE paimon_tbl (id int, binary BINARY, ts timestamp, ts_ntz timestamp_ntz)
-                   |using paimon
-                   |tblproperties ('file.format'='$format')
-                   |""".stripMargin)
+        Seq(true, false).foreach {
+          datetimeJava8APIEnabled =>
+            withSQLConf("spark.sql.datetime.java8API.enabled" -> datetimeJava8APIEnabled.toString) {
+              withTimeZone("Asia/Shanghai") {
+                withTable("paimon_tbl") {
+                  // Spark support create table with timestamp_ntz since 3.4
+                  if (gteqSpark3_4) {
+                    spark.sql(
+                      s"""CREATE TABLE paimon_tbl (id int, binary BINARY, ts timestamp, ts_ntz timestamp_ntz)
+                         |USING paimon
+                         |TBLPROPERTIES ('file.format'='$format')
+                         |""".stripMargin)
 
-              spark.sql(
-                s"insert into paimon_tbl values (1, binary('b'), timestamp'2024-01-01 00:00:00', timestamp_ntz'2024-01-01 00:00:00')")
-              checkAnswer(
-                spark.sql(s"select ts, ts_ntz from paimon_tbl"),
-                Row(
-                  Timestamp.valueOf("2024-01-01 00:00:00"),
-                  LocalDateTime.parse("2024-01-01T00:00:00")) :: Nil
-              )
+                    spark.sql(
+                      s"INSERT INTO paimon_tbl VALUES (1, binary('b'), timestamp'2024-01-01 00:00:00', timestamp_ntz'2024-01-01 00:00:00')")
+                    checkAnswer(
+                      spark.sql(s"SELECT ts, ts_ntz FROM paimon_tbl"),
+                      Row(
+                        if (datetimeJava8APIEnabled)
+                          Timestamp.valueOf("2024-01-01 00:00:00").toInstant
+                        else Timestamp.valueOf("2024-01-01 00:00:00"),
+                        LocalDateTime.parse("2024-01-01T00:00:00")
+                      ) :: Nil
+                    )
 
-              // change time zone to UTC
-              withTimeZone("UTC") {
-                // todo: fix with orc
-                if (format != "orc")
-                  checkAnswer(
-                    spark.sql(s"select ts, ts_ntz from paimon_tbl"),
-                    Row(
-                      Timestamp.valueOf("2023-12-31 16:00:00"),
-                      LocalDateTime.parse("2024-01-01T00:00:00")) :: Nil
-                  )
-              }
-            } else {
-              spark.sql(s"""CREATE TABLE paimon_tbl (id int, binary BINARY, ts timestamp)
-                           |using paimon
-                           |tblproperties ('file.format'='$format')
-                           |""".stripMargin)
+                    // change time zone to UTC
+                    withTimeZone("UTC") {
+                      // todo: fix with orc
+                      if (format != "orc")
+                        checkAnswer(
+                          spark.sql(s"SELECT ts, ts_ntz FROM paimon_tbl"),
+                          Row(
+                            if (datetimeJava8APIEnabled)
+                              Timestamp.valueOf("2023-12-31 16:00:00").toInstant
+                            else Timestamp.valueOf("2023-12-31 16:00:00"),
+                            LocalDateTime.parse("2024-01-01T00:00:00")
+                          ) :: Nil
+                        )
+                    }
+                  } else {
+                    spark.sql(s"""CREATE TABLE paimon_tbl (id int, binary BINARY, ts timestamp)
+                                 |USING paimon
+                                 |TBLPROPERTIES ('file.format'='$format')
+                                 |""".stripMargin)
 
-              spark.sql(
-                s"insert into paimon_tbl values (1, binary('b'), timestamp'2024-01-01 00:00:00')")
-              checkAnswer(
-                spark.sql(s"select ts from paimon_tbl"),
-                Row(Timestamp.valueOf("2024-01-01 00:00:00"))
-              )
+                    spark.sql(
+                      s"INSERT INTO paimon_tbl VALUES (1, binary('b'), timestamp'2024-01-01 00:00:00')")
+                    checkAnswer(
+                      spark.sql(s"SELECT ts FROM paimon_tbl"),
+                      Row(
+                        if (datetimeJava8APIEnabled)
+                          Timestamp.valueOf("2024-01-01 00:00:00").toInstant
+                        else Timestamp.valueOf("2024-01-01 00:00:00"))
+                    )
 
-              // For Spark 3.3 and below, time zone conversion is not supported,
-              // see SparkTypeUtils.treatPaimonTimestampTypeAsSparkTimestampType
-              withTimeZone("UTC") {
-                // todo: fix with orc
-                if (format != "orc") {
-                  checkAnswer(
-                    spark.sql(s"select ts from paimon_tbl"),
-                    Row(Timestamp.valueOf("2024-01-01 00:00:00"))
-                  )
+                    // For Spark 3.3 and below, time zone conversion is not supported,
+                    // see TypeUtils.treatPaimonTimestampTypeAsSparkTimestampType
+                    withTimeZone("UTC") {
+                      // todo: fix with orc
+                      if (format != "orc") {
+                        checkAnswer(
+                          spark.sql(s"SELECT ts FROM paimon_tbl"),
+                          Row(
+                            if (datetimeJava8APIEnabled)
+                              Timestamp.valueOf("2024-01-01 00:00:00").toInstant
+                            else Timestamp.valueOf("2024-01-01 00:00:00"))
+                        )
+                      }
+                    }
+                  }
                 }
               }
             }
-          }
         }
+    }
+  }
+
+  test("Paimon DDL: create table with timestamp/timestamp_ntz using table API") {
+    val identifier = Identifier.create("test", "paimon_tbl")
+    try {
+      withTimeZone("Asia/Shanghai") {
+        val schema = Schema.newBuilder
+          .column("ts", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE())
+          .column("ts_ntz", DataTypes.TIMESTAMP())
+          .build
+        catalog.createTable(identifier, schema, false)
+        spark.sql(
+          s"INSERT INTO paimon_tbl VALUES (timestamp'2024-01-01 00:00:00', timestamp_ntz'2024-01-01 00:00:00')")
+
+        checkAnswer(
+          spark.sql(s"SELECT ts, ts_ntz FROM paimon_tbl"),
+          Row(
+            Timestamp.valueOf("2024-01-01 00:00:00"),
+            if (gteqSpark3_4) LocalDateTime.parse("2024-01-01T00:00:00")
+            else Timestamp.valueOf("2024-01-01 00:00:00")
+          ) :: Nil
+        )
+
+        // change time zone to UTC
+        withTimeZone("UTC") {
+          checkAnswer(
+            spark.sql(s"SELECT ts, ts_ntz FROM paimon_tbl"),
+            Row(
+              // For Spark 3.3 and below, time zone conversion is not supported,
+              // see TypeUtils.treatPaimonTimestampTypeAsSparkTimestampType
+              if (gteqSpark3_4) Timestamp.valueOf("2023-12-31 16:00:00")
+              else Timestamp.valueOf("2024-01-01 00:00:00"),
+              if (gteqSpark3_4) LocalDateTime.parse("2024-01-01T00:00:00")
+              else Timestamp.valueOf("2024-01-01 00:00:00")
+            ) :: Nil
+          )
+        }
+      }
+    } finally {
+      catalog.dropTable(identifier, true)
     }
   }
 }

@@ -175,12 +175,17 @@ public class SparkRow implements InternalRow, Serializable {
             if (TypeUtils.treatPaimonTimestampTypeAsSparkTimestampType()) {
                 return Timestamp.fromSQLTimestamp(ts);
             } else {
-                return DateTimeUtils.toInternalUTC(ts.getTime(), ts.getNanos());
+                return Timestamp.fromInstant(ts.toInstant());
             }
         } else if (object instanceof java.time.Instant) {
-            LocalDateTime localDateTime =
-                    LocalDateTime.ofInstant((Instant) object, ZoneId.systemDefault());
-            return Timestamp.fromLocalDateTime(localDateTime);
+            Instant instant = (Instant) object;
+            if (TypeUtils.treatPaimonTimestampTypeAsSparkTimestampType()) {
+                LocalDateTime localDateTime =
+                        LocalDateTime.ofInstant((Instant) object, ZoneId.systemDefault());
+                return Timestamp.fromLocalDateTime(localDateTime);
+            } else {
+                return Timestamp.fromInstant(instant);
+            }
         } else {
             return Timestamp.fromLocalDateTime((LocalDateTime) object);
         }
