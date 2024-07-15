@@ -764,7 +764,8 @@ public class TestFileStore extends KeyValueFileStore {
         }
 
         public TestFileStore build() {
-            Options conf = Options.fromMap(tableSchema.options());
+            Options conf =
+                    tableSchema == null ? new Options() : Options.fromMap(tableSchema.options());
 
             conf.set(CoreOptions.WRITE_BUFFER_SIZE, WRITE_BUFFER_SIZE);
             conf.set(CoreOptions.PAGE_SIZE, PAGE_SIZE);
