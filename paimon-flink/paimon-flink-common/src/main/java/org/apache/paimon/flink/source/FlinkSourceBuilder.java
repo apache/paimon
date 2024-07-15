@@ -250,11 +250,15 @@ public class FlinkSourceBuilder {
         if (env == null) {
             throw new IllegalArgumentException("StreamExecutionEnvironment should not be null.");
         }
+        if (conf.contains(CoreOptions.CONSUMER_ID)
+                && !conf.contains(CoreOptions.CONSUMER_EXPIRATION_TIME)) {
+            throw new IllegalArgumentException(
+                    "consumer.expiration-time should be specified when using consumer-id.");
+        }
 
         if (sourceBounded) {
             return buildStaticFileSource();
         }
-
         TableScanUtils.streamingReadingValidate(table);
 
         // TODO visit all options through CoreOptions

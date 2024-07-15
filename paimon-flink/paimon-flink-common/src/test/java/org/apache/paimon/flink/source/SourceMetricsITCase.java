@@ -111,7 +111,7 @@ public class SourceMetricsITCase {
                 "CREATE TEMPORARY TABLE B ( k INT, v INT ) WITH ( 'connector' = 'blackhole' )");
         TableResult tableResult =
                 tEnv.executeSql(
-                        "INSERT INTO B SELECT * FROM T /*+ OPTIONS('consumer-id' = 'test') */");
+                        "INSERT INTO B SELECT * FROM T /*+ OPTIONS('consumer-id' = 'test','consumer.expiration-time'='3h') */");
         JobClient client = tableResult.getJobClient().get();
         JobID jobId = client.getJobID();
 
