@@ -59,7 +59,19 @@ public interface FileIndexResult {
 
     boolean remain();
 
-    FileIndexResult and(FileIndexResult fileIndexResult);
+    default FileIndexResult and(FileIndexResult fileIndexResult) {
+        if (fileIndexResult.remain()) {
+            return this;
+        } else {
+            return SKIP;
+        }
+    }
 
-    FileIndexResult or(FileIndexResult fileIndexResult);
+    default FileIndexResult or(FileIndexResult fileIndexResult) {
+        if (fileIndexResult.remain()) {
+            return REMAIN;
+        } else {
+            return this;
+        }
+    }
 }
