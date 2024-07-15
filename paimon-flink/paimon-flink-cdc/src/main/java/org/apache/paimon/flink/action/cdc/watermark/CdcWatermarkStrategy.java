@@ -57,13 +57,10 @@ public class CdcWatermarkStrategy implements WatermarkStrategy<CdcSourceRecord> 
                     throw new RuntimeException(e);
                 }
                 currentMaxTimestamp = Math.max(currentMaxTimestamp, tMs);
-                output.emitWatermark(new Watermark(currentMaxTimestamp - 1));
             }
 
             @Override
             public void onPeriodicEmit(WatermarkOutput output) {
-                long timeMillis = System.currentTimeMillis();
-                currentMaxTimestamp = Math.max(timeMillis, currentMaxTimestamp);
                 output.emitWatermark(new Watermark(currentMaxTimestamp - 1));
             }
         };
