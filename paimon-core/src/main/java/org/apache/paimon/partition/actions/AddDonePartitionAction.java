@@ -16,30 +16,37 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.procedure.actions;
+package org.apache.paimon.partition.actions;
 
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.metastore.MetastoreClient;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
+
 import java.io.IOException;
 import java.util.LinkedHashMap;
+import java.util.Map;
 
 import static org.apache.paimon.utils.PartitionPathUtils.extractPartitionSpecFromPath;
 
-/** A {@link PartitionMarkDoneAction} which add mark "PartitionEventType.LOAD_DONE". */
-public class MarkPartitionDoneEventAction implements PartitionMarkDoneAction {
-
+/** A {@link PartitionMarkDoneAction} which add ".done" partition. */
+public class AddDonePartitionAction implements PartitionMarkDoneAction {
     private final MetastoreClient metastoreClient;
 
-    public MarkPartitionDoneEventAction(MetastoreClient metastoreClient) {
+    public AddDonePartitionAction(MetastoreClient metastoreClient) {
         this.metastoreClient = metastoreClient;
     }
 
     @Override
     public void markDone(String partition) throws Exception {
-        LinkedHashMap<String, String> partitionSpec =
-                extractPartitionSpecFromPath(new Path(partition));
-        metastoreClient.markDone(partitionSpec);
+        LinkedHashMap<String, String> doneSpec = extractPartitionSpecFromPath(new Path(partition));
+        Map.Entry<String, String> lastField = tailEntry(doneSpec);
+        doneSpec.put(lastField.getKey(), lastField.getValue() + ".done");
+        metastoreClient.addPartition(doneSpec);
+    }
+
+    private Map.Entry<String, String> tailEntry(LinkedHashMap<String, String> partitionSpec) {
+        return Iterators.getLast(partitionSpec.entrySet().iterator());
     }
 
     @Override

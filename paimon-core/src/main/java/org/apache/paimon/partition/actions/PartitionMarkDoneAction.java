@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink.partition;
+package org.apache.paimon.partition.actions;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.metastore.MetastoreClient;
@@ -28,12 +28,13 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
-import static org.apache.paimon.flink.FlinkConnectorOptions.PARTITION_MARK_DONE_ACTION;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Action to mark partitions done. */
 public interface PartitionMarkDoneAction extends Closeable {
+
+    String PARTITION_MARK_DONE_ACTION = "partition.mark-done-action";
 
     void markDone(String partition) throws Exception;
 

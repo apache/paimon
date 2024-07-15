@@ -19,10 +19,10 @@
 package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.spark.procedure.actions.AddDonePartitionAction;
-import org.apache.paimon.spark.procedure.actions.MarkPartitionDoneEventAction;
-import org.apache.paimon.spark.procedure.actions.PartitionMarkDoneAction;
-import org.apache.paimon.spark.procedure.actions.SuccessFileMarkDoneAction;
+import org.apache.paimon.partition.actions.AddDonePartitionAction;
+import org.apache.paimon.partition.actions.MarkPartitionDoneEventAction;
+import org.apache.paimon.partition.actions.PartitionMarkDoneAction;
+import org.apache.paimon.partition.actions.SuccessFileMarkDoneAction;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.PartitionPathUtils;
@@ -39,7 +39,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.spark.procedure.actions.PartitionMarkDoneAction.createMetastoreClient;
+import static org.apache.paimon.partition.actions.PartitionMarkDoneAction.createMetastoreClient;
 import static org.apache.paimon.utils.ParameterUtils.getPartitions;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.spark.sql.types.DataTypes.StringType;

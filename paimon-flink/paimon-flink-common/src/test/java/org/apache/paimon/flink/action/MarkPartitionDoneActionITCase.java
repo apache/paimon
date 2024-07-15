@@ -20,8 +20,8 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.flink.sink.partition.SuccessFile;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.partition.file.SuccessFile;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.types.DataType;

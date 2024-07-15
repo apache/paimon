@@ -19,8 +19,8 @@
 package org.apache.paimon.spark.procedure
 
 import org.apache.paimon.fs.Path
+import org.apache.paimon.partition.file.SuccessFile
 import org.apache.paimon.spark.PaimonSparkTestBase
-import org.apache.paimon.spark.procedure.actions.file.SuccessFile
 
 import org.apache.spark.sql.Row
 import org.assertj.core.api.Assertions.assertThat

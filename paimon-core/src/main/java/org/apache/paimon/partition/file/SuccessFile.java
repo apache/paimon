@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink.partition;
+package org.apache.paimon.partition.file;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
