@@ -1,6 +1,6 @@
 ---
 title: "Hive"
-weight: 5
+weight: 4
 type: docs
 aliases:
 - /engines/hive.html

@@ -1,6 +1,6 @@
 ---
 title: "Doris"
-weight: 5
+weight: 3
 type: docs
 aliases:
 - /engines/doris.html
