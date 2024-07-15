@@ -1268,7 +1268,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Integer> DELETE_FILE_THREAD_NUM =
             key("delete-file.thread-num")
                     .intType()
-                    .defaultValue(Runtime.getRuntime().availableProcessors())
+                    .noDefaultValue()
                     .withDescription(
                             "The maximum number of concurrent deleting files. "
                                     + "By default is the number of processors available to the Java virtual machine.");
@@ -1498,7 +1498,8 @@ public class CoreOptions implements Serializable {
     }
 
     public int deleteFileThreadNum() {
-        return options.get(DELETE_FILE_THREAD_NUM);
+        return options.getOptional(DELETE_FILE_THREAD_NUM)
+                .orElseGet(() -> Runtime.getRuntime().availableProcessors());
     }
 
     public ExpireConfig expireConfig() {
