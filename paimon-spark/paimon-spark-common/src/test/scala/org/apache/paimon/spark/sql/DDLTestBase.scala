@@ -198,17 +198,15 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
                 withTable("paimon_tbl") {
                   // Spark support create table with timestamp_ntz since 3.4
                   if (gteqSpark3_4) {
-                    spark.sql(
-                      s"""
-                         |CREATE TABLE paimon_tbl (id int, binary BINARY, ts timestamp, ts_ntz timestamp_ntz)
-                         |USING paimon
-                         |TBLPROPERTIES ('file.format'='$format')
-                         |""".stripMargin)
+                    sql(s"""
+                           |CREATE TABLE paimon_tbl (id int, binary BINARY, ts timestamp, ts_ntz timestamp_ntz)
+                           |USING paimon
+                           |TBLPROPERTIES ('file.format'='$format')
+                           |""".stripMargin)
 
-                    spark.sql(
-                      s"INSERT INTO paimon_tbl VALUES (1, binary('b'), timestamp'2024-01-01 00:00:00', timestamp_ntz'2024-01-01 00:00:00')")
+                    sql(s"INSERT INTO paimon_tbl VALUES (1, binary('b'), timestamp'2024-01-01 00:00:00', timestamp_ntz'2024-01-01 00:00:00')")
                     checkAnswer(
-                      spark.sql(s"SELECT ts, ts_ntz FROM paimon_tbl"),
+                      sql(s"SELECT ts, ts_ntz FROM paimon_tbl"),
                       Row(
                         if (datetimeJava8APIEnabled)
                           Timestamp.valueOf("2024-01-01 00:00:00").toInstant
@@ -222,7 +220,7 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
                       // todo: fix with orc
                       if (format != "orc")
                         checkAnswer(
-                          spark.sql(s"SELECT ts, ts_ntz FROM paimon_tbl"),
+                          sql(s"SELECT ts, ts_ntz FROM paimon_tbl"),
                           Row(
                             if (datetimeJava8APIEnabled)
                               Timestamp.valueOf("2023-12-31 16:00:00").toInstant
@@ -232,16 +230,15 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
                         )
                     }
                   } else {
-                    spark.sql(s"""
-                                 |CREATE TABLE paimon_tbl (id int, binary BINARY, ts timestamp)
-                                 |USING paimon
-                                 |TBLPROPERTIES ('file.format'='$format')
-                                 |""".stripMargin)
+                    sql(s"""
+                           |CREATE TABLE paimon_tbl (id int, binary BINARY, ts timestamp)
+                           |USING paimon
+                           |TBLPROPERTIES ('file.format'='$format')
+                           |""".stripMargin)
 
-                    spark.sql(
-                      s"INSERT INTO paimon_tbl VALUES (1, binary('b'), timestamp'2024-01-01 00:00:00')")
+                    sql(s"INSERT INTO paimon_tbl VALUES (1, binary('b'), timestamp'2024-01-01 00:00:00')")
                     checkAnswer(
-                      spark.sql(s"SELECT ts FROM paimon_tbl"),
+                      sql(s"SELECT ts FROM paimon_tbl"),
                       Row(
                         if (datetimeJava8APIEnabled)
                           Timestamp.valueOf("2024-01-01 00:00:00").toInstant
@@ -254,7 +251,7 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
                       // todo: fix with orc
                       if (format != "orc") {
                         checkAnswer(
-                          spark.sql(s"SELECT ts FROM paimon_tbl"),
+                          sql(s"SELECT ts FROM paimon_tbl"),
                           Row(
                             if (datetimeJava8APIEnabled)
                               Timestamp.valueOf("2024-01-01 00:00:00").toInstant
@@ -279,11 +276,11 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
           .column("ts_ntz", DataTypes.TIMESTAMP())
           .build
         catalog.createTable(identifier, schema, false)
-        spark.sql(
+        sql(
           s"INSERT INTO paimon_tbl VALUES (timestamp'2024-01-01 00:00:00', timestamp_ntz'2024-01-01 00:00:00')")
 
         checkAnswer(
-          spark.sql(s"SELECT ts, ts_ntz FROM paimon_tbl"),
+          sql(s"SELECT ts, ts_ntz FROM paimon_tbl"),
           Row(
             Timestamp.valueOf("2024-01-01 00:00:00"),
             if (gteqSpark3_4) LocalDateTime.parse("2024-01-01T00:00:00")
@@ -294,7 +291,7 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
         // change time zone to UTC
         withTimeZone("UTC") {
           checkAnswer(
-            spark.sql(s"SELECT ts, ts_ntz FROM paimon_tbl"),
+            sql(s"SELECT ts, ts_ntz FROM paimon_tbl"),
             Row(
               // For Spark 3.3 and below, time zone conversion is not supported,
               // see TypeUtils.treatPaimonTimestampTypeAsSparkTimestampType
@@ -302,7 +299,7 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
               else Timestamp.valueOf("2024-01-01 00:00:00"),
               if (gteqSpark3_4) LocalDateTime.parse("2024-01-01T00:00:00")
               else Timestamp.valueOf("2024-01-01 00:00:00")
-            ) :: Nil
+            )
           )
         }
       }
@@ -318,21 +315,19 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
           withTable("paimon_tbl") {
             // Spark support create table with timestamp_ntz since 3.4
             if (gteqSpark3_4) {
-              spark.sql(s"""
-                           |CREATE TABLE paimon_tbl (ts timestamp, ts_ntz timestamp_ntz)
-                           |USING paimon
-                           |""".stripMargin)
-
-              spark.sql(s"""
-                           |INSERT INTO paimon_tbl VALUES
-                           |(timestamp'2024-01-01 00:00:00', timestamp_ntz'2024-01-01 00:00:00'),
-                           |(timestamp'2024-01-02 00:00:00', timestamp_ntz'2024-01-02 00:00:00'),
-                           |(timestamp'2024-01-03 00:00:00', timestamp_ntz'2024-01-03 00:00:00')
-                           |""".stripMargin)
+              sql(s"""
+                     |CREATE TABLE paimon_tbl (ts timestamp, ts_ntz timestamp_ntz)
+                     |USING paimon
+                     |""".stripMargin)
+              sql(
+                s"INSERT INTO paimon_tbl VALUES (timestamp'2024-01-01 00:00:00', timestamp_ntz'2024-01-01 00:00:00')")
+              sql(
+                s"INSERT INTO paimon_tbl VALUES (timestamp'2024-01-02 00:00:00', timestamp_ntz'2024-01-02 00:00:00')")
+              sql(
+                s"INSERT INTO paimon_tbl VALUES (timestamp'2024-01-03 00:00:00', timestamp_ntz'2024-01-03 00:00:00')")
 
               checkAnswer(
-                spark.sql(
-                  s"SELECT * FROM paimon_tbl where ts_ntz = timestamp_ntz'2024-01-01 00:00:00'"),
+                sql(s"SELECT * FROM paimon_tbl where ts_ntz = timestamp_ntz'2024-01-01 00:00:00'"),
                 Row(
                   if (datetimeJava8APIEnabled)
                     Timestamp.valueOf("2024-01-01 00:00:00").toInstant
@@ -342,7 +337,7 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
               )
 
               checkAnswer(
-                spark.sql(s"SELECT * FROM paimon_tbl where ts > timestamp'2024-01-02 00:00:00'"),
+                sql(s"SELECT * FROM paimon_tbl where ts > timestamp'2024-01-02 00:00:00'"),
                 Row(
                   if (datetimeJava8APIEnabled)
                     Timestamp.valueOf("2024-01-03 00:00:00").toInstant
@@ -351,19 +346,16 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
                 )
               )
             } else {
-              spark.sql(s"""
-                           |CREATE TABLE paimon_tbl (ts timestamp)
-                           |USING paimon
-                           |""".stripMargin)
-              spark.sql(s"""
-                           |INSERT INTO paimon_tbl VALUES
-                           |timestamp'2024-01-01 00:00:00',
-                           |timestamp'2024-01-02 00:00:00',
-                           |timestamp'2024-01-03 00:00:00'
-                           |""".stripMargin)
+              sql(s"""
+                     |CREATE TABLE paimon_tbl (ts timestamp)
+                     |USING paimon
+                     |""".stripMargin)
+              sql(s"INSERT INTO paimon_tbl VALUES (timestamp'2024-01-01 00:00:00')")
+              sql(s"INSERT INTO paimon_tbl VALUES (timestamp'2024-01-02 00:00:00')")
+              sql(s"INSERT INTO paimon_tbl VALUES (timestamp'2024-01-03 00:00:00')")
 
               checkAnswer(
-                spark.sql(s"SELECT * FROM paimon_tbl where ts = timestamp'2024-01-01 00:00:00'"),
+                sql(s"SELECT * FROM paimon_tbl where ts = timestamp'2024-01-01 00:00:00'"),
                 Row(
                   if (datetimeJava8APIEnabled)
                     Timestamp.valueOf("2024-01-01 00:00:00").toInstant
