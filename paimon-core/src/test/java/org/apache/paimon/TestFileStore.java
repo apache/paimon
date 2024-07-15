@@ -155,19 +155,10 @@ public class TestFileStore extends KeyValueFileStore {
     }
 
     public ExpireSnapshots newExpire(int numRetainedMin, int numRetainedMax, long millisRetained) {
-        return newExpire(numRetainedMin, numRetainedMax, millisRetained, true);
-    }
-
-    public ExpireSnapshots newExpire(
-            int numRetainedMin,
-            int numRetainedMax,
-            long millisRetained,
-            boolean snapshotExpireCleanEmptyDirectories) {
         return new ExpireSnapshotsImpl(
                         snapshotManager(),
                         newSnapshotDeletion(),
-                        new TagManager(fileIO, options.path()),
-                        snapshotExpireCleanEmptyDirectories)
+                        new TagManager(fileIO, options.path()))
                 .config(
                         ExpireConfig.builder()
                                 .snapshotRetainMax(numRetainedMax)
@@ -176,24 +167,20 @@ public class TestFileStore extends KeyValueFileStore {
                                 .build());
     }
 
-    public ExpireSnapshots newExpire(
-            ExpireConfig expireConfig, boolean snapshotExpireCleanEmptyDirectories) {
+    public ExpireSnapshots newExpire(ExpireConfig expireConfig) {
         return new ExpireSnapshotsImpl(
                         snapshotManager(),
                         newSnapshotDeletion(),
-                        new TagManager(fileIO, options.path()),
-                        snapshotExpireCleanEmptyDirectories)
+                        new TagManager(fileIO, options.path()))
                 .config(expireConfig);
     }
 
-    public ExpireSnapshots newChangelogExpire(
-            ExpireConfig config, boolean snapshotExpireCleanEmptyDirectories) {
+    public ExpireSnapshots newChangelogExpire(ExpireConfig config) {
         ExpireChangelogImpl impl =
                 new ExpireChangelogImpl(
                         snapshotManager(),
                         new TagManager(fileIO, options.path()),
-                        newChangelogDeletion(),
-                        snapshotExpireCleanEmptyDirectories);
+                        newChangelogDeletion());
         impl.config(config);
         return impl;
     }
@@ -777,7 +764,7 @@ public class TestFileStore extends KeyValueFileStore {
         }
 
         public TestFileStore build() {
-            Options conf = new Options();
+            Options conf = Options.fromMap(tableSchema.options());
 
             conf.set(CoreOptions.WRITE_BUFFER_SIZE, WRITE_BUFFER_SIZE);
             conf.set(CoreOptions.PAGE_SIZE, PAGE_SIZE);

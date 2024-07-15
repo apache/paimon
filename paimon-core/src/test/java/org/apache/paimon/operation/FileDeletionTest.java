@@ -64,6 +64,7 @@ import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.SNAPSHOT_CLEAN_EMPTY_DIRECTORIES;
 import static org.apache.paimon.operation.FileStoreCommitImpl.mustConflictCheck;
 import static org.apache.paimon.operation.FileStoreTestUtils.assertPathExists;
 import static org.apache.paimon.operation.FileStoreTestUtils.assertPathNotExists;
@@ -160,7 +161,8 @@ public class FileDeletionTest {
         cleanBucket(store, partition, 0);
 
         // step 5: expire and check file paths
-        store.newExpire(1, 1, Long.MAX_VALUE, cleanEmptyDirs).expire();
+        store.options().toConfiguration().set(SNAPSHOT_CLEAN_EMPTY_DIRECTORIES, true);
+        store.newExpire(1, 1, Long.MAX_VALUE).expire();
 
         // check dt=0401
         if (cleanEmptyDirs) {
@@ -671,8 +673,7 @@ public class FileDeletionTest {
         // action: expire snapshot 1 -> delete tag1 -> expire snapshot 2
         // result: exist A & B (because of tag2)
         ExpireSnapshots expireSnapshots =
-                new ExpireSnapshotsImpl(
-                        snapshotManager, store.newSnapshotDeletion(), tagManager, true);
+                new ExpireSnapshotsImpl(snapshotManager, store.newSnapshotDeletion(), tagManager);
         expireSnapshots
                 .config(
                         ExpireConfig.builder()
@@ -732,13 +733,15 @@ public class FileDeletionTest {
         }
 
         SchemaManager schemaManager = new SchemaManager(fileIO, new Path(root));
+
         TableSchema tableSchema =
                 schemaManager.createTable(
                         new Schema(
                                 rowType.getFields(),
                                 partitionType.getFieldNames(),
                                 TestKeyValueGenerator.getPrimaryKeys(mode),
-                                Collections.emptyMap(),
+                                Collections.singletonMap(
+                                        SNAPSHOT_CLEAN_EMPTY_DIRECTORIES.key(), "true"),
                                 null));
 
         return new TestFileStore.Builder(

@@ -137,7 +137,7 @@ public class RollbackHelper {
         }
 
         // delete directories
-        snapshotDeletion.cleanDataDirectories();
+        snapshotDeletion.cleanEmptyDirectories();
 
         return toBeCleaned;
     }
@@ -165,7 +165,7 @@ public class RollbackHelper {
         }
 
         // delete directories
-        snapshotDeletion.cleanDataDirectories();
+        snapshotDeletion.cleanEmptyDirectories();
 
         // modify the latest hint
         try {
@@ -221,7 +221,7 @@ public class RollbackHelper {
                 tagDeletion.cleanUnusedDataFiles(s, dataFileSkipper);
             }
             // delete directories
-            tagDeletion.cleanDataDirectories();
+            tagDeletion.cleanEmptyDirectories();
         }
 
         return toBeCleaned;

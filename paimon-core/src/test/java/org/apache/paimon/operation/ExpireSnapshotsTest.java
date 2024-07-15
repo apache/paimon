@@ -336,7 +336,7 @@ public class ExpireSnapshotsTest {
         builder.snapshotRetainMin(1)
                 .snapshotRetainMax(Integer.MAX_VALUE)
                 .snapshotTimeRetain(Duration.ofMillis(1000));
-        ExpireSnapshots expire = store.newExpire(builder.build(), true);
+        ExpireSnapshots expire = store.newExpire(builder.build());
 
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
@@ -417,8 +417,8 @@ public class ExpireSnapshotsTest {
                         .changelogRetainMax(3)
                         .build();
 
-        ExpireSnapshots snapshot = store.newExpire(config, true);
-        ExpireSnapshots changelog = store.newChangelogExpire(config, true);
+        ExpireSnapshots snapshot = store.newExpire(config);
+        ExpireSnapshots changelog = store.newChangelogExpire(config);
         // expire twice to check for idempotence
         snapshot.expire();
         snapshot.expire();

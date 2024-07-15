@@ -230,7 +230,7 @@ public class TagManager {
         }
         if (success) {
             tagDeletion.cleanUnusedDataFiles(taggedSnapshot, dataFileSkipper);
-            tagDeletion.cleanDataDirectories();
+            tagDeletion.cleanEmptyDirectories();
         }
 
         // delete manifests
