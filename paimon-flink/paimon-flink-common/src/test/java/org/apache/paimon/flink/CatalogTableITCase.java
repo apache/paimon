@@ -771,6 +771,34 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testConsumerExpirationTimeInBatchMode() {
+        batchSql("CREATE TABLE T (a INT, b INT)");
+        batchSql("INSERT INTO T VALUES (1, 2)");
+        batchSql("INSERT INTO T VALUES (3, 4)");
+        batchSql("INSERT INTO T VALUES (5, 6), (7, 8)");
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "SELECT * FROM T /*+ OPTIONS('consumer.expiration-time' = '3h') */ WHERE a = 1"))
+                .rootCause()
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("consumer-id should be specified when using consumer.expiration-time.");
+    }
+
+    @Test
+    public void testConsumerExpirationTimeInStreamingMode() {
+        batchSql("CREATE TABLE T (a INT, b INT)");
+        batchSql("INSERT INTO T VALUES (1, 2)");
+        batchSql("INSERT INTO T VALUES (3, 4)");
+        assertThatThrownBy(
+                        () ->
+                                streamSqlIter(
+                                        "SELECT * FROM T /*+ OPTIONS('consumer.expiration-time' = '3h') */"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("consumer-id should be specified when using consumer.expiration-time.");
+    }
+
+    @Test
     public void testConsumerIdExpInStreamingMode() {
         batchSql("CREATE TABLE T (a INT, b INT)");
         batchSql("INSERT INTO T VALUES (1, 2)");

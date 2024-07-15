@@ -256,6 +256,12 @@ public class FlinkSourceBuilder {
                     "consumer.expiration-time should be specified when using consumer-id.");
         }
 
+        if (!conf.contains(CoreOptions.CONSUMER_ID)
+                && conf.contains(CoreOptions.CONSUMER_EXPIRATION_TIME)) {
+            throw new IllegalArgumentException(
+                    "consumer-id should be specified when using consumer.expiration-time.");
+        }
+
         if (sourceBounded) {
             return buildStaticFileSource();
         }
