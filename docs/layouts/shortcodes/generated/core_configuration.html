@@ -195,6 +195,12 @@ under the License.
             <td>The TTL in rocksdb index for cross partition upsert (primary keys not contain all partition fields), this can avoid maintaining too many indexes and lead to worse and worse performance, but please note that this may also cause data duplication.</td>
         </tr>
         <tr>
+            <td><h5>delete-file.thread-num</h5></td>
+            <td style="word-wrap: break-word;">12</td>
+            <td>Integer</td>
+            <td>The maximum number of concurrent deleting files. By default is the number of processors available to the Java virtual machine.</td>
+        </tr>
+        <tr>
             <td><h5>delete.force-produce-changelog</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
