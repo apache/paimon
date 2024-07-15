@@ -60,7 +60,7 @@ public interface FileIndexResult {
     boolean remain();
 
     default FileIndexResult and(FileIndexResult fileIndexResult) {
-        if (fileIndexResult.remain()){
+        if (fileIndexResult.remain()) {
             return this;
         } else {
             return SKIP;
