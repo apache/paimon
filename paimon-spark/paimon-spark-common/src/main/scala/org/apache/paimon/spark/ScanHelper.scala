@@ -85,7 +85,7 @@ trait ScanHelper extends Logging {
 
     def closeInputPartition(): Unit = {
       closeDataSplit()
-      if (currentSplit.nonEmpty) {
+      if (currentSplits.nonEmpty) {
         partitions += PaimonInputPartition(currentSplits.toArray)
       }
       currentSplits.clear()
