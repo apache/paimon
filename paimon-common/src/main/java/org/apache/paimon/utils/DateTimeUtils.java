@@ -116,6 +116,10 @@ public class DateTimeUtils {
         return Timestamp.fromEpochMillis(millis + TimeZone.getDefault().getOffset(millis), nanos);
     }
 
+    public static Timestamp toInternalUTC(long millis, int nanos) {
+        return Timestamp.fromEpochMillis(millis + UTC_ZONE.getOffset(millis), nanos);
+    }
+
     public static int toInternal(LocalDate date) {
         return ymdToUnixDate(date.getYear(), date.getMonthValue(), date.getDayOfMonth());
     }

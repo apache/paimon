@@ -24,6 +24,7 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.spark.util.shim.TypeUtils;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DateType;
@@ -170,7 +171,12 @@ public class SparkRow implements InternalRow, Serializable {
 
     private static Timestamp toPaimonTimestamp(Object object) {
         if (object instanceof java.sql.Timestamp) {
-            return Timestamp.fromSQLTimestamp((java.sql.Timestamp) object);
+            java.sql.Timestamp ts = (java.sql.Timestamp) object;
+            if (TypeUtils.treatPaimonTimestampTypeAsSparkTimestampType()) {
+                return Timestamp.fromSQLTimestamp(ts);
+            } else {
+                return DateTimeUtils.toInternalUTC(ts.getTime(), ts.getNanos());
+            }
         } else if (object instanceof java.time.Instant) {
             LocalDateTime localDateTime =
                     LocalDateTime.ofInstant((Instant) object, ZoneId.systemDefault());

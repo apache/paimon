@@ -310,7 +310,12 @@ All Spark's data types are available in package `org.apache.spark.sql.types`.
     </tr>
     <tr>
       <td><code>TimestampType</code></td>
-      <td><code>TimestampType</code>, <code>LocalZonedTimestamp</code></td>
+      <td><code>LocalZonedTimestamp</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>TimestampNTZType(Spark3.4+)</code></td>
+      <td><code>TimestampType</code></td>
       <td>true</td>
     </tr>
     <tr>
