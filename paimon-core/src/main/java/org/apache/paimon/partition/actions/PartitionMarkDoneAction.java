@@ -21,7 +21,6 @@ package org.apache.paimon.partition.actions;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.StringUtils;
 
 import java.io.Closeable;
 import java.util.Arrays;
@@ -29,25 +28,19 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
+import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_ACTION;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Action to mark partitions done. */
 public interface PartitionMarkDoneAction extends Closeable {
 
-    String PARTITION_MARK_DONE_ACTION = "partition.mark-done-action";
-    String DEFAULT_MARK_DONE_ACTION = "success-file";
-
     void markDone(String partition) throws Exception;
 
     static List<PartitionMarkDoneAction> createActions(
             FileStoreTable fileStoreTable, CoreOptions options) {
-        String markdoneAction =
-                StringUtils.isBlank((options.toConfiguration().get(PARTITION_MARK_DONE_ACTION)))
-                        ? DEFAULT_MARK_DONE_ACTION
-                        : options.toConfiguration().get(PARTITION_MARK_DONE_ACTION);
-
-        return Arrays.asList(markdoneAction.split(",")).stream()
+        return Arrays.asList(options.toConfiguration().get(PARTITION_MARK_DONE_ACTION).split(","))
+                .stream()
                 .map(
                         action -> {
                             switch (action) {
