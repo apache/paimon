@@ -46,7 +46,8 @@ public class ChangelogDeletion extends FileDeletionBase<Changelog> {
             ManifestList manifestList,
             IndexFileHandler indexFileHandler,
             StatsFileHandler statsFileHandler,
-            boolean cleanEmptyDirectories) {
+            boolean cleanEmptyDirectories,
+            int deleteFileThreadNum) {
         super(
                 fileIO,
                 pathFactory,
@@ -54,7 +55,8 @@ public class ChangelogDeletion extends FileDeletionBase<Changelog> {
                 manifestList,
                 indexFileHandler,
                 statsFileHandler,
-                cleanEmptyDirectories);
+                cleanEmptyDirectories,
+                deleteFileThreadNum);
     }
 
     @Override

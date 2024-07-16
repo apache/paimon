@@ -32,8 +32,8 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.stats.StatsFileHandler;
+import org.apache.paimon.utils.FileDeletionThreadPool;
 import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.TagManager;
 
@@ -71,9 +71,10 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     protected final IndexFileHandler indexFileHandler;
     protected final StatsFileHandler statsFileHandler;
     private final boolean cleanEmptyDirectories;
-
     protected final Map<BinaryRow, Set<Integer>> deletionBuckets;
-    protected final Executor ioExecutor;
+
+    private final Executor deleteFileExecutor;
+
     protected boolean changelogDecoupled;
 
     /** Used to record which tag is cached. */
@@ -89,7 +90,8 @@ public abstract class FileDeletionBase<T extends Snapshot> {
             ManifestList manifestList,
             IndexFileHandler indexFileHandler,
             StatsFileHandler statsFileHandler,
-            boolean cleanEmptyDirectories) {
+            boolean cleanEmptyDirectories,
+            int deleteFileThreadNum) {
         this.fileIO = fileIO;
         this.pathFactory = pathFactory;
         this.manifestFile = manifestFile;
@@ -98,7 +100,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         this.statsFileHandler = statsFileHandler;
         this.cleanEmptyDirectories = cleanEmptyDirectories;
         this.deletionBuckets = new HashMap<>();
-        this.ioExecutor = FileUtils.COMMON_IO_FORK_JOIN_POOL;
+        this.deleteFileExecutor = FileDeletionThreadPool.getExecutorService(deleteFileThreadNum);
     }
 
     /**
@@ -455,15 +457,15 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         }
     }
 
-    protected <T> void deleteFiles(Collection<T> files, Consumer<T> deletion) {
+    protected <F> void deleteFiles(Collection<F> files, Consumer<F> deletion) {
         if (files.isEmpty()) {
             return;
         }
 
         List<CompletableFuture<Void>> deletionFutures = new ArrayList<>(files.size());
-        for (T file : files) {
+        for (F file : files) {
             deletionFutures.add(
-                    CompletableFuture.runAsync(() -> deletion.accept(file), ioExecutor));
+                    CompletableFuture.runAsync(() -> deletion.accept(file), deleteFileExecutor));
         }
 
         try {

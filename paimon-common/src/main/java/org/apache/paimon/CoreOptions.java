@@ -1284,6 +1284,14 @@ public class CoreOptions implements Serializable {
                             "When set to true, produce Iceberg metadata after a snapshot is committed, "
                                     + "so that Iceberg readers can read Paimon's raw files.");
 
+    public static final ConfigOption<Integer> DELETE_FILE_THREAD_NUM =
+            key("delete-file.thread-num")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The maximum number of concurrent deleting files. "
+                                    + "By default is the number of processors available to the Java virtual machine.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -1506,6 +1514,11 @@ public class CoreOptions implements Serializable {
 
     public boolean cleanEmptyDirectories() {
         return options.get(SNAPSHOT_CLEAN_EMPTY_DIRECTORIES);
+    }
+
+    public int deleteFileThreadNum() {
+        return options.getOptional(DELETE_FILE_THREAD_NUM)
+                .orElseGet(() -> Runtime.getRuntime().availableProcessors());
     }
 
     public ExpireConfig expireConfig() {
