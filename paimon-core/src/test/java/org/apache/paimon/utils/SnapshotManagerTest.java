@@ -138,7 +138,7 @@ public class SnapshotManagerTest {
         assertThat(snapshotManager.laterOrEqualWatermark(millis + 999)).isNull();
     }
 
-    private Snapshot createSnapshotWithMillis(long id, long millis) {
+    public Snapshot createSnapshotWithMillis(long id, long millis) {
         return new Snapshot(
                 id,
                 0L,
