@@ -18,12 +18,6 @@
 
 package org.apache.paimon.flink.source;
 
-import org.apache.flink.api.connector.source.Boundedness;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.streaming.api.datastream.DataStreamSource;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.functions.source.RichSourceFunction;
-import org.apache.flink.streaming.api.operators.StreamSource;
 import org.apache.paimon.append.AppendOnlyCompactionTask;
 import org.apache.paimon.append.AppendOnlyTableCompactionCoordinator;
 import org.apache.paimon.flink.sink.CompactionTaskTypeInfo;
@@ -31,10 +25,18 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.utils.Preconditions;
+
+import org.apache.flink.api.connector.source.Boundedness;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.streaming.api.datastream.DataStreamSource;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.source.RichSourceFunction;
+import org.apache.flink.streaming.api.operators.StreamSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
+
 import java.util.List;
 
 /**
