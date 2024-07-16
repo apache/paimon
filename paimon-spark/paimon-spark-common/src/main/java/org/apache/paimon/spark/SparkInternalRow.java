@@ -23,6 +23,7 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.spark.util.shim.TypeUtils;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataType;
@@ -283,7 +284,11 @@ public class SparkInternalRow extends org.apache.spark.sql.catalyst.InternalRow 
     }
 
     public static long fromPaimon(Timestamp timestamp) {
-        return DateTimeUtils.fromJavaTimestamp(timestamp.toSQLTimestamp());
+        if (TypeUtils.treatPaimonTimestampTypeAsSparkTimestampType()) {
+            return DateTimeUtils.fromJavaTimestamp(timestamp.toSQLTimestamp());
+        } else {
+            return timestamp.toMicros();
+        }
     }
 
     public static ArrayData fromPaimon(InternalArray array, ArrayType arrayType) {

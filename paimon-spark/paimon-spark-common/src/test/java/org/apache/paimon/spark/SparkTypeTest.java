@@ -65,7 +65,8 @@ public class SparkTypeTest {
                     .field("smallint", DataTypes.SMALLINT())
                     .field("bigint", DataTypes.BIGINT())
                     .field("bytes", DataTypes.BYTES())
-                    .field("timestamp", DataTypes.TIMESTAMP())
+                    .field("timestamp", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE())
+                    .field("timestamp_ntz", DataTypes.TIMESTAMP())
                     .field("date", DataTypes.DATE())
                     .field("decimal", DataTypes.DECIMAL(2, 2))
                     .field("decimal2", DataTypes.DECIMAL(38, 2))
@@ -95,6 +96,7 @@ public class SparkTypeTest {
                         + "StructField(bigint,LongType,true),"
                         + "StructField(bytes,BinaryType,true),"
                         + "StructField(timestamp,TimestampType,true),"
+                        + "StructField(timestamp_ntz,TimestampNTZType,true),"
                         + "StructField(date,DateType,true),"
                         + "StructField(decimal,DecimalType(2,2),true),"
                         + "StructField(decimal2,DecimalType(38,2),true),"

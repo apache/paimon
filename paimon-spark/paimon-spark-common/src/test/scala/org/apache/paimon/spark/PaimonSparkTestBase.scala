@@ -36,6 +36,7 @@ import org.scalactic.source.Position
 import org.scalatest.Tag
 
 import java.io.File
+import java.util.TimeZone
 
 import scala.util.Random
 
@@ -99,6 +100,18 @@ class PaimonSparkTestBase
 
   protected def withTempDirs(f: (File, File) => Unit): Unit = {
     withTempDir(file1 => withTempDir(file2 => f(file1, file2)))
+  }
+
+  protected def withTimeZone(timeZone: String)(f: => Unit): Unit = {
+    withSQLConf("spark.sql.session.timeZone" -> timeZone) {
+      val originTimeZone = TimeZone.getDefault
+      try {
+        TimeZone.setDefault(TimeZone.getTimeZone(timeZone))
+        f
+      } finally {
+        TimeZone.setDefault(originTimeZone)
+      }
+    }
   }
 
   override def test(testName: String, testTags: Tag*)(testFun: => Any)(implicit
