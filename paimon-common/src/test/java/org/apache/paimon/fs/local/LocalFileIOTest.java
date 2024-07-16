@@ -27,7 +27,7 @@ import org.junit.jupiter.api.io.TempDir;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link LocalFileIO}. */
-public class LocalFleIOTest {
+public class LocalFileIOTest {
 
     @TempDir java.nio.file.Path tempDir;
 
