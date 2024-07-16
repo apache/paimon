@@ -164,7 +164,7 @@ class MigrateFileProcedureTest extends PaimonHiveTestBase {
               "d",
               "p2") :: Nil)
 
-          checkAnswer(spark.sql("SELECT * FROM paimon_tbl ORDER BY id"), Nil)
+          checkAnswer(spark.sql("SELECT * FROM hive_tbl ORDER BY id"), Nil)
         }
       }
     })
