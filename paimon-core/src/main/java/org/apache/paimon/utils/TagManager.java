@@ -389,8 +389,7 @@ public class TagManager {
         return -1;
     }
 
-    private static int findNextOrEqualTag(
-            List<Snapshot> taggedSnapshots, long targetSnapshotId) {
+    private static int findNextOrEqualTag(List<Snapshot> taggedSnapshots, long targetSnapshotId) {
         for (int i = 0; i < taggedSnapshots.size(); i++) {
             if (taggedSnapshots.get(i).id() >= targetSnapshotId) {
                 return i;
@@ -398,5 +397,4 @@ public class TagManager {
         }
         return -1;
     }
-
 }
