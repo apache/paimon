@@ -445,6 +445,13 @@ public abstract class AbstractCatalog implements Catalog {
         }
     }
 
+    protected void assertMainBranch(String branchName) {
+        if (!DEFAULT_MAIN_BRANCH.equals(branchName)) {
+            throw new UnsupportedOperationException(
+                    this.getClass().getName() + " currently does not support table branches");
+        }
+    }
+
     private static boolean isSpecifiedSystemTable(Identifier identifier) {
         return identifier.getObjectName().contains(SYSTEM_TABLE_SPLITTER)
                 && !getOriginalIdentifierAndBranch(identifier).isPresent();
