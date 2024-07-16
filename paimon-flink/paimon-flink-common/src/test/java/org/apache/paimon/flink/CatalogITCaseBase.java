@@ -85,7 +85,7 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
                                 .collect(Collectors.joining(","))));
         tEnv.useCatalog(catalog);
 
-        sEnv = tableEnvironmentBuilder().streamingMode().checkpointIntervalMs(100).build();
+        sEnv = tableEnvironmentBuilder().streamingMode().checkpointIntervalMs(30000).build();
         sEnv.registerCatalog(catalog, tEnv.getCatalog(catalog).get());
         sEnv.useCatalog(catalog);
 
