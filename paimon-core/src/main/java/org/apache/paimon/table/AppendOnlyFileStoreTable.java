@@ -65,11 +65,6 @@ class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public FileStoreTable copy(TableSchema newTableSchema) {
-        return new AppendOnlyFileStoreTable(fileIO, path, newTableSchema, catalogEnvironment);
-    }
-
-    @Override
     public AppendOnlyFileStore store() {
         if (lazyStore == null) {
             lazyStore =

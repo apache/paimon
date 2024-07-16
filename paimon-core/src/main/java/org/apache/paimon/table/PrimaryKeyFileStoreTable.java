@@ -67,11 +67,6 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public FileStoreTable copy(TableSchema newTableSchema) {
-        return new PrimaryKeyFileStoreTable(fileIO, path, newTableSchema, catalogEnvironment);
-    }
-
-    @Override
     public KeyValueFileStore store() {
         if (lazyStore == null) {
             RowType rowType = tableSchema.logicalRowType();

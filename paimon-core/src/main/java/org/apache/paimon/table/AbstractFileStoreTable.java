@@ -256,7 +256,15 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         CoreOptions.setDefaultValues(newOptions);
 
         // copy a new table schema to contain dynamic options
-        TableSchema newTableSchema = tableSchema.copy(newOptions.toMap());
+        TableSchema newTableSchema = tableSchema;
+        if (newOptions.contains(CoreOptions.BRANCH)) {
+            newTableSchema =
+                    schemaManager()
+                            .copyWithBranch(new CoreOptions(newOptions).branch())
+                            .latest()
+                            .get();
+        }
+        newTableSchema = newTableSchema.copy(newOptions.toMap());
 
         if (tryTimeTravel) {
             // see if merged options contain time travel option
@@ -283,6 +291,13 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         } else {
             return this;
         }
+    }
+
+    @Override
+    public FileStoreTable copy(TableSchema newTableSchema) {
+        return newTableSchema.primaryKeys().isEmpty()
+                ? new AppendOnlyFileStoreTable(fileIO, path, newTableSchema, catalogEnvironment)
+                : new PrimaryKeyFileStoreTable(fileIO, path, newTableSchema, catalogEnvironment);
     }
 
     protected SchemaManager schemaManager() {
