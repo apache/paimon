@@ -39,6 +39,10 @@ public class RoaringBitmap32 {
         this.roaringBitmap = new RoaringBitmap();
     }
 
+    public RoaringBitmap32(RoaringBitmap roaringBitmap) {
+        this.roaringBitmap = roaringBitmap;
+    }
+
     public void add(int x) {
         roaringBitmap.add(x);
     }
@@ -106,5 +110,13 @@ public class RoaringBitmap32 {
             roaringBitmap32.add(ele);
         }
         return roaringBitmap32;
+    }
+
+    public static RoaringBitmap32 and(final RoaringBitmap32 x1, final RoaringBitmap32 x2) {
+        return new RoaringBitmap32(RoaringBitmap.and(x1.roaringBitmap, x2.roaringBitmap));
+    }
+
+    public static RoaringBitmap32 or(final RoaringBitmap32 x1, final RoaringBitmap32 x2) {
+        return new RoaringBitmap32(RoaringBitmap.or(x1.roaringBitmap, x2.roaringBitmap));
     }
 }
