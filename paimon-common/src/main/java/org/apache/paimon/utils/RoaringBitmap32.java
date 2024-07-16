@@ -40,7 +40,7 @@ public class RoaringBitmap32 {
         this.roaringBitmap = new RoaringBitmap();
     }
 
-    public RoaringBitmap32(RoaringBitmap roaringBitmap) {
+    private RoaringBitmap32(RoaringBitmap roaringBitmap) {
         this.roaringBitmap = roaringBitmap;
     }
 
