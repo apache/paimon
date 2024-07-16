@@ -26,6 +26,7 @@ import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Iterator;
 import java.util.Objects;
 
 /** A compressed bitmap for 32-bit integer. */
@@ -103,6 +104,19 @@ public class RoaringBitmap32 {
         roaringBitmap.deserialize(ByteBuffer.wrap(rbmBytes));
     }
 
+    public void flip(final long rangeStart, final long rangeEnd) {
+        roaringBitmap.flip(rangeStart, rangeEnd);
+    }
+
+    public Iterator<Integer> iterator() {
+        return roaringBitmap.iterator();
+    }
+
+    @Override
+    public String toString() {
+        return roaringBitmap.toString();
+    }
+
     @VisibleForTesting
     public static RoaringBitmap32 bitmapOf(int... dat) {
         RoaringBitmap32 roaringBitmap32 = new RoaringBitmap32();
@@ -118,5 +132,21 @@ public class RoaringBitmap32 {
 
     public static RoaringBitmap32 or(final RoaringBitmap32 x1, final RoaringBitmap32 x2) {
         return new RoaringBitmap32(RoaringBitmap.or(x1.roaringBitmap, x2.roaringBitmap));
+    }
+
+    public static RoaringBitmap32 or(Iterator<RoaringBitmap32> iterator) {
+        return new RoaringBitmap32(
+                RoaringBitmap.or(
+                        new Iterator<RoaringBitmap>() {
+                            @Override
+                            public boolean hasNext() {
+                                return iterator.hasNext();
+                            }
+
+                            @Override
+                            public RoaringBitmap next() {
+                                return iterator.next().roaringBitmap;
+                            }
+                        }));
     }
 }
