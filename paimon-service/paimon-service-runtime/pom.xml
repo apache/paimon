@@ -25,7 +25,7 @@ under the License.
     <parent>
         <groupId>org.apache.paimon</groupId>
         <artifactId>paimon-service</artifactId>
-        <version>0.8-SNAPSHOT</version>
+        <version>0.8.1</version>
     </parent>
 
     <artifactId>paimon-service-runtime</artifactId>
