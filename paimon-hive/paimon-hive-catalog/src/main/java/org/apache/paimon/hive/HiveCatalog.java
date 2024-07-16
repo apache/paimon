@@ -93,7 +93,6 @@ import static org.apache.paimon.hive.HiveCatalogOptions.IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalogOptions.LOCATION_IN_PROPERTIES;
 import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
-import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
 
@@ -407,13 +406,6 @@ public class HiveCatalog extends AbstractCatalog {
             throws TableNotExistException {
         assertMainBranch(branchName);
         return getDataTableSchema(identifier);
-    }
-
-    private void assertMainBranch(String branchName) {
-        if (!DEFAULT_MAIN_BRANCH.equals(branchName)) {
-            throw new UnsupportedOperationException(
-                    "HiveCatalog currently does not support table branches");
-        }
     }
 
     private TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
