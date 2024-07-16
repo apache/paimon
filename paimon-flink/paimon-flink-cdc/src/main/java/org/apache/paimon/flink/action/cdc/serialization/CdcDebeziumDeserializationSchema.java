@@ -20,8 +20,8 @@ package org.apache.paimon.flink.action.cdc.serialization;
 
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 
-import com.ververica.cdc.debezium.DebeziumDeserializationSchema;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.cdc.debezium.DebeziumDeserializationSchema;
 import org.apache.flink.util.Collector;
 import org.apache.kafka.connect.json.JsonConverter;
 import org.apache.kafka.connect.json.JsonConverterConfig;
