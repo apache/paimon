@@ -188,14 +188,38 @@ public class AvroSchemaConverter {
                 return nullable ? nullableSchema(record) : record;
             case MULTISET:
             case MAP:
-                Schema map =
-                        SchemaBuilder.builder()
-                                .map()
-                                .values(
-                                        convertToSchema(
-                                                extractValueTypeToAvroMap(dataType),
-                                                rowName,
-                                                rowNameMapping));
+                DataType keyType = extractKeyTypeToAvroMap(dataType);
+                DataType valueType = extractValueTypeToAvroMap(dataType);
+                Schema map;
+                if (isArrayMap(dataType)) {
+                    map =
+                            SchemaBuilder.builder()
+                                    .map()
+                                    .values(convertToSchema(valueType, rowName, rowNameMapping));
+                } else {
+                    String mapRowName = rowName + "_kv";
+                    SchemaBuilder.GenericDefault<Schema> kvBuilder =
+                            SchemaBuilder.builder()
+                                    .record(mapRowName)
+                                    .fields()
+                                    .name("key")
+                                    .type(convertToSchema(keyType, mapRowName, rowNameMapping))
+                                    .noDefault()
+                                    .name("value")
+                                    .type(convertToSchema(valueType, mapRowName, rowNameMapping));
+                    if (valueType.isNullable()) {
+                        map =
+                                SchemaBuilder.builder()
+                                        .array()
+                                        .items(kvBuilder.withDefault(null).endRecord());
+                    } else {
+                        map =
+                                SchemaBuilder.builder()
+                                        .array()
+                                        .items(kvBuilder.noDefault().endRecord());
+                    }
+                    map = LogicalMap.get().addToSchema(map);
+                }
                 return nullable ? nullableSchema(map) : map;
             case ARRAY:
                 ArrayType arrayType = (ArrayType) dataType;
@@ -214,26 +238,29 @@ public class AvroSchemaConverter {
         }
     }
 
-    public static DataType extractValueTypeToAvroMap(DataType type) {
-        DataType keyType;
-        DataType valueType;
+    public static boolean isArrayMap(DataType type) {
+        DataType keyType = extractKeyTypeToAvroMap(type);
+        return keyType.getTypeRoot() == DataTypeRoot.VARCHAR
+                || keyType.getTypeRoot() == DataTypeRoot.CHAR;
+    }
+
+    public static DataType extractKeyTypeToAvroMap(DataType type) {
         if (type instanceof MapType) {
             MapType mapType = (MapType) type;
-            keyType = mapType.getKeyType();
-            valueType = mapType.getValueType();
+            return mapType.getKeyType();
         } else {
             MultisetType multisetType = (MultisetType) type;
-            keyType = multisetType.getElementType();
-            valueType = new IntType();
+            return multisetType.getElementType();
         }
-        if (keyType.getTypeRoot() != DataTypeRoot.VARCHAR
-                && keyType.getTypeRoot() != DataTypeRoot.CHAR) {
-            throw new UnsupportedOperationException(
-                    "Avro format doesn't support non-string as key type of map. "
-                            + "The key type is: "
-                            + keyType.asSQLString());
+    }
+
+    public static DataType extractValueTypeToAvroMap(DataType type) {
+        if (type instanceof MapType) {
+            MapType mapType = (MapType) type;
+            return mapType.getValueType();
+        } else {
+            return new IntType();
         }
-        return valueType;
     }
 
     /** Returns schema with nullable true. */
