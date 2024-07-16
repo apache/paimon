@@ -31,7 +31,7 @@ import java.util.Set;
  * overriding mysql conf file, i.e. my.cnf.
  *
  * <p>Copied from <a
- * href="https://github.com/ververica/flink-cdc-connectors/blob/master/flink-connector-mysql-cdc/src/test/java/com/ververica/cdc/connectors/mysql/testutils/MySqlContainer.java">ververica
+ * href="https://github.com/apache/flink-cdc/blob/master/flink-cdc-connect/flink-cdc-source-connectors/flink-connector-mysql-cdc/src/test/java/org/apache/flink/cdc/connectors/mysql/testutils/MySqlContainer.java">flink-cdc
  * / flink-cdc-connectors</a>.
  */
 @SuppressWarnings("rawtypes")

@@ -31,7 +31,8 @@ services:
       - /tmp/paimon-e2e-tests-jars:/jars
     entrypoint: >
       /bin/bash -c "
-      cp /jars/paimon-flink.jar /jars/paimon-flink-action.jar /jars/bundled-hadoop.jar /jars/mysql-cdc.jar
+      cp /jars/paimon-flink.jar /jars/paimon-flink-action.jar /jars/bundled-hadoop.jar 
+      /jars/mysql-cdc.jar /jars/mysql-connector-java.jar
       /jars/flink-sql-connector-kafka.jar /jars/flink-sql-connector-hive.jar /opt/flink/lib ;
       echo 'See FLINK-31659 for why we need the following two steps' ;
       mv /opt/flink/opt/flink-table-planner*.jar /opt/flink/lib/ ;
@@ -54,7 +55,8 @@ services:
       - /tmp/paimon-e2e-tests-jars:/jars
     entrypoint: >
       /bin/bash -c "
-      cp /jars/paimon-flink.jar /jars/paimon-flink-action.jar /jars/bundled-hadoop.jar /jars/mysql-cdc.jar
+      cp /jars/paimon-flink.jar /jars/paimon-flink-action.jar /jars/bundled-hadoop.jar 
+      /jars/mysql-cdc.jar /jars/mysql-connector-java.jar
       /jars/flink-sql-connector-kafka.jar /jars/flink-sql-connector-hive.jar /opt/flink/lib ;
       echo 'See FLINK-31659 for why we need the following two steps' ;
       mv /opt/flink/opt/flink-table-planner*.jar /opt/flink/lib/ ;
