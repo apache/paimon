@@ -68,6 +68,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiConsumer;
@@ -241,10 +242,10 @@ public abstract class AbstractFlinkTableFactory
 
         Map<String, String> dynamicOptions = getDynamicTableConfigOptions(context);
         dynamicOptions.forEach(
-                (key, value) -> {
-                    if (origin.getOptions().get(key) == null
-                            || !origin.getOptions().get(key).equals(value)) {
-                        SchemaManager.checkAlterTableOption(key);
+                (key, newValue) -> {
+                    String oldValue = origin.getOptions().get(key);
+                    if (!Objects.equals(oldValue, newValue)) {
+                        SchemaManager.checkAlterTableOption(key, oldValue, newValue, true);
                     }
                 });
         Map<String, String> newOptions = new HashMap<>();
