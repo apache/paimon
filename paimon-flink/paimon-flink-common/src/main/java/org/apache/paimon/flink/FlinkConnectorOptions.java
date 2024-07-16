@@ -357,25 +357,6 @@ public class FlinkConnectorOptions {
                             "You can specify time interval for partition, for example, "
                                     + "daily partition is '1 d', hourly partition is '1 h'.");
 
-    public static final ConfigOption<String> PARTITION_MARK_DONE_ACTION =
-            key("partition.mark-done-action")
-                    .stringType()
-                    .defaultValue("success-file")
-                    .withDescription(
-                            Description.builder()
-                                    .text(
-                                            "Action to mark a partition done is to notify the downstream application that the partition"
-                                                    + " has finished writing, the partition is ready to be read.")
-                                    .linebreak()
-                                    .text("1. 'success-file': add '_success' file to directory.")
-                                    .linebreak()
-                                    .text(
-                                            "2. 'done-partition': add 'xxx.done' partition to metastore.")
-                                    .linebreak()
-                                    .text(
-                                            "Both can be configured at the same time: 'done-partition,success-file'.")
-                                    .build());
-
     public static final ConfigOption<Boolean> PARTITION_MARK_DONE_WHEN_END_INPUT =
             ConfigOptions.key("partition.end-input-to-done")
                     .booleanType()

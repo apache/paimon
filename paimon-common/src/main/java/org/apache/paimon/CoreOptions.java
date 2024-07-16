@@ -1033,6 +1033,25 @@ public class CoreOptions implements Serializable {
                             "Parameter string for the constructor of class #. "
                                     + "Callback class should parse the parameter by itself.");
 
+    public static final ConfigOption<String> PARTITION_MARK_DONE_ACTION =
+            key("partition.mark-done-action")
+                    .stringType()
+                    .defaultValue("success-file")
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "Action to mark a partition done is to notify the downstream application that the partition"
+                                                    + " has finished writing, the partition is ready to be read.")
+                                    .linebreak()
+                                    .text("1. 'success-file': add '_success' file to directory.")
+                                    .linebreak()
+                                    .text(
+                                            "2. 'done-partition': add 'xxx.done' partition to metastore.")
+                                    .linebreak()
+                                    .text(
+                                            "Both can be configured at the same time: 'done-partition,success-file'.")
+                                    .build());
+
     public static final ConfigOption<Boolean> METASTORE_PARTITIONED_TABLE =
             key("metastore.partitioned-table")
                     .booleanType()

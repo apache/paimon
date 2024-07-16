@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink.partition;
+package org.apache.paimon.partition.actions;
 
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.metastore.MetastoreClient;
@@ -28,6 +28,7 @@ import static org.apache.paimon.utils.PartitionPathUtils.extractPartitionSpecFro
 
 /** A {@link PartitionMarkDoneAction} which add mark "PartitionEventType.LOAD_DONE". */
 public class MarkPartitionDoneEventAction implements PartitionMarkDoneAction {
+
     private final MetastoreClient metastoreClient;
 
     public MarkPartitionDoneEventAction(MetastoreClient metastoreClient) {

@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink.partition;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.metastore.MetastoreClient;
+import org.apache.paimon.partition.actions.AddDonePartitionAction;
 
 import org.junit.jupiter.api.Test;
 

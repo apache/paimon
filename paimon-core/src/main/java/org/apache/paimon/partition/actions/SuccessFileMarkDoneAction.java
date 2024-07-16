@@ -16,10 +16,16 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink.partition;
+package org.apache.paimon.partition.actions;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.partition.file.SuccessFile;
+
+import javax.annotation.Nullable;
+
+import java.io.FileNotFoundException;
+import java.io.IOException;
 
 /** A {@link PartitionMarkDoneAction} which create "_SUCCESS" file. */
 public class SuccessFileMarkDoneAction implements PartitionMarkDoneAction {
@@ -47,6 +53,16 @@ public class SuccessFileMarkDoneAction implements PartitionMarkDoneAction {
             successFile = successFile.updateModificationTime(currentTime);
         }
         fileIO.overwriteFileUtf8(successPath, successFile.toJson());
+    }
+
+    @Nullable
+    public static SuccessFile safelyFromPath(FileIO fileIO, Path path) throws IOException {
+        try {
+            String json = fileIO.readFileUtf8(path);
+            return SuccessFile.fromJson(json);
+        } catch (FileNotFoundException e) {
+            return null;
+        }
     }
 
     @Override

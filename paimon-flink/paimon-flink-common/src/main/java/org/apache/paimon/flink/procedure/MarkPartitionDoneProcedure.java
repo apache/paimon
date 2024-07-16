@@ -21,7 +21,7 @@ package org.apache.paimon.flink.procedure;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.sink.partition.PartitionMarkDoneAction;
+import org.apache.paimon.partition.actions.PartitionMarkDoneAction;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.IOUtils;
