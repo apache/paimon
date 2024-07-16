@@ -330,3 +330,11 @@ All Spark's data types are available in package `org.apache.spark.sql.types`.
     </tr>
     </tbody>
 </table>
+
+{{< hint warning >}}
+Due to the previous design, in Spark3.3 and below, Paimon will map both Paimon's TimestampType and LocalZonedTimestamp to Spark's TimestampType, and only correctly handle with TimestampType.
+
+Therefore, when using Spark3.3 and below, reads Paimon table with LocalZonedTimestamp type written by other engines, such as Flink, the query result of LocalZonedTimestamp type will have time zone offset, which needs to be adjusted manually.
+
+When using Spark3.4 and above, all timestamp types can be parsed correctly.
+{{< /hint >}}

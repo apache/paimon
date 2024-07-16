@@ -279,6 +279,7 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
         sql(
           s"INSERT INTO paimon_tbl VALUES (timestamp'2024-01-01 00:00:00', timestamp_ntz'2024-01-01 00:00:00')")
 
+        // read by spark
         checkAnswer(
           sql(s"SELECT ts, ts_ntz FROM paimon_tbl"),
           Row(
@@ -288,8 +289,29 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
           )
         )
 
+        // read by table api
+        // Due to previous design, read timestamp ltz type with spark 3.3 and below will cause problems,
+        // skip testing it
+        if (gteqSpark3_4) {
+          val table = catalog.getTable(identifier)
+          val builder = table.newReadBuilder.withProjection(Array[Int](0, 1))
+          val splits = builder.newScan().plan().splits()
+          builder.newRead
+            .createReader(splits)
+            .forEachRemaining(
+              r => {
+                Assertions.assertEquals(
+                  Timestamp.valueOf("2023-12-31 16:00:00"),
+                  r.getTimestamp(0, 6).toSQLTimestamp)
+                Assertions.assertEquals(
+                  Timestamp.valueOf("2024-01-01 00:00:00").toLocalDateTime,
+                  r.getTimestamp(1, 6).toLocalDateTime)
+              })
+        }
+
         // change time zone to UTC
         withTimeZone("UTC") {
+          // read by spark
           checkAnswer(
             sql(s"SELECT ts, ts_ntz FROM paimon_tbl"),
             Row(
@@ -301,6 +323,26 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
               else Timestamp.valueOf("2024-01-01 00:00:00")
             )
           )
+
+          // read by table api
+          // Due to previous design, read timestamp ltz type with spark 3.3 and below will cause problems,
+          // skip testing it
+          if (gteqSpark3_4) {
+            val table = catalog.getTable(identifier)
+            val builder = table.newReadBuilder.withProjection(Array[Int](0, 1))
+            val splits = builder.newScan().plan().splits()
+            builder.newRead
+              .createReader(splits)
+              .forEachRemaining(
+                r => {
+                  Assertions.assertEquals(
+                    Timestamp.valueOf("2023-12-31 16:00:00"),
+                    r.getTimestamp(0, 6).toSQLTimestamp)
+                  Assertions.assertEquals(
+                    Timestamp.valueOf("2024-01-01 00:00:00").toLocalDateTime,
+                    r.getTimestamp(1, 6).toLocalDateTime)
+                })
+          }
         }
       }
     } finally {
