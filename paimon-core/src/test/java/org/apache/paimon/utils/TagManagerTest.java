@@ -41,12 +41,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.operation.FileStoreTestUtils.commitData;
 import static org.apache.paimon.operation.FileStoreTestUtils.partitionedData;
@@ -129,6 +131,25 @@ public class TagManagerTest {
                 tagJson.contains("tagCreateTime") && tagJson.contains("tagTimeRetained"));
         Assertions.assertEquals(tag, Tag.fromJson(tagJson));
         assertThat(tags.get(0).getValue()).contains("tag");
+    }
+
+    @Test
+    public void testOverlappedSnapshots() {
+        SnapshotManagerTest snapshotManagerTest = new SnapshotManagerTest();
+        List<Snapshot> taggedSnapshot = new ArrayList<>();
+        long millis = System.currentTimeMillis();
+        long[] snapshotId = new long[] {7, 9, 11, 12};
+        for (long id : snapshotId) {
+            taggedSnapshot.add(snapshotManagerTest.createSnapshotWithMillis(id, millis));
+        }
+
+        int beginInclusive = 10, endExclusive = 15;
+        // overlapped snapshot is [11,12]
+        List<Snapshot> overlappedSnapshots =
+                TagManager.findOverlappedSnapshots(taggedSnapshot, beginInclusive, endExclusive);
+        List<Long> overlappedIds =
+                overlappedSnapshots.stream().map(Snapshot::id).collect(Collectors.toList());
+        assertThat(overlappedIds).containsExactly(11L, 12L);
     }
 
     private TestFileStore createStore(TestKeyValueGenerator.GeneratorMode mode, int buckets)
