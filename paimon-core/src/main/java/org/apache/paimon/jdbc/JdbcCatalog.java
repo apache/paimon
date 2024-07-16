@@ -57,6 +57,7 @@ import static org.apache.paimon.jdbc.JdbcCatalogLock.checkMaxSleep;
 import static org.apache.paimon.jdbc.JdbcUtils.execute;
 import static org.apache.paimon.jdbc.JdbcUtils.insertProperties;
 import static org.apache.paimon.jdbc.JdbcUtils.updateTable;
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 
 /* This file is based on source code from the Iceberg Project (http://iceberg.apache.org/), licensed by the Apache
  * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
@@ -308,8 +309,10 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected void alterTableImpl(Identifier identifier, List<SchemaChange> changes)
+    protected void alterTableImpl(
+            Identifier identifier, String branchName, List<SchemaChange> changes)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
+        assertMainBranch(branchName);
         if (!tableExists(identifier)) {
             throw new RuntimeException("Table is not exists " + identifier.getFullName());
         }
@@ -318,7 +321,9 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
+    protected TableSchema getDataTableSchema(Identifier identifier, String branchName)
+            throws TableNotExistException {
+        assertMainBranch(branchName);
         if (!tableExists(identifier)) {
             throw new TableNotExistException(identifier);
         }
@@ -327,6 +332,13 @@ public class JdbcCatalog extends AbstractCatalog {
                 .latest()
                 .orElseThrow(
                         () -> new RuntimeException("There is no paimon table in " + tableLocation));
+    }
+
+    private void assertMainBranch(String branchName) {
+        if (!DEFAULT_MAIN_BRANCH.equals(branchName)) {
+            throw new UnsupportedOperationException(
+                    "JdbcCatalog currently does not support table branches");
+        }
     }
 
     @Override

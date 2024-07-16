@@ -38,6 +38,7 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.system.SystemTableLoader;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.Nullable;
@@ -57,6 +58,7 @@ import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Common implementation of {@link Catalog}. */
@@ -218,7 +220,9 @@ public abstract class AbstractCatalog implements Catalog {
     @Override
     public void dropTable(Identifier identifier, boolean ignoreIfNotExists)
             throws TableNotExistException {
+        checkNotBranch(identifier, "dropTable");
         checkNotSystemTable(identifier, "dropTable");
+
         if (!tableExists(identifier)) {
             if (ignoreIfNotExists) {
                 return;
@@ -234,6 +238,7 @@ public abstract class AbstractCatalog implements Catalog {
     @Override
     public void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
             throws TableAlreadyExistException, DatabaseNotExistException {
+        checkNotBranch(identifier, "createTable");
         checkNotSystemTable(identifier, "createTable");
         validateIdentifierNameCaseInsensitive(identifier);
         validateFieldNameCaseInsensitive(schema.rowType().getFieldNames());
@@ -260,6 +265,8 @@ public abstract class AbstractCatalog implements Catalog {
     @Override
     public void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)
             throws TableNotExistException, TableAlreadyExistException {
+        checkNotBranch(fromTable, "renameTable");
+        checkNotBranch(toTable, "renameTable");
         checkNotSystemTable(fromTable, "renameTable");
         checkNotSystemTable(toTable, "renameTable");
         validateIdentifierNameCaseInsensitive(toTable);
@@ -288,6 +295,14 @@ public abstract class AbstractCatalog implements Catalog {
         validateIdentifierNameCaseInsensitive(identifier);
         validateFieldNameCaseInsensitiveInSchemaChange(changes);
 
+        Optional<Pair<Identifier, String>> optionalBranchName =
+                getOriginalIdentifierAndBranch(identifier);
+        String branchName = DEFAULT_MAIN_BRANCH;
+        if (optionalBranchName.isPresent()) {
+            identifier = optionalBranchName.get().getLeft();
+            branchName = optionalBranchName.get().getRight();
+        }
+
         if (!tableExists(identifier)) {
             if (ignoreIfNotExists) {
                 return;
@@ -295,10 +310,11 @@ public abstract class AbstractCatalog implements Catalog {
             throw new TableNotExistException(identifier);
         }
 
-        alterTableImpl(identifier, changes);
+        alterTableImpl(identifier, branchName, changes);
     }
 
-    protected abstract void alterTableImpl(Identifier identifier, List<SchemaChange> changes)
+    protected abstract void alterTableImpl(
+            Identifier identifier, String branchName, List<SchemaChange> changes)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException;
 
     @Nullable
@@ -344,7 +360,15 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     private FileStoreTable getDataTable(Identifier identifier) throws TableNotExistException {
-        TableSchema tableSchema = getDataTableSchema(identifier);
+        Optional<Pair<Identifier, String>> optionalBranchName =
+                getOriginalIdentifierAndBranch(identifier);
+        String branch = DEFAULT_MAIN_BRANCH;
+        if (optionalBranchName.isPresent()) {
+            identifier = optionalBranchName.get().getLeft();
+            branch = optionalBranchName.get().getRight();
+        }
+
+        TableSchema tableSchema = getDataTableSchema(identifier, branch);
         return FileStoreTableFactory.create(
                 fileIO,
                 getDataTableLocation(identifier),
@@ -384,7 +408,7 @@ public abstract class AbstractCatalog implements Catalog {
         }
     }
 
-    protected abstract TableSchema getDataTableSchema(Identifier identifier)
+    protected abstract TableSchema getDataTableSchema(Identifier identifier, String branchName)
             throws TableNotExistException;
 
     @VisibleForTesting
@@ -392,8 +416,38 @@ public abstract class AbstractCatalog implements Catalog {
         return new Path(newDatabasePath(identifier.getDatabaseName()), identifier.getObjectName());
     }
 
+    private static Optional<Pair<Identifier, String>> getOriginalIdentifierAndBranch(
+            Identifier identifier) {
+        String tableName = identifier.getObjectName();
+        if (tableName.contains(BRANCH_PREFIX)) {
+            int idx = tableName.indexOf(BRANCH_PREFIX);
+            String branchName = tableName.substring(idx + BRANCH_PREFIX.length());
+            if (StringUtils.isNullOrWhitespaceOnly(branchName)) {
+                return Optional.empty();
+            } else {
+                return Optional.of(
+                        Pair.of(
+                                Identifier.create(
+                                        identifier.getDatabaseName(), tableName.substring(0, idx)),
+                                branchName));
+            }
+        }
+        return Optional.empty();
+    }
+
+    protected void checkNotBranch(Identifier identifier, String method) {
+        if (getOriginalIdentifierAndBranch(identifier).isPresent()) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Cannot '%s' for branch table '%s', "
+                                    + "please modify the table with the default branch.",
+                            method, identifier));
+        }
+    }
+
     private static boolean isSpecifiedSystemTable(Identifier identifier) {
-        return identifier.getObjectName().contains(SYSTEM_TABLE_SPLITTER);
+        return identifier.getObjectName().contains(SYSTEM_TABLE_SPLITTER)
+                && !getOriginalIdentifierAndBranch(identifier).isPresent();
     }
 
     protected boolean isSystemTable(Identifier identifier) {

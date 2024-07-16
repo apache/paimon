@@ -117,10 +117,10 @@ You can read or write with branch as below.
 
 ```sql
 -- read from branch 'branch1'
-SELECT * FROM t /*+ OPTIONS('branch' = 'branch1') */;
+SELECT * FROM `t$branch_branch1`;
 
 -- write to branch 'branch1'
-INSERT INTO t /*+ OPTIONS('branch' = 'branch1') */ SELECT ...
+INSERT INTO `t$branch_branch1` SELECT ...
 ```
 
 {{< /tab >}}
