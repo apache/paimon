@@ -26,8 +26,8 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 
-import static com.google.common.base.Preconditions.checkArgument;
 import static org.apache.paimon.lookup.sort.SortLookupStoreWriter.MAGIC_NUMBER;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Footer for a sorted file. */
 public class Footer {

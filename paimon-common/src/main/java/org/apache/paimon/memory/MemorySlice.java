@@ -20,8 +20,6 @@ package org.apache.paimon.memory;
 
 import org.apache.paimon.utils.MurmurHashUtils;
 
-import static com.google.common.base.Preconditions.checkPositionIndexes;
-
 /** Slice of a {@link MemorySegment}. */
 public final class MemorySlice implements Comparable<MemorySlice> {
 
@@ -52,7 +50,6 @@ public final class MemorySlice implements Comparable<MemorySlice> {
             return this;
         }
 
-        checkPositionIndexes(index, index + length, this.length);
         return new MemorySlice(segment, offset + index, length);
     }
 

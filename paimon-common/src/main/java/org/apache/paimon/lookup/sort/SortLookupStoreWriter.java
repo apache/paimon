@@ -28,7 +28,6 @@ import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.MurmurHashUtils;
-import org.apache.paimon.utils.PureJavaCrc32C;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,6 +38,7 @@ import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.zip.CRC32;
 
 import static org.apache.paimon.lookup.sort.BlockHandle.writeBlockHandle;
 import static org.apache.paimon.memory.MemorySegmentUtils.allocateReuseBytes;
@@ -166,10 +166,10 @@ public class SortLookupStoreWriter implements LookupStoreWriter {
     }
 
     private static int crc32c(MemorySlice data, BlockCompressionType type) {
-        PureJavaCrc32C crc32c = new PureJavaCrc32C();
-        crc32c.update(data.getHeapMemory(), data.offset(), data.length());
-        crc32c.update(type.persistentId() & 0xFF);
-        return crc32c.getMaskedValue();
+        CRC32 crc = new CRC32();
+        crc.update(data.getHeapMemory(), data.offset(), data.length());
+        crc.update(type.persistentId() & 0xFF);
+        return (int) crc.getValue();
     }
 
     @Override
