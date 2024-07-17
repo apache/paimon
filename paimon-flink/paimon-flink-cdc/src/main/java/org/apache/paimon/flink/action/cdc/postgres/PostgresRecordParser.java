@@ -115,7 +115,7 @@ public class PostgresRecordParser
     @Override
     public void flatMap(CdcSourceRecord rawEvent, Collector<RichCdcMultiplexRecord> out)
             throws Exception {
-        root = objectMapper.readValue((String) rawEvent.getValue(), DebeziumEvent.class);
+        root = objectMapper.readValue(rawEvent.getBytes(), DebeziumEvent.class);
 
         currentTable = root.payload().source().get(AbstractSourceInfo.TABLE_NAME_KEY).asText();
         databaseName = root.payload().source().get(AbstractSourceInfo.DATABASE_NAME_KEY).asText();

@@ -53,7 +53,7 @@ public class CdcDebeziumTimestampExtractorITCase {
                 new CdcTimestampExtractorFactory.MysqlCdcTimestampExtractor();
 
         JsonNode data = objectMapper.readValue("{\"payload\" : {\"ts_ms\": 1}}", JsonNode.class);
-        CdcSourceRecord record = new CdcSourceRecord(data.toString());
+        CdcSourceRecord record = new CdcSourceRecord(data.toString().getBytes());
         assertThat(extractor.extractTimestamp(record)).isEqualTo(1L);
 
         // If the record is a schema-change event `ts_ms` would be null, just ignore the record.
@@ -63,7 +63,7 @@ public class CdcDebeziumTimestampExtractorITCase {
                         .getResource("mysql/debezium-event-change.json");
         assertThat(url).isNotNull();
         JsonNode schemaChangeEvent = objectMapper.readValue(url, JsonNode.class);
-        record = new CdcSourceRecord(schemaChangeEvent.toString());
+        record = new CdcSourceRecord(schemaChangeEvent.toString().getBytes());
         assertThat(extractor.extractTimestamp(record)).isEqualTo(Long.MIN_VALUE);
     }
 
@@ -73,7 +73,7 @@ public class CdcDebeziumTimestampExtractorITCase {
                 new CdcTimestampExtractorFactory.MongoDBCdcTimestampExtractor();
 
         JsonNode data = objectMapper.readValue("{\"ts_ms\": 1}", JsonNode.class);
-        CdcSourceRecord record = new CdcSourceRecord(data.toString());
+        CdcSourceRecord record = new CdcSourceRecord(data.toString().getBytes());
         assertThat(extractor.extractTimestamp(record)).isEqualTo(1L);
     }
 }

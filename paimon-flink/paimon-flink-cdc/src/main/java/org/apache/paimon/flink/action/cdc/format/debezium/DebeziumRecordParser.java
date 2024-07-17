@@ -120,7 +120,7 @@ public class DebeziumRecordParser extends RecordParser {
 
     @Override
     protected void setRoot(CdcSourceRecord record) {
-        JsonNode node = (JsonNode) record.getValue();
+        JsonNode node = record.getJsonNode();
 
         hasSchema = false;
         if (node.has(FIELD_SCHEMA)) {
