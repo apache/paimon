@@ -49,6 +49,7 @@ but only returns input records.)
 By default, Partial update can not accept delete records, you can choose one of the following solutions:
 
 - Configure 'ignore-delete' to ignore delete records.
+- Configure 'partial-update.remove-record-on-delete' to remove the whole row when receiving delete records.
 - Configure 'sequence-group's to retract partial columns.
   {{< /hint >}}
 
