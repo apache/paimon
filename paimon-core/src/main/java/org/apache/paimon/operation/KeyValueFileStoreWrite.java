@@ -29,6 +29,7 @@ import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compact.NoopCompactManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.RowCompactedSerializer;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.format.FileFormatDiscover;
@@ -39,8 +40,8 @@ import org.apache.paimon.io.FileReaderFactory;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.io.RecordLevelExpire;
+import org.apache.paimon.lookup.LookupStoreFactory;
 import org.apache.paimon.lookup.LookupStrategy;
-import org.apache.paimon.lookup.hash.HashLookupStoreFactory;
 import org.apache.paimon.mergetree.Levels;
 import org.apache.paimon.mergetree.LookupLevels;
 import org.apache.paimon.mergetree.LookupLevels.ContainsValueProcessor;
@@ -349,6 +350,11 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             throw new RuntimeException(
                     "Can not use lookup, there is no temp disk directory to use.");
         }
+        LookupStoreFactory lookupStoreFactory =
+                LookupStoreFactory.create(
+                        options,
+                        cacheManager,
+                        new RowCompactedSerializer(keyType).createSliceComparator());
         Options options = this.options.toConfiguration();
         return new LookupLevels<>(
                 levels,
@@ -357,11 +363,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 valueProcessor,
                 readerFactory::createRecordReader,
                 () -> ioManager.createChannel().getPathFile(),
-                new HashLookupStoreFactory(
-                        cacheManager,
-                        this.options.cachePageSize(),
-                        options.get(CoreOptions.LOOKUP_HASH_LOAD_FACTOR),
-                        options.get(CoreOptions.LOOKUP_CACHE_SPILL_COMPRESSION)),
+                lookupStoreFactory,
                 options.get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
                 options.get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE),
                 bfGenerator(options));

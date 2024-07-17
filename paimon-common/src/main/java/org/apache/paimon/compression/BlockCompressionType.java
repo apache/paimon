@@ -18,21 +18,31 @@
 
 package org.apache.paimon.compression;
 
-/** Implementation of {@link BlockCompressionFactory} for zstd codec. */
-public class ZstdBlockCompressionFactory implements BlockCompressionFactory {
+/** Block Compression type. */
+public enum BlockCompressionType {
+    NONE(0),
+    ZSTD(1),
+    LZ4(2),
+    LZO(3);
 
-    @Override
-    public BlockCompressionType getCompressionType() {
-        return BlockCompressionType.ZSTD;
+    private final int persistentId;
+
+    BlockCompressionType(int persistentId) {
+        this.persistentId = persistentId;
     }
 
-    @Override
-    public BlockCompressor getCompressor() {
-        return new ZstdBlockCompressor();
+    public int persistentId() {
+        return this.persistentId;
     }
 
-    @Override
-    public BlockDecompressor getDecompressor() {
-        return new ZstdBlockDecompressor();
+    public static BlockCompressionType getCompressionTypeByPersistentId(int persistentId) {
+        BlockCompressionType[] types = values();
+        for (BlockCompressionType type : types) {
+            if (type.persistentId == persistentId) {
+                return type;
+            }
+        }
+
+        throw new IllegalArgumentException("Unknown persistentId " + persistentId);
     }
 }

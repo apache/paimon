@@ -16,23 +16,20 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.compression;
+package org.apache.paimon.lookup.sort;
 
-/** Implementation of {@link BlockCompressionFactory} for zstd codec. */
-public class ZstdBlockCompressionFactory implements BlockCompressionFactory {
+import org.apache.paimon.lookup.LookupStoreFactory.Context;
 
-    @Override
-    public BlockCompressionType getCompressionType() {
-        return BlockCompressionType.ZSTD;
+/** A {@link Context} for sort store. */
+public class SortContext implements Context {
+
+    private final long fileSize;
+
+    public SortContext(long fileSize) {
+        this.fileSize = fileSize;
     }
 
-    @Override
-    public BlockCompressor getCompressor() {
-        return new ZstdBlockCompressor();
-    }
-
-    @Override
-    public BlockDecompressor getDecompressor() {
-        return new ZstdBlockDecompressor();
+    public long fileSize() {
+        return fileSize;
     }
 }

@@ -16,23 +16,29 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.compression;
+package org.apache.paimon.lookup.sort;
 
-/** Implementation of {@link BlockCompressionFactory} for zstd codec. */
-public class ZstdBlockCompressionFactory implements BlockCompressionFactory {
+/** Aligned type for block. */
+public enum BlockAlignedType {
+    ALIGNED((byte) 0),
+    UNALIGNED((byte) 1);
 
-    @Override
-    public BlockCompressionType getCompressionType() {
-        return BlockCompressionType.ZSTD;
+    private final byte b;
+
+    BlockAlignedType(byte b) {
+        this.b = b;
     }
 
-    @Override
-    public BlockCompressor getCompressor() {
-        return new ZstdBlockCompressor();
+    public byte toByte() {
+        return b;
     }
 
-    @Override
-    public BlockDecompressor getDecompressor() {
-        return new ZstdBlockDecompressor();
+    public static BlockAlignedType fromByte(byte b) {
+        for (BlockAlignedType type : BlockAlignedType.values()) {
+            if (type.toByte() == b) {
+                return type;
+            }
+        }
+        throw new IllegalStateException("Illegal block aligned type: " + b);
     }
 }
