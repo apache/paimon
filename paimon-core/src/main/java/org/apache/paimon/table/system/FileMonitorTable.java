@@ -54,6 +54,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalLong;
 
 import static org.apache.paimon.CoreOptions.SCAN_BOUNDED_WATERMARK;
 import static org.apache.paimon.CoreOptions.STREAM_SCAN_MODE;
@@ -88,6 +89,11 @@ public class FileMonitorTable implements DataTable, ReadonlyTable {
         dynamicOptions.put(STREAM_SCAN_MODE.key(), FILE_MONITOR.getValue());
         dynamicOptions.put(SCAN_BOUNDED_WATERMARK.key(), null);
         this.wrapped = wrapped.copy(dynamicOptions);
+    }
+
+    @Override
+    public OptionalLong currentSnapshot() {
+        return wrapped.currentSnapshot();
     }
 
     @Override

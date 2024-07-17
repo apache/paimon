@@ -47,6 +47,7 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 /** {@link FileStoreTable} with privilege checks. */
 public class PrivilegedFileStoreTable implements FileStoreTable {
@@ -141,6 +142,11 @@ public class PrivilegedFileStoreTable implements FileStoreTable {
     public FileStoreTable copy(Map<String, String> dynamicOptions) {
         return new PrivilegedFileStoreTable(
                 wrapped.copy(dynamicOptions), privilegeChecker, identifier);
+    }
+
+    @Override
+    public OptionalLong currentSnapshot() {
+        return wrapped.currentSnapshot();
     }
 
     @Override

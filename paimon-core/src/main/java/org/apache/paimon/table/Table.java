@@ -31,6 +31,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 /**
  * A table provides basic abstraction for table type and table scan and table read.
@@ -72,6 +73,10 @@ public interface Table extends Serializable {
 
     /** Copy this table with adding dynamic options. */
     Table copy(Map<String, String> dynamicOptions);
+
+    /** Get the current snapshot id for this table, or empty if there are no snapshots. */
+    @Experimental
+    OptionalLong currentSnapshot();
 
     /** Rollback table's state to a specific snapshot. */
     @Experimental
