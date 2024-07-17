@@ -138,8 +138,7 @@ public final class DataField implements Serializable {
             return false;
         }
         DataField field = (DataField) o;
-        return Objects.equals(id, field.id)
-                && Objects.equals(name, field.name)
+        return Objects.equals(name, field.name)
                 && Objects.equals(type, field.type)
                 && Objects.equals(description, field.description);
     }
