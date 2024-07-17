@@ -92,7 +92,9 @@ public class BloomFilterFileIndex implements FileIndexer {
 
         @Override
         public void write(Object key) {
-            filter.addHash(hashFunction.hash(key));
+            if (key != null) {
+                filter.addHash(hashFunction.hash(key));
+            }
         }
 
         @Override

@@ -303,6 +303,9 @@ public final class DataFileIndexWriter implements Closeable {
         }
 
         public void write(InternalRow row) {
+            if (row.isNullAt(position)) {
+                return;
+            }
             InternalMap internalMap = row.getMap(position);
             InternalArray keyArray = internalMap.keyArray();
             InternalArray valueArray = internalMap.valueArray();
