@@ -21,6 +21,7 @@ package org.apache.paimon.utils;
 import org.apache.paimon.fs.FileIO;
 
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
@@ -49,7 +50,7 @@ public class FileDeletionThreadPool {
                 threadNum,
                 1,
                 TimeUnit.MINUTES,
-                new LinkedBlockingQueue<>(),
+                new SynchronousQueue<>(),
                 newDaemonThreadFactory("DELETE-FILE-THREAD-POOL"));
     }
 }
