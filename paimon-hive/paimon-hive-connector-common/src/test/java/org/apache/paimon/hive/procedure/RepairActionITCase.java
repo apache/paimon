@@ -42,7 +42,7 @@ public class RepairActionITCase extends ActionITCaseBase {
 
     private static final TestHiveMetastore TEST_HIVE_METASTORE = new TestHiveMetastore();
 
-    private static final int PORT = 9082;
+    private static final int PORT = 9083;
 
     @BeforeEach
     public void beforeEach() {
