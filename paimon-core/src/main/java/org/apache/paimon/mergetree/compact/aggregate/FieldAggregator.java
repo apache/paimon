@@ -172,6 +172,11 @@ public abstract class FieldAggregator implements Serializable {
 
     public abstract Object agg(Object accumulator, Object inputField);
 
+    // for sequence group accumulate
+    public Object aggReversed(Object accumulator, Object inputField) {
+        return agg(accumulator, inputField);
+    }
+
     /** reset the aggregator to a clean start state. */
     public void reset() {}
 
