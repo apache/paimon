@@ -166,6 +166,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                     row.setField(
                             i, aggregator == null ? field : aggregator.agg(accumulator, field));
                 } else if (aggregator != null) {
+                    // we should put field as accumulator here, because
                     row.setField(i, aggregator.agg(field, accumulator));
                 }
             }
