@@ -44,12 +44,15 @@ public class FileDeletionThreadPool {
     }
 
     private static ThreadPoolExecutor createCachedThreadPool(int threadNum) {
-        return new ThreadPoolExecutor(
-                0,
-                threadNum,
-                1,
-                TimeUnit.MINUTES,
-                new LinkedBlockingQueue<>(),
-                newDaemonThreadFactory("DELETE-FILE-THREAD-POOL"));
+        ThreadPoolExecutor executor =
+                new ThreadPoolExecutor(
+                        threadNum,
+                        threadNum,
+                        1,
+                        TimeUnit.MINUTES,
+                        new LinkedBlockingQueue<>(),
+                        newDaemonThreadFactory("DELETE-FILE-THREAD-POOL"));
+        executor.allowCoreThreadTimeOut(true);
+        return executor;
     }
 }
