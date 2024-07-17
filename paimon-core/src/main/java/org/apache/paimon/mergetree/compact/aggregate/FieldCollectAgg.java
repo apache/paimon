@@ -99,7 +99,8 @@ public class FieldCollectAgg extends FieldAggregator {
 
         if (equaliser != null) {
             List<Object> collection = new ArrayList<>();
-            collectWithEqualiser(collection, accumulator);
+            // do not need to distinct accumulator
+            collect(collection, accumulator);
             collectWithEqualiser(collection, inputField);
             return new GenericArray(collection.toArray());
         } else {
