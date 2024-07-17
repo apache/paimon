@@ -145,8 +145,8 @@ public class PrivilegedFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public OptionalLong currentSnapshot() {
-        return wrapped.currentSnapshot();
+    public OptionalLong latestSnapshotId() {
+        return wrapped.latestSnapshotId();
     }
 
     @Override

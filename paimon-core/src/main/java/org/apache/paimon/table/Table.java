@@ -74,9 +74,9 @@ public interface Table extends Serializable {
     /** Copy this table with adding dynamic options. */
     Table copy(Map<String, String> dynamicOptions);
 
-    /** Get the current snapshot id for this table, or empty if there are no snapshots. */
+    /** Get the latest snapshot id for this table, or empty if there are no snapshots. */
     @Experimental
-    OptionalLong currentSnapshot();
+    OptionalLong latestSnapshotId();
 
     /** Rollback table's state to a specific snapshot. */
     @Experimental

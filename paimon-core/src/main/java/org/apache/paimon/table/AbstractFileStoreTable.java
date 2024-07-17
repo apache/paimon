@@ -109,7 +109,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public OptionalLong currentSnapshot() {
+    public OptionalLong latestSnapshotId() {
         Long snapshot = store().snapshotManager().latestSnapshotId();
         return snapshot == null ? OptionalLong.empty() : OptionalLong.of(snapshot);
     }
