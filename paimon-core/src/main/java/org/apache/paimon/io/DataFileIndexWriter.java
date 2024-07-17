@@ -43,8 +43,10 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /** Index file writer for a data file. */
 public final class DataFileIndexWriter implements Closeable {
@@ -304,18 +306,27 @@ public final class DataFileIndexWriter implements Closeable {
 
         public void write(InternalRow row) {
             if (row.isNullAt(position)) {
+                indexWritersMap.values().forEach(write -> write.writeRecord(null));
                 return;
             }
             InternalMap internalMap = row.getMap(position);
             InternalArray keyArray = internalMap.keyArray();
             InternalArray valueArray = internalMap.valueArray();
 
+            Set<String> writedKeys = new HashSet<>();
             for (int i = 0; i < keyArray.size(); i++) {
                 String key = keyArray.getString(i).toString();
                 org.apache.paimon.fileindex.FileIndexWriter writer =
                         indexWritersMap.getOrDefault(key, null);
                 if (writer != null) {
+                    writedKeys.add(key);
                     writer.writeRecord(valueElementGetter.getElementOrNull(valueArray, i));
+                }
+            }
+
+            for (Map.Entry<String, FileIndexWriter> writerEntry : indexWritersMap.entrySet()) {
+                if (!writedKeys.contains(writerEntry.getKey())) {
+                    writerEntry.getValue().writeRecord(null);
                 }
             }
         }
