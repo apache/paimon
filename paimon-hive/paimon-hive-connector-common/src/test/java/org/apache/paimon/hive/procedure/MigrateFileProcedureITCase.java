@@ -109,10 +109,10 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
         tEnv.useCatalog("HIVE");
         tEnv.getConfig().setSqlDialect(SqlDialect.HIVE);
         tEnv.executeSql(
-                "CREATE TABLE hivetable (id string) PARTITIONED BY (id2 int, id3 int) STORED AS "
+                "CREATE TABLE hivetable01 (id string) PARTITIONED BY (id2 int, id3 int) STORED AS "
                         + format);
-        tEnv.executeSql("INSERT INTO hivetable VALUES" + data(100)).await();
-        tEnv.executeSql("SHOW CREATE TABLE hivetable");
+        tEnv.executeSql("INSERT INTO hivetable01 VALUES" + data(100)).await();
+        tEnv.executeSql("SHOW CREATE TABLE hivetable01");
 
         tEnv.getConfig().setSqlDialect(SqlDialect.DEFAULT);
         tEnv.executeSql("CREATE CATALOG PAIMON_GE WITH ('type'='paimon-generic')");
@@ -126,11 +126,11 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
                         + "')");
         tEnv.useCatalog("PAIMON");
         tEnv.executeSql(
-                "CREATE TABLE paimontable (id STRING, id2 INT, id3 INT) PARTITIONED BY (id2, id3) with ('bucket' = '-1');");
+                "CREATE TABLE paimontable01 (id STRING, id2 INT, id3 INT) PARTITIONED BY (id2, id3) with ('bucket' = '-1');");
         tEnv.executeSql(
-                        "CALL sys.migrate_file('hive', 'default.hivetable', 'default.paimontable'， false)")
+                        "CALL sys.migrate_file('hive', 'default.hivetable01', 'default.paimontable01'， false)")
                 .await();
-        List<Row> r1 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
+        List<Row> r1 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable01").collect());
         Assertions.assertThat(r1.size() == 0);
     }
 
