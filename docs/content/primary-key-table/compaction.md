@@ -59,14 +59,11 @@ You can use the following strategies for your table:
 ```shell
 num-sorted-run.stop-trigger = 2147483647
 sort-spill-threshold = 10
-changelog-producer.lookup-wait = false
+lookup-wait = false
 ```
 
 This configuration will generate more files during peak write periods and gradually merge into optimal read
 performance during low write periods.
-
-In the case of `'changelog-producer' = 'lookup'`, by default, the lookup will be completed at checkpointing, which
-will block the checkpoint. So if you want an asynchronous lookup, you should also set `'changelog-producer.lookup-wait' = 'false'`.
 
 ## Dedicated compaction job
 

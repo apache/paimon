@@ -275,8 +275,7 @@ public class MultiTablesStoreCompactOperator
             }
         }
 
-        if (changelogProducer == CoreOptions.ChangelogProducer.LOOKUP
-                && !coreOptions.prepareCommitWaitCompaction()) {
+        if (coreOptions.needLookup() && !coreOptions.prepareCommitWaitCompaction()) {
             return (table, commitUser, state, ioManager, memoryPool, metricGroup) ->
                     new AsyncLookupSinkWrite(
                             table,
