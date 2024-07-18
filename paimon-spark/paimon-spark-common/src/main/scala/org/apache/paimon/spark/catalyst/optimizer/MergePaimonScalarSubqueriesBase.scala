@@ -44,7 +44,7 @@ trait MergePaimonScalarSubqueriesBase extends Rule[LogicalPlan] with PredicateHe
   def apply(plan: LogicalPlan): LogicalPlan = {
     plan match {
       // Subquery reuse needs to be enabled for this optimization.
-      case _ if !conf.getConf(SQLConf.SUBQUERY_REUSE_ENABLED) && !containPaimonScan(plan) => plan
+      case _ if !conf.getConf(SQLConf.SUBQUERY_REUSE_ENABLED) && !existsPaimonScan(plan) => plan
 
       // This rule does a whole plan traversal, no need to run on subqueries.
       case _: Subquery => plan
@@ -56,7 +56,7 @@ trait MergePaimonScalarSubqueriesBase extends Rule[LogicalPlan] with PredicateHe
     }
   }
 
-  private def containPaimonScan(plan: LogicalPlan): Boolean = {
+  private def existsPaimonScan(plan: LogicalPlan): Boolean = {
     plan.find {
       case r: DataSourceV2ScanRelation => r.scan.isInstanceOf[PaimonScan]
       case _ => false
