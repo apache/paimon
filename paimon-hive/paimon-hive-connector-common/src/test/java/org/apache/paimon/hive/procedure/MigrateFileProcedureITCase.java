@@ -130,6 +130,7 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
         tEnv.executeSql(
                         "CALL sys.migrate_file('hive', 'default.hivetable01', 'default.paimontable01', false)")
                 .await();
+        tEnv.useCatalog("HIVE");
         List<Row> r1 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable01").collect());
         Assertions.assertThat(r1.size() == 0);
     }
