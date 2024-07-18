@@ -73,6 +73,10 @@ public class IntArrayList {
         return Arrays.copyOf(array, size);
     }
 
+    public int get(int i) {
+        return array[i];
+    }
+
     public static final IntArrayList EMPTY =
             new IntArrayList(0) {
 

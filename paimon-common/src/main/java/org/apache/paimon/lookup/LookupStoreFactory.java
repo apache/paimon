@@ -19,6 +19,10 @@
 package org.apache.paimon.lookup;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.io.cache.CacheManager;
+import org.apache.paimon.lookup.hash.HashLookupStoreFactory;
+import org.apache.paimon.lookup.sort.SortLookupStoreFactory;
+import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.BloomFilter;
 
@@ -26,6 +30,7 @@ import javax.annotation.Nullable;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Comparator;
 import java.util.function.Function;
 
 /**
@@ -57,6 +62,26 @@ public interface LookupStoreFactory {
                     };
         }
         return bfGenerator;
+    }
+
+    static LookupStoreFactory create(
+            CoreOptions options, CacheManager cacheManager, Comparator<MemorySlice> keyComparator) {
+        String compression =
+                options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_SPILL_COMPRESSION);
+        switch (options.lookupLocalFileType()) {
+            case SORT:
+                return new SortLookupStoreFactory(
+                        keyComparator, cacheManager, options.cachePageSize(), compression);
+            case HASH:
+                return new HashLookupStoreFactory(
+                        cacheManager,
+                        options.cachePageSize(),
+                        options.toConfiguration().get(CoreOptions.LOOKUP_HASH_LOAD_FACTOR),
+                        compression);
+            default:
+                throw new IllegalArgumentException(
+                        "Unsupported lookup local file type: " + options.lookupLocalFileType());
+        }
     }
 
     /** Context between writer and reader. */

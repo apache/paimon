@@ -24,12 +24,22 @@ import io.airlift.compress.Decompressor;
 /** Implementation of {@link BlockCompressionFactory} for airlift compressors. */
 public class AirCompressorFactory implements BlockCompressionFactory {
 
+    private final BlockCompressionType type;
     private final Compressor internalCompressor;
     private final Decompressor internalDecompressor;
 
-    public AirCompressorFactory(Compressor internalCompressor, Decompressor internalDecompressor) {
+    public AirCompressorFactory(
+            BlockCompressionType type,
+            Compressor internalCompressor,
+            Decompressor internalDecompressor) {
+        this.type = type;
         this.internalCompressor = internalCompressor;
         this.internalDecompressor = internalDecompressor;
+    }
+
+    @Override
+    public BlockCompressionType getCompressionType() {
+        return type;
     }
 
     @Override

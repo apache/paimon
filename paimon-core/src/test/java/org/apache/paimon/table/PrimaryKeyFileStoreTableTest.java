@@ -20,6 +20,7 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
+import org.apache.paimon.CoreOptions.LookupLocalFileType;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -92,6 +93,7 @@ import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.ChangelogProducer.LOOKUP;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
+import static org.apache.paimon.CoreOptions.LOOKUP_LOCAL_FILE_TYPE;
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_EXPIRE_LIMIT;
@@ -1562,6 +1564,17 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     public void testTableQueryForLookup() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(options -> options.set(CHANGELOG_PRODUCER, LOOKUP));
+        innerTestTableQuery(table);
+    }
+
+    @Test
+    public void testTableQueryForLookupLocalSortFile() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set(CHANGELOG_PRODUCER, LOOKUP);
+                            options.set(LOOKUP_LOCAL_FILE_TYPE, LookupLocalFileType.SORT);
+                        });
         innerTestTableQuery(table);
     }
 
