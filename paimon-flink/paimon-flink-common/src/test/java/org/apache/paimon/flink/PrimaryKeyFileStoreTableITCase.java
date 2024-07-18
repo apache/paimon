@@ -487,8 +487,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                                 "'write-buffer-size' = '%s',",
                                 random.nextBoolean() ? "512kb" : "1mb")
                         + "'changelog-producer' = 'lookup',"
-                        + String.format(
-                                "'changelog-producer.lookup-wait' = '%s',", random.nextBoolean())
+                        + String.format("'lookup-wait' = '%s',", random.nextBoolean())
                         + String.format(
                                 "'deletion-vectors.enabled' = '%s'", enableDeletionVectors));
 
@@ -551,8 +550,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                                 "'write-buffer-size' = '%s',",
                                 random.nextBoolean() ? "512kb" : "1mb")
                         + "'changelog-producer' = 'lookup',"
-                        + String.format(
-                                "'changelog-producer.lookup-wait' = '%s',", random.nextBoolean())
+                        + String.format("'lookup-wait' = '%s',", random.nextBoolean())
                         + "'write-only' = 'true'");
 
         // sleep for a random amount of time to check

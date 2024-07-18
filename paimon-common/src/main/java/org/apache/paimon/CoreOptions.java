@@ -1279,16 +1279,13 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("Specifies the commit user prefix.");
 
-    public static final ConfigOption<Boolean> CHANGELOG_PRODUCER_LOOKUP_WAIT =
-            key("changelog-producer.lookup-wait")
+    public static final ConfigOption<Boolean> LOOKUP_WAIT =
+            key("lookup-wait")
                     .booleanType()
                     .defaultValue(true)
+                    .withFallbackKeys("changelog-producer.lookup-wait")
                     .withDescription(
-                            "When "
-                                    + CoreOptions.CHANGELOG_PRODUCER.key()
-                                    + " is set to "
-                                    + ChangelogProducer.LOOKUP.name()
-                                    + ", commit will wait for changelog generation by lookup.");
+                            "When need to lookup, commit will wait for compaction by lookup.");
 
     public static final ConfigOption<Boolean> METADATA_ICEBERG_COMPATIBLE =
             key("metadata.iceberg-compatible")
@@ -2036,8 +2033,11 @@ public class CoreOptions implements Serializable {
     }
 
     public boolean prepareCommitWaitCompaction() {
-        return changelogProducer() == ChangelogProducer.LOOKUP
-                && options.get(CHANGELOG_PRODUCER_LOOKUP_WAIT);
+        if (!needLookup()) {
+            return false;
+        }
+
+        return options.get(LOOKUP_WAIT);
     }
 
     public boolean metadataIcebergCompatible() {

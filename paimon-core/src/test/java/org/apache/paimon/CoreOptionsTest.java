@@ -64,4 +64,26 @@ public class CoreOptionsTest {
         assertThat(new CoreOptions(conf).startupMode())
                 .isEqualTo(CoreOptions.StartupMode.LATEST_FULL);
     }
+
+    @Test
+    public void testPrepareCommitWaitCompaction() {
+        Options conf = new Options();
+        CoreOptions options = new CoreOptions(conf);
+
+        assertThat(options.prepareCommitWaitCompaction()).isFalse();
+
+        conf.set(CoreOptions.DELETION_VECTORS_ENABLED, true);
+        assertThat(options.prepareCommitWaitCompaction()).isTrue();
+        conf.remove(CoreOptions.DELETION_VECTORS_ENABLED.key());
+
+        conf.set(CoreOptions.MERGE_ENGINE, CoreOptions.MergeEngine.FIRST_ROW);
+        assertThat(options.prepareCommitWaitCompaction()).isTrue();
+        conf.remove(CoreOptions.MERGE_ENGINE.key());
+
+        conf.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.LOOKUP);
+        assertThat(options.prepareCommitWaitCompaction()).isTrue();
+
+        conf.set(CoreOptions.LOOKUP_WAIT, false);
+        assertThat(options.prepareCommitWaitCompaction()).isFalse();
+    }
 }
