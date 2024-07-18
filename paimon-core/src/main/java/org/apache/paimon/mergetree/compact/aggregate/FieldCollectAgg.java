@@ -88,9 +88,9 @@ public class FieldCollectAgg extends FieldAggregator {
     }
 
     @Override
-    public Object aggReversed(Object accumulator, Object inputField) {
+    public Object aggReversed(Object inputField, Object accumulator) {
         // reverse back for this agg
-        return agg(inputField, accumulator);
+        return agg(accumulator, inputField);
     }
 
     @Override
