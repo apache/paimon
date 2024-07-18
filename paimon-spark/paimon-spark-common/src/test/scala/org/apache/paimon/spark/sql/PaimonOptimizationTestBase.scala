@@ -20,7 +20,7 @@ package org.apache.paimon.spark.sql
 
 import org.apache.paimon.Snapshot.CommitKind
 import org.apache.paimon.spark.PaimonSparkTestBase
-import org.apache.paimon.spark.catalyst.optimizer.MergePaimonScalarSubqueriers
+import org.apache.paimon.spark.catalyst.optimizer.MergePaimonScalarSubqueries
 
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.expressions.{Attribute, CreateNamedStruct, Literal, NamedExpression}
@@ -39,7 +39,7 @@ abstract class PaimonOptimizationTestBase extends PaimonSparkTestBase {
 
   private object Optimize extends RuleExecutor[LogicalPlan] {
     val batches: immutable.Seq[Batch] =
-      Batch("MergePaimonScalarSubqueries", Once, MergePaimonScalarSubqueriers) :: Nil
+      Batch("MergePaimonScalarSubqueries", Once, MergePaimonScalarSubqueries) :: Nil
   }
 
   test("Paimon Optimization: merge scalar subqueries") {
