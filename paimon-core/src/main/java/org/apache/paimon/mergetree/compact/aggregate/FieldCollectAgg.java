@@ -88,6 +88,14 @@ public class FieldCollectAgg extends FieldAggregator {
     }
 
     @Override
+    public Object aggReversed(Object accumulator, Object inputField) {
+        // we don't need to actually do the reverse here for this agg
+        // because accumulator has been distinct, just let accumulator be accumulator will speed up
+        // dinstinct process
+        return agg(accumulator, inputField);
+    }
+
+    @Override
     public Object agg(Object accumulator, Object inputField) {
         if (accumulator == null && inputField == null) {
             return null;
@@ -99,7 +107,9 @@ public class FieldCollectAgg extends FieldAggregator {
 
         if (equaliser != null) {
             List<Object> collection = new ArrayList<>();
-            collectWithEqualiser(collection, accumulator);
+            // do not need to distinct accumulator, because the accumulator is always distinct, no
+            // need to distinct it every time
+            collect(collection, accumulator);
             collectWithEqualiser(collection, inputField);
             return new GenericArray(collection.toArray());
         } else {
