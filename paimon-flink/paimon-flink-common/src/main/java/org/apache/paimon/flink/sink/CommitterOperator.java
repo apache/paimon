@@ -121,7 +121,7 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
         this.committerFactory = checkNotNull(committerFactory);
         this.committableStateManager = committableStateManager;
         this.endInputWatermark = endInputWatermark;
-        setChainingStrategy(chaining ? ChainingStrategy.ALWAYS : ChainingStrategy.NEVER);
+        setChainingStrategy(chaining ? ChainingStrategy.ALWAYS : ChainingStrategy.HEAD);
     }
 
     @Override
