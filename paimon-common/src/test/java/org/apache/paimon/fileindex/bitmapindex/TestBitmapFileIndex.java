@@ -21,6 +21,8 @@ package org.apache.paimon.fileindex.bitmapindex;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexWriter;
+import org.apache.paimon.fileindex.bitmap.BitmapFileIndex;
+import org.apache.paimon.fileindex.bitmap.BitmapIndexResultLazy;
 import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.types.IntType;

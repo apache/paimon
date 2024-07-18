@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.fileindex.bitmapindex;
+package org.apache.paimon.fileindex.bitmap;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.types.ArrayType;

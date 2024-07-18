@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.fileindex.bitmapindex;
+package org.apache.paimon.fileindex.bitmap;
 
 import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.utils.LazyField;

@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.fileindex.bitmapindex;
+package org.apache.paimon.fileindex.bitmap;
 
 import org.apache.paimon.fileindex.FileIndexer;
 import org.apache.paimon.fileindex.FileIndexerFactory;
@@ -26,7 +26,7 @@ import org.apache.paimon.types.DataType;
 /** Factory to create {@link BitmapFileIndex}. */
 public class BitmapFileIndexFactory implements FileIndexerFactory {
 
-    public static final String BITMAP_INDEX = "bitmap-index";
+    public static final String BITMAP_INDEX = "bitmap";
 
     @Override
     public String identifier() {
