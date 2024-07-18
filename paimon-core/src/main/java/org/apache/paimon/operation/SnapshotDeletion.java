@@ -49,8 +49,18 @@ public class SnapshotDeletion extends FileDeletionBase<Snapshot> {
             ManifestList manifestList,
             IndexFileHandler indexFileHandler,
             StatsFileHandler statsFileHandler,
-            boolean produceChangelog) {
-        super(fileIO, pathFactory, manifestFile, manifestList, indexFileHandler, statsFileHandler);
+            boolean produceChangelog,
+            boolean cleanEmptyDirectories,
+            int deleteFileThreadNum) {
+        super(
+                fileIO,
+                pathFactory,
+                manifestFile,
+                manifestList,
+                indexFileHandler,
+                statsFileHandler,
+                cleanEmptyDirectories,
+                deleteFileThreadNum);
         this.produceChangelog = produceChangelog;
     }
 

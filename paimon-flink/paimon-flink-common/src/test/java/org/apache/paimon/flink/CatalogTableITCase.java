@@ -742,7 +742,8 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(
-                        streamSqlIter("SELECT * FROM T /*+ OPTIONS('consumer-id'='my1') */"));
+                        streamSqlIter(
+                                "SELECT * FROM T /*+ OPTIONS('consumer-id'='my1','consumer.expiration-time'='3h') */"));
 
         batchSql("INSERT INTO T VALUES (5, 6), (7, 8)");
         assertThat(iterator.collect(2)).containsExactlyInAnyOrder(Row.of(1, 2), Row.of(3, 4));
@@ -752,6 +753,34 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         assertThat(result).hasSize(1);
         assertThat(result.get(0).getField(0)).isEqualTo("my1");
         assertThat((Long) result.get(0).getField(1)).isGreaterThanOrEqualTo(3);
+    }
+
+    @Test
+    public void testConsumerIdExpInBatchMode() {
+        batchSql("CREATE TABLE T (a INT, b INT)");
+        batchSql("INSERT INTO T VALUES (1, 2)");
+        batchSql("INSERT INTO T VALUES (3, 4)");
+        batchSql("INSERT INTO T VALUES (5, 6), (7, 8)");
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "SELECT * FROM T /*+ OPTIONS('consumer-id' = 'test-id') */ WHERE a = 1"))
+                .rootCause()
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("consumer.expiration-time should be specified when using consumer-id.");
+    }
+
+    @Test
+    public void testConsumerIdExpInStreamingMode() {
+        batchSql("CREATE TABLE T (a INT, b INT)");
+        batchSql("INSERT INTO T VALUES (1, 2)");
+        batchSql("INSERT INTO T VALUES (3, 4)");
+        assertThatThrownBy(
+                        () ->
+                                streamSqlIter(
+                                        "SELECT * FROM T /*+ OPTIONS('consumer-id'='test-id') */"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("consumer.expiration-time should be specified when using consumer-id.");
     }
 
     @Test

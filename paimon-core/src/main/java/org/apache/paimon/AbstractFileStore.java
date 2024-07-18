@@ -217,7 +217,9 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 manifestListFactory().create(),
                 newIndexFileHandler(),
                 newStatsFileHandler(),
-                options.changelogProducer() != CoreOptions.ChangelogProducer.NONE);
+                options.changelogProducer() != CoreOptions.ChangelogProducer.NONE,
+                options.cleanEmptyDirectories(),
+                options.deleteFileThreadNum());
     }
 
     @Override
@@ -228,7 +230,9 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 manifestFileFactory().create(),
                 manifestListFactory().create(),
                 newIndexFileHandler(),
-                newStatsFileHandler());
+                newStatsFileHandler(),
+                options.cleanEmptyDirectories(),
+                options.deleteFileThreadNum());
     }
 
     @Override
@@ -244,7 +248,9 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 manifestFileFactory().create(),
                 manifestListFactory().create(),
                 newIndexFileHandler(),
-                newStatsFileHandler());
+                newStatsFileHandler(),
+                options.cleanEmptyDirectories(),
+                options.deleteFileThreadNum());
     }
 
     public abstract Comparator<InternalRow> newKeyComparator();

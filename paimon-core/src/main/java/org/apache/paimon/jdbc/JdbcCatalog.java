@@ -308,8 +308,10 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected void alterTableImpl(Identifier identifier, List<SchemaChange> changes)
+    protected void alterTableImpl(
+            Identifier identifier, String branchName, List<SchemaChange> changes)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
+        assertMainBranch(branchName);
         if (!tableExists(identifier)) {
             throw new RuntimeException("Table is not exists " + identifier.getFullName());
         }
@@ -318,7 +320,9 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
+    protected TableSchema getDataTableSchema(Identifier identifier, String branchName)
+            throws TableNotExistException {
+        assertMainBranch(branchName);
         if (!tableExists(identifier)) {
             throw new TableNotExistException(identifier);
         }

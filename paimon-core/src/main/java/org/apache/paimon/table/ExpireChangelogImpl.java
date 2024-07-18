@@ -45,7 +45,6 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
     private final SnapshotManager snapshotManager;
     private final ConsumerManager consumerManager;
     private final ChangelogDeletion changelogDeletion;
-    private final boolean cleanEmptyDirectories;
     private final TagManager tagManager;
 
     private ExpireConfig expireConfig;
@@ -53,13 +52,11 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
     public ExpireChangelogImpl(
             SnapshotManager snapshotManager,
             TagManager tagManager,
-            ChangelogDeletion changelogDeletion,
-            boolean cleanEmptyDirectories) {
+            ChangelogDeletion changelogDeletion) {
         this.snapshotManager = snapshotManager;
         this.tagManager = tagManager;
         this.consumerManager =
                 new ConsumerManager(snapshotManager.fileIO(), snapshotManager.tablePath());
-        this.cleanEmptyDirectories = cleanEmptyDirectories;
         this.changelogDeletion = changelogDeletion;
         this.expireConfig = ExpireConfig.builder().build();
     }
@@ -162,9 +159,7 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
             snapshotManager.fileIO().deleteQuietly(snapshotManager.longLivedChangelogPath(id));
         }
 
-        if (cleanEmptyDirectories) {
-            changelogDeletion.cleanDataDirectories();
-        }
+        changelogDeletion.cleanEmptyDirectories();
         writeEarliestHintFile(endExclusiveId);
         return (int) (endExclusiveId - earliestId);
     }

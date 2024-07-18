@@ -75,6 +75,12 @@ public class SearchArgumentToPredicateConverterTest {
                 java.sql.Timestamp.valueOf("2022-05-17 16:25:53"),
                 DataTypes.TIMESTAMP(3),
                 Timestamp.fromSQLTimestamp(java.sql.Timestamp.valueOf("2022-05-17 16:25:53")));
+        testLiteral(
+                PredicateLeaf.Type.TIMESTAMP,
+                java.sql.Timestamp.valueOf("2022-05-17 16:25:53"),
+                DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3),
+                Timestamp.fromInstant(
+                        java.sql.Timestamp.valueOf("2022-05-17 16:25:53").toInstant()));
     }
 
     private void testLiteral(

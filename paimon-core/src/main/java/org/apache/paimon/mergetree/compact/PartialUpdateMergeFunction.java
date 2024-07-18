@@ -29,6 +29,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FieldsComparator;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.Projection;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
 
@@ -48,6 +49,7 @@ import java.util.stream.Stream;
 
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.CoreOptions.FIELDS_SEPARATOR;
+import static org.apache.paimon.CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE;
 import static org.apache.paimon.utils.InternalRowUtils.createFieldGetters;
 
 /**
@@ -63,6 +65,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     private final Map<Integer, FieldsComparator> fieldSeqComparators;
     private final boolean fieldSequenceEnabled;
     private final Map<Integer, FieldAggregator> fieldAggregators;
+    private final boolean removeRecordOnDelete;
 
     private InternalRow currentKey;
     private long latestSequenceNumber;
@@ -74,12 +77,14 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             boolean ignoreDelete,
             Map<Integer, FieldsComparator> fieldSeqComparators,
             Map<Integer, FieldAggregator> fieldAggregators,
-            boolean fieldSequenceEnabled) {
+            boolean fieldSequenceEnabled,
+            boolean removeRecordOnDelete) {
         this.getters = getters;
         this.ignoreDelete = ignoreDelete;
         this.fieldSeqComparators = fieldSeqComparators;
         this.fieldAggregators = fieldAggregators;
         this.fieldSequenceEnabled = fieldSequenceEnabled;
+        this.removeRecordOnDelete = removeRecordOnDelete;
     }
 
     @Override
@@ -103,6 +108,14 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
             if (fieldSequenceEnabled) {
                 retractWithSequenceGroup(kv);
+                return;
+            }
+
+            if (removeRecordOnDelete) {
+                if (kv.valueKind() == RowKind.DELETE) {
+                    row = null;
+                }
+                // ignore -U records
                 return;
             }
 
@@ -166,7 +179,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                     row.setField(
                             i, aggregator == null ? field : aggregator.agg(accumulator, field));
                 } else if (aggregator != null) {
-                    row.setField(i, aggregator.agg(field, accumulator));
+                    row.setField(i, aggregator.aggReversed(accumulator, field));
                 }
             }
         }
@@ -235,6 +248,9 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         if (reused == null) {
             reused = new KeyValue();
         }
+        if (removeRecordOnDelete && row == null) {
+            return null;
+        }
         return reused.replace(currentKey, latestSequenceNumber, RowKind.INSERT, row);
     }
 
@@ -255,6 +271,8 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         private final Map<Integer, FieldsComparator> fieldSeqComparators;
 
         private final Map<Integer, FieldAggregator> fieldAggregators;
+
+        private final boolean removeRecordOnDelete;
 
         private Factory(Options options, RowType rowType, List<String> primaryKeys) {
             this.ignoreDelete = options.get(CoreOptions.IGNORE_DELETE);
@@ -310,6 +328,19 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                 throw new IllegalArgumentException(
                         "Must use sequence group for aggregation functions.");
             }
+
+            removeRecordOnDelete = options.get(PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE);
+
+            Preconditions.checkState(
+                    !(removeRecordOnDelete && ignoreDelete),
+                    String.format(
+                            "%s and %s have conflicting behavior so should not be enabled at the same time.",
+                            CoreOptions.IGNORE_DELETE, PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE));
+            Preconditions.checkState(
+                    !removeRecordOnDelete || fieldSeqComparators.isEmpty(),
+                    String.format(
+                            "sequence group and %s have conflicting behavior so should not be enabled at the same time.",
+                            PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE));
         }
 
         @Override
@@ -368,14 +399,16 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                         ignoreDelete,
                         projectedSeqComparators,
                         projectedAggregators,
-                        !fieldSeqComparators.isEmpty());
+                        !fieldSeqComparators.isEmpty(),
+                        removeRecordOnDelete);
             } else {
                 return new PartialUpdateMergeFunction(
                         createFieldGetters(tableTypes),
                         ignoreDelete,
                         fieldSeqComparators,
                         fieldAggregators,
-                        !fieldSeqComparators.isEmpty());
+                        !fieldSeqComparators.isEmpty(),
+                        removeRecordOnDelete);
             }
         }
 

@@ -880,6 +880,26 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testAlterTableComment() throws Exception {
+        sql("CREATE TABLE T (a STRING, b STRING, c STRING)");
+
+        // add table comment
+        sql("ALTER TABLE T SET ('comment'='t comment')");
+        String comment = table("T").getComment();
+        assertThat(comment).isEqualTo("t comment");
+
+        // update table comment
+        sql("ALTER TABLE T SET ('comment'='t comment v2')");
+        comment = table("T").getComment();
+        assertThat(comment).isEqualTo("t comment v2");
+
+        // remove table comment
+        sql("ALTER TABLE T RESET ('comment')");
+        comment = table("T").getComment();
+        assertThat(comment).isEmpty();
+    }
+
+    @Test
     public void testAlterTableSchema() {
         sql("CREATE TABLE T (a STRING, b STRING COMMENT 'from column b')");
         List<String> result =

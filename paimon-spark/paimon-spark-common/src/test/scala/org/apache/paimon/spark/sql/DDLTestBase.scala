@@ -18,10 +18,16 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.catalog.Identifier
+import org.apache.paimon.schema.Schema
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.types.DataTypes
 
 import org.apache.spark.sql.Row
 import org.junit.jupiter.api.Assertions
+
+import java.sql.Timestamp
+import java.time.LocalDateTime
 
 abstract class DDLTestBase extends PaimonSparkTestBase {
 
@@ -180,5 +186,226 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
           )
         }
       }
+  }
+
+  test("Paimon DDL: create table with timestamp/timestamp_ntz") {
+    Seq("orc", "parquet", "avro").foreach {
+      format =>
+        Seq(true, false).foreach {
+          datetimeJava8APIEnabled =>
+            withSQLConf("spark.sql.datetime.java8API.enabled" -> datetimeJava8APIEnabled.toString) {
+              withTimeZone("Asia/Shanghai") {
+                withTable("paimon_tbl") {
+                  // Spark support create table with timestamp_ntz since 3.4
+                  if (gteqSpark3_4) {
+                    sql(s"""
+                           |CREATE TABLE paimon_tbl (id int, binary BINARY, ts timestamp, ts_ntz timestamp_ntz)
+                           |USING paimon
+                           |TBLPROPERTIES ('file.format'='$format')
+                           |""".stripMargin)
+
+                    sql(s"INSERT INTO paimon_tbl VALUES (1, binary('b'), timestamp'2024-01-01 00:00:00', timestamp_ntz'2024-01-01 00:00:00')")
+                    checkAnswer(
+                      sql(s"SELECT ts, ts_ntz FROM paimon_tbl"),
+                      Row(
+                        if (datetimeJava8APIEnabled)
+                          Timestamp.valueOf("2024-01-01 00:00:00").toInstant
+                        else Timestamp.valueOf("2024-01-01 00:00:00"),
+                        LocalDateTime.parse("2024-01-01T00:00:00")
+                      )
+                    )
+
+                    // change time zone to UTC
+                    withTimeZone("UTC") {
+                      // todo: fix with orc
+                      if (format != "orc")
+                        checkAnswer(
+                          sql(s"SELECT ts, ts_ntz FROM paimon_tbl"),
+                          Row(
+                            if (datetimeJava8APIEnabled)
+                              Timestamp.valueOf("2023-12-31 16:00:00").toInstant
+                            else Timestamp.valueOf("2023-12-31 16:00:00"),
+                            LocalDateTime.parse("2024-01-01T00:00:00")
+                          )
+                        )
+                    }
+                  } else {
+                    sql(s"""
+                           |CREATE TABLE paimon_tbl (id int, binary BINARY, ts timestamp)
+                           |USING paimon
+                           |TBLPROPERTIES ('file.format'='$format')
+                           |""".stripMargin)
+
+                    sql(s"INSERT INTO paimon_tbl VALUES (1, binary('b'), timestamp'2024-01-01 00:00:00')")
+                    checkAnswer(
+                      sql(s"SELECT ts FROM paimon_tbl"),
+                      Row(
+                        if (datetimeJava8APIEnabled)
+                          Timestamp.valueOf("2024-01-01 00:00:00").toInstant
+                        else Timestamp.valueOf("2024-01-01 00:00:00"))
+                    )
+
+                    // For Spark 3.3 and below, time zone conversion is not supported,
+                    // see TypeUtils.treatPaimonTimestampTypeAsSparkTimestampType
+                    withTimeZone("UTC") {
+                      // todo: fix with orc
+                      if (format != "orc") {
+                        checkAnswer(
+                          sql(s"SELECT ts FROM paimon_tbl"),
+                          Row(
+                            if (datetimeJava8APIEnabled)
+                              Timestamp.valueOf("2024-01-01 00:00:00").toInstant
+                            else Timestamp.valueOf("2024-01-01 00:00:00"))
+                        )
+                      }
+                    }
+                  }
+                }
+              }
+            }
+        }
+    }
+  }
+
+  test("Paimon DDL: create table with timestamp/timestamp_ntz using table API") {
+    val identifier = Identifier.create("test", "paimon_tbl")
+    try {
+      withTimeZone("Asia/Shanghai") {
+        val schema = Schema.newBuilder
+          .column("ts", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE())
+          .column("ts_ntz", DataTypes.TIMESTAMP())
+          .build
+        catalog.createTable(identifier, schema, false)
+        sql(
+          s"INSERT INTO paimon_tbl VALUES (timestamp'2024-01-01 00:00:00', timestamp_ntz'2024-01-01 00:00:00')")
+
+        // read by spark
+        checkAnswer(
+          sql(s"SELECT ts, ts_ntz FROM paimon_tbl"),
+          Row(
+            Timestamp.valueOf("2024-01-01 00:00:00"),
+            if (gteqSpark3_4) LocalDateTime.parse("2024-01-01T00:00:00")
+            else Timestamp.valueOf("2024-01-01 00:00:00")
+          )
+        )
+
+        // read by table api
+        // Due to previous design, read timestamp ltz type with spark 3.3 and below will cause problems,
+        // skip testing it
+        if (gteqSpark3_4) {
+          val table = catalog.getTable(identifier)
+          val builder = table.newReadBuilder.withProjection(Array[Int](0, 1))
+          val splits = builder.newScan().plan().splits()
+          builder.newRead
+            .createReader(splits)
+            .forEachRemaining(
+              r => {
+                Assertions.assertEquals(
+                  Timestamp.valueOf("2023-12-31 16:00:00"),
+                  r.getTimestamp(0, 6).toSQLTimestamp)
+                Assertions.assertEquals(
+                  Timestamp.valueOf("2024-01-01 00:00:00").toLocalDateTime,
+                  r.getTimestamp(1, 6).toLocalDateTime)
+              })
+        }
+
+        // change time zone to UTC
+        withTimeZone("UTC") {
+          // read by spark
+          checkAnswer(
+            sql(s"SELECT ts, ts_ntz FROM paimon_tbl"),
+            Row(
+              // For Spark 3.3 and below, time zone conversion is not supported,
+              // see TypeUtils.treatPaimonTimestampTypeAsSparkTimestampType
+              if (gteqSpark3_4) Timestamp.valueOf("2023-12-31 16:00:00")
+              else Timestamp.valueOf("2024-01-01 00:00:00"),
+              if (gteqSpark3_4) LocalDateTime.parse("2024-01-01T00:00:00")
+              else Timestamp.valueOf("2024-01-01 00:00:00")
+            )
+          )
+
+          // read by table api
+          // Due to previous design, read timestamp ltz type with spark 3.3 and below will cause problems,
+          // skip testing it
+          if (gteqSpark3_4) {
+            val table = catalog.getTable(identifier)
+            val builder = table.newReadBuilder.withProjection(Array[Int](0, 1))
+            val splits = builder.newScan().plan().splits()
+            builder.newRead
+              .createReader(splits)
+              .forEachRemaining(
+                r => {
+                  Assertions.assertEquals(
+                    Timestamp.valueOf("2023-12-31 16:00:00"),
+                    r.getTimestamp(0, 6).toSQLTimestamp)
+                  Assertions.assertEquals(
+                    Timestamp.valueOf("2024-01-01 00:00:00").toLocalDateTime,
+                    r.getTimestamp(1, 6).toLocalDateTime)
+                })
+          }
+        }
+      }
+    } finally {
+      catalog.dropTable(identifier, true)
+    }
+  }
+
+  test("Paimon DDL: select table with timestamp and timestamp_ntz with filter") {
+    Seq(true, false).foreach {
+      datetimeJava8APIEnabled =>
+        withSQLConf("spark.sql.datetime.java8API.enabled" -> datetimeJava8APIEnabled.toString) {
+          withTable("paimon_tbl") {
+            // Spark support create table with timestamp_ntz since 3.4
+            if (gteqSpark3_4) {
+              sql(s"""
+                     |CREATE TABLE paimon_tbl (ts timestamp, ts_ntz timestamp_ntz)
+                     |USING paimon
+                     |""".stripMargin)
+              sql(
+                s"INSERT INTO paimon_tbl VALUES (timestamp'2024-01-01 00:00:00', timestamp_ntz'2024-01-01 00:00:00')")
+              sql(
+                s"INSERT INTO paimon_tbl VALUES (timestamp'2024-01-02 00:00:00', timestamp_ntz'2024-01-02 00:00:00')")
+              sql(
+                s"INSERT INTO paimon_tbl VALUES (timestamp'2024-01-03 00:00:00', timestamp_ntz'2024-01-03 00:00:00')")
+
+              checkAnswer(
+                sql(s"SELECT * FROM paimon_tbl where ts_ntz = timestamp_ntz'2024-01-01 00:00:00'"),
+                Row(
+                  if (datetimeJava8APIEnabled)
+                    Timestamp.valueOf("2024-01-01 00:00:00").toInstant
+                  else Timestamp.valueOf("2024-01-01 00:00:00"),
+                  LocalDateTime.parse("2024-01-01T00:00:00")
+                )
+              )
+
+              checkAnswer(
+                sql(s"SELECT * FROM paimon_tbl where ts > timestamp'2024-01-02 00:00:00'"),
+                Row(
+                  if (datetimeJava8APIEnabled)
+                    Timestamp.valueOf("2024-01-03 00:00:00").toInstant
+                  else Timestamp.valueOf("2024-01-03 00:00:00"),
+                  LocalDateTime.parse("2024-01-03T00:00:00")
+                )
+              )
+            } else {
+              sql(s"""
+                     |CREATE TABLE paimon_tbl (ts timestamp)
+                     |USING paimon
+                     |""".stripMargin)
+              sql(s"INSERT INTO paimon_tbl VALUES (timestamp'2024-01-01 00:00:00')")
+              sql(s"INSERT INTO paimon_tbl VALUES (timestamp'2024-01-02 00:00:00')")
+              sql(s"INSERT INTO paimon_tbl VALUES (timestamp'2024-01-03 00:00:00')")
+
+              checkAnswer(
+                sql(s"SELECT * FROM paimon_tbl where ts = timestamp'2024-01-01 00:00:00'"),
+                Row(
+                  if (datetimeJava8APIEnabled)
+                    Timestamp.valueOf("2024-01-01 00:00:00").toInstant
+                  else Timestamp.valueOf("2024-01-01 00:00:00"))
+              )
+            }
+          }
+        }
+    }
   }
 }

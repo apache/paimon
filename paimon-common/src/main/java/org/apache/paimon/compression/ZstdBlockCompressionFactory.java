@@ -22,6 +22,11 @@ package org.apache.paimon.compression;
 public class ZstdBlockCompressionFactory implements BlockCompressionFactory {
 
     @Override
+    public BlockCompressionType getCompressionType() {
+        return BlockCompressionType.ZSTD;
+    }
+
+    @Override
     public BlockCompressor getCompressor() {
         return new ZstdBlockCompressor();
     }

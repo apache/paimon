@@ -68,7 +68,7 @@ public class IcebergCompatibilityTest {
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    public void testUnartitionedPrimaryKeyTable() throws Exception {
+    public void testUnPartitionedPrimaryKeyTable() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {

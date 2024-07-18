@@ -282,14 +282,19 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The maximum number of snapshots allowed to expire at a time.");
 
-    public static final ConfigOption<Boolean> SNAPSHOT_EXPIRE_CLEAN_EMPTY_DIRECTORIES =
-            key("snapshot.expire.clean-empty-directories")
+    public static final ConfigOption<Boolean> SNAPSHOT_CLEAN_EMPTY_DIRECTORIES =
+            key("snapshot.clean-empty-directories")
                     .booleanType()
-                    .defaultValue(true)
+                    .defaultValue(false)
+                    .withDeprecatedKeys("snapshot.expire.clean-empty-directories")
                     .withDescription(
-                            "Whether to try to clean empty directories when expiring snapshots. "
-                                    + "Note that trying to clean directories might throw exceptions in filesystem, "
-                                    + "but in most cases it won't cause problems.");
+                            Description.builder()
+                                    .text(
+                                            "Whether to try to clean empty directories when expiring snapshots, if enabled, please note:")
+                                    .list(
+                                            text("hdfs: may print exceptions in NameNode."),
+                                            text("oss/s3: may cause performance issue."))
+                                    .build());
 
     public static final ConfigOption<Duration> CONTINUOUS_DISCOVERY_INTERVAL =
             key("continuous.discovery-interval")
@@ -549,6 +554,14 @@ public class CoreOptions implements Serializable {
                                     + " the sequence number determines which data is the most recent.");
 
     @Immutable
+    public static final ConfigOption<Boolean> PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE =
+            key("partial-update.remove-record-on-delete")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to remove the whole row in partial-update engine when -D records are received.");
+
+    @Immutable
     public static final ConfigOption<String> ROWKIND_FIELD =
             key("rowkind.field")
                     .stringType()
@@ -796,6 +809,12 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Define partition by table options, cannot define partition on DDL and table options at the same time.");
 
+    public static final ConfigOption<LookupLocalFileType> LOOKUP_LOCAL_FILE_TYPE =
+            key("lookup.local-file-type")
+                    .enumType(LookupLocalFileType.class)
+                    .defaultValue(LookupLocalFileType.HASH)
+                    .withDescription("The local file type for lookup.");
+
     public static final ConfigOption<Float> LOOKUP_HASH_LOAD_FACTOR =
             key("lookup.hash-load-factor")
                     .floatType()
@@ -1027,6 +1046,25 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Parameter string for the constructor of class #. "
                                     + "Callback class should parse the parameter by itself.");
+
+    public static final ConfigOption<String> PARTITION_MARK_DONE_ACTION =
+            key("partition.mark-done-action")
+                    .stringType()
+                    .defaultValue("success-file")
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "Action to mark a partition done is to notify the downstream application that the partition"
+                                                    + " has finished writing, the partition is ready to be read.")
+                                    .linebreak()
+                                    .text("1. 'success-file': add '_success' file to directory.")
+                                    .linebreak()
+                                    .text(
+                                            "2. 'done-partition': add 'xxx.done' partition to metastore.")
+                                    .linebreak()
+                                    .text(
+                                            "Both can be configured at the same time: 'done-partition,success-file'.")
+                                    .build());
 
     public static final ConfigOption<Boolean> METASTORE_PARTITIONED_TABLE =
             key("metastore.partitioned-table")
@@ -1260,6 +1298,14 @@ public class CoreOptions implements Serializable {
                             "When set to true, produce Iceberg metadata after a snapshot is committed, "
                                     + "so that Iceberg readers can read Paimon's raw files.");
 
+    public static final ConfigOption<Integer> DELETE_FILE_THREAD_NUM =
+            key("delete-file.thread-num")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The maximum number of concurrent deleting files. "
+                                    + "By default is the number of processors available to the Java virtual machine.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -1480,8 +1526,13 @@ public class CoreOptions implements Serializable {
         return options.get(SNAPSHOT_EXPIRE_LIMIT);
     }
 
-    public boolean snapshotExpireCleanEmptyDirectories() {
-        return options.get(SNAPSHOT_EXPIRE_CLEAN_EMPTY_DIRECTORIES);
+    public boolean cleanEmptyDirectories() {
+        return options.get(SNAPSHOT_CLEAN_EMPTY_DIRECTORIES);
+    }
+
+    public int deleteFileThreadNum() {
+        return options.getOptional(DELETE_FILE_THREAD_NUM)
+                .orElseGet(() -> Runtime.getRuntime().availableProcessors());
     }
 
     public ExpireConfig expireConfig() {
@@ -1577,6 +1628,10 @@ public class CoreOptions implements Serializable {
 
     public int cachePageSize() {
         return (int) options.get(CACHE_PAGE_SIZE).getBytes();
+    }
+
+    public LookupLocalFileType lookupLocalFileType() {
+        return options.get(LOOKUP_LOCAL_FILE_TYPE);
     }
 
     public MemorySize lookupCacheMaxMemory() {
@@ -2557,6 +2612,32 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         PartitionExpireStrategy(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** Specifies the local file type for lookup. */
+    public enum LookupLocalFileType implements DescribedEnum {
+        SORT("sort", "Construct a sorted file for lookup."),
+
+        HASH("hash", "Construct a hash file for lookup.");
+
+        private final String value;
+
+        private final String description;
+
+        LookupLocalFileType(String value, String description) {
             this.value = value;
             this.description = description;
         }

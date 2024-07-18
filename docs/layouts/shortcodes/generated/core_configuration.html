@@ -195,6 +195,12 @@ under the License.
             <td>The TTL in rocksdb index for cross partition upsert (primary keys not contain all partition fields), this can avoid maintaining too many indexes and lead to worse and worse performance, but please note that this may also cause data duplication.</td>
         </tr>
         <tr>
+            <td><h5>delete-file.thread-num</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>The maximum number of concurrent deleting files. By default is the number of processors available to the Java virtual machine.</td>
+        </tr>
+        <tr>
             <td><h5>delete.force-produce-changelog</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -382,6 +388,12 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>The index load factor for lookup.</td>
         </tr>
         <tr>
+            <td><h5>lookup.local-file-type</h5></td>
+            <td style="word-wrap: break-word;">hash</td>
+            <td><p>Enum</p></td>
+            <td>The local file type for lookup.<br /><br />Possible values:<ul><li>"sort": Construct a sorted file for lookup.</li><li>"hash": Construct a hash file for lookup.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>manifest.compression</h5></td>
             <td style="word-wrap: break-word;">"zstd"</td>
             <td>String</td>
@@ -480,6 +492,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Turn off the dictionary encoding for all fields in parquet.</td>
         </tr>
         <tr>
+            <td><h5>partial-update.remove-record-on-delete</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to remove the whole row in partial-update engine when -D records are received.</td>
+        </tr>
+        <tr>
             <td><h5>partition</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -508,6 +526,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Duration</td>
             <td>The expiration interval of a partition. A partition will be expired if it‘s lifetime is over this value. Partition time is extracted from the partition value.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.mark-done-action</h5></td>
+            <td style="word-wrap: break-word;">"success-file"</td>
+            <td>String</td>
+            <td>Action to mark a partition done is to notify the downstream application that the partition has finished writing, the partition is ready to be read.<br />1. 'success-file': add '_success' file to directory.<br />2. 'done-partition': add 'xxx.done' partition to metastore.<br />Both can be configured at the same time: 'done-partition,success-file'.</td>
         </tr>
         <tr>
             <td><h5>partition.timestamp-formatter</h5></td>
@@ -630,10 +654,10 @@ This config option does not affect the default filesystem metastore.</td>
             <td>The time zone to parse the long watermark value to TIMESTAMP value. The default value is 'UTC', which means the watermark is defined on TIMESTAMP column or not defined. If the watermark is defined on TIMESTAMP_LTZ column, the time zone of watermark is user configured time zone, the value should be the user configured local time zone. The option value is either a full name such as 'America/Los_Angeles', or a custom timezone id such as 'GMT-08:00'.</td>
         </tr>
         <tr>
-            <td><h5>snapshot.expire.clean-empty-directories</h5></td>
-            <td style="word-wrap: break-word;">true</td>
+            <td><h5>snapshot.clean-empty-directories</h5></td>
+            <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>Whether to try to clean empty directories when expiring snapshots. Note that trying to clean directories might throw exceptions in filesystem, but in most cases it won't cause problems.</td>
+            <td>Whether to try to clean empty directories when expiring snapshots, if enabled, please note:<ul><li>hdfs: may print exceptions in NameNode.</li><li>oss/s3: may cause performance issue.</li></ul></td>
         </tr>
         <tr>
             <td><h5>snapshot.expire.execution-mode</h5></td>

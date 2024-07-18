@@ -42,6 +42,7 @@ import org.apache.paimon.types.DataTypeCasts;
 import org.apache.paimon.types.DataTypeVisitor;
 import org.apache.paimon.types.ReassignFieldId;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
@@ -67,7 +68,6 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.catalog.AbstractCatalog.DB_SUFFIX;
 import static org.apache.paimon.catalog.Identifier.UNKNOWN_DATABASE;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
-import static org.apache.paimon.utils.BranchManager.branchPath;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -189,7 +189,7 @@ public class SchemaManager implements Serializable {
                     latest().orElseThrow(
                                     () ->
                                             new Catalog.TableNotExistException(
-                                                    fromPath(tableRoot.toString(), true)));
+                                                    fromPath(branchPath(), true)));
             Map<String, String> newOptions = new HashMap<>(schema.options());
             List<DataField> newFields = new ArrayList<>(schema.fields());
             AtomicInteger highestFieldId = new AtomicInteger(schema.highestFieldId());
@@ -211,13 +211,13 @@ public class SchemaManager implements Serializable {
                     SchemaChange.Move move = addColumn.move();
                     if (newFields.stream().anyMatch(f -> f.name().equals(addColumn.fieldName()))) {
                         throw new Catalog.ColumnAlreadyExistException(
-                                fromPath(tableRoot.toString(), true), addColumn.fieldName());
+                                fromPath(branchPath(), true), addColumn.fieldName());
                     }
                     Preconditions.checkArgument(
                             addColumn.dataType().isNullable(),
                             "Column %s cannot specify NOT NULL in the %s table.",
                             addColumn.fieldName(),
-                            fromPath(tableRoot.toString(), true).getFullName());
+                            fromPath(branchPath(), true).getFullName());
                     int id = highestFieldId.incrementAndGet();
                     DataType dataType =
                             ReassignFieldId.reassign(addColumn.dataType(), highestFieldId);
@@ -248,7 +248,7 @@ public class SchemaManager implements Serializable {
                     validateNotPrimaryAndPartitionKey(schema, rename.fieldName());
                     if (newFields.stream().anyMatch(f -> f.name().equals(rename.newName()))) {
                         throw new Catalog.ColumnAlreadyExistException(
-                                fromPath(tableRoot.toString(), true), rename.fieldName());
+                                fromPath(branchPath(), true), rename.fieldName());
                     }
 
                     updateNestedColumn(
@@ -267,7 +267,7 @@ public class SchemaManager implements Serializable {
                     if (!newFields.removeIf(
                             f -> f.name().equals(((DropColumn) change).fieldName()))) {
                         throw new Catalog.ColumnNotExistException(
-                                fromPath(tableRoot.toString(), true), drop.fieldName());
+                                fromPath(branchPath(), true), drop.fieldName());
                     }
                     if (newFields.isEmpty()) {
                         throw new IllegalArgumentException("Cannot drop all fields in table");
@@ -494,7 +494,7 @@ public class SchemaManager implements Serializable {
         }
         if (!found) {
             throw new Catalog.ColumnNotExistException(
-                    fromPath(tableRoot.toString(), true), Arrays.toString(updateFieldNames));
+                    fromPath(branchPath(), true), Arrays.toString(updateFieldNames));
         }
     }
 
@@ -535,13 +535,17 @@ public class SchemaManager implements Serializable {
         }
     }
 
+    private String branchPath() {
+        return BranchManager.branchPath(tableRoot, branch);
+    }
+
     public Path schemaDirectory() {
-        return new Path(branchPath(tableRoot, branch) + "/schema");
+        return new Path(branchPath() + "/schema");
     }
 
     @VisibleForTesting
     public Path toSchemaPath(long schemaId) {
-        return new Path(branchPath(tableRoot, branch) + "/schema/" + SCHEMA_PREFIX + schemaId);
+        return new Path(branchPath() + "/schema/" + SCHEMA_PREFIX + schemaId);
     }
 
     /**

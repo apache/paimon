@@ -39,6 +39,7 @@ import org.junit.jupiter.api.Test;
 
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
@@ -71,8 +72,8 @@ public class KvQueryTableTest extends PrimaryKeyTableTestBase {
         this.query0 = table.newLocalTableQuery().withIOManager(ioManager);
         this.query1 = table.newLocalTableQuery().withIOManager(ioManager);
 
-        this.server0 = createServer(0, query0, 7777);
-        this.server1 = createServer(1, query1, 7900);
+        this.server0 = createServer(0, query0, 7700, 7799);
+        this.server1 = createServer(1, query1, 7900, 7999);
         registryServers();
 
         this.client =
@@ -86,14 +87,18 @@ public class KvQueryTableTest extends PrimaryKeyTableTestBase {
         serviceManager.resetService(PRIMARY_KEY_LOOKUP, addresses);
     }
 
-    private KvQueryServer createServer(int serverId, TableQuery query, int port) {
+    private KvQueryServer createServer(int serverId, TableQuery query, int minPort, int maxPort) {
         try {
+            List<Integer> portList = new ArrayList<>();
+            for (int p = minPort; p <= maxPort; p++) {
+                portList.add(p);
+            }
             KvQueryServer server =
                     new KvQueryServer(
                             serverId,
                             2,
                             InetAddress.getLocalHost().getHostName(),
-                            Collections.singletonList(port).iterator(),
+                            portList.iterator(),
                             1,
                             1,
                             query,
@@ -106,19 +111,27 @@ public class KvQueryTableTest extends PrimaryKeyTableTestBase {
     }
 
     @AfterEach
-    public void afterEach() {
+    public void afterEach() throws Exception {
         shutdownServers();
         if (client != null) {
-            client.shutdown();
+            client.shutdownFuture().get();
         }
     }
 
     private void shutdownServers() {
         if (server0 != null) {
-            server0.shutdown();
+            try {
+                server0.shutdownServer().get();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
         }
         if (server1 != null) {
-            server1.shutdown();
+            try {
+                server1.shutdownServer().get();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
         }
     }
 
@@ -151,8 +164,8 @@ public class KvQueryTableTest extends PrimaryKeyTableTestBase {
         innerTestServerRestart(
                 () -> {
                     shutdownServers();
-                    KvQueryTableTest.this.server0 = createServer(0, query0, 7777);
-                    KvQueryTableTest.this.server1 = createServer(1, query1, 7900);
+                    KvQueryTableTest.this.server0 = createServer(0, query0, 7700, 7799);
+                    KvQueryTableTest.this.server1 = createServer(1, query1, 7900, 7999);
                     registryServers();
                 });
     }
@@ -162,8 +175,8 @@ public class KvQueryTableTest extends PrimaryKeyTableTestBase {
         innerTestServerRestart(
                 () -> {
                     shutdownServers();
-                    KvQueryTableTest.this.server0 = createServer(0, query0, 7900);
-                    KvQueryTableTest.this.server1 = createServer(1, query1, 7777);
+                    KvQueryTableTest.this.server0 = createServer(0, query0, 7900, 7999);
+                    KvQueryTableTest.this.server1 = createServer(1, query1, 7700, 7799);
                     registryServers();
                 });
     }
@@ -173,8 +186,8 @@ public class KvQueryTableTest extends PrimaryKeyTableTestBase {
         innerTestServerRestart(
                 () -> {
                     shutdownServers();
-                    KvQueryTableTest.this.server0 = createServer(0, query0, 7778);
-                    KvQueryTableTest.this.server1 = createServer(1, query1, 7901);
+                    KvQueryTableTest.this.server0 = createServer(0, query0, 7700, 7799);
+                    KvQueryTableTest.this.server1 = createServer(1, query1, 7900, 7999);
                     registryServers();
                 });
     }

@@ -47,21 +47,18 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
     private final ConsumerManager consumerManager;
     private final SnapshotDeletion snapshotDeletion;
     private final TagManager tagManager;
-    private final boolean cleanEmptyDirectories;
 
     private ExpireConfig expireConfig;
 
     public ExpireSnapshotsImpl(
             SnapshotManager snapshotManager,
             SnapshotDeletion snapshotDeletion,
-            TagManager tagManager,
-            boolean cleanEmptyDirectories) {
+            TagManager tagManager) {
         this.snapshotManager = snapshotManager;
         this.consumerManager =
                 new ConsumerManager(snapshotManager.fileIO(), snapshotManager.tablePath());
         this.snapshotDeletion = snapshotDeletion;
         this.tagManager = tagManager;
-        this.cleanEmptyDirectories = cleanEmptyDirectories;
         this.expireConfig = ExpireConfig.builder().build();
     }
 
@@ -194,9 +191,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
 
         // data files and changelog files in bucket directories has been deleted
         // then delete changed bucket directories if they are empty
-        if (cleanEmptyDirectories) {
-            snapshotDeletion.cleanDataDirectories();
-        }
+        snapshotDeletion.cleanEmptyDirectories();
 
         // delete manifests and indexFiles
         List<Snapshot> skippingSnapshots =

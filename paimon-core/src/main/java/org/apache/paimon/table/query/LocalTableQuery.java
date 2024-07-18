@@ -26,16 +26,18 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.serializer.InternalSerializers;
+import org.apache.paimon.data.serializer.RowCompactedSerializer;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.cache.CacheManager;
-import org.apache.paimon.lookup.hash.HashLookupStoreFactory;
+import org.apache.paimon.lookup.LookupStoreFactory;
 import org.apache.paimon.mergetree.Levels;
 import org.apache.paimon.mergetree.LookupLevels;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.KeyComparatorSupplier;
 import org.apache.paimon.utils.Preconditions;
 
@@ -62,7 +64,7 @@ public class LocalTableQuery implements TableQuery {
 
     private final KeyValueFileReaderFactory.Builder readerFactoryBuilder;
 
-    private final HashLookupStoreFactory hashLookupStoreFactory;
+    private final LookupStoreFactory lookupStoreFactory;
 
     private final int startLevel;
 
@@ -79,13 +81,13 @@ public class LocalTableQuery implements TableQuery {
         KeyValueFileStore store = (KeyValueFileStore) tableStore;
 
         this.readerFactoryBuilder = store.newReaderFactoryBuilder();
+        RowType keyType = readerFactoryBuilder.keyType();
         this.keyComparatorSupplier = new KeyComparatorSupplier(readerFactoryBuilder.keyType());
-        this.hashLookupStoreFactory =
-                new HashLookupStoreFactory(
+        this.lookupStoreFactory =
+                LookupStoreFactory.create(
+                        options,
                         new CacheManager(options.lookupCacheMaxMemory()),
-                        options.cachePageSize(),
-                        options.toConfiguration().get(CoreOptions.LOOKUP_HASH_LOAD_FACTOR),
-                        options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_SPILL_COMPRESSION));
+                        new RowCompactedSerializer(keyType).createSliceComparator());
 
         if (options.needLookup()) {
             startLevel = 1;
@@ -145,7 +147,7 @@ public class LocalTableQuery implements TableQuery {
                                 Preconditions.checkNotNull(ioManager, "IOManager is required.")
                                         .createChannel()
                                         .getPathFile(),
-                        hashLookupStoreFactory,
+                        lookupStoreFactory,
                         options.get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
                         options.get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE),
                         bfGenerator(options));

@@ -37,10 +37,12 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.AbstractMap;
 import java.util.Map;
+import java.util.TimeZone;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import scala.Function1;
+import scala.collection.JavaConverters;
 
 import static org.apache.paimon.data.BinaryString.fromString;
 import static org.apache.paimon.spark.SparkTypeTest.ALL_TYPES;
@@ -51,6 +53,8 @@ public class SparkInternalRowTest {
 
     @Test
     public void test() {
+        TimeZone tz = TimeZone.getDefault();
+        TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"));
         InternalRow rowData =
                 GenericRow.of(
                         1,
@@ -77,6 +81,7 @@ public class SparkInternalRowTest {
                         23567222L,
                         "varbinary_v".getBytes(StandardCharsets.UTF_8),
                         Timestamp.fromLocalDateTime(LocalDateTime.parse("2007-12-03T10:15:30")),
+                        Timestamp.fromLocalDateTime(LocalDateTime.parse("2007-12-03T10:15:30")),
                         DateTimeUtils.toInternal(LocalDate.parse("2022-05-02")),
                         Decimal.fromBigDecimal(BigDecimal.valueOf(0.21), 2, 2),
                         Decimal.fromBigDecimal(BigDecimal.valueOf(65782123123.01), 38, 2),
@@ -93,32 +98,40 @@ public class SparkInternalRowTest {
                         sparkConverter.apply(new SparkInternalRow(ALL_TYPES).replace(rowData));
 
         String expected =
-                "{"
-                        + "\"id\":1,"
-                        + "\"name\":\"jingsong\","
-                        + "\"char\":\"apache\","
-                        + "\"varchar\":\"paimon\","
-                        + "\"salary\":22.2,"
-                        + "\"locations\":{\"key1\":{\"posX\":1.2,\"posY\":2.3},\"key2\":{\"posX\":2.4,\"posY\":3.5}},"
-                        + "\"strArray\":[\"v1\",\"v5\"],"
-                        + "\"intArray\":[10,30],"
-                        + "\"boolean\":true,"
-                        + "\"tinyint\":22,"
-                        + "\"smallint\":356,"
-                        + "\"bigint\":23567222,"
-                        + "\"bytes\":\"dmFyYmluYXJ5X3Y=\","
-                        + "\"timestamp\":\"2007-12-03 10:15:30\","
-                        + "\"date\":\"2022-05-02\","
-                        + "\"decimal\":0.21,"
-                        + "\"decimal2\":65782123123.01,"
-                        + "\"decimal3\":62123123.5"
-                        + "}";
-        assertThat(sparkRow.json()).isEqualTo(expected);
+                "1,"
+                        + "jingsong,"
+                        + "apache,"
+                        + "paimon,"
+                        + "22.2,"
+                        + "Map(key2 -> [2.4,3.5], key1 -> [1.2,2.3]),"
+                        + "WrappedArray(v1, v5),"
+                        + "WrappedArray(10, 30),"
+                        + "true,"
+                        + "22,"
+                        + "356,"
+                        + "23567222,"
+                        + "[B@,"
+                        + "2007-12-03 18:15:30.0,"
+                        + "2007-12-03T10:15:30,"
+                        + "2022-05-02,"
+                        + "0.21,"
+                        + "65782123123.01,"
+                        + "62123123.5";
+        assertThat(sparkRowToString(sparkRow)).isEqualTo(expected);
 
         SparkRow sparkRowData = new SparkRow(ALL_TYPES, sparkRow);
         sparkRow =
                 (org.apache.spark.sql.Row)
                         sparkConverter.apply(new SparkInternalRow(ALL_TYPES).replace(sparkRowData));
-        assertThat(sparkRow.json()).isEqualTo(expected);
+        assertThat(sparkRowToString(sparkRow)).isEqualTo(expected);
+        TimeZone.setDefault(tz);
+    }
+
+    private String sparkRowToString(org.apache.spark.sql.Row row) {
+        return JavaConverters.seqAsJavaList(row.toSeq()).stream()
+                .map(Object::toString)
+                // Since the toString result of Spark's binary col is unstable, replace it
+                .map(x -> x.startsWith("[B@") ? "[B@" : x)
+                .collect(Collectors.joining(","));
     }
 }

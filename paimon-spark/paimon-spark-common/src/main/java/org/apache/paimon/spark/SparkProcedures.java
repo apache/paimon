@@ -26,6 +26,7 @@ import org.apache.paimon.spark.procedure.DeleteTagProcedure;
 import org.apache.paimon.spark.procedure.ExpirePartitionsProcedure;
 import org.apache.paimon.spark.procedure.ExpireSnapshotsProcedure;
 import org.apache.paimon.spark.procedure.FastForwardProcedure;
+import org.apache.paimon.spark.procedure.MarkPartitionDoneProcedure;
 import org.apache.paimon.spark.procedure.MigrateFileProcedure;
 import org.apache.paimon.spark.procedure.MigrateTableProcedure;
 import org.apache.paimon.spark.procedure.Procedure;
@@ -70,6 +71,7 @@ public class SparkProcedures {
         procedureBuilders.put("repair", RepairProcedure::builder);
         procedureBuilders.put("fast_forward", FastForwardProcedure::builder);
         procedureBuilders.put("reset_consumer", ResetConsumerProcedure::builder);
+        procedureBuilders.put("mark_partition_done", MarkPartitionDoneProcedure::builder);
         return procedureBuilders.build();
     }
 }
