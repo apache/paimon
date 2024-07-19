@@ -1148,6 +1148,12 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "In watermarking, if a source remains idle beyond the specified timeout duration, it triggers snapshot advancement and facilitates tag creation.");
 
+    public static final ConfigOption<Integer> PARQUET_ENABLE_DICTIONARY =
+            key("parquet.enable.dictionary")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription("Turn off the dictionary encoding for all fields in parquet.");
+
     public static final ConfigOption<String> SINK_WATERMARK_TIME_ZONE =
             key("sink.watermark-time-zone")
                     .stringType()
