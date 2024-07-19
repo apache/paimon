@@ -208,6 +208,24 @@ SELECT * FROM my_table$tags;
 */
 ```
 
+### Branches Table
+
+You can query the branches of the table.
+
+```sql
+SELECT * FROM my_table$branches;
+
+/*
++----------------------+---------------------------+--------------------------+-------------------------+
+|          branch_name |          created_from_tag |    created_from_snapshot |             create_time |
++----------------------+---------------------------+--------------------------+-------------------------+
+|              branch1 |                    tag1   |                        2 | 2024-07-18 20:31:39.084 |
+|              branch2 |                    tag2   |                        5 | 2024-07-18 21:11:14.373 |
++----------------------+---------------------------+--------------------------+-------------------------+
+2 rows in set
+*/
+```
+
 ### Consumers Table
 
 You can query all consumers which contains next snapshot.
