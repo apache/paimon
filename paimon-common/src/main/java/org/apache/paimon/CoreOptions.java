@@ -286,7 +286,7 @@ public class CoreOptions implements Serializable {
             key("snapshot.clean-empty-directories")
                     .booleanType()
                     .defaultValue(false)
-                    .withDeprecatedKeys("snapshot.expire.clean-empty-directories")
+                    .withFallbackKeys("snapshot.expire.clean-empty-directories")
                     .withDescription(
                             Description.builder()
                                     .text(
@@ -322,7 +322,7 @@ public class CoreOptions implements Serializable {
             key("ignore-delete")
                     .booleanType()
                     .defaultValue(false)
-                    .withDeprecatedKeys(
+                    .withFallbackKeys(
                             "first-row.ignore-delete",
                             "deduplicate.ignore-delete",
                             "partial-update.ignore-delete")
@@ -359,7 +359,7 @@ public class CoreOptions implements Serializable {
             key("write-only")
                     .booleanType()
                     .defaultValue(false)
-                    .withDeprecatedKeys("write.compaction-skip")
+                    .withFallbackKeys("write.compaction-skip")
                     .withDescription(
                             "If set to true, compactions and snapshot expiration will be skipped. "
                                     + "This option is used along with dedicated compact jobs.");
@@ -522,7 +522,7 @@ public class CoreOptions implements Serializable {
             key("compaction.max.file-num")
                     .intType()
                     .defaultValue(50)
-                    .withDeprecatedKeys("compaction.early-max.file-num")
+                    .withFallbackKeys("compaction.early-max.file-num")
                     .withDescription(
                             "For file set [f_0,...,f_N], the maximum file number to trigger a compaction "
                                     + "for append-only table, even if sum(size(f_i)) < targetFileSize. This value "
@@ -574,7 +574,7 @@ public class CoreOptions implements Serializable {
             key("scan.mode")
                     .enumType(StartupMode.class)
                     .defaultValue(StartupMode.DEFAULT)
-                    .withDeprecatedKeys("log.scan")
+                    .withFallbackKeys("log.scan")
                     .withDescription("Specify the scanning behavior of the source.");
 
     public static final ConfigOption<String> SCAN_TIMESTAMP =
@@ -588,7 +588,7 @@ public class CoreOptions implements Serializable {
             key("scan.timestamp-millis")
                     .longType()
                     .noDefaultValue()
-                    .withDeprecatedKeys("log.scan.timestamp-millis")
+                    .withFallbackKeys("log.scan.timestamp-millis")
                     .withDescription(
                             "Optional timestamp used in case of \"from-timestamp\" scan mode. "
                                     + "If there is no snapshot earlier than this time, the earliest snapshot will be chosen.");
@@ -1147,12 +1147,6 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription(
                             "In watermarking, if a source remains idle beyond the specified timeout duration, it triggers snapshot advancement and facilitates tag creation.");
-
-    public static final ConfigOption<Integer> PARQUET_ENABLE_DICTIONARY =
-            key("parquet.enable.dictionary")
-                    .intType()
-                    .noDefaultValue()
-                    .withDescription("Turn off the dictionary encoding for all fields in parquet.");
 
     public static final ConfigOption<String> SINK_WATERMARK_TIME_ZONE =
             key("sink.watermark-time-zone")
