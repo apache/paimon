@@ -21,7 +21,7 @@ package org.apache.paimon.spark.catalyst.optimizer
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.rules.Rule
 
-object MergePaimonScalarSubqueriers extends Rule[LogicalPlan] {
+object MergePaimonScalarSubqueries extends Rule[LogicalPlan] {
 
   override def apply(plan: LogicalPlan): LogicalPlan = {
     plan
