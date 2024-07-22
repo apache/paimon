@@ -151,16 +151,17 @@ public class ConsumerActionITCase extends ActionITCaseBase {
 
         // use consumer streaming read table
         testStreamingRead(
-                "SELECT * FROM `"
-                        + branchTableName
-                        + "` /*+ OPTIONS('consumer-id'='myid','consumer.expiration-time'='3h') */",
-                Arrays.asList(
-                        changelogRow("+I", 1L, "Hi"),
-                        changelogRow("+I", 2L, "Hello"),
-                        changelogRow("+I", 3L, "Paimon")))
+                        "SELECT * FROM `"
+                                + branchTableName
+                                + "` /*+ OPTIONS('consumer-id'='myid','consumer.expiration-time'='3h') */",
+                        Arrays.asList(
+                                changelogRow("+I", 1L, "Hi"),
+                                changelogRow("+I", 2L, "Hello"),
+                                changelogRow("+I", 3L, "Paimon")))
                 .close();
 
-        ConsumerManager consumerManager = new ConsumerManager(table.fileIO(), table.location(), branchName);
+        ConsumerManager consumerManager =
+                new ConsumerManager(table.fileIO(), table.location(), branchName);
         Optional<Consumer> consumer1 = consumerManager.consumer("myid");
         assertThat(consumer1).isPresent();
         assertThat(consumer1.get().nextSnapshot()).isEqualTo(4);
@@ -184,7 +185,8 @@ public class ConsumerActionITCase extends ActionITCaseBase {
         } else {
             callProcedure(
                     String.format(
-                            "CALL sys.reset_consumer('%s.%s', 'myid', 1)", database, branchTableName));
+                            "CALL sys.reset_consumer('%s.%s', 'myid', 1)",
+                            database, branchTableName));
         }
         Optional<Consumer> consumer2 = consumerManager.consumer("myid");
         assertThat(consumer2).isPresent();
@@ -195,10 +197,10 @@ public class ConsumerActionITCase extends ActionITCaseBase {
             createAction(ResetConsumerAction.class, args.subList(0, 9)).run();
         } else {
             callProcedure(
-                    String.format("CALL sys.reset_consumer('%s.%s', 'myid')", database, branchTableName));
+                    String.format(
+                            "CALL sys.reset_consumer('%s.%s', 'myid')", database, branchTableName));
         }
         Optional<Consumer> consumer3 = consumerManager.consumer("myid");
         assertThat(consumer3).isNotPresent();
-
     }
 }
