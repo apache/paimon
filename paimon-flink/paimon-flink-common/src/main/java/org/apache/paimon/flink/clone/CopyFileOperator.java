@@ -56,11 +56,11 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
     public void open() throws Exception {
         sourceCatalog =
                 (AbstractCatalog)
-                        FlinkCatalogFactory.createPaimonCatalog(
+                        FlinkCatalogFactory.INSTANCE.createPaimonCatalog(
                                 Options.fromMap(sourceCatalogConfig));
         targetCatalog =
                 (AbstractCatalog)
-                        FlinkCatalogFactory.createPaimonCatalog(
+                        FlinkCatalogFactory.INSTANCE.createPaimonCatalog(
                                 Options.fromMap(targetCatalogConfig));
     }
 

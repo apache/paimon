@@ -62,9 +62,11 @@ public class PickFilesForCloneOperator extends AbstractStreamOperator<CloneFileI
     @Override
     public void open() throws Exception {
         sourceCatalog =
-                FlinkCatalogFactory.createPaimonCatalog(Options.fromMap(sourceCatalogConfig));
+                FlinkCatalogFactory.INSTANCE.createPaimonCatalog(
+                        Options.fromMap(sourceCatalogConfig));
         targetCatalog =
-                FlinkCatalogFactory.createPaimonCatalog(Options.fromMap(targetCatalogConfig));
+                FlinkCatalogFactory.INSTANCE.createPaimonCatalog(
+                        Options.fromMap(targetCatalogConfig));
     }
 
     @Override

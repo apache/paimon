@@ -20,8 +20,11 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.DataSplit;
@@ -294,6 +297,22 @@ public class CompactActionITCase extends CompactActionITCaseBase {
                 .hasMessage("Only parition key can be specialized in compaction action.");
     }
 
+    @Test
+    public void testDynamicLoadCatalogNotExist() {
+        Assertions.assertThatThrownBy(
+                        () -> runAction(false, false, "--catalog_conf", "catalog-type=foobar"))
+                .hasMessageContaining(
+                        "Could not find any factory for identifier 'foobar' that implements "
+                                + "'org.apache.paimon.flink.FlinkCatalogFactory' in the classpath.");
+    }
+
+    @Test
+    public void testDynamicLoadCatalog() {
+        Assertions.assertThatThrownBy(
+                        () -> runAction(false, false, "--catalog_conf", "catalog-type=paimon-test"))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
     private FileStoreTable prepareTable(
             List<String> partitionKeys,
             List<String> primaryKeys,
@@ -327,7 +346,8 @@ public class CompactActionITCase extends CompactActionITCaseBase {
         runAction(isStreaming, true);
     }
 
-    private void runAction(boolean isStreaming, boolean unawareBucket) throws Exception {
+    private void runAction(boolean isStreaming, boolean unawareBucket, String... additionalArgs)
+            throws Exception {
         StreamExecutionEnvironment env;
         if (isStreaming) {
             env = streamExecutionEnvironmentBuilder().streamingMode().build();
@@ -344,6 +364,7 @@ public class CompactActionITCase extends CompactActionITCaseBase {
                         database,
                         "--table",
                         tableName);
+        baseArgs.addAll(Lists.newArrayList(additionalArgs));
         ThreadLocalRandom random = ThreadLocalRandom.current();
         if (unawareBucket) {
             if (true) {
@@ -373,6 +394,19 @@ public class CompactActionITCase extends CompactActionITCaseBase {
             env.executeAsync();
         } else {
             env.execute();
+        }
+    }
+
+    /** TestFlinkCatalogFactory that verifies factories can be correctly discovered. */
+    public static class TestFlinkCatalogFactory extends FlinkCatalogFactory {
+        @Override
+        public String factoryIdentifier() {
+            return "paimon-test";
+        }
+
+        @Override
+        public Catalog createPaimonCatalog(Options catalogOptions) {
+            throw new UnsupportedOperationException();
         }
     }
 }

@@ -109,7 +109,7 @@ public class FlinkCatalogTest {
         conf.setString("warehouse", path);
         conf.set(LOG_SYSTEM_AUTO_REGISTER, true);
         catalog =
-                FlinkCatalogFactory.createCatalog(
+                FlinkCatalogFactory.INSTANCE.createCatalog(
                         "test-catalog",
                         CatalogContext.create(conf),
                         FlinkCatalogTest.class.getClassLoader());
@@ -572,7 +572,7 @@ public class FlinkCatalogTest {
         conf.set(LOG_SYSTEM_AUTO_REGISTER, true);
         conf.set(DISABLE_CREATE_TABLE_IN_DEFAULT_DB, true);
         Catalog catalog =
-                FlinkCatalogFactory.createCatalog(
+                FlinkCatalogFactory.INSTANCE.createCatalog(
                         "test-ddl-catalog",
                         CatalogContext.create(conf),
                         FlinkCatalogTest.class.getClassLoader());
@@ -595,7 +595,7 @@ public class FlinkCatalogTest {
 
         conf.set(FlinkCatalogOptions.DEFAULT_DATABASE, "default-db");
         Catalog catalog1 =
-                FlinkCatalogFactory.createCatalog(
+                FlinkCatalogFactory.INSTANCE.createCatalog(
                         "test-ddl-catalog1",
                         CatalogContext.create(conf),
                         FlinkCatalogTest.class.getClassLoader());

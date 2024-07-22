@@ -68,7 +68,8 @@ public class CloneSourceBuilder {
 
     public DataStream<Tuple2<String, String>> build() throws Exception {
         try (Catalog sourceCatalog =
-                FlinkCatalogFactory.createPaimonCatalog(Options.fromMap(sourceCatalogConfig))) {
+                FlinkCatalogFactory.INSTANCE.createPaimonCatalog(
+                        Options.fromMap(sourceCatalogConfig))) {
             return build(sourceCatalog);
         }
     }

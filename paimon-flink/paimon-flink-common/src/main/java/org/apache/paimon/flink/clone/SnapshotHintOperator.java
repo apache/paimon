@@ -53,7 +53,8 @@ public class SnapshotHintOperator extends AbstractStreamOperator<CloneFileInfo>
     @Override
     public void open() throws Exception {
         targetCatalog =
-                FlinkCatalogFactory.createPaimonCatalog(Options.fromMap(targetCatalogConfig));
+                FlinkCatalogFactory.INSTANCE.createPaimonCatalog(
+                        Options.fromMap(targetCatalogConfig));
         identifiers = new HashSet<>();
     }
 

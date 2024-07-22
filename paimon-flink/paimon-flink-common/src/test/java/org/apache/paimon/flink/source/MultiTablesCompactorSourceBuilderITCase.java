@@ -561,6 +561,6 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
     private Catalog.Loader catalogLoader() {
         // to make the action workflow serializable
         catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse);
-        return () -> FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
+        return () -> FlinkCatalogFactory.INSTANCE.createPaimonCatalog(catalogOptions);
     }
 }

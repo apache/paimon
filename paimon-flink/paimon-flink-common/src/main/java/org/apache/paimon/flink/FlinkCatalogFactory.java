@@ -33,6 +33,8 @@ public class FlinkCatalogFactory implements org.apache.flink.table.factories.Cat
 
     public static final String IDENTIFIER = "paimon";
 
+    public static final FlinkCatalogFactory INSTANCE = new FlinkCatalogFactory();
+
     @Override
     public String factoryIdentifier() {
         return IDENTIFIER;
@@ -57,7 +59,7 @@ public class FlinkCatalogFactory implements org.apache.flink.table.factories.Cat
                 context.getClassLoader());
     }
 
-    public static FlinkCatalog createCatalog(
+    public FlinkCatalog createCatalog(
             String catalogName, CatalogContext context, ClassLoader classLoader) {
         return new FlinkCatalog(
                 CatalogFactory.createCatalog(context, classLoader),
@@ -67,7 +69,7 @@ public class FlinkCatalogFactory implements org.apache.flink.table.factories.Cat
                 context.options());
     }
 
-    public static FlinkCatalog createCatalog(String catalogName, Catalog catalog, Options options) {
+    public FlinkCatalog createCatalog(String catalogName, Catalog catalog, Options options) {
         return new FlinkCatalog(
                 catalog,
                 catalogName,
@@ -76,7 +78,7 @@ public class FlinkCatalogFactory implements org.apache.flink.table.factories.Cat
                 options);
     }
 
-    public static Catalog createPaimonCatalog(Options catalogOptions) {
+    public Catalog createPaimonCatalog(Options catalogOptions) {
         return CatalogFactory.createCatalog(
                 CatalogContext.create(catalogOptions, new FlinkFileIOLoader()));
     }

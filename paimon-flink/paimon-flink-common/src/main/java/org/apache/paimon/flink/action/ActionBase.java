@@ -22,7 +22,9 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.flink.FlinkCatalogFactory;
+import org.apache.paimon.flink.FlinkCatalogOptions;
 import org.apache.paimon.flink.LogicalTypeConversion;
+import org.apache.paimon.flink.factories.FlinkFactoryUtil;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
@@ -42,7 +44,6 @@ import java.util.stream.Collectors;
 
 /** Abstract base of {@link Action} for table. */
 public abstract class ActionBase implements Action {
-
     protected final Options catalogOptions;
     protected final Catalog catalog;
     protected final FlinkCatalog flinkCatalog;
@@ -50,11 +51,13 @@ public abstract class ActionBase implements Action {
 
     protected StreamExecutionEnvironment env;
     protected StreamTableEnvironment batchTEnv;
+    private final FlinkCatalogFactory flinkCatalogFactory;
 
     public ActionBase(String warehouse, Map<String, String> catalogConfig) {
         catalogOptions = Options.fromMap(catalogConfig);
         catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse);
 
+        flinkCatalogFactory = createFlinkCatalogFactory(catalogOptions);
         catalog = initPaimonCatalog();
         flinkCatalog = initFlinkCatalog();
 
@@ -68,11 +71,11 @@ public abstract class ActionBase implements Action {
     }
 
     protected Catalog initPaimonCatalog() {
-        return FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
+        return flinkCatalogFactory.createPaimonCatalog(catalogOptions);
     }
 
     protected FlinkCatalog initFlinkCatalog() {
-        return FlinkCatalogFactory.createCatalog(catalogName, catalog, catalogOptions);
+        return flinkCatalogFactory.createCatalog(catalogName, catalog, catalogOptions);
     }
 
     protected void initFlinkEnv(StreamExecutionEnvironment env) {
@@ -95,7 +98,7 @@ public abstract class ActionBase implements Action {
     protected Catalog.Loader catalogLoader() {
         // to make the action workflow serializable
         Options catalogOptions = this.catalogOptions;
-        return () -> FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
+        return () -> createFlinkCatalogFactory(catalogOptions).createPaimonCatalog(catalogOptions);
     }
 
     /**
@@ -131,5 +134,12 @@ public abstract class ActionBase implements Action {
     @VisibleForTesting
     public Map<String, String> catalogConfig() {
         return catalogOptions.toMap();
+    }
+
+    private static FlinkCatalogFactory createFlinkCatalogFactory(Options catalogOptions) {
+        return FlinkFactoryUtil.discoverFlinkFactory(
+                ActionBase.class.getClassLoader(),
+                FlinkCatalogFactory.class,
+                catalogOptions.get(FlinkCatalogOptions.CATALOG_TYPE));
     }
 }
