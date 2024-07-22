@@ -136,6 +136,8 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
         tEnv.executeSql(
                 "CREATE TABLE paimontable01 (id STRING, id2 INT, id3 INT) PARTITIONED BY (id2, id3) with ('bucket' = '-1');");
         tEnv.executeSql(
+                "CREATE TABLE paimontable02 (id STRING, id2 INT, id3 INT) PARTITIONED BY (id2, id3) with ('bucket' = '-1');");
+        tEnv.executeSql(
                         "CALL sys.migrate_file('hive', 'default.hivetable01', 'default.paimontable01', false)")
                 .await();
 
