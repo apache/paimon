@@ -182,7 +182,7 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
                         "");
         migrateFileAction.run();
 
-        tEnv.useCatalog("HIVE");
+        tEnv.useCatalog("PAIMON");
         List<Row> r1 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable02").collect());
 
         Assertions.assertThat(r1.size() == 0);
