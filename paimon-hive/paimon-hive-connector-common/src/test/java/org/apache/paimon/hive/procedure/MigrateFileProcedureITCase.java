@@ -59,21 +59,18 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
     @Test
     public void testOrc() throws Exception {
         test("orc");
-        testWithDeleteOrigin("orc");
         testMigrateFileAction("orc");
     }
 
     @Test
     public void testAvro() throws Exception {
         test("avro");
-        testWithDeleteOrigin("avro");
         testMigrateFileAction("avro");
     }
 
     @Test
     public void testParquet() throws Exception {
         test("parquet");
-        testWithDeleteOrigin("parquet");
         testMigrateFileAction("parquet");
     }
 
@@ -109,7 +106,7 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
         Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
     }
 
-    public void testWithDeleteOrigin(String format) throws Exception {
+    public void testMigrateFileAction(String format) throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
         tEnv.useCatalog("HIVE");
@@ -118,7 +115,12 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
                 "CREATE TABLE hivetable01 (id string) PARTITIONED BY (id2 int, id3 int) STORED AS "
                         + format);
         tEnv.executeSql("INSERT INTO hivetable01 VALUES" + data(100)).await();
-        tEnv.executeSql("SHOW CREATE TABLE hivetable01");
+
+        tEnv.executeSql(
+                "CREATE TABLE hivetable02 (id string) PARTITIONED BY (id2 int, id3 int) STORED AS "
+                        + format);
+        tEnv.executeSql("INSERT INTO hivetable02 VALUES" + data(100)).await();
+        tEnv.executeSql("SHOW CREATE TABLE hivetable02");
 
         tEnv.getConfig().setSqlDialect(SqlDialect.DEFAULT);
         tEnv.executeSql("CREATE CATALOG PAIMON_GE WITH ('type'='paimon-generic')");
@@ -136,41 +138,11 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
         tEnv.executeSql(
                         "CALL sys.migrate_file('hive', 'default.hivetable01', 'default.paimontable01', false)")
                 .await();
-        tEnv.useCatalog("HIVE");
-        List<Row> r1 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable01").collect());
-        Assertions.assertThat(r1.size() == 0);
-    }
 
-    public void testMigrateFileAction(String format) throws Exception {
-        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
-        tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
-        tEnv.useCatalog("HIVE");
-        tEnv.getConfig().setSqlDialect(SqlDialect.HIVE);
-        tEnv.executeSql(
-                "CREATE TABLE hivetable02 (id string) PARTITIONED BY (id2 int, id3 int) STORED AS "
-                        + format);
-        tEnv.executeSql("INSERT INTO hivetable02 VALUES" + data(100)).await();
-        tEnv.executeSql("SHOW CREATE TABLE hivetable02");
-
-        tEnv.getConfig().setSqlDialect(SqlDialect.DEFAULT);
-        tEnv.executeSql("CREATE CATALOG PAIMON_GE WITH ('type'='paimon-generic')");
         tEnv.useCatalog("PAIMON_GE");
-
         Map<String, String> catalogConf = new HashMap<>();
         catalogConf.put("metastore", "hive");
         catalogConf.put("uri", "thrift://localhost:" + PORT);
-
-        tEnv.executeSql(
-                "CREATE CATALOG PAIMON WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:"
-                        + PORT
-                        + "' , 'warehouse' = '"
-                        + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname)
-                        + "')");
-        tEnv.useCatalog("PAIMON");
-        tEnv.executeSql(
-                "CREATE TABLE paimontable02 (id STRING, id2 INT, id3 INT) PARTITIONED BY (id2, id3) with ('bucket' = '-1');");
-
-        tEnv.useCatalog("PAIMON_GE");
         MigrateFileAction migrateFileAction =
                 new MigrateFileAction(
                         "hive",
@@ -182,10 +154,11 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
                         "");
         migrateFileAction.run();
 
-        tEnv.useCatalog("PAIMON");
-        List<Row> r1 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable02").collect());
-
+        tEnv.useCatalog("HIVE");
+        List<Row> r1 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable01").collect());
+        List<Row> r2 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable02").collect());
         Assertions.assertThat(r1.size() == 0);
+        Assertions.assertThat(r2.size() == 0);
     }
 
     private String data(int i) {

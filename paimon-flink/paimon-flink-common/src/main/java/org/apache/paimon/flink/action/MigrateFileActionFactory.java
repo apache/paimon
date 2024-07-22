@@ -49,6 +49,7 @@ public class MigrateFileActionFactory implements ActionFactory {
         String targetTable = params.get(TARGET_TABLE);
         boolean deleteOrigin = Boolean.parseBoolean(params.get(DELETE_ORIGIN));
         Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
+        String tableConf = params.get(OPTIONS);
 
         MigrateFileAction migrateFileAction =
                 new MigrateFileAction(
@@ -58,7 +59,7 @@ public class MigrateFileActionFactory implements ActionFactory {
                         targetTable,
                         deleteOrigin,
                         catalogConfig,
-                        "");
+                        tableConf);
         return Optional.of(migrateFileAction);
     }
 
