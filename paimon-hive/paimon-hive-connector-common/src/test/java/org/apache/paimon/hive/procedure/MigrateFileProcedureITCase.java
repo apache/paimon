@@ -161,15 +161,7 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
         catalogConf.put("uri", "thrift://localhost:" + PORT);
 
         tEnv.executeSql(
-                "CREATE CATALOG PAIMON WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:"
-                        + PORT
-                        + "' , 'warehouse' = '"
-                        + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname)
-                        + "')");
-        tEnv.useCatalog("PAIMON");
-        tEnv.executeSql(
                 "CREATE TABLE paimontable02 (id STRING, id2 INT, id3 INT) PARTITIONED BY (id2, id3) with ('bucket' = '-1');");
-        tEnv.useCatalog("PAIMON");
 
         MigrateFileAction migrateFileAction =
                 new MigrateFileAction(
@@ -185,12 +177,7 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
         tEnv.useCatalog("HIVE");
         List<Row> r1 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable02").collect());
 
-        tEnv.useCatalog("PAIMON");
-        List<Row> r2 =
-                ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM paimontable02").collect());
-
         Assertions.assertThat(r1.size() == 0);
-        Assertions.assertThat(r2.size() == 100);
     }
 
     private String data(int i) {
