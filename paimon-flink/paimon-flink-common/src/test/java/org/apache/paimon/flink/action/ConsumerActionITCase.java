@@ -119,4 +119,86 @@ public class ConsumerActionITCase extends ActionITCaseBase {
         Optional<Consumer> consumer3 = consumerManager.consumer("myid");
         assertThat(consumer3).isNotPresent();
     }
+
+    @Test
+    public void testResetBranchConsumer() throws Exception {
+        init(warehouse);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.BIGINT(), DataTypes.STRING()},
+                        new String[] {"pk1", "col1"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("pk1"),
+                        Collections.emptyList(),
+                        Collections.emptyMap());
+
+        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = writeBuilder.newWrite();
+        commit = writeBuilder.newCommit();
+
+        // 3 snapshots
+        writeData(rowData(1L, BinaryString.fromString("Hi")));
+        writeData(rowData(2L, BinaryString.fromString("Hello")));
+        writeData(rowData(3L, BinaryString.fromString("Paimon")));
+
+        String branchName = "b1";
+        table.createBranch("b1", 3);
+        String branchTableName = tableName + "$branch_b1";
+
+        // use consumer streaming read table
+        testStreamingRead(
+                "SELECT * FROM `"
+                        + branchTableName
+                        + "` /*+ OPTIONS('consumer-id'='myid','consumer.expiration-time'='3h') */",
+                Arrays.asList(
+                        changelogRow("+I", 1L, "Hi"),
+                        changelogRow("+I", 2L, "Hello"),
+                        changelogRow("+I", 3L, "Paimon")))
+                .close();
+
+        ConsumerManager consumerManager = new ConsumerManager(table.fileIO(), table.location(), branchName);
+        Optional<Consumer> consumer1 = consumerManager.consumer("myid");
+        assertThat(consumer1).isPresent();
+        assertThat(consumer1.get().nextSnapshot()).isEqualTo(4);
+
+        List<String> args =
+                Arrays.asList(
+                        "reset_consumer",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        branchTableName,
+                        "--consumer_id",
+                        "myid",
+                        "--next_snapshot",
+                        "1");
+        // reset consumer
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            createAction(ResetConsumerAction.class, args).run();
+        } else {
+            callProcedure(
+                    String.format(
+                            "CALL sys.reset_consumer('%s.%s', 'myid', 1)", database, branchTableName));
+        }
+        Optional<Consumer> consumer2 = consumerManager.consumer("myid");
+        assertThat(consumer2).isPresent();
+        assertThat(consumer2.get().nextSnapshot()).isEqualTo(1);
+
+        // delete consumer
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            createAction(ResetConsumerAction.class, args.subList(0, 9)).run();
+        } else {
+            callProcedure(
+                    String.format("CALL sys.reset_consumer('%s.%s', 'myid')", database, branchTableName));
+        }
+        Optional<Consumer> consumer3 = consumerManager.consumer("myid");
+        assertThat(consumer3).isNotPresent();
+
+    }
 }
