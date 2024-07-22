@@ -19,7 +19,7 @@
 package org.apache.paimon.hive.procedure;
 
 import org.apache.paimon.flink.action.ActionITCaseBase;
-import org.apache.paimon.flink.action.MigrateFileAction;
+import org.apache.paimon.flink.action.MigrateTableAction;
 import org.apache.paimon.flink.procedure.MigrateFileProcedure;
 import org.apache.paimon.hive.TestHiveMetastore;
 
@@ -169,12 +169,11 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
         Map<String, String> catalogConf = new HashMap<>();
         catalogConf.put("metastore", "hive");
         catalogConf.put("uri", "thrift://localhost:" + PORT);
-        MigrateFileAction migrateTableAction =
-                new MigrateFileAction(
+        MigrateTableAction migrateTableAction =
+                new MigrateTableAction(
                         "hive",
                         System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname),
                         "default.hivetable",
-                        "",
                         catalogConf,
                         "");
         migrateTableAction.run();
