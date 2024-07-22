@@ -140,8 +140,7 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
         tEnv.executeSql(
                         "CALL sys.migrate_file('hive', 'default.hivetable01', 'default.paimontable01', false)")
                 .await();
-
-        tEnv.useCatalog("PAIMON_GE");
+        
         Map<String, String> catalogConf = new HashMap<>();
         catalogConf.put("metastore", "hive");
         catalogConf.put("uri", "thrift://localhost:" + PORT);
