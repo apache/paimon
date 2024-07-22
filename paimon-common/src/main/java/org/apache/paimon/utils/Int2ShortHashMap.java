@@ -67,7 +67,13 @@ public class Int2ShortHashMap {
         }
 
         public Int2ShortHashMap build() {
-            Int2ShortHashMap map = new Int2ShortHashMap(keyList.size());
+            Int2ShortHashMap map;
+            try {
+                map = new Int2ShortHashMap(keyList.size());
+            } catch (IllegalArgumentException e) {
+                map = new Int2ShortHashMap();
+            }
+
             for (int i = 0; i < keyList.size(); i++) {
                 map.put(keyList.getInt(i), valueList.getShort(i));
             }
