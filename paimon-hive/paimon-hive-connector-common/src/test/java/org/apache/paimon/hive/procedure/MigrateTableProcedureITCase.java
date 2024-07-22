@@ -190,6 +190,48 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
         Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"orc", "parquet", "avro"})
+    public void testMigrateFileAction(String format) throws Exception {
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
+        tEnv.useCatalog("HIVE");
+        tEnv.getConfig().setSqlDialect(SqlDialect.HIVE);
+        tEnv.executeSql(
+                "CREATE TABLE hivetable (id string) PARTITIONED BY (id2 int, id3 int) STORED AS "
+                        + format);
+        tEnv.executeSql("INSERT INTO hivetable VALUES" + data(100)).await();
+        tEnv.executeSql("SHOW CREATE TABLE hivetable");
+
+        tEnv.getConfig().setSqlDialect(SqlDialect.DEFAULT);
+        tEnv.executeSql("CREATE CATALOG PAIMON_GE WITH ('type'='paimon-generic')");
+        tEnv.useCatalog("PAIMON_GE");
+        List<Row> r1 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
+        Map<String, String> catalogConf = new HashMap<>();
+        catalogConf.put("metastore", "hive");
+        catalogConf.put("uri", "thrift://localhost:" + PORT);
+        MigrateTableAction migrateTableAction =
+                new MigrateTableAction(
+                        "hive",
+                        System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname),
+                        "default.hivetable",
+                        catalogConf,
+                        "");
+        migrateTableAction.run();
+
+        tEnv.executeSql(
+                "CREATE CATALOG PAIMON WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:"
+                        + PORT
+                        + "' , 'warehouse' = '"
+                        + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname)
+                        + "')");
+        tEnv.useCatalog("PAIMON");
+        List<Row> r2 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
+
+        Assertions.assertThat(r1.size() == 100);
+        Assertions.assertThat(r2.size() == 0);
+    }
+
     protected static String data(int i) {
         Random random = new Random();
         StringBuilder stringBuilder = new StringBuilder();
