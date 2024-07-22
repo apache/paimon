@@ -19,18 +19,7 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.flink.sink.CommittableStateManager;
-import org.apache.paimon.flink.sink.Committer;
-import org.apache.paimon.flink.sink.CommitterOperator;
-import org.apache.paimon.flink.sink.FlinkSink;
-import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
-import org.apache.paimon.flink.sink.MultiTableCommittable;
-import org.apache.paimon.flink.sink.MultiTableCommittableTypeInfo;
-import org.apache.paimon.flink.sink.RestoreAndFailCommittableStateManager;
-import org.apache.paimon.flink.sink.StoreMultiCommitter;
-import org.apache.paimon.flink.sink.StoreSinkWrite;
-import org.apache.paimon.flink.sink.StoreSinkWriteImpl;
-import org.apache.paimon.flink.sink.WrappedManifestCommittableSerializer;
+import org.apache.paimon.flink.sink.*;
 import org.apache.paimon.manifest.WrappedManifestCommittable;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;

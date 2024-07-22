@@ -16,9 +16,8 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink.cdc;
+package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.flink.sink.MultiTableCommittable;
 import org.apache.paimon.table.sink.ChannelComputer;
 
 import java.util.Objects;
