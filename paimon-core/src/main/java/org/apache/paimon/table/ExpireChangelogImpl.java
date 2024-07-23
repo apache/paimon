@@ -56,7 +56,10 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
         this.snapshotManager = snapshotManager;
         this.tagManager = tagManager;
         this.consumerManager =
-                new ConsumerManager(snapshotManager.fileIO(), snapshotManager.tablePath());
+                new ConsumerManager(
+                        snapshotManager.fileIO(),
+                        snapshotManager.tablePath(),
+                        snapshotManager.branch());
         this.changelogDeletion = changelogDeletion;
         this.expireConfig = ExpireConfig.builder().build();
     }

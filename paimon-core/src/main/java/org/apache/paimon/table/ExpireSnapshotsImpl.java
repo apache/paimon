@@ -56,7 +56,10 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             TagManager tagManager) {
         this.snapshotManager = snapshotManager;
         this.consumerManager =
-                new ConsumerManager(snapshotManager.fileIO(), snapshotManager.tablePath());
+                new ConsumerManager(
+                        snapshotManager.fileIO(),
+                        snapshotManager.tablePath(),
+                        snapshotManager.branch());
         this.snapshotDeletion = snapshotDeletion;
         this.tagManager = tagManager;
         this.expireConfig = ExpireConfig.builder().build();
