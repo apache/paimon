@@ -21,6 +21,7 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.jdbc.JdbcCatalog;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
@@ -31,6 +32,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewImpl;
+import org.apache.paimon.utils.BranchManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
@@ -40,6 +42,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.File;
+import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -371,6 +375,49 @@ public abstract class CatalogTestBase {
                 .isThrownBy(
                         () -> catalog.getTable(Identifier.create("non_existing_db", "test_table")))
                 .withMessage("Table non_existing_db.test_table does not exist.");
+    }
+
+    @Test
+    public void testGetDataTableLocation() {
+        Path path =
+                ((JdbcCatalog) catalog)
+                        .getDataTableLocation(Identifier.create("test_db", "test_table$branch_a"));
+        assertThat(path.toString())
+                .isEqualTo(
+                        new File(
+                                        "file:/" + tempFile,
+                                        "test_db"
+                                                + ".db"
+                                                + File.separator
+                                                + "test_table"
+                                                + File.separator
+                                                + "branch"
+                                                + File.separator
+                                                + BranchManager.BRANCH_PREFIX
+                                                + "a")
+                                .toString());
+    }
+
+    @Test
+    public void testNewTableLocation() {
+        Path path =
+                AbstractCatalog.newTableLocation(
+                        String.valueOf(tempFile),
+                        Identifier.create("test_db", "test_table$branch_a"));
+        assertThat(path.toString())
+                .isEqualTo(
+                        new File(
+                                        String.valueOf(tempFile),
+                                        "test_db"
+                                                + ".db"
+                                                + File.separator
+                                                + "test_table"
+                                                + File.separator
+                                                + "branch"
+                                                + File.separator
+                                                + BranchManager.BRANCH_PREFIX
+                                                + "a")
+                                .toString());
     }
 
     @Test
