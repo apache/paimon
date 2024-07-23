@@ -454,8 +454,10 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
             for (int i = 0; i < numFields; i++) {
                 IcebergPartitionSummary summary = fileMeta.partitions().get(i);
                 DataType fieldType = partitionType.getTypeAt(i);
-                minValues.setField(i, IcebergConversions.toObject(fieldType, summary.lowerBound()));
-                maxValues.setField(i, IcebergConversions.toObject(fieldType, summary.upperBound()));
+                minValues.setField(
+                        i, IcebergConversions.toPaimonObject(fieldType, summary.lowerBound()));
+                maxValues.setField(
+                        i, IcebergConversions.toPaimonObject(fieldType, summary.upperBound()));
                 // IcebergPartitionSummary only has `containsNull` field and does not have the
                 // exact number of nulls.
                 nullCounts[i] = summary.containsNull() ? 1 : 0;

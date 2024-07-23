@@ -84,7 +84,7 @@ public class IcebergConversions {
         }
     }
 
-    public static Object toObject(DataType type, byte[] bytes) {
+    public static Object toPaimonObject(DataType type, byte[] bytes) {
         switch (type.getTypeRoot()) {
             case BOOLEAN:
                 return bytes[0] != 0;
