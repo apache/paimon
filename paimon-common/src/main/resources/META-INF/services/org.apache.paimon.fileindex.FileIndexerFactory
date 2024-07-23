@@ -14,3 +14,4 @@
 # limitations under the License.
 
 org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndexFactory
+org.apache.paimon.fileindex.bitmap.BitmapFileIndexFactory
