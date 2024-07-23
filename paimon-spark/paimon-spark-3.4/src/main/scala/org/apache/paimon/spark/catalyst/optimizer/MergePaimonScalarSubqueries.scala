@@ -20,11 +20,11 @@ package org.apache.paimon.spark.catalyst.optimizer
 
 import org.apache.paimon.spark.PaimonScan
 
-import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeMap, AttributeReference, ExprId, ScalarSubquery}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeMap, AttributeReference, ExprId, ScalarSubquery, SortOrder}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
 
-object MergePaimonScalarSubqueriers extends MergePaimonScalarSubqueriersBase {
+object MergePaimonScalarSubqueries extends MergePaimonScalarSubqueriesBase {
 
   override def tryMergeDataSourceV2ScanRelation(
       newV2ScanRelation: DataSourceV2ScanRelation,
@@ -32,15 +32,26 @@ object MergePaimonScalarSubqueriers extends MergePaimonScalarSubqueriersBase {
       : Option[(LogicalPlan, AttributeMap[Attribute])] = {
     (newV2ScanRelation, cachedV2ScanRelation) match {
       case (
-            DataSourceV2ScanRelation(newRelation, newScan: PaimonScan, newOutput, newPartitioning),
+            DataSourceV2ScanRelation(
+              newRelation,
+              newScan: PaimonScan,
+              newOutput,
+              newPartitioning,
+              newOrdering),
             DataSourceV2ScanRelation(
               cachedRelation,
               cachedScan: PaimonScan,
               _,
-              cachedPartitioning)) =>
+              cachedPartitioning,
+              cacheOrdering)) =>
         checkIdenticalPlans(newRelation, cachedRelation).flatMap {
           outputMap =>
-            if (samePartitioning(newPartitioning, cachedPartitioning, outputMap)) {
+            if (
+              samePartitioning(newPartitioning, cachedPartitioning, outputMap) && sameOrdering(
+                newOrdering,
+                cacheOrdering,
+                outputMap)
+            ) {
               mergePaimonScan(newScan, cachedScan).map {
                 mergedScan =>
                   val mergedAttributes = mergedScan
@@ -70,7 +81,16 @@ object MergePaimonScalarSubqueriers extends MergePaimonScalarSubqueriersBase {
     }
   }
 
+  private def sameOrdering(
+      newOrdering: Option[Seq[SortOrder]],
+      cachedOrdering: Option[Seq[SortOrder]],
+      outputAttrMap: AttributeMap[Attribute]): Boolean = {
+    val mappedNewOrdering = newOrdering.map(_.map(mapAttributes(_, outputAttrMap)))
+    mappedNewOrdering.map(_.map(_.canonicalized)) == cachedOrdering.map(_.map(_.canonicalized))
+  }
+
   override protected def createScalarSubquery(plan: LogicalPlan, exprId: ExprId): ScalarSubquery = {
     ScalarSubquery(plan, exprId = exprId)
   }
+
 }

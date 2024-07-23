@@ -31,6 +31,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 /** Readonly table which only provide implementation for scan and read. */
 public interface ReadonlyTable extends InnerTable {
@@ -100,6 +101,14 @@ public interface ReadonlyTable extends InnerTable {
         throw new UnsupportedOperationException(
                 String.format(
                         "Readonly Table %s does not support newStreamScan.",
+                        this.getClass().getSimpleName()));
+    }
+
+    @Override
+    default OptionalLong latestSnapshotId() {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support currentSnapshot.",
                         this.getClass().getSimpleName()));
     }
 

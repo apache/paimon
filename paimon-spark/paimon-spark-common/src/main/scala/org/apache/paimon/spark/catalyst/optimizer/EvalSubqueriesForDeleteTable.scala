@@ -37,8 +37,8 @@ import scala.collection.JavaConverters._
  * in advance. So that when running [[DeleteFromPaimonTableCommand]], we can directly call
  * dropPartitions to achieve fast deletion.
  *
- * Note: this rule must be placed before [[MergePaimonScalarSubqueriers]], because
- * [[MergePaimonScalarSubqueriers]] will merge subqueries.
+ * Note: this rule must be placed before [[MergePaimonScalarSubqueries]], because
+ * [[MergePaimonScalarSubqueries]] will merge subqueries.
  */
 object EvalSubqueriesForDeleteTable extends Rule[LogicalPlan] with ExpressionHelper with Logging {
 

@@ -26,13 +26,13 @@ import org.apache.paimon.spark.utils.TableMigrationUtils;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
-import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 
 import java.util.Collections;
 
+import static org.apache.spark.sql.types.DataTypes.BooleanType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /**
@@ -48,13 +48,14 @@ public class MigrateFileProcedure extends BaseProcedure {
             new ProcedureParameter[] {
                 ProcedureParameter.required("source_type", StringType),
                 ProcedureParameter.required("source_table", StringType),
-                ProcedureParameter.required("target_table", StringType)
+                ProcedureParameter.required("target_table", StringType),
+                ProcedureParameter.optional("delete_origin", BooleanType)
             };
 
     private static final StructType OUTPUT_TYPE =
             new StructType(
                     new StructField[] {
-                        new StructField("result", DataTypes.BooleanType, true, Metadata.empty())
+                        new StructField("result", BooleanType, true, Metadata.empty())
                     });
 
     protected MigrateFileProcedure(TableCatalog tableCatalog) {
@@ -76,6 +77,7 @@ public class MigrateFileProcedure extends BaseProcedure {
         String format = args.getString(0);
         String sourceTable = args.getString(1);
         String targetTable = args.getString(2);
+        boolean deleteNeed = args.isNullAt(3) ? true : args.getBoolean(3);
 
         Identifier sourceTableId = Identifier.fromString(sourceTable);
         Identifier targetTableId = Identifier.fromString(targetTable);
@@ -97,6 +99,8 @@ public class MigrateFileProcedure extends BaseProcedure {
                             targetTableId.getDatabaseName(),
                             targetTableId.getObjectName(),
                             Collections.emptyMap());
+
+            migrator.deleteOriginTable(deleteNeed);
             migrator.executeMigrate();
         } catch (Exception e) {
             throw new RuntimeException("Call migrate_file error", e);

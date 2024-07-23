@@ -55,6 +55,7 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalLong;
 
 import static org.apache.paimon.utils.SerializationUtils.newBytesType;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
@@ -101,6 +102,11 @@ public class BucketsTable implements DataTable, ReadonlyTable {
         this.wrapped = wrapped;
         this.isContinuous = isContinuous;
         this.databaseName = databaseName;
+    }
+
+    @Override
+    public OptionalLong latestSnapshotId() {
+        return wrapped.latestSnapshotId();
     }
 
     @Override

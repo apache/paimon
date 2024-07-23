@@ -72,6 +72,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.SortedMap;
 import java.util.function.BiConsumer;
 
@@ -105,6 +106,12 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         }
         this.tableSchema = tableSchema;
         this.catalogEnvironment = catalogEnvironment;
+    }
+
+    @Override
+    public OptionalLong latestSnapshotId() {
+        Long snapshot = store().snapshotManager().latestSnapshotId();
+        return snapshot == null ? OptionalLong.empty() : OptionalLong.of(snapshot);
     }
 
     @Override

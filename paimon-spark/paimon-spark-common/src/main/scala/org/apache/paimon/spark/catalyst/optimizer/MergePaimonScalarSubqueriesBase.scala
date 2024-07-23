@@ -40,11 +40,11 @@ import scala.collection.mutable.ArrayBuffer
  * reused. So we extend the [[tryMergePlans]] method to check and merge
  * [[DataSourceV2ScanRelation]]s, thus we can merge scalar subqueries for paimon.
  */
-trait MergePaimonScalarSubqueriersBase extends Rule[LogicalPlan] with PredicateHelper {
+trait MergePaimonScalarSubqueriesBase extends Rule[LogicalPlan] with PredicateHelper {
   def apply(plan: LogicalPlan): LogicalPlan = {
     plan match {
       // Subquery reuse needs to be enabled for this optimization.
-      case _ if !conf.getConf(SQLConf.SUBQUERY_REUSE_ENABLED) => plan
+      case _ if !conf.getConf(SQLConf.SUBQUERY_REUSE_ENABLED) && !existsPaimonScan(plan) => plan
 
       // This rule does a whole plan traversal, no need to run on subqueries.
       case _: Subquery => plan
@@ -54,6 +54,13 @@ trait MergePaimonScalarSubqueriersBase extends Rule[LogicalPlan] with PredicateH
 
       case _ => extractCommonScalarSubqueries(plan)
     }
+  }
+
+  private def existsPaimonScan(plan: LogicalPlan): Boolean = {
+    plan.find {
+      case r: DataSourceV2ScanRelation => r.scan.isInstanceOf[PaimonScan]
+      case _ => false
+    }.isDefined
   }
 
   /**

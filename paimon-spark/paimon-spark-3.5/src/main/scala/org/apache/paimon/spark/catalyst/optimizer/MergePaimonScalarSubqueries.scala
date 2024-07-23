@@ -24,7 +24,7 @@ import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeMap, Attri
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
 
-object MergePaimonScalarSubqueriers extends MergePaimonScalarSubqueriersBase {
+object MergePaimonScalarSubqueries extends MergePaimonScalarSubqueriesBase {
 
   override def tryMergeDataSourceV2ScanRelation(
       newV2ScanRelation: DataSourceV2ScanRelation,

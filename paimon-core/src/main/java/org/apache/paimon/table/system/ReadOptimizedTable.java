@@ -38,6 +38,7 @@ import org.apache.paimon.utils.TagManager;
 
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalLong;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
@@ -54,55 +55,59 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
 
     public static final String READ_OPTIMIZED = "ro";
 
-    private final FileStoreTable dataTable;
+    private final FileStoreTable wrapped;
 
-    public ReadOptimizedTable(FileStoreTable dataTable) {
-        this.dataTable = dataTable;
+    public ReadOptimizedTable(FileStoreTable wrapped) {
+        this.wrapped = wrapped;
+    }
+
+    @Override
+    public OptionalLong latestSnapshotId() {
+        return wrapped.latestSnapshotId();
     }
 
     @Override
     public String name() {
-        return dataTable.name() + SYSTEM_TABLE_SPLITTER + READ_OPTIMIZED;
+        return wrapped.name() + SYSTEM_TABLE_SPLITTER + READ_OPTIMIZED;
     }
 
     @Override
     public RowType rowType() {
-        return dataTable.rowType();
+        return wrapped.rowType();
     }
 
     @Override
     public List<String> partitionKeys() {
-        return dataTable.partitionKeys();
+        return wrapped.partitionKeys();
     }
 
     @Override
     public Map<String, String> options() {
-        return dataTable.options();
+        return wrapped.options();
     }
 
     @Override
     public List<String> primaryKeys() {
-        return dataTable.primaryKeys();
+        return wrapped.primaryKeys();
     }
 
     @Override
     public SnapshotReader newSnapshotReader() {
-        if (dataTable.schema().primaryKeys().size() > 0) {
-            return dataTable
-                    .newSnapshotReader()
+        if (wrapped.schema().primaryKeys().size() > 0) {
+            return wrapped.newSnapshotReader()
                     .withLevelFilter(level -> level == coreOptions().numLevels() - 1);
         } else {
-            return dataTable.newSnapshotReader();
+            return wrapped.newSnapshotReader();
         }
     }
 
     @Override
     public DataTableBatchScan newScan() {
         return new DataTableBatchScan(
-                dataTable.schema().primaryKeys().size() > 0,
+                wrapped.schema().primaryKeys().size() > 0,
                 coreOptions(),
                 newSnapshotReader(),
-                DefaultValueAssigner.create(dataTable.schema()));
+                DefaultValueAssigner.create(wrapped.schema()));
     }
 
     @Override
@@ -111,47 +116,47 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
                 coreOptions(),
                 newSnapshotReader(),
                 snapshotManager(),
-                dataTable.supportStreamingReadOverwrite(),
-                DefaultValueAssigner.create(dataTable.schema()));
+                wrapped.supportStreamingReadOverwrite(),
+                DefaultValueAssigner.create(wrapped.schema()));
     }
 
     @Override
     public CoreOptions coreOptions() {
-        return dataTable.coreOptions();
+        return wrapped.coreOptions();
     }
 
     @Override
     public Path location() {
-        return dataTable.location();
+        return wrapped.location();
     }
 
     @Override
     public SnapshotManager snapshotManager() {
-        return dataTable.snapshotManager();
+        return wrapped.snapshotManager();
     }
 
     @Override
     public TagManager tagManager() {
-        return dataTable.tagManager();
+        return wrapped.tagManager();
     }
 
     @Override
     public BranchManager branchManager() {
-        return dataTable.branchManager();
+        return wrapped.branchManager();
     }
 
     @Override
     public InnerTableRead newRead() {
-        return dataTable.newRead();
+        return wrapped.newRead();
     }
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new ReadOptimizedTable(dataTable.copy(dynamicOptions));
+        return new ReadOptimizedTable(wrapped.copy(dynamicOptions));
     }
 
     @Override
     public FileIO fileIO() {
-        return dataTable.fileIO();
+        return wrapped.fileIO();
     }
 }
