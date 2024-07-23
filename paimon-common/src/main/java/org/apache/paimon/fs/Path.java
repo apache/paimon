@@ -115,6 +115,9 @@ public class Path implements Comparable<Path>, Serializable {
                 throw new IllegalArgumentException(e);
             }
         }
+        if (WINDOWS && !child.uri.isAbsolute() && !parentUri.toString().endsWith("/")) {
+            child = new Path(SEPARATOR + child);
+        }
         URI resolved = parentUri.resolve(child.uri);
         initialize(
                 resolved.getScheme(),
