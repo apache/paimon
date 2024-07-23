@@ -38,11 +38,13 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.system.SystemTableLoader;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.Nullable;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -294,7 +296,7 @@ public abstract class AbstractCatalog implements Catalog {
             if (ignoreIfNotExists) {
                 return;
             }
-            throw new TableNotExistException(identifier);
+            throw new TableNotExistException(identifier, branchName);
         }
 
         alterTableImpl(identifier, branchName, changes);
@@ -399,7 +401,21 @@ public abstract class AbstractCatalog implements Catalog {
 
     @VisibleForTesting
     public Path getDataTableLocation(Identifier identifier) {
-        return new Path(newDatabasePath(identifier.getDatabaseName()), identifier.getObjectName());
+        Optional<Pair<Identifier, String>> optionalBranchName =
+                getOriginalIdentifierAndBranch(identifier);
+        String branch = DEFAULT_MAIN_BRANCH;
+        if (optionalBranchName.isPresent()) {
+            identifier = optionalBranchName.get().getLeft();
+            branch = optionalBranchName.get().getRight();
+        }
+        Path databasePath = newDatabasePath(identifier.getDatabaseName());
+        if (branch.equals(DEFAULT_MAIN_BRANCH)) {
+            return new Path(databasePath, identifier.getObjectName());
+        } else {
+            return new Path(
+                    databasePath + File.separator + identifier.getObjectName(),
+                    "branch/" + BranchManager.BRANCH_PREFIX + branch);
+        }
     }
 
     private static Optional<Pair<Identifier, String>> getOriginalIdentifierAndBranch(
@@ -477,9 +493,21 @@ public abstract class AbstractCatalog implements Catalog {
                             "Table name[%s] cannot contain '%s' separator",
                             identifier.getObjectName(), SYSTEM_TABLE_SPLITTER));
         }
-        return new Path(
-                newDatabasePath(warehouse, identifier.getDatabaseName()),
-                identifier.getObjectName());
+        Optional<Pair<Identifier, String>> optionalBranchName =
+                getOriginalIdentifierAndBranch(identifier);
+        String branch = DEFAULT_MAIN_BRANCH;
+        if (optionalBranchName.isPresent()) {
+            identifier = optionalBranchName.get().getLeft();
+            branch = optionalBranchName.get().getRight();
+        }
+        Path databasePath = newDatabasePath(warehouse, identifier.getDatabaseName());
+        if (branch.equals(DEFAULT_MAIN_BRANCH)) {
+            return new Path(databasePath, identifier.getObjectName());
+        } else {
+            return new Path(
+                    databasePath + File.separator + identifier.getObjectName(),
+                    "branch/" + BranchManager.BRANCH_PREFIX + branch);
+        }
     }
 
     public static Path newDatabasePath(String warehouse, String database) {
