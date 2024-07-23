@@ -286,7 +286,6 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
         List<IcebergManifestFileMeta> baseManifestFileMetas =
                 manifestList.read(baseMetadata.currentSnapshot().manifestList());
 
-        Pair<List<IcebergManifestFileMeta>, Boolean> createManifestFileMetasResult;
         // Note that `isAddOnly(commitable)` and `removedFiles.isEmpty()` may be different,
         // because if a file's level is changed, it will first be removed and then added.
         // In this case, if `baseMetadata` already contains this file, we should not add a
