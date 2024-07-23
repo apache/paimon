@@ -24,7 +24,6 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.iceberg.IcebergCommitCallback;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.metastore.AddPartitionCommitCallback;
@@ -397,7 +396,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 options.forceCreatingSnapshot());
     }
 
-    private List<CommitCallback> createCommitCallbacks(String commitUser) {
+    protected List<CommitCallback> createCommitCallbacks(String commitUser) {
         List<CommitCallback> callbacks =
                 new ArrayList<>(CallbackUtils.loadCommitCallbacks(coreOptions()));
         CoreOptions options = coreOptions();
@@ -421,10 +420,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                                     metastoreClientFactory.create(), options.tagToPartitionField()),
                             tagPreview);
             callbacks.add(callback);
-        }
-
-        if (options.metadataIcebergCompatible()) {
-            callbacks.add(new IcebergCommitCallback(this, commitUser));
         }
 
         return callbacks;

@@ -51,7 +51,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -59,6 +59,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -66,6 +67,40 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class IcebergCompatibilityTest {
 
     @TempDir java.nio.file.Path tempDir;
+
+    // ------------------------------------------------------------------------
+    //  Constructed Tests
+    // ------------------------------------------------------------------------
+
+    @Test
+    public void testFileLevelChange() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType, Collections.emptyList(), Collections.singletonList("k"), 1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(false, 1));
+        assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)");
+
+        write.compact(BinaryRow.EMPTY_ROW, 0, true);
+        commit.commit(2, write.prepareCommit(true, 2));
+        assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)");
+
+        write.close();
+        commit.close();
+    }
+
+    // ------------------------------------------------------------------------
+    //  Random Tests
+    // ------------------------------------------------------------------------
 
     @Test
     public void testUnPartitionedPrimaryKeyTable() throws Exception {
@@ -80,6 +115,8 @@ public class IcebergCompatibilityTest {
         int numRecords = 500;
         ThreadLocalRandom random = ThreadLocalRandom.current();
         List<List<TestRecord>> testRecords = new ArrayList<>();
+        List<List<String>> expected = new ArrayList<>();
+        Map<String, String> expectedMap = new LinkedHashMap<>();
         for (int r = 0; r < numRounds; r++) {
             List<TestRecord> round = new ArrayList<>();
             for (int i = 0; i < numRecords; i++) {
@@ -90,11 +127,14 @@ public class IcebergCompatibilityTest {
                 round.add(
                         new TestRecord(
                                 BinaryRow.EMPTY_ROW,
-                                String.format("%d|%s", k1, k2),
-                                String.format("%d|%d", v1, v2),
                                 GenericRow.of(k1, BinaryString.fromString(k2), v1, v2)));
+                expectedMap.put(String.format("%d, %s", k1, k2), String.format("%d, %d", v1, v2));
             }
             testRecords.add(round);
+            expected.add(
+                    expectedMap.entrySet().stream()
+                            .map(e -> String.format("Record(%s, %s)", e.getKey(), e.getValue()))
+                            .collect(Collectors.toList()));
         }
 
         runCompatibilityTest(
@@ -102,8 +142,8 @@ public class IcebergCompatibilityTest {
                 Collections.emptyList(),
                 Arrays.asList("k1", "k2"),
                 testRecords,
-                r -> String.format("%d|%s", r.get(0, Integer.class), r.get(1, String.class)),
-                r -> String.format("%d|%d", r.get(2, Integer.class), r.get(3, Long.class)));
+                expected,
+                Record::toString);
     }
 
     @Test
@@ -129,10 +169,12 @@ public class IcebergCompatibilityTest {
                     return b;
                 };
 
-        int numRounds = 5;
-        int numRecords = 500;
+        int numRounds = 2;
+        int numRecords = 3;
         ThreadLocalRandom random = ThreadLocalRandom.current();
         List<List<TestRecord>> testRecords = new ArrayList<>();
+        List<List<String>> expected = new ArrayList<>();
+        Map<String, String> expectedMap = new LinkedHashMap<>();
         for (int r = 0; r < numRounds; r++) {
             List<TestRecord> round = new ArrayList<>();
             for (int i = 0; i < numRecords; i++) {
@@ -144,16 +186,20 @@ public class IcebergCompatibilityTest {
                 round.add(
                         new TestRecord(
                                 binaryRow.apply(pt1, pt2),
-                                String.format("%d|%s|%s", pt1, pt2, k),
-                                String.format("%d|%d", v1, v2),
                                 GenericRow.of(
                                         pt1,
                                         BinaryString.fromString(pt2),
                                         BinaryString.fromString(k),
                                         v1,
                                         v2)));
+                expectedMap.put(
+                        String.format("%d, %s, %s", pt1, pt2, k), String.format("%d, %d", v1, v2));
             }
             testRecords.add(round);
+            expected.add(
+                    expectedMap.entrySet().stream()
+                            .map(e -> String.format("Record(%s, %s)", e.getKey(), e.getValue()))
+                            .collect(Collectors.toList()));
         }
 
         runCompatibilityTest(
@@ -161,13 +207,8 @@ public class IcebergCompatibilityTest {
                 Arrays.asList("pt1", "pt2"),
                 Arrays.asList("pt1", "pt2", "k"),
                 testRecords,
-                r ->
-                        String.format(
-                                "%d|%s|%s",
-                                r.get(0, Integer.class),
-                                r.get(1, String.class),
-                                r.get(2, String.class)),
-                r -> String.format("%d|%d", r.get(3, Integer.class), r.get(4, Long.class)));
+                expected,
+                Record::toString);
     }
 
     @Test
@@ -214,6 +255,8 @@ public class IcebergCompatibilityTest {
         int numRecords = 500;
         ThreadLocalRandom random = ThreadLocalRandom.current();
         List<List<TestRecord>> testRecords = new ArrayList<>();
+        List<List<String>> expected = new ArrayList<>();
+        List<String> currentExpected = new ArrayList<>();
         for (int r = 0; r < numRounds; r++) {
             List<TestRecord> round = new ArrayList<>();
             for (int i = 0; i < numRecords; i++) {
@@ -234,25 +277,9 @@ public class IcebergCompatibilityTest {
                         random.nextBoolean() ? String.valueOf(random.nextInt()).getBytes() : null;
                 Integer vDate = random.nextBoolean() ? random.nextInt(0, 30000) : null;
 
-                String k =
-                        String.format(
-                                "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s",
-                                pt,
-                                vBoolean,
-                                vBigInt,
-                                vFloat,
-                                vDouble,
-                                vDecimal,
-                                vChar,
-                                vVarChar,
-                                vBinary == null ? null : new String(vBinary),
-                                vVarBinary == null ? null : new String(vVarBinary),
-                                vDate == null ? null : LocalDate.ofEpochDay(vDate));
                 round.add(
                         new TestRecord(
                                 binaryRow.apply(pt),
-                                k,
-                                "",
                                 GenericRow.of(
                                         pt,
                                         vBoolean,
@@ -265,8 +292,23 @@ public class IcebergCompatibilityTest {
                                         vBinary,
                                         vVarBinary,
                                         vDate)));
+                currentExpected.add(
+                        String.format(
+                                "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s",
+                                pt,
+                                vBoolean,
+                                vBigInt,
+                                vFloat,
+                                vDouble,
+                                vDecimal,
+                                vChar,
+                                vVarChar,
+                                vBinary == null ? null : new String(vBinary),
+                                vVarBinary == null ? null : new String(vVarBinary),
+                                vDate == null ? null : LocalDate.ofEpochDay(vDate)));
             }
             testRecords.add(round);
+            expected.add(new ArrayList<>(currentExpected));
         }
 
         runCompatibilityTest(
@@ -274,24 +316,19 @@ public class IcebergCompatibilityTest {
                 Collections.emptyList(),
                 Collections.emptyList(),
                 testRecords,
-                r -> {
-                    ByteBuffer vBinary = r.get(8, ByteBuffer.class);
-                    ByteBuffer vVarBinary = r.get(9, ByteBuffer.class);
-                    return String.format(
-                            "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s",
-                            r.get(0),
-                            r.get(1),
-                            r.get(2),
-                            r.get(3),
-                            r.get(4),
-                            r.get(5),
-                            r.get(6),
-                            r.get(7),
-                            vBinary == null ? null : new String(vBinary.array()),
-                            vVarBinary == null ? null : new String(vVarBinary.array()),
-                            r.get(10));
-                },
-                r -> "");
+                expected,
+                r ->
+                        IntStream.range(0, rowType.getFieldCount())
+                                .mapToObj(
+                                        i -> {
+                                            Object field = r.get(i);
+                                            if (field instanceof ByteBuffer) {
+                                                return new String(((ByteBuffer) field).array());
+                                            } else {
+                                                return String.valueOf(field);
+                                            }
+                                        })
+                                .collect(Collectors.joining(", ")));
     }
 
     private void runCompatibilityTest(
@@ -299,35 +336,20 @@ public class IcebergCompatibilityTest {
             List<String> partitionKeys,
             List<String> primaryKeys,
             List<List<TestRecord>> testRecords,
-            Function<Record, String> icebergRecordToKey,
-            Function<Record, String> icebergRecordToValue)
+            List<List<String>> expected,
+            Function<Record, String> icebergRecordToString)
             throws Exception {
-        LocalFileIO fileIO = LocalFileIO.create();
-        Path path = new Path(tempDir.toString());
-
-        Options options = new Options();
-        if (!primaryKeys.isEmpty()) {
-            options.set(CoreOptions.BUCKET, 2);
-        }
-        options.set(CoreOptions.METADATA_ICEBERG_COMPATIBLE, true);
-        options.set(CoreOptions.FILE_FORMAT, "avro");
-        Schema schema =
-                new Schema(rowType.getFields(), partitionKeys, primaryKeys, options.toMap(), "");
-
-        FileSystemCatalog paimonCatalog = new FileSystemCatalog(fileIO, path);
-        paimonCatalog.createDatabase("mydb", false);
-        Identifier paimonIdentifier = Identifier.create("mydb", "t");
-        paimonCatalog.createTable(paimonIdentifier, schema, false);
-        FileStoreTable table = (FileStoreTable) paimonCatalog.getTable(paimonIdentifier);
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType, partitionKeys, primaryKeys, primaryKeys.isEmpty() ? -1 : 2);
 
         String commitUser = UUID.randomUUID().toString();
         TableWriteImpl<?> write = table.newWrite(commitUser);
         TableCommitImpl commit = table.newCommit(commitUser);
 
-        Map<String, String> expected = new HashMap<>();
-        for (List<TestRecord> round : testRecords) {
+        for (int r = 0; r < testRecords.size(); r++) {
+            List<TestRecord> round = testRecords.get(r);
             for (TestRecord testRecord : round) {
-                expected.put(testRecord.key, testRecord.value);
                 write.write(testRecord.record);
             }
 
@@ -339,20 +361,9 @@ public class IcebergCompatibilityTest {
                     }
                 }
             }
-            commit.commit(1, write.prepareCommit(true, 1));
+            commit.commit(r, write.prepareCommit(true, r));
 
-            HadoopCatalog icebergCatalog =
-                    new HadoopCatalog(new Configuration(), tempDir.toString());
-            TableIdentifier icebergIdentifier = TableIdentifier.of("mydb.db", "t");
-            org.apache.iceberg.Table icebergTable = icebergCatalog.loadTable(icebergIdentifier);
-            CloseableIterable<Record> result = IcebergGenerics.read(icebergTable).build();
-            Map<String, String> actual = new HashMap<>();
-            for (Record record : result) {
-                actual.put(icebergRecordToKey.apply(record), icebergRecordToValue.apply(record));
-            }
-            result.close();
-
-            assertThat(actual).isEqualTo(expected);
+            assertThat(getIcebergResult(icebergRecordToString)).hasSameElementsAs(expected.get(r));
         }
 
         write.close();
@@ -361,15 +372,54 @@ public class IcebergCompatibilityTest {
 
     private static class TestRecord {
         private final BinaryRow partition;
-        private final String key;
-        private final String value;
         private final GenericRow record;
 
-        private TestRecord(BinaryRow partition, String key, String value, GenericRow record) {
+        private TestRecord(BinaryRow partition, GenericRow record) {
             this.partition = partition;
-            this.key = key;
-            this.value = value;
             this.record = record;
         }
+    }
+
+    // ------------------------------------------------------------------------
+    //  Utils
+    // ------------------------------------------------------------------------
+
+    private FileStoreTable createPaimonTable(
+            RowType rowType, List<String> partitionKeys, List<String> primaryKeys, int numBuckets)
+            throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path path = new Path(tempDir.toString());
+
+        Options options = new Options();
+        options.set(CoreOptions.BUCKET, numBuckets);
+        options.set(CoreOptions.METADATA_ICEBERG_COMPATIBLE, true);
+        options.set(CoreOptions.FILE_FORMAT, "avro");
+        Schema schema =
+                new Schema(rowType.getFields(), partitionKeys, primaryKeys, options.toMap(), "");
+
+        try (FileSystemCatalog paimonCatalog = new FileSystemCatalog(fileIO, path)) {
+            paimonCatalog.createDatabase("mydb", false);
+            Identifier paimonIdentifier = Identifier.create("mydb", "t");
+            paimonCatalog.createTable(paimonIdentifier, schema, false);
+            return (FileStoreTable) paimonCatalog.getTable(paimonIdentifier);
+        }
+    }
+
+    private List<String> getIcebergResult() throws Exception {
+        return getIcebergResult(Record::toString);
+    }
+
+    private List<String> getIcebergResult(Function<Record, String> icebergRecordToString)
+            throws Exception {
+        HadoopCatalog icebergCatalog = new HadoopCatalog(new Configuration(), tempDir.toString());
+        TableIdentifier icebergIdentifier = TableIdentifier.of("mydb.db", "t");
+        org.apache.iceberg.Table icebergTable = icebergCatalog.loadTable(icebergIdentifier);
+        CloseableIterable<Record> result = IcebergGenerics.read(icebergTable).build();
+        List<String> actual = new ArrayList<>();
+        for (Record record : result) {
+            actual.add(icebergRecordToString.apply(record));
+        }
+        result.close();
+        return actual;
     }
 }

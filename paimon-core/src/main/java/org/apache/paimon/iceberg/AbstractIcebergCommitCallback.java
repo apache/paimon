@@ -37,6 +37,7 @@ import org.apache.paimon.iceberg.metadata.IcebergPartitionSpec;
 import org.apache.paimon.iceberg.metadata.IcebergSchema;
 import org.apache.paimon.iceberg.metadata.IcebergSnapshot;
 import org.apache.paimon.iceberg.metadata.IcebergSnapshotSummary;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
@@ -44,12 +45,14 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.RawFile;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
@@ -60,37 +63,37 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.function.Function;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 /**
  * A {@link CommitCallback} to create Iceberg compatible metadata, so Iceberg readers can read
  * Paimon's {@link RawFile}.
  */
-public class IcebergCommitCallback implements CommitCallback {
+public abstract class AbstractIcebergCommitCallback implements CommitCallback {
 
     // see org.apache.iceberg.hadoop.Util
     private static final String VERSION_HINT_FILENAME = "version-hint.text";
 
-    private final FileStoreTable table;
+    protected final FileStoreTable table;
     private final String commitUser;
     private final IcebergPathFactory pathFactory;
+    private final FileStorePathFactory fileStorePathFactory;
 
     private final IcebergManifestFile manifestFile;
     private final IcebergManifestList manifestList;
 
-    public IcebergCommitCallback(FileStoreTable table, String commitUser) {
+    public AbstractIcebergCommitCallback(FileStoreTable table, String commitUser) {
         this.table = table;
         this.commitUser = commitUser;
         this.pathFactory = new IcebergPathFactory(table.location());
+        this.fileStorePathFactory = table.store().pathFactory();
 
         RowType partitionType = table.schema().logicalPartitionType();
         RowType entryType = IcebergManifestEntry.schema(partitionType);
@@ -196,14 +199,10 @@ public class IcebergCommitCallback implements CommitCallback {
 
     private void createMetadataWithoutBase(long snapshotId) throws IOException {
         SnapshotReader snapshotReader = table.newSnapshotReader().withSnapshot(snapshotId);
-        Function<DataSplit, Stream<IcebergManifestEntry>> dataSplitToManifestEntries =
-                s ->
-                        s.convertToRawFiles().get().stream()
-                                .map(r -> rawFileToManifestEntry(r, s.partition(), snapshotId));
         Iterator<IcebergManifestEntry> entryIterator =
                 snapshotReader.read().dataSplits().stream()
                         .filter(DataSplit::rawConvertible)
-                        .flatMap(dataSplitToManifestEntries)
+                        .flatMap(s -> dataSplitToManifestEntries(s, snapshotId).stream())
                         .iterator();
         List<IcebergManifestFileMeta> manifestFileMetas =
                 manifestFile.rollingWrite(entryIterator, snapshotId);
@@ -217,7 +216,7 @@ public class IcebergCommitCallback implements CommitCallback {
                         snapshotId,
                         snapshotId,
                         System.currentTimeMillis(),
-                        new IcebergSnapshotSummary(IcebergSnapshotSummary.OPERATION_APPEND),
+                        IcebergSnapshotSummary.APPEND,
                         pathFactory.toManifestListPath(manifestListFileName).toString(),
                         schemaId);
 
@@ -246,121 +245,75 @@ public class IcebergCommitCallback implements CommitCallback {
                         String.valueOf(snapshotId));
     }
 
+    private List<IcebergManifestEntry> dataSplitToManifestEntries(
+            DataSplit dataSplit, long snapshotId) {
+        List<IcebergManifestEntry> result = new ArrayList<>();
+        for (RawFile rawFile : dataSplit.convertToRawFiles().get()) {
+            IcebergDataFileMeta fileMeta =
+                    new IcebergDataFileMeta(
+                            IcebergDataFileMeta.Content.DATA,
+                            rawFile.path(),
+                            rawFile.format(),
+                            dataSplit.partition(),
+                            rawFile.rowCount(),
+                            rawFile.fileSize());
+            result.add(
+                    new IcebergManifestEntry(
+                            IcebergManifestEntry.Status.ADDED,
+                            snapshotId,
+                            snapshotId,
+                            snapshotId,
+                            fileMeta));
+        }
+        return result;
+    }
+
     private void createMetadataWithBase(
             ManifestCommittable committable, long currentSnapshotId, long baseSnapshotId)
             throws IOException {
-        Set<BinaryRow> modifiedPartitions =
+        Set<String> removedFiles = new LinkedHashSet<>();
+        Map<String, Pair<BinaryRow, DataFileMeta>> addedFiles = new LinkedHashMap<>();
+        collectFileChanges(committable, removedFiles, addedFiles);
+        List<BinaryRow> modifiedPartitions =
                 committable.fileCommittables().stream()
                         .map(CommitMessage::partition)
-                        .collect(Collectors.toSet());
-        List<BinaryRow> modifiedPartitionsList = new ArrayList<>(modifiedPartitions);
-
-        List<DataSplit> dataSplits =
-                table.newSnapshotReader()
-                        .withPartitionFilter(modifiedPartitionsList)
-                        .read()
-                        .dataSplits();
-        Map<String, Pair<RawFile, BinaryRow>> currentRawFiles = new HashMap<>();
-        for (DataSplit dataSplit : dataSplits) {
-            if (dataSplit.rawConvertible() && modifiedPartitions.contains(dataSplit.partition())) {
-                dataSplit
-                        .convertToRawFiles()
-                        .get()
-                        .forEach(
-                                r ->
-                                        currentRawFiles.put(
-                                                r.path(), Pair.of(r, dataSplit.partition())));
-            }
-        }
+                        .distinct()
+                        .collect(Collectors.toList());
 
         IcebergMetadata baseMetadata =
                 IcebergMetadata.fromPath(
                         table.fileIO(), pathFactory.toMetadataPath(baseSnapshotId));
         List<IcebergManifestFileMeta> baseManifestFileMetas =
                 manifestList.read(baseMetadata.currentSnapshot().manifestList());
-        RowType partitionType = table.schema().logicalPartitionType();
-        PartitionPredicate predicate =
-                PartitionPredicate.fromMultiple(partitionType, modifiedPartitionsList);
 
-        IcebergSnapshotSummary snapshotSummary =
-                new IcebergSnapshotSummary(IcebergSnapshotSummary.OPERATION_APPEND);
-        List<IcebergManifestFileMeta> newManifestFileMetas = new ArrayList<>();
-        for (IcebergManifestFileMeta fileMeta : baseManifestFileMetas) {
-            // use partition predicate to only check modified partitions
-            int numFields = partitionType.getFieldCount();
-            GenericRow minValues = new GenericRow(numFields);
-            GenericRow maxValues = new GenericRow(numFields);
-            for (int i = 0; i < numFields; i++) {
-                IcebergPartitionSummary summary = fileMeta.partitions().get(i);
-                DataType fieldType = partitionType.getTypeAt(i);
-                minValues.setField(i, IcebergConversions.toObject(fieldType, summary.lowerBound()));
-                maxValues.setField(i, IcebergConversions.toObject(fieldType, summary.upperBound()));
-            }
-
-            if (predicate.test(
-                    fileMeta.liveRowsCount(),
-                    minValues,
-                    maxValues,
-                    // IcebergPartitionSummary only has `containsNull` field and does not have the
-                    // exact number of nulls, so we set null count to 0 to not affect filtering
-                    new GenericArray(new long[numFields]))) {
-                // check if any IcebergManifestEntry in this manifest file meta is removed
-                List<IcebergManifestEntry> entries =
-                        manifestFile.read(new Path(fileMeta.manifestPath()).getName());
-                Set<String> removedPaths = new HashSet<>();
-                for (IcebergManifestEntry entry : entries) {
-                    if (entry.isLive() && modifiedPartitions.contains(entry.file().partition())) {
-                        String path = entry.file().filePath();
-                        if (currentRawFiles.containsKey(path)) {
-                            currentRawFiles.remove(path);
-                        } else {
-                            removedPaths.add(path);
-                        }
-                    }
-                }
-
-                if (removedPaths.isEmpty()) {
-                    // nothing is removed, use this file meta again
-                    newManifestFileMetas.add(fileMeta);
-                } else {
-                    // some file is removed, rewrite this file meta
-                    snapshotSummary =
-                            new IcebergSnapshotSummary(IcebergSnapshotSummary.OPERATION_OVERWRITE);
-                    List<IcebergManifestEntry> newEntries = new ArrayList<>();
-                    for (IcebergManifestEntry entry : entries) {
-                        if (entry.isLive()) {
-                            newEntries.add(
-                                    new IcebergManifestEntry(
-                                            removedPaths.contains(entry.file().filePath())
-                                                    ? IcebergManifestEntry.Status.DELETED
-                                                    : IcebergManifestEntry.Status.EXISTING,
-                                            entry.snapshotId(),
-                                            entry.sequenceNumber(),
-                                            entry.fileSequenceNumber(),
-                                            entry.file()));
-                        }
-                    }
-                    newManifestFileMetas.addAll(
-                            manifestFile.rollingWrite(newEntries.iterator(), currentSnapshotId));
-                }
-            }
-        }
-
-        if (!currentRawFiles.isEmpty()) {
-            // add new raw files
+        Pair<List<IcebergManifestFileMeta>, Boolean> createManifestFileMetasResult;
+        // Note that `isAddOnly(commitable)` and `removedFiles.isEmpty()` may be different,
+        // because if a file's level is changed, it will first be removed and then added.
+        // In this case, if `baseMetadata` already contains this file, we should not add a
+        // duplicate.
+        IcebergSnapshotSummary snapshotSummary;
+        List<IcebergManifestFileMeta> newManifestFileMetas;
+        if (isAddOnly(committable)) {
+            // Fast case. We don't need to remove files from `baseMetadata`. We only need to append
+            // new metadata files.
+            snapshotSummary = IcebergSnapshotSummary.APPEND;
+            newManifestFileMetas = new ArrayList<>(baseManifestFileMetas);
             newManifestFileMetas.addAll(
-                    manifestFile.rollingWrite(
-                            currentRawFiles.values().stream()
-                                    .map(
-                                            p ->
-                                                    rawFileToManifestEntry(
-                                                            p.getLeft(),
-                                                            p.getRight(),
-                                                            currentSnapshotId))
-                                    .iterator(),
-                            currentSnapshotId));
+                    createNewlyAddedManifestFileMetas(addedFiles, currentSnapshotId));
+        } else {
+            Pair<List<IcebergManifestFileMeta>, Boolean> result =
+                    createWithDeleteManifestFileMetas(
+                            removedFiles,
+                            addedFiles,
+                            modifiedPartitions,
+                            baseManifestFileMetas,
+                            currentSnapshotId);
+            snapshotSummary =
+                    result.getRight()
+                            ? IcebergSnapshotSummary.APPEND
+                            : IcebergSnapshotSummary.OVERWRITE;
+            newManifestFileMetas = result.getLeft();
         }
-
         String manifestListFileName = manifestList.writeWithoutRolling(newManifestFileMetas);
 
         // add new schema if needed
@@ -401,18 +354,165 @@ public class IcebergCommitCallback implements CommitCallback {
                         String.valueOf(currentSnapshotId));
     }
 
-    private IcebergManifestEntry rawFileToManifestEntry(
-            RawFile rawFile, BinaryRow partition, long snapshotId) {
-        IcebergDataFileMeta fileMeta =
-                new IcebergDataFileMeta(
-                        IcebergDataFileMeta.Content.DATA,
-                        rawFile.path(),
-                        rawFile.format(),
-                        partition,
-                        rawFile.rowCount(),
-                        rawFile.fileSize());
-        return new IcebergManifestEntry(
-                IcebergManifestEntry.Status.ADDED, snapshotId, snapshotId, snapshotId, fileMeta);
+    private boolean isAddOnly(ManifestCommittable committable) {
+        for (CommitMessage message : committable.fileCommittables()) {
+            CommitMessageImpl m = (CommitMessageImpl) message;
+            if (!m.newFilesIncrement().deletedFiles().isEmpty()
+                    || !m.compactIncrement().compactBefore().isEmpty()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void collectFileChanges(
+            ManifestCommittable committable,
+            Set<String> removedFiles,
+            Map<String, Pair<BinaryRow, DataFileMeta>> addedFiles) {
+        for (CommitMessage message : committable.fileCommittables()) {
+            CommitMessageImpl m = (CommitMessageImpl) message;
+            String bucketPath =
+                    fileStorePathFactory.bucketPath(m.partition(), m.bucket()).toString();
+            for (DataFileMeta meta : m.newFilesIncrement().deletedFiles()) {
+                String path = bucketPath + "/" + meta.fileName();
+                removedFiles.add(path);
+            }
+            for (DataFileMeta meta : m.newFilesIncrement().newFiles()) {
+                if (shouldAddFileToIceberg(meta)) {
+                    String path = bucketPath + "/" + meta.fileName();
+                    removedFiles.remove(path);
+                    addedFiles.put(path, Pair.of(m.partition(), meta));
+                }
+            }
+            for (DataFileMeta meta : m.compactIncrement().compactBefore()) {
+                String path = bucketPath + "/" + meta.fileName();
+                addedFiles.remove(path);
+                removedFiles.add(path);
+            }
+            for (DataFileMeta meta : m.compactIncrement().compactAfter()) {
+                if (shouldAddFileToIceberg(meta)) {
+                    String path = bucketPath + "/" + meta.fileName();
+                    removedFiles.remove(path);
+                    addedFiles.put(path, Pair.of(m.partition(), meta));
+                }
+            }
+        }
+    }
+
+    protected abstract boolean shouldAddFileToIceberg(DataFileMeta meta);
+
+    private List<IcebergManifestFileMeta> createNewlyAddedManifestFileMetas(
+            Map<String, Pair<BinaryRow, DataFileMeta>> addedFiles, long currentSnapshotId)
+            throws IOException {
+        if (addedFiles.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        return manifestFile.rollingWrite(
+                addedFiles.entrySet().stream()
+                        .map(
+                                e -> {
+                                    IcebergDataFileMeta fileMeta =
+                                            new IcebergDataFileMeta(
+                                                    IcebergDataFileMeta.Content.DATA,
+                                                    e.getKey(),
+                                                    e.getValue().getRight().fileFormat(),
+                                                    e.getValue().getLeft(),
+                                                    e.getValue().getRight().rowCount(),
+                                                    e.getValue().getRight().fileSize());
+                                    return new IcebergManifestEntry(
+                                            IcebergManifestEntry.Status.ADDED,
+                                            currentSnapshotId,
+                                            currentSnapshotId,
+                                            currentSnapshotId,
+                                            fileMeta);
+                                })
+                        .iterator(),
+                currentSnapshotId);
+    }
+
+    private Pair<List<IcebergManifestFileMeta>, Boolean> createWithDeleteManifestFileMetas(
+            Set<String> removedFiles,
+            Map<String, Pair<BinaryRow, DataFileMeta>> addedFiles,
+            List<BinaryRow> modifiedPartitions,
+            List<IcebergManifestFileMeta> baseManifestFileMetas,
+            long currentSnapshotId)
+            throws IOException {
+        boolean isAppend = true;
+        List<IcebergManifestFileMeta> newManifestFileMetas = new ArrayList<>();
+
+        RowType partitionType = table.schema().logicalPartitionType();
+        PartitionPredicate predicate =
+                PartitionPredicate.fromMultiple(partitionType, modifiedPartitions);
+
+        for (IcebergManifestFileMeta fileMeta : baseManifestFileMetas) {
+            // use partition predicate to only check modified partitions
+            int numFields = partitionType.getFieldCount();
+            GenericRow minValues = new GenericRow(numFields);
+            GenericRow maxValues = new GenericRow(numFields);
+            long[] nullCounts = new long[numFields];
+            for (int i = 0; i < numFields; i++) {
+                IcebergPartitionSummary summary = fileMeta.partitions().get(i);
+                DataType fieldType = partitionType.getTypeAt(i);
+                minValues.setField(i, IcebergConversions.toObject(fieldType, summary.lowerBound()));
+                maxValues.setField(i, IcebergConversions.toObject(fieldType, summary.upperBound()));
+                // IcebergPartitionSummary only has `containsNull` field and does not have the
+                // exact number of nulls.
+                nullCounts[i] = summary.containsNull() ? 1 : 0;
+            }
+
+            if (predicate == null
+                    || predicate.test(
+                            fileMeta.liveRowsCount(),
+                            minValues,
+                            maxValues,
+                            new GenericArray(nullCounts))) {
+                // check if any IcebergManifestEntry in this manifest file meta is removed
+                List<IcebergManifestEntry> entries =
+                        manifestFile.read(new Path(fileMeta.manifestPath()).getName());
+                boolean canReuseFile = true;
+                for (IcebergManifestEntry entry : entries) {
+                    if (entry.isLive()) {
+                        String path = entry.file().filePath();
+                        if (addedFiles.containsKey(path)) {
+                            // added file already exists (most probably due to level changes),
+                            // remove it to not add a duplicate.
+                            addedFiles.remove(path);
+                        } else if (removedFiles.contains(path)) {
+                            canReuseFile = false;
+                        }
+                    }
+                }
+
+                if (canReuseFile) {
+                    // nothing is removed, use this file meta again
+                    newManifestFileMetas.add(fileMeta);
+                } else {
+                    // some file is removed, rewrite this file meta
+                    isAppend = false;
+                    List<IcebergManifestEntry> newEntries = new ArrayList<>();
+                    for (IcebergManifestEntry entry : entries) {
+                        if (entry.isLive()) {
+                            newEntries.add(
+                                    new IcebergManifestEntry(
+                                            removedFiles.contains(entry.file().filePath())
+                                                    ? IcebergManifestEntry.Status.DELETED
+                                                    : IcebergManifestEntry.Status.EXISTING,
+                                            entry.snapshotId(),
+                                            entry.sequenceNumber(),
+                                            entry.fileSequenceNumber(),
+                                            entry.file()));
+                        }
+                    }
+                    newManifestFileMetas.addAll(
+                            manifestFile.rollingWrite(newEntries.iterator(), currentSnapshotId));
+                }
+            }
+        }
+
+        newManifestFileMetas.addAll(
+                createNewlyAddedManifestFileMetas(addedFiles, currentSnapshotId));
+        return Pair.of(newManifestFileMetas, isAppend);
     }
 
     private List<IcebergPartitionField> getPartitionFields(RowType partitionType) {
