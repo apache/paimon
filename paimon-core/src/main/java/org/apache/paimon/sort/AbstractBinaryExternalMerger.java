@@ -183,7 +183,7 @@ public abstract class AbstractBinaryExternalMerger<Entry> implements Closeable {
                             compressionCodecFactory,
                             compressionBlockSize);
             writeMergingOutput(mergeIterator, output);
-            numBytesInLastBlock = output.close();
+            output.close();
             numBlocksWritten = output.getBlockCount();
         } catch (IOException e) {
             if (output != null) {
@@ -202,8 +202,7 @@ public abstract class AbstractBinaryExternalMerger<Entry> implements Closeable {
             }
         }
 
-        return new ChannelWithMeta(
-                mergedChannelID, numBlocksWritten, numBytesInLastBlock, output.getWriteBytes());
+        return new ChannelWithMeta(mergedChannelID, numBlocksWritten, output.getWriteBytes());
     }
 
     // -------------------------------------------------------------------------------------------

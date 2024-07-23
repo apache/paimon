@@ -37,6 +37,7 @@ import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.EmptyRecordReader;
+import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.IndexCastMapping;
 import org.apache.paimon.schema.SchemaEvolutionUtil;
@@ -131,7 +132,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     public RecordReader<InternalRow> createReader(DataSplit split) throws IOException {
         DataFilePathFactory dataFilePathFactory =
                 pathFactory.createDataFilePathFactory(split.partition(), split.bucket());
-        List<ConcatRecordReader.ReaderSupplier<InternalRow>> suppliers = new ArrayList<>();
+        List<ReaderSupplier<InternalRow>> suppliers = new ArrayList<>();
         if (split.beforeFiles().size() > 0) {
             LOG.info("Ignore split before files: " + split.beforeFiles());
         }
