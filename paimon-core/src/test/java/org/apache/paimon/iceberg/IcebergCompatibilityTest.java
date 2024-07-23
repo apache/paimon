@@ -26,6 +26,7 @@ import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
@@ -35,6 +36,7 @@ import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 
 import org.apache.hadoop.conf.Configuration;
@@ -51,6 +53,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -93,6 +96,69 @@ public class IcebergCompatibilityTest {
         write.compact(BinaryRow.EMPTY_ROW, 0, true);
         commit.commit(2, write.prepareCommit(true, 2));
         assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testDelete() throws Exception {
+        testDeleteImpl(false);
+    }
+
+    @Test
+    public void testDeleteWithDeletionVector() throws Exception {
+        testDeleteImpl(true);
+    }
+
+    private void testDeleteImpl(boolean deletionVector) throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        Map<String, String> customOptions = new HashMap<>();
+        if (deletionVector) {
+            customOptions.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        }
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        1,
+                        customOptions);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(false, 1));
+        assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)");
+
+        write.write(GenericRow.of(2, 21));
+        write.compact(BinaryRow.EMPTY_ROW, 0, true);
+        commit.commit(2, write.prepareCommit(true, 2));
+        assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 21)");
+
+        write.write(GenericRow.ofKind(RowKind.DELETE, 1, 10));
+        commit.commit(3, write.prepareCommit(false, 3));
+        // not changed because no full compaction
+        assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 21)");
+
+        write.compact(BinaryRow.EMPTY_ROW, 0, true);
+        commit.commit(4, write.prepareCommit(true, 4));
+        if (deletionVector) {
+            // level 0 file is compacted into deletion vector, so max level data file does not
+            // change
+            // this is still a valid table state at some time in the history
+            assertThat(getIcebergResult())
+                    .containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 21)");
+        } else {
+            assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(2, 21)");
+        }
 
         write.close();
         commit.close();
@@ -387,10 +453,20 @@ public class IcebergCompatibilityTest {
     private FileStoreTable createPaimonTable(
             RowType rowType, List<String> partitionKeys, List<String> primaryKeys, int numBuckets)
             throws Exception {
+        return createPaimonTable(rowType, partitionKeys, primaryKeys, numBuckets, new HashMap<>());
+    }
+
+    private FileStoreTable createPaimonTable(
+            RowType rowType,
+            List<String> partitionKeys,
+            List<String> primaryKeys,
+            int numBuckets,
+            Map<String, String> customOptions)
+            throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         Path path = new Path(tempDir.toString());
 
-        Options options = new Options();
+        Options options = new Options(customOptions);
         options.set(CoreOptions.BUCKET, numBuckets);
         options.set(CoreOptions.METADATA_ICEBERG_COMPATIBLE, true);
         options.set(CoreOptions.FILE_FORMAT, "avro");
