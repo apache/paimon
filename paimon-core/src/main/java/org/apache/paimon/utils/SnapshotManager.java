@@ -668,6 +668,42 @@ public class SnapshotManager implements Serializable {
         return listVersionedFiles(fileIO, dir, prefix).reduce(reducer).orElse(null);
     }
 
+    /**
+     * Find the overlapping snapshots between sortedSnapshots and range of [beginInclusive,
+     * endExclusive).
+     */
+    public static List<Snapshot> findOverlappedSnapshots(
+            List<Snapshot> sortedSnapshots, long beginInclusive, long endExclusive) {
+        List<Snapshot> overlappedSnapshots = new ArrayList<>();
+        int right = findPreviousSnapshot(sortedSnapshots, endExclusive);
+        if (right >= 0) {
+            int left = Math.max(findPreviousOrEqualSnapshot(sortedSnapshots, beginInclusive), 0);
+            for (int i = left; i <= right; i++) {
+                overlappedSnapshots.add(sortedSnapshots.get(i));
+            }
+        }
+        return overlappedSnapshots;
+    }
+
+    public static int findPreviousSnapshot(List<Snapshot> sortedSnapshots, long targetSnapshotId) {
+        for (int i = sortedSnapshots.size() - 1; i >= 0; i--) {
+            if (sortedSnapshots.get(i).id() < targetSnapshotId) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static int findPreviousOrEqualSnapshot(
+            List<Snapshot> sortedSnapshots, long targetSnapshotId) {
+        for (int i = sortedSnapshots.size() - 1; i >= 0; i--) {
+            if (sortedSnapshots.get(i).id() <= targetSnapshotId) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
     public void deleteLatestHint() throws IOException {
         Path snapshotDir = snapshotDirectory();
         Path hintFile = new Path(snapshotDir, LATEST);

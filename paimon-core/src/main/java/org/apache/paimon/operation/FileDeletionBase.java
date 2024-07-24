@@ -35,7 +35,7 @@ import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.utils.FileDeletionThreadPool;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.TagManager;
+import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -78,10 +78,11 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     protected boolean changelogDecoupled;
 
     /** Used to record which tag is cached. */
-    private long cachedTag = 0;
+    private long cachedSnapshotId = 0;
 
     /** Used to cache data files used by current tag. */
-    private final Map<BinaryRow, Map<Integer, Set<String>>> cachedTagDataFiles = new HashMap<>();
+    private final Map<BinaryRow, Map<Integer, Set<String>>> cachedSnapshotDataFiles =
+            new HashMap<>();
 
     public FileDeletionBase(
             FileIO fileIO,
@@ -328,17 +329,17 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     }
 
     public Predicate<ManifestEntry> dataFileSkipper(
-            List<Snapshot> taggedSnapshots, long expiringSnapshotId) throws Exception {
-        int index = TagManager.findPreviousTag(taggedSnapshots, expiringSnapshotId);
+            List<Snapshot> skippingSnapshots, long expiringSnapshotId) throws Exception {
+        int index = SnapshotManager.findPreviousSnapshot(skippingSnapshots, expiringSnapshotId);
         // refresh tag data files
         if (index >= 0) {
-            Snapshot previousTag = taggedSnapshots.get(index);
-            if (previousTag.id() != cachedTag) {
-                cachedTag = previousTag.id();
-                cachedTagDataFiles.clear();
-                addMergedDataFiles(cachedTagDataFiles, previousTag);
+            Snapshot previousSnapshot = skippingSnapshots.get(index);
+            if (previousSnapshot.id() != cachedSnapshotId) {
+                cachedSnapshotId = previousSnapshot.id();
+                cachedSnapshotDataFiles.clear();
+                addMergedDataFiles(cachedSnapshotDataFiles, previousSnapshot);
             }
-            return entry -> containsDataFile(cachedTagDataFiles, entry);
+            return entry -> containsDataFile(cachedSnapshotDataFiles, entry);
         }
         return entry -> false;
     }
