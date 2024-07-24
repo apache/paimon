@@ -128,29 +128,6 @@ public class ConfigOption<T> {
 
     /**
      * Creates a new config option, using this option's key and default value, and adding the given
-     * deprecated keys.
-     *
-     * <p>When obtaining a value from the configuration via {@link Options#get(ConfigOption)}, the
-     * deprecated keys will be checked in the order provided to this method. The first key for which
-     * a value is found will be used - that value will be returned.
-     *
-     * @param deprecatedKeys The deprecated keys, in the order in which they should be checked.
-     * @return A new config options, with the given deprecated keys.
-     */
-    public ConfigOption<T> withDeprecatedKeys(String... deprecatedKeys) {
-        final Stream<FallbackKey> newDeprecatedKeys =
-                Arrays.stream(deprecatedKeys).map(FallbackKey::createDeprecatedKey);
-        final Stream<FallbackKey> currentAlternativeKeys = Arrays.stream(this.fallbackKeys);
-
-        // put deprecated keys last so that they are de-prioritized
-        final FallbackKey[] mergedAlternativeKeys =
-                Stream.concat(currentAlternativeKeys, newDeprecatedKeys)
-                        .toArray(FallbackKey[]::new);
-        return new ConfigOption<>(key, clazz, description, defaultValue, mergedAlternativeKeys);
-    }
-
-    /**
-     * Creates a new config option, using this option's key and default value, and adding the given
      * description. The given description is used when generation the configuration documentation.
      *
      * @param description The description for this option.

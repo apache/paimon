@@ -211,7 +211,7 @@ public class FlinkConnectorOptions {
             key("scan.remove-normalize")
                     .booleanType()
                     .defaultValue(false)
-                    .withDeprecatedKeys("log.scan.remove-normalize")
+                    .withFallbackKeys("log.scan.remove-normalize")
                     .withDescription(
                             "Whether to force the removal of the normalize node when streaming read."
                                     + " Note: This is dangerous and is likely to cause data errors if downstream"
