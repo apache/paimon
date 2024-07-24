@@ -205,7 +205,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.branch(),
                 newStatsFileHandler(),
                 bucketMode(),
-                options.scanManifestParallelism());
+                options.scanManifestParallelism(),
+                schema.options());
     }
 
     @Override

@@ -284,7 +284,7 @@ public class BranchManager {
                             .collect(Collectors.toList());
 
             // Delete latest snapshot hint
-            snapshotManager.deleteLatestHint();
+            snapshotManager.removeSnapshotLatestHint();
 
             fileIO.deleteFilesQuietly(deletePaths);
             fileIO.copyFiles(

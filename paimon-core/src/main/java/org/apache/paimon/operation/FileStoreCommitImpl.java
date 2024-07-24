@@ -18,10 +18,14 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.exception.CommitFailedException;
+import org.apache.paimon.exception.CommitStateUnknownException;
+import org.apache.paimon.exception.DirtyCommitException;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
@@ -52,12 +56,14 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.StringUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -65,6 +71,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -73,6 +80,8 @@ import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.COMMIT_ISOLATION_LEVEL;
+import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
@@ -130,6 +139,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final StatsFileHandler statsFileHandler;
 
     private final BucketMode bucketMode;
+    private final Map<String, String> tableOptions;
 
     public FileStoreCommitImpl(
             FileIO fileIO,
@@ -152,7 +162,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             String branchName,
             StatsFileHandler statsFileHandler,
             BucketMode bucketMode,
-            @Nullable Integer manifestReadParallelism) {
+            @Nullable Integer manifestReadParallelism,
+            Map<String, String> tableOptions) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.commitUser = commitUser;
@@ -178,6 +189,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.commitMetrics = null;
         this.statsFileHandler = statsFileHandler;
         this.bucketMode = bucketMode;
+        this.tableOptions = tableOptions;
     }
 
     @Override
@@ -934,18 +946,36 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     e);
         }
 
-        boolean success;
+        String commitIsolationLevel =
+                tableOptions.getOrDefault(
+                        COMMIT_ISOLATION_LEVEL.key(), COMMIT_ISOLATION_LEVEL.defaultValue().name());
+        boolean useSerializableIsolation =
+                Objects.equals(
+                        commitIsolationLevel, CoreOptions.CommitIsolationLevel.SERIALIZABLE.name());
+        LOG.info("Commit isolation level is [{}]", commitIsolationLevel);
+        boolean useLockService = lock != null;
+        boolean success = false;
+        String successMsg =
+                String.format(
+                        "Successfully commit snapshot #%d (path %s) by user %s "
+                                + "with identifier %s and kind %s.",
+                        newSnapshotId, newSnapshotPath, commitUser, identifier, commitKind.name());
+        String errorMsg =
+                String.format(
+                        "Atomic commit failed for snapshot #%d (path %s) by user %s "
+                                + "with identifier %s and kind %s. "
+                                + "Clean up and try again.",
+                        newSnapshotId, newSnapshotPath, commitUser, identifier, commitKind.name());
         try {
             Callable<Boolean> callable =
-                    () -> {
-                        boolean committed =
-                                fileIO.tryToWriteAtomic(newSnapshotPath, newSnapshot.toJson());
-                        if (committed) {
-                            snapshotManager.commitLatestHint(newSnapshotId);
-                        }
-                        return committed;
-                    };
-            if (lock != null) {
+                    () ->
+                            doCommit(
+                                    newSnapshotId,
+                                    newSnapshotPath,
+                                    newSnapshot,
+                                    useSerializableIsolation,
+                                    useLockService);
+            if (useLockService) {
                 success =
                         lock.runWithLock(
                                 () ->
@@ -956,46 +986,46 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                         // case
                                         !fileIO.exists(newSnapshotPath) && callable.call());
             } else {
+                if (useSerializableIsolation) {
+                    checkBeforeCommit(newSnapshotId);
+                }
                 success = callable.call();
+                if (useSerializableIsolation && success) {
+                    checkAfterCommit(newSnapshotId);
+                }
             }
-        } catch (Throwable e) {
+        } catch (CommitStateUnknownException e) {
             // exception when performing the atomic rename,
             // we cannot clean up because we can't determine the success
-            throw new RuntimeException(
-                    String.format(
-                            "Exception occurs when committing snapshot #%d (path %s) by user %s "
-                                    + "with identifier %s and kind %s. "
-                                    + "Cannot clean up because we can't determine the success.",
-                            newSnapshotId,
-                            newSnapshotPath,
-                            commitUser,
-                            identifier,
-                            commitKind.name()),
-                    e);
+            throw e;
+        } catch (DirtyCommitException e) {
+            // We need to clean up all the metadata information generated by this commit.
+            cleanUpTmpManifests(
+                    previousChangesListName,
+                    newChangesListName,
+                    changelogListName,
+                    newIndexManifest,
+                    oldMetas,
+                    newMetas,
+                    changelogMetas);
+            throw e;
+        } catch (Exception e) {
+            // If the commit succeeds, we ignore all exceptions thrown by the successful commit;
+            // otherwise, we throw an exception.
+            if (!success && useSerializableIsolation) {
+                throw new CommitFailedException(e.getMessage(), e);
+            }
         }
 
         if (success) {
             if (LOG.isDebugEnabled()) {
-                LOG.debug(
-                        String.format(
-                                "Successfully commit snapshot #%d (path %s) by user %s "
-                                        + "with identifier %s and kind %s.",
-                                newSnapshotId,
-                                newSnapshotPath,
-                                commitUser,
-                                identifier,
-                                commitKind.name()));
+                LOG.debug(successMsg);
             }
             return true;
         }
 
         // atomic rename fails, clean up and try again
-        LOG.warn(
-                String.format(
-                        "Atomic commit failed for snapshot #%d (path %s) by user %s "
-                                + "with identifier %s and kind %s. "
-                                + "Clean up and try again.",
-                        newSnapshotId, newSnapshotPath, commitUser, identifier, commitKind.name()));
+        LOG.warn(errorMsg);
         cleanUpTmpManifests(
                 previousChangesListName,
                 newChangesListName,
@@ -1004,7 +1034,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 oldMetas,
                 newMetas,
                 changelogMetas);
-        return false;
+        if (useSerializableIsolation) {
+            throw new CommitFailedException(errorMsg);
+        } else {
+            return false;
+        }
     }
 
     @SafeVarargs
@@ -1273,5 +1307,102 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     public static ConflictCheck mustConflictCheck() {
         return latestSnapshot -> true;
+    }
+
+    boolean doCommit(
+            long newSnapshotId,
+            Path newSnapshotPath,
+            Snapshot newSnapshot,
+            boolean useSerializableIsolation,
+            boolean useLock) {
+        try {
+            boolean committed = tryAtomicCommitNewSnapshot(newSnapshotPath, newSnapshot);
+            if (committed) {
+                if (useSerializableIsolation && !useLock) {
+                    // If the useSerializableIsolation is turned on,And we not use lock service,
+                    // we will remove all HINTs,as it may provide incorrect information.
+                    snapshotManager.removeSnapshotEarliestHint();
+                    snapshotManager.removeSnapshotLatestHint();
+                    snapshotManager.removeChangeLogEarliestHint();
+                    snapshotManager.removeChangeLogLatestHint();
+                } else {
+                    snapshotManager.commitLatestHint(newSnapshotId);
+                }
+            }
+            return committed;
+        } catch (Exception e) {
+            throw new CommitStateUnknownException(e.getMessage(), e);
+        }
+    }
+
+    boolean tryAtomicCommitNewSnapshot(Path newSnapshotPath, Snapshot newSnapshot)
+            throws IOException {
+        return fileIO.tryToWriteAtomic(newSnapshotPath, newSnapshot.toJson());
+    }
+
+    void checkBeforeCommit(long newSnapshotId) throws IOException {
+        long latestSnapshotIdBeforeCommit =
+                Optional.ofNullable(snapshotManager.latestSnapshotIdWithOutHint())
+                        .orElse(Snapshot.FIRST_SNAPSHOT_ID - 1);
+        boolean currentCommitIsLatest =
+                Objects.equals(newSnapshotId, latestSnapshotIdBeforeCommit + 1);
+        if (!currentCommitIsLatest) {
+            snapshotManager.removeSnapshotLatestHint();
+            snapshotManager.removeSnapshotEarliestHint();
+            throw new CommitFailedException(
+                    String.format(
+                            "Can't submit snapshotId [%s], because it is expected that snapshotId [%s] should be submitted now.",
+                            newSnapshotId, latestSnapshotIdBeforeCommit + 1));
+        }
+    }
+
+    void checkAfterCommit(long newSnapshotId) throws IOException {
+        String maxSaveSnapshotsNumStr = tableOptions.get(SNAPSHOT_NUM_RETAINED_MAX.key());
+        int maxSaveSnapshotNum = SNAPSHOT_NUM_RETAINED_MAX.defaultValue();
+        if (!StringUtils.isBlank(maxSaveSnapshotsNumStr)) {
+            maxSaveSnapshotNum = Integer.parseInt(maxSaveSnapshotsNumStr);
+        }
+        long latestSnapshotIdAfterCommit =
+                Optional.ofNullable(snapshotManager.latestSnapshotIdWithOutHint())
+                        .orElse(Snapshot.FIRST_SNAPSHOT_ID);
+        long waterMark =
+                latestSnapshotIdAfterCommit > maxSaveSnapshotNum
+                        ? latestSnapshotIdAfterCommit - maxSaveSnapshotNum
+                        : -1;
+        fastFailIfDirtyCommit(newSnapshotId, waterMark, latestSnapshotIdAfterCommit);
+        List<Long> dirtyCommits = new ArrayList<>();
+        Iterator<Snapshot> iterator = snapshotManager.snapshots();
+        while (iterator.hasNext()) {
+            Snapshot snapshot = iterator.next();
+            long currentSnapshotId = snapshot.id();
+            if (waterMark > currentSnapshotId) {
+                dirtyCommits.add(currentSnapshotId);
+            }
+        }
+        for (Long dirtyCommit : dirtyCommits) {
+            snapshotManager.removeSnapshot(dirtyCommit);
+            snapshotManager.removeChangeLog(dirtyCommit);
+        }
+    }
+
+    private void fastFailIfDirtyCommit(
+            long newSnapshotId, long waterMark, long latestSnapshotIdAfterCommit)
+            throws IOException {
+        String errorMsg =
+                String.format(
+                        "Reject commit snapshotId [%s] because it's much smaller than the current latest snapshotId[%s].It's high probably a dirty commit.",
+                        newSnapshotId, latestSnapshotIdAfterCommit);
+        boolean isDirtyCommit =
+                newSnapshotId < waterMark && snapshotManager.snapshotExists(newSnapshotId);
+        if (isDirtyCommit) {
+            try {
+                snapshotManager.removeSnapshot(newSnapshotId);
+                snapshotManager.removeSnapshotLatestHint();
+                snapshotManager.removeSnapshotEarliestHint();
+                throw new DirtyCommitException(errorMsg);
+            } catch (IOException e) {
+                throw new DirtyCommitException(errorMsg, e);
+            }
+        }
     }
 }

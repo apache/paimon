@@ -27,6 +27,9 @@ import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
+import org.apache.paimon.exception.CommitFailedException;
+import org.apache.paimon.exception.CommitStateUnknownException;
+import org.apache.paimon.exception.DirtyCommitException;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.IndexFileHandler;
@@ -52,6 +55,7 @@ import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TraceableFileIO;
 
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -73,7 +77,12 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -83,6 +92,13 @@ import static org.apache.paimon.partition.PartitionPredicate.createPartitionPred
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.anyBoolean;
+import static org.mockito.Mockito.anyLong;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.spy;
 
 /** Tests for {@link FileStoreCommitImpl}. */
 public class FileStoreCommitTest {
@@ -898,6 +914,461 @@ public class FileStoreCommitTest {
         assertThat(dvs.get("f2").isDeleted(3)).isTrue();
     }
 
+    @Test
+    public void testExceptionBeforeDoCommit() throws Exception {
+        TestFileStore store = createStoreWithIsolation(false);
+        TestFileStore spyStore = spy(store);
+        doAnswer(
+                        x -> {
+                            FileStoreCommitImpl commitImpl =
+                                    (FileStoreCommitImpl) x.callRealMethod();
+                            FileStoreCommitImpl spyCommit = spy(commitImpl);
+                            doThrow(new RuntimeException("Oops!"))
+                                    .when(spyCommit)
+                                    .checkBeforeCommit(anyLong());
+                            return spyCommit;
+                        })
+                .when(spyStore)
+                .newCommit(any());
+
+        assertThatThrownBy(
+                        () ->
+                                spyStore.commitDataImpl(
+                                        Collections.emptyList(),
+                                        gen::getPartition,
+                                        kv -> 0,
+                                        false,
+                                        null,
+                                        null,
+                                        Collections.emptyList(),
+                                        (commit, committable) -> {
+                                            commit.ignoreEmptyCommit(false);
+                                            commit.commit(committable, Collections.emptyMap());
+                                        }))
+                .isInstanceOf(CommitFailedException.class)
+                .hasMessage("Oops!");
+    }
+
+    @Test
+    public void testExceptionAfterDoCommit() throws Exception {
+        TestFileStore store = createStoreWithIsolation(false);
+        Snapshot snapshot =
+                store.commitData(
+                                generateDataList(10),
+                                gen::getPartition,
+                                kv -> 0,
+                                Collections.emptyMap())
+                        .get(0);
+        TestFileStore spyStore = spy(store);
+        doAnswer(
+                        x -> {
+                            FileStoreCommitImpl commitImpl =
+                                    (FileStoreCommitImpl) x.callRealMethod();
+                            FileStoreCommitImpl spyCommit = spy(commitImpl);
+                            doThrow(new RuntimeException("Oops!"))
+                                    .when(spyCommit)
+                                    .checkAfterCommit(anyLong());
+                            return spyCommit;
+                        })
+                .when(spyStore)
+                .newCommit(any());
+        spyStore.commitDataImpl(
+                Collections.emptyList(),
+                gen::getPartition,
+                kv -> 0,
+                false,
+                null,
+                null,
+                Collections.emptyList(),
+                (commit, committable) -> {
+                    commit.ignoreEmptyCommit(false);
+                    commit.commit(committable, Collections.emptyMap());
+                });
+        assertThat(spyStore.snapshotManager().latestSnapshotId()).isEqualTo(snapshot.id() + 1);
+    }
+
+    @Test
+    public void testExceptionWhenCommit() throws Exception {
+        TestFileStore store = createStoreWithIsolation(false);
+        TestFileStore spyStore = spy(store);
+        doAnswer(
+                        x -> {
+                            FileStoreCommitImpl commitImpl =
+                                    (FileStoreCommitImpl) x.callRealMethod();
+                            FileStoreCommitImpl spyCommit = spy(commitImpl);
+                            doThrow(new RuntimeException("Oops!"))
+                                    .when(spyCommit)
+                                    .tryAtomicCommitNewSnapshot(any(), any());
+                            return spyCommit;
+                        })
+                .when(spyStore)
+                .newCommit(any());
+
+        assertThatThrownBy(
+                        () ->
+                                spyStore.commitDataImpl(
+                                        Collections.emptyList(),
+                                        gen::getPartition,
+                                        kv -> 0,
+                                        false,
+                                        null,
+                                        null,
+                                        Collections.emptyList(),
+                                        (commit, committable) -> {
+                                            commit.ignoreEmptyCommit(false);
+                                            commit.commit(committable, Collections.emptyMap());
+                                        }))
+                .isInstanceOf(CommitStateUnknownException.class)
+                .hasMessage("Oops!");
+    }
+
+    @Test
+    public void testRejectCommitAlreadyExistsVersion() throws Exception {
+        TestFileStore store = createStoreWithIsolation(false);
+        TestFileStore store1 = createStore(false);
+        CountDownLatch countDownLatch = new CountDownLatch(10);
+        CountDownLatch countDownLatch2 = new CountDownLatch(1);
+        AtomicReference<Throwable> unexpectedException = new AtomicReference<>();
+        ExecutorService executorService = Executors.newFixedThreadPool(16);
+
+        executorService.execute(
+                () -> {
+                    try {
+                        countDownLatch2.await();
+                        for (int i = 0; i < 10; i++) {
+                            store1.commitDataImpl(
+                                    Collections.emptyList(),
+                                    gen::getPartition,
+                                    kv -> 0,
+                                    false,
+                                    null,
+                                    null,
+                                    Collections.emptyList(),
+                                    (commit, committable) -> {
+                                        commit.ignoreEmptyCommit(false);
+                                        commit.commit(committable, Collections.emptyMap());
+                                    });
+                            countDownLatch.countDown();
+                        }
+                    } catch (Throwable e) {
+                        unexpectedException.set(e);
+                    }
+                });
+        TestFileStore spyStore = spy(store);
+        doAnswer(
+                        x -> {
+                            FileStoreCommitImpl commitImpl =
+                                    (FileStoreCommitImpl) x.callRealMethod();
+                            FileStoreCommitImpl spyCommit = spy(commitImpl);
+                            doAnswer(
+                                            p -> {
+                                                countDownLatch2.countDown();
+                                                countDownLatch.await();
+                                                return p.callRealMethod();
+                                            })
+                                    .when(spyCommit)
+                                    .doCommit(anyLong(), any(), any(), anyBoolean(), anyBoolean());
+                            return spyCommit;
+                        })
+                .when(spyStore)
+                .newCommit(any());
+
+        executorService.execute(
+                () -> {
+                    try {
+                        assertThatThrownBy(
+                                        () ->
+                                                spyStore.commitDataImpl(
+                                                        Collections.emptyList(),
+                                                        gen::getPartition,
+                                                        kv -> 0,
+                                                        false,
+                                                        null,
+                                                        null,
+                                                        Collections.emptyList(),
+                                                        (commit, committable) -> {
+                                                            commit.ignoreEmptyCommit(false);
+                                                            commit.commit(
+                                                                    committable,
+                                                                    Collections.emptyMap());
+                                                        }))
+                                .isInstanceOf(CommitFailedException.class)
+                                .hasMessageContaining("Clean up and try again.");
+                    } catch (Throwable e) {
+                        unexpectedException.set(e);
+                    }
+                });
+        executorService.shutdown();
+        if (executorService.awaitTermination(300, TimeUnit.SECONDS)) {
+            assertThat(unexpectedException.get()).isNull();
+        } else {
+            throw new RuntimeException("can not termination");
+        }
+    }
+
+    @Test
+    public void testRejectTooOldCommit() throws Exception {
+        TestFileStore store = createStoreWithIsolation(false);
+        TestFileStore store1 = createStoreWithIsolation(false);
+        CountDownLatch countDownLatch = new CountDownLatch(10);
+        CountDownLatch countDownLatch2 = new CountDownLatch(1);
+        AtomicReference<Throwable> unexpectedException = new AtomicReference<>();
+        ExecutorService executorService = Executors.newFixedThreadPool(16);
+
+        executorService.execute(
+                () -> {
+                    try {
+                        countDownLatch2.await();
+                        for (int i = 0; i < 10; i++) {
+                            store1.commitDataImpl(
+                                    Collections.emptyList(),
+                                    gen::getPartition,
+                                    kv -> 0,
+                                    false,
+                                    null,
+                                    null,
+                                    Collections.emptyList(),
+                                    (commit, committable) -> {
+                                        commit.ignoreEmptyCommit(false);
+                                        commit.commit(committable, Collections.emptyMap());
+                                    });
+                            countDownLatch.countDown();
+                        }
+                    } catch (Throwable e) {
+                        unexpectedException.set(e);
+                    }
+                });
+        TestFileStore spyStore = spy(store);
+        doAnswer(
+                        x -> {
+                            FileStoreCommitImpl commitImpl =
+                                    (FileStoreCommitImpl) x.callRealMethod();
+                            FileStoreCommitImpl spyCommit = spy(commitImpl);
+                            doAnswer(
+                                            p -> {
+                                                countDownLatch2.countDown();
+                                                countDownLatch.await();
+                                                return p.callRealMethod();
+                                            })
+                                    .when(spyCommit)
+                                    .checkBeforeCommit(anyLong());
+                            return spyCommit;
+                        })
+                .when(spyStore)
+                .newCommit(any());
+
+        executorService.execute(
+                () -> {
+                    try {
+                        assertThatThrownBy(
+                                        () ->
+                                                spyStore.commitDataImpl(
+                                                        Collections.emptyList(),
+                                                        gen::getPartition,
+                                                        kv -> 0,
+                                                        false,
+                                                        null,
+                                                        null,
+                                                        Collections.emptyList(),
+                                                        (commit, committable) -> {
+                                                            commit.ignoreEmptyCommit(false);
+                                                            commit.commit(
+                                                                    committable,
+                                                                    Collections.emptyMap());
+                                                        }))
+                                .isInstanceOf(CommitFailedException.class)
+                                .hasMessage(
+                                        "Can't submit snapshotId [1], because it is expected that snapshotId [11] should be submitted now.");
+                    } catch (Throwable e) {
+                        unexpectedException.set(e);
+                    }
+                });
+        executorService.shutdown();
+        if (executorService.awaitTermination(30, TimeUnit.SECONDS)) {
+            assertThat(unexpectedException.get()).isNull();
+        } else {
+            throw new RuntimeException("can not termination");
+        }
+    }
+
+    @Test
+    public void testRejectDirtyCommit() throws Exception {
+        TestFileStore store = createStoreWithIsolation(false);
+        TestFileStore store1 = createStoreWithIsolation(false);
+        CountDownLatch countDownLatch = new CountDownLatch(10);
+        CountDownLatch countDownLatch2 = new CountDownLatch(1);
+        AtomicReference<Throwable> unexpectedException = new AtomicReference<>();
+        ExecutorService executorService = Executors.newFixedThreadPool(16);
+
+        executorService.execute(
+                () -> {
+                    try {
+                        countDownLatch2.await();
+                        for (int i = 0; i < 10; i++) {
+                            store1.commitDataImpl(
+                                    Collections.emptyList(),
+                                    gen::getPartition,
+                                    kv -> 0,
+                                    false,
+                                    null,
+                                    null,
+                                    Collections.emptyList(),
+                                    (commit, committable) -> {
+                                        commit.ignoreEmptyCommit(false);
+                                        commit.commit(committable, Collections.emptyMap());
+                                    });
+                            countDownLatch.countDown();
+                        }
+                    } catch (Throwable e) {
+                        unexpectedException.set(e);
+                    }
+                });
+        TestFileStore spyStore = spy(store);
+        doAnswer(
+                        x -> {
+                            FileStoreCommitImpl commitImpl =
+                                    (FileStoreCommitImpl) x.callRealMethod();
+                            FileStoreCommitImpl spyCommit = spy(commitImpl);
+                            doAnswer(
+                                            p -> {
+                                                countDownLatch2.countDown();
+                                                countDownLatch.await();
+                                                return p.callRealMethod();
+                                            })
+                                    .when(spyCommit)
+                                    .doCommit(anyLong(), any(), any(), anyBoolean(), anyBoolean());
+                            return spyCommit;
+                        })
+                .when(spyStore)
+                .newCommit(any());
+
+        executorService.execute(
+                () -> {
+                    try {
+                        assertThatThrownBy(
+                                        () ->
+                                                spyStore.commitDataImpl(
+                                                        Collections.emptyList(),
+                                                        gen::getPartition,
+                                                        kv -> 0,
+                                                        false,
+                                                        null,
+                                                        null,
+                                                        Collections.emptyList(),
+                                                        (commit, committable) -> {
+                                                            commit.ignoreEmptyCommit(false);
+                                                            commit.commit(
+                                                                    committable,
+                                                                    Collections.emptyMap());
+                                                        }))
+                                .isInstanceOf(DirtyCommitException.class)
+                                .hasMessage(
+                                        "Reject commit snapshotId [1] because it's much smaller than the current latest snapshotId[10].It's high probably a dirty commit.");
+                    } catch (Throwable e) {
+                        unexpectedException.set(e);
+                    }
+                });
+        executorService.shutdown();
+        if (executorService.awaitTermination(30, TimeUnit.SECONDS)) {
+            assertThat(unexpectedException.get()).isNull();
+        } else {
+            throw new RuntimeException("can not termination");
+        }
+    }
+
+    @Test
+    public void testCleanOldDirtyCommit() throws Exception {
+        TestFileStore store = createStoreWithIsolation(false);
+        TestFileStore store1 = createStoreWithIsolation(false);
+        CountDownLatch countDownLatch = new CountDownLatch(10);
+        CountDownLatch countDownLatch2 = new CountDownLatch(1);
+        AtomicReference<Throwable> unexpectedException = new AtomicReference<>();
+        ExecutorService executorService = Executors.newFixedThreadPool(16);
+
+        executorService.execute(
+                () -> {
+                    try {
+                        countDownLatch2.await();
+                        for (int i = 0; i < 10; i++) {
+                            store1.commitDataImpl(
+                                    Collections.emptyList(),
+                                    gen::getPartition,
+                                    kv -> 0,
+                                    false,
+                                    null,
+                                    null,
+                                    Collections.emptyList(),
+                                    (commit, committable) -> {
+                                        commit.ignoreEmptyCommit(false);
+                                        commit.commit(committable, Collections.emptyMap());
+                                    });
+                            countDownLatch.countDown();
+                        }
+                    } catch (Throwable e) {
+                        unexpectedException.set(e);
+                    }
+                });
+        TestFileStore spyStore = spy(store);
+        doAnswer(
+                        x -> {
+                            FileStoreCommitImpl commitImpl =
+                                    (FileStoreCommitImpl) x.callRealMethod();
+                            FileStoreCommitImpl spyCommit = spy(commitImpl);
+                            doNothing().when(spyCommit).checkAfterCommit(anyLong());
+                            doAnswer(
+                                            p -> {
+                                                countDownLatch2.countDown();
+                                                countDownLatch.await();
+                                                return p.callRealMethod();
+                                            })
+                                    .when(spyCommit)
+                                    .doCommit(anyLong(), any(), any(), anyBoolean(), anyBoolean());
+                            return spyCommit;
+                        })
+                .when(spyStore)
+                .newCommit(any());
+
+        executorService.execute(
+                () -> {
+                    try {
+                        spyStore.commitDataImpl(
+                                Collections.emptyList(),
+                                gen::getPartition,
+                                kv -> 0,
+                                false,
+                                null,
+                                null,
+                                Collections.emptyList(),
+                                (commit, committable) -> {
+                                    commit.ignoreEmptyCommit(false);
+                                    commit.commit(committable, Collections.emptyMap());
+                                });
+                    } catch (Throwable e) {
+                        unexpectedException.set(e);
+                    }
+                });
+        executorService.shutdown();
+        if (executorService.awaitTermination(30, TimeUnit.SECONDS)) {
+            assertThat(unexpectedException.get()).isNull();
+            Assertions.assertThat(store1.snapshotManager().snapshotExists(1)).isTrue();
+            store1.commitDataImpl(
+                    Collections.emptyList(),
+                    gen::getPartition,
+                    kv -> 0,
+                    false,
+                    null,
+                    null,
+                    Collections.emptyList(),
+                    (commit, committable) -> {
+                        commit.ignoreEmptyCommit(false);
+                        commit.commit(committable, Collections.emptyMap());
+                    });
+            Assertions.assertThat(store1.snapshotManager().snapshotExists(1)).isFalse();
+        } else {
+            throw new RuntimeException("can not termination");
+        }
+    }
+
     private TestFileStore createStore(boolean failing) throws Exception {
         return createStore(failing, 1);
     }
@@ -972,5 +1443,47 @@ public class FileStoreCommitTest {
                             TestKeyValueGenerator.DEFAULT_ROW_TYPE));
         }
         LOG.debug("========== End of " + name + " ==========");
+    }
+
+    private TestFileStore createStoreWithIsolation(boolean failing) throws Exception {
+        return createStoreWithIsolation(failing, 1, CoreOptions.ChangelogProducer.NONE);
+    }
+
+    private TestFileStore createStoreWithIsolation(
+            boolean failing, int numBucket, CoreOptions.ChangelogProducer changelogProducer)
+            throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(
+                CoreOptions.COMMIT_ISOLATION_LEVEL.key(),
+                CoreOptions.CommitIsolationLevel.SERIALIZABLE.name());
+        options.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "2");
+        options.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "3");
+        String root =
+                failing
+                        ? FailingFileIO.getFailingPath(failingName, tempDir.toString())
+                        : TraceableFileIO.SCHEME + "://" + tempDir.toString();
+        Path path = new Path(tempDir.toUri());
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(new LocalFileIO(), path),
+                        new Schema(
+                                TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields(),
+                                TestKeyValueGenerator.DEFAULT_PART_TYPE.getFieldNames(),
+                                TestKeyValueGenerator.getPrimaryKeys(
+                                        TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED),
+                                options,
+                                null));
+        return new TestFileStore.Builder(
+                        "avro",
+                        root,
+                        numBucket,
+                        TestKeyValueGenerator.DEFAULT_PART_TYPE,
+                        TestKeyValueGenerator.KEY_TYPE,
+                        TestKeyValueGenerator.DEFAULT_ROW_TYPE,
+                        TestKeyValueGenerator.TestKeyValueFieldsExtractor.EXTRACTOR,
+                        DeduplicateMergeFunction.factory(),
+                        tableSchema)
+                .changelogProducer(changelogProducer)
+                .build();
     }
 }

@@ -664,12 +664,6 @@ public class SnapshotManager implements Serializable {
         return listVersionedFiles(fileIO, dir, prefix).reduce(reducer).orElse(null);
     }
 
-    public void deleteLatestHint() throws IOException {
-        Path snapshotDir = snapshotDirectory();
-        Path hintFile = new Path(snapshotDir, LATEST);
-        fileIO.delete(hintFile, false);
-    }
-
     public void commitLatestHint(long snapshotId) throws IOException {
         commitHint(snapshotId, LATEST, snapshotDirectory());
     }
@@ -689,5 +683,33 @@ public class SnapshotManager implements Serializable {
     private void commitHint(long snapshotId, String fileName, Path dir) throws IOException {
         Path hintFile = new Path(dir, fileName);
         fileIO.overwriteFileUtf8(hintFile, String.valueOf(snapshotId));
+    }
+
+    public @Nullable Long latestSnapshotIdWithOutHint() throws IOException {
+        return findByListFiles(Math::max, snapshotDirectory(), SNAPSHOT_PREFIX);
+    }
+
+    public boolean removeSnapshot(long snapshotId) throws IOException {
+        return fileIO.delete(snapshotPath(snapshotId), false);
+    }
+
+    public boolean removeChangeLog(long snapshotId) throws IOException {
+        return fileIO.delete(longLivedChangelogPath(snapshotId), false);
+    }
+
+    public boolean removeSnapshotLatestHint() throws IOException {
+        return fileIO.delete(new Path(snapshotDirectory(), LATEST), false);
+    }
+
+    public boolean removeSnapshotEarliestHint() throws IOException {
+        return fileIO.delete(new Path(snapshotDirectory(), EARLIEST), false);
+    }
+
+    public boolean removeChangeLogLatestHint() throws IOException {
+        return fileIO.delete(new Path(changelogDirectory(), LATEST), false);
+    }
+
+    public boolean removeChangeLogEarliestHint() throws IOException {
+        return fileIO.delete(new Path(changelogDirectory(), EARLIEST), false);
     }
 }
