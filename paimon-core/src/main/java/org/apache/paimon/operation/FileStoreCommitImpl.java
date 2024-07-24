@@ -52,11 +52,13 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.StringUtils;
+import org.apache.paimon.utils.TagManager;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -140,6 +142,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     private final BucketMode bucketMode;
     private final Map<String, String> tableOptions;
+    private final BranchManager branchManager;
+    private final TagManager tagManager;
 
     public FileStoreCommitImpl(
             FileIO fileIO,
@@ -163,7 +167,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             StatsFileHandler statsFileHandler,
             BucketMode bucketMode,
             @Nullable Integer manifestReadParallelism,
-            Map<String, String> tableOptions) {
+            Map<String, String> tableOptions,
+            BranchManager branchManager,
+            TagManager tagManager) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.commitUser = commitUser;
@@ -190,6 +196,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.statsFileHandler = statsFileHandler;
         this.bucketMode = bucketMode;
         this.tableOptions = tableOptions;
+        this.branchManager = branchManager;
+        this.tagManager = tagManager;
     }
 
     @Override
@@ -1369,13 +1377,31 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 latestSnapshotIdAfterCommit > maxSaveSnapshotNum
                         ? latestSnapshotIdAfterCommit - maxSaveSnapshotNum
                         : -1;
-        fastFailIfDirtyCommit(newSnapshotId, waterMark, latestSnapshotIdAfterCommit);
+        Set<Long> excludeSnapshotIds = new HashSet<>();
+        branchManager
+                .branchSnapshots()
+                .forEach(
+                        x -> {
+                            if (x != null) {
+                                excludeSnapshotIds.add(x.id());
+                            }
+                        });
+        tagManager
+                .taggedSnapshots()
+                .forEach(
+                        x -> {
+                            if (x != null) {
+                                excludeSnapshotIds.add(x.id());
+                            }
+                        });
+        fastFailIfDirtyCommit(
+                newSnapshotId, waterMark, latestSnapshotIdAfterCommit, excludeSnapshotIds);
         List<Long> dirtyCommits = new ArrayList<>();
         Iterator<Snapshot> iterator = snapshotManager.snapshots();
         while (iterator.hasNext()) {
             Snapshot snapshot = iterator.next();
             long currentSnapshotId = snapshot.id();
-            if (waterMark > currentSnapshotId) {
+            if (waterMark > currentSnapshotId && !excludeSnapshotIds.contains(currentSnapshotId)) {
                 dirtyCommits.add(currentSnapshotId);
             }
         }
@@ -1386,14 +1412,18 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     private void fastFailIfDirtyCommit(
-            long newSnapshotId, long waterMark, long latestSnapshotIdAfterCommit)
-            throws IOException {
+            long newSnapshotId,
+            long waterMark,
+            long latestSnapshotIdAfterCommit,
+            Collection<Long> excludeSnapshotIds) {
         String errorMsg =
                 String.format(
                         "Reject commit snapshotId [%s] because it's much smaller than the current latest snapshotId[%s].It's high probably a dirty commit.",
                         newSnapshotId, latestSnapshotIdAfterCommit);
         boolean isDirtyCommit =
-                newSnapshotId < waterMark && snapshotManager.snapshotExists(newSnapshotId);
+                newSnapshotId < waterMark
+                        && snapshotManager.snapshotExists(newSnapshotId)
+                        && !excludeSnapshotIds.contains(newSnapshotId);
         if (isDirtyCommit) {
             try {
                 snapshotManager.removeSnapshot(newSnapshotId);

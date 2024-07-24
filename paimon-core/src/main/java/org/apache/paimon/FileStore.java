@@ -36,6 +36,7 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -85,6 +86,8 @@ public interface FileStore<T> extends Serializable {
     ChangelogDeletion newChangelogDeletion();
 
     TagManager newTagManager();
+
+    BranchManager newBranchManager();
 
     TagDeletion newTagDeletion();
 
