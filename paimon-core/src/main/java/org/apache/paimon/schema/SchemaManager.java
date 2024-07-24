@@ -538,9 +538,12 @@ public class SchemaManager implements Serializable {
             newOptions.put(BUCKET_KEY.key(), Joiner.on(',').join(newBucketColumns));
         }
 
+        // TODO: Apply changes to other options that contain column names, such as `sequence.field`
         return newOptions;
     }
 
+    // Apply column rename changes to the list of column names, this will not change the order of
+    // the column names
     private static List<String> applyColumnRename(
             List<String> columns, Iterable<RenameColumn> renames) {
         if (Iterables.isEmpty(renames)) {
