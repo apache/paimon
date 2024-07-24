@@ -70,13 +70,15 @@ public class Int2ShortHashMap {
             Int2ShortHashMap map;
             try {
                 map = new Int2ShortHashMap(keyList.size());
+                for (int i = 0; i < keyList.size(); i++) {
+                    map.put(keyList.getInt(i), valueList.getShort(i));
+                }
             } catch (IllegalArgumentException e) {
-                map = new Int2ShortHashMap();
+                throw new PaimonUtilsException(
+                        "capacity of Int2ShortOpenHashMap is too large, advise raise your parallelism in your Flink/Spark job",
+                        e);
             }
 
-            for (int i = 0; i < keyList.size(); i++) {
-                map.put(keyList.getInt(i), valueList.getShort(i));
-            }
             return map;
         }
     }
