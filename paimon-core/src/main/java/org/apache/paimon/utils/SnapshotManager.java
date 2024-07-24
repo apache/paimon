@@ -90,6 +90,10 @@ public class SnapshotManager implements Serializable {
         return tablePath;
     }
 
+    public String branch() {
+        return branch;
+    }
+
     public Path changelogDirectory() {
         return new Path(branchPath(tablePath, branch) + "/changelog");
     }

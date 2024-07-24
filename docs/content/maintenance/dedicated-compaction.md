@@ -81,9 +81,7 @@ To run a dedicated job for compaction, follow these instructions.
 
 {{< tabs "dedicated-compaction-job" >}}
 
-{{< tab "Flink" >}}
-
-Flink SQL currently does not support statements related to compactions, so we have to submit the compaction job through `flink run`.
+{{< tab "Flink Action Jar" >}}
 
 Run the following command to submit a compaction job for the table.
 
@@ -130,6 +128,25 @@ For more usage of the compact action, see
 
 {{< /tab >}}
 
+{{< tab "Flink" >}}
+
+Run the following sql:
+
+```sql
+-- compact table
+CALL sys.compact(`table` => 'default.T');
+
+-- compact table with options
+CALL sys.compact(`table` => 'default.T', `options` => 'sink.parallelism=4');
+
+-- compact table partition
+CALL sys.compact(`table` => 'default.T', `partitions` => 'p=0');
+
+-- compact table partition with filter
+CALL sys.compact(`table` => 'default.T', `where` => 'dt>10 and h<20');
+```
+{{< /tab >}}
+
 {{< /tabs >}}
 
 {{< hint info >}}
@@ -143,7 +160,7 @@ You can run the following command to submit a compaction job for multiple databa
 
 {{< tabs "database-compaction-job" >}}
 
-{{< tab "Flink" >}}
+{{< tab "Flink Action Jar" >}}
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -226,6 +243,26 @@ For more usage of the compact_database action, see
 
 {{< /tab >}}
 
+{{< tab "Flink" >}}
+
+Run the following sql:
+
+```sql
+CALL sys.compact_database('includingDatabases')
+
+CALL sys.compact_database('includingDatabases', 'mode')
+
+CALL sys.compact_database('includingDatabases', 'mode', 'includingTables')
+
+CALL sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables')
+
+CALL sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables', 'tableOptions')
+
+-- example
+CALL sys.compact_database('db1|db2', 'combined', 'table_.*', 'ignore', 'sink.parallelism=4')
+```
+{{< /tab >}}
+
 {{< /tabs >}}
 
 ## Sort Compact
@@ -233,6 +270,10 @@ For more usage of the compact_database action, see
 If your table is configured with [dynamic bucket primary key table]({{< ref "primary-key-table/data-distribution#dynamic-bucket" >}})
 or [append table]({{< ref "append-table/overview" >}}) ,
 you can trigger a compact with specified column sort to speed up queries.
+
+{{< tabs "database-compaction-job" >}}
+
+{{< tab "Flink Action Jar" >}}
 
 ```bash  
 <FLINK_HOME>/bin/flink run \
@@ -252,4 +293,18 @@ There are two new configuration in `Sort Compact`
 {{< generated/sort-compact >}}
 
 The sort parallelism is the same as the sink parallelism, you can dynamically specify it by add conf `--table_conf sink.parallelism=<value>`.
+
+{{< /tab >}}
+
+{{< tab "Flink" >}}
+
+Run the following sql:
+
+```sql
+-- sort compact table
+CALL sys.compact(`table` => 'default.T', order_strategy => 'zorder', order_by => 'a,b')
+```
+{{< /tab >}}
+
+{{< /tabs >}}
 

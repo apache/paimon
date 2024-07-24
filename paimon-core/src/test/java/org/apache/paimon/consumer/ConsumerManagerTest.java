@@ -39,11 +39,18 @@ public class ConsumerManagerTest {
 
     private ConsumerManager manager;
 
+    private ConsumerManager consumerManagerBranch;
+
     @BeforeEach
     public void before() {
         this.manager =
                 new ConsumerManager(
                         LocalFileIO.create(), new org.apache.paimon.fs.Path(tempDir.toUri()));
+        this.consumerManagerBranch =
+                new ConsumerManager(
+                        LocalFileIO.create(),
+                        new org.apache.paimon.fs.Path(tempDir.toUri()),
+                        "branch1");
     }
 
     @Test
@@ -62,6 +69,21 @@ public class ConsumerManagerTest {
         assertThat(consumer).map(Consumer::nextSnapshot).get().isEqualTo(8L);
 
         assertThat(manager.minNextSnapshot()).isEqualTo(OptionalLong.of(5L));
+
+        Optional<Consumer> consumerBranch = consumerManagerBranch.consumer("id1");
+        assertThat(consumerBranch).isEmpty();
+
+        assertThat(consumerManagerBranch.minNextSnapshot()).isEmpty();
+
+        consumerManagerBranch.resetConsumer("id1", new Consumer(5));
+        consumerBranch = consumerManagerBranch.consumer("id1");
+        assertThat(consumerBranch).map(Consumer::nextSnapshot).get().isEqualTo(5L);
+
+        consumerManagerBranch.resetConsumer("id2", new Consumer(8));
+        consumerBranch = consumerManagerBranch.consumer("id2");
+        assertThat(consumerBranch).map(Consumer::nextSnapshot).get().isEqualTo(8L);
+
+        assertThat(consumerManagerBranch.minNextSnapshot()).isEqualTo(OptionalLong.of(5L));
     }
 
     @Test
@@ -83,11 +105,41 @@ public class ConsumerManagerTest {
         manager.resetConsumer("id2", new Consumer(3));
         manager.expire(expireDateTime);
         assertThat(manager.consumer("id2")).map(Consumer::nextSnapshot).get().isEqualTo(3L);
+
+        consumerManagerBranch.resetConsumer("id3", new Consumer(1));
+        Thread.sleep(1000);
+        LocalDateTime expireDateTimeBranch =
+                DateTimeUtils.toLocalDateTime(System.currentTimeMillis());
+        Thread.sleep(1000);
+        consumerManagerBranch.resetConsumer("id4", new Consumer(2));
+
+        // check expire
+        consumerManagerBranch.expire(expireDateTimeBranch);
+        assertThat(consumerManagerBranch.consumer("id3")).isEmpty();
+        assertThat(consumerManagerBranch.consumer("id4"))
+                .map(Consumer::nextSnapshot)
+                .get()
+                .isEqualTo(2L);
+
+        // check last modification
+        expireDateTimeBranch = DateTimeUtils.toLocalDateTime(System.currentTimeMillis());
+        Thread.sleep(1000);
+        consumerManagerBranch.resetConsumer("id4", new Consumer(3));
+        consumerManagerBranch.expire(expireDateTimeBranch);
+        assertThat(consumerManagerBranch.consumer("id4"))
+                .map(Consumer::nextSnapshot)
+                .get()
+                .isEqualTo(3L);
     }
 
     @Test
     public void testReadConsumer() throws Exception {
         manager.resetConsumer("id1", new Consumer(5));
         assertThat(manager.consumer("id1"));
+
+        consumerManagerBranch.resetConsumer("id2", new Consumer(5));
+        assertThat(consumerManagerBranch.consumer("id2"));
+
+        assertThat(manager.consumer("id2")).isEmpty();
     }
 }
