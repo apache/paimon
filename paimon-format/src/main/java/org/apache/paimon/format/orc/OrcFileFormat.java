@@ -18,7 +18,9 @@
 
 package org.apache.paimon.format.orc;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.cache.BlockCacheConfig;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
@@ -68,6 +70,7 @@ public class OrcFileFormat extends FileFormat {
     private final org.apache.hadoop.conf.Configuration readerConf;
     private final org.apache.hadoop.conf.Configuration writerConf;
     private final int readBatchSize;
+    private final BlockCacheConfig config;
 
     public OrcFileFormat(FormatContext formatContext) {
         super(IDENTIFIER);
@@ -77,6 +80,7 @@ public class OrcFileFormat extends FileFormat {
         this.writerConf = new org.apache.hadoop.conf.Configuration();
         this.orcProperties.forEach((k, v) -> writerConf.set(k.toString(), v.toString()));
         this.readBatchSize = formatContext.readBatchSize();
+        this.config = new BlockCacheConfig(new CoreOptions(formatContext.formatOptions()));
     }
 
     @VisibleForTesting

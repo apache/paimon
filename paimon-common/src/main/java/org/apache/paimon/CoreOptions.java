@@ -1303,6 +1303,35 @@ public class CoreOptions implements Serializable {
                             "The maximum number of concurrent deleting files. "
                                     + "By default is the number of processors available to the Java virtual machine.");
 
+    /** The type of the block cache. */
+    public enum BlockCacheType {
+        rcache,
+    }
+
+    public static final ConfigOption<Boolean> BLOCK_CACHE_ENABLED =
+            key("scan.blockcache.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to enable the block cache.");
+
+    public static final ConfigOption<BlockCacheType> BLOCK_CACHE_TYPE =
+            key("scan.blockcache.type")
+                    .enumType(BlockCacheType.class)
+                    .defaultValue(BlockCacheType.rcache)
+                    .withDescription("The type of the block cache.");
+
+    public static final ConfigOption<MemorySize> BLOCK_CACHE_DISK_SIZE =
+            key("scan.blockcache.disk.size")
+                    .memoryType()
+                    .defaultValue(MemorySize.parse("100gb"))
+                    .withDescription("The size of the block cache's disk tier");
+
+    public static final ConfigOption<String> BLOCK_CACHE_DISK_LOCAL_PATH =
+            key("scan.blockcache.local-path")
+                    .stringType()
+                    .defaultValue("/tmp/")
+                    .withDescription("The base path of the block cache's disk tier");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -2042,6 +2071,22 @@ public class CoreOptions implements Serializable {
 
     public boolean metadataIcebergCompatible() {
         return options.get(METADATA_ICEBERG_COMPATIBLE);
+    }
+
+    public boolean blockCacheEnabled() {
+        return options.get(BLOCK_CACHE_ENABLED);
+    }
+
+    public BlockCacheType blockCacheType() {
+        return options.get(BLOCK_CACHE_TYPE);
+    }
+
+    public MemorySize diskSize() {
+        return options.get(BLOCK_CACHE_DISK_SIZE);
+    }
+
+    public String diskPath() {
+        return options.get(BLOCK_CACHE_DISK_LOCAL_PATH);
     }
 
     /** Specifies the merge engine for table with primary key. */

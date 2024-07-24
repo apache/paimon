@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.orc;
 
+import org.apache.paimon.cache.BlockCacheConfig;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.OrcFormatReaderContext;
@@ -277,7 +278,8 @@ class OrcReaderFactoryTest {
                 new Configuration(),
                 Projection.of(selectedFields).project(formatType),
                 conjunctPredicates,
-                BATCH_SIZE);
+                BATCH_SIZE,
+                BlockCacheConfig.DISABLED);
     }
 
     private RecordReader<InternalRow> createReader(OrcReaderFactory format, Path split)
