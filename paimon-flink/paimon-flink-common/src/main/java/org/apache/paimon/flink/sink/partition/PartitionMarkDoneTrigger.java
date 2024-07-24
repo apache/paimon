@@ -36,6 +36,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -122,9 +123,14 @@ public class PartitionMarkDoneTrigger {
             String partition = entry.getKey();
 
             long lastUpdateTime = entry.getValue();
+            LinkedHashMap<String, String> partitionSpec =
+                    extractPartitionSpecFromPath(new Path(partition));
             long partitionStartTime =
                     timeExtractor
-                            .extract(extractPartitionSpecFromPath(new Path(partition)))
+                            .extract(
+                                    new ArrayList<>(partitionSpec.keySet()),
+                                    new ArrayList<>(partitionSpec.values()),
+                                    false)
                             .atZone(ZoneId.systemDefault())
                             .toInstant()
                             .toEpochMilli();

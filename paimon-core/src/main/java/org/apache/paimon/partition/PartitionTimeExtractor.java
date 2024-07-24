@@ -34,8 +34,6 @@ import java.time.format.DateTimeParseException;
 import java.time.format.ResolverStyle;
 import java.time.format.SignStyle;
 import java.time.temporal.ChronoField;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -93,12 +91,9 @@ public class PartitionTimeExtractor {
         this.formatter = formatter;
     }
 
-    public LocalDateTime extract(LinkedHashMap<String, String> spec) {
-        return extract(new ArrayList<>(spec.keySet()), new ArrayList<>(spec.values()));
-    }
-
-    public LocalDateTime extract(List<String> partitionKeys, List<?> partitionValues) {
-        LocalDateTime dateTime = null;
+    @Nullable
+    public LocalDateTime extract(
+            List<String> partitionKeys, List<?> partitionValues, boolean ignoreException) {
         try {
             String timestampString;
             if (pattern == null) {
@@ -112,22 +107,31 @@ public class PartitionTimeExtractor {
                                     partitionValues.get(i).toString());
                 }
             }
-            dateTime = toLocalDateTime(timestampString, this.formatter);
+            return toLocalDateTime(timestampString, this.formatter);
         } catch (Exception e) {
             String partitionInfos =
                     IntStream.range(0, partitionKeys.size())
                             .mapToObj(i -> partitionKeys.get(i) + ":" + partitionValues.get(i))
                             .collect(Collectors.joining(","));
-            LOG.warn(
-                    "Partition {} can't uses '{}' formatter to extract datetime to expire."
-                            + " Please check the partition expiration configuration or"
-                            + " manually delete the partition using the drop-partition command or"
-                            + " use 'update-time' expiration strategy by set {}, the strategy support non-date formatted partition.",
-                    partitionInfos,
-                    this.formatter,
-                    CoreOptions.PARTITION_EXPIRATION_STRATEGY.key());
+            String message =
+                    String.format(
+                            "Can't extract datetime from partition '%s' with formatter '%s' and pattern '%s'.",
+                            partitionInfos, this.formatter, this.pattern);
+            if (ignoreException) {
+                LOG.warn(
+                        "{}. If you want to configure partition expiration, please:\n"
+                                + "  1. Check the expiration configuration.\n"
+                                + "  2. Manually delete the partition using the drop-partition command if the partition"
+                                + " value is non-date formatted.\n"
+                                + "  3. Use '{}' expiration strategy by set '{}', which supports non-date formatted partition.",
+                        message,
+                        CoreOptions.PartitionExpireStrategy.UPDATE_TIME,
+                        CoreOptions.PARTITION_EXPIRATION_STRATEGY.key());
+                return null;
+            } else {
+                throw new RuntimeException(message, e);
+            }
         }
-        return dateTime;
     }
 
     private static LocalDateTime toLocalDateTime(

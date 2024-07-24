@@ -64,7 +64,8 @@ public class PartitionValuesTimeExpireStrategy extends PartitionExpireStrategy {
         @Override
         public boolean test(BinaryRow partition) {
             Object[] array = convertPartition(partition);
-            LocalDateTime partTime = timeExtractor.extract(partitionKeys, Arrays.asList(array));
+            LocalDateTime partTime =
+                    timeExtractor.extract(partitionKeys, Arrays.asList(array), true);
             return partTime != null && expireDateTime.isAfter(partTime);
         }
 
