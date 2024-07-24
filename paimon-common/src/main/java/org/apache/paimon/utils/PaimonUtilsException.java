@@ -19,8 +19,8 @@
 package org.apache.paimon.utils;
 
 /**
- * A {@code PaimonUtilsException} is thrown when occur exception during using with paimon utils, such as too
- * large initial capacity when build Int2ShortHashMap and so on.
+ * A {@code PaimonUtilsException} is thrown when occur exception during using with paimon utils,
+ * such as too large initial capacity when build Int2ShortHashMap and so on.
  */
 public class PaimonUtilsException extends RuntimeException {
 
