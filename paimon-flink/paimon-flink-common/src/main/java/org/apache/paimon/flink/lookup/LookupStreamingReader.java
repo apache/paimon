@@ -25,6 +25,7 @@ import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
@@ -144,7 +145,7 @@ public class LookupStreamingReader {
                             options.pageSize(),
                             new Options(table.options()).get(LOOKUP_BOOTSTRAP_PARALLELISM));
         } else {
-            List<ConcatRecordReader.ReaderSupplier<InternalRow>> readers = new ArrayList<>();
+            List<ReaderSupplier<InternalRow>> readers = new ArrayList<>();
             for (Split split : splits) {
                 readers.add(() -> readerSupplier.apply(split));
             }

@@ -188,7 +188,6 @@ public class ExternalBuffer implements RowBuffer {
                 new ChannelWithMeta(
                         channel,
                         inMemoryBuffer.getNumRecordBuffers(),
-                        inMemoryBuffer.getNumBytesInLastBuffer(),
                         channelWriterOutputView.getNumBytes()));
 
         inMemoryBuffer.reset();

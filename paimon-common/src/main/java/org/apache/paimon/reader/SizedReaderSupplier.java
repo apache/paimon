@@ -16,30 +16,10 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.disk;
+package org.apache.paimon.reader;
 
-/** Channel with block count and numBytesInLastBlock of file. */
-public class ChannelWithMeta {
+/** Supplier to get {@link RecordReader} with size. */
+public interface SizedReaderSupplier<T> extends ReaderSupplier<T> {
 
-    private final FileIOChannel.ID channel;
-    private final int blockCount;
-    private final long numBytes;
-
-    public ChannelWithMeta(FileIOChannel.ID channel, int blockCount, long numEstimatedBytes) {
-        this.channel = channel;
-        this.blockCount = blockCount;
-        this.numBytes = numEstimatedBytes;
-    }
-
-    public FileIOChannel.ID getChannel() {
-        return channel;
-    }
-
-    public int getBlockCount() {
-        return blockCount;
-    }
-
-    public long getNumBytes() {
-        return numBytes;
-    }
+    long estimateSize();
 }

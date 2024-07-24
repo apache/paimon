@@ -117,7 +117,7 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
             MergeSorter sorter,
             boolean keepDelete)
             throws IOException {
-        return sorter.mergeSort(
+        return sorter.mergeSortNoSpill(
                 Arrays.asList(
                         () -> wrapLevelToReader(beforeReader, BEFORE_LEVEL),
                         () -> wrapLevelToReader(afterReader, AFTER_LEVEL)),
