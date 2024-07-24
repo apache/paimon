@@ -18,6 +18,10 @@
 
 package org.apache.paimon.utils;
 
+/**
+ * A {@code PaimonUtilsException} is thrown when occur exception in use in paimon utils, such as too
+ * large initial capacity when build Int2ShortHashMap and so on.
+ */
 public class PaimonUtilsException extends RuntimeException {
 
     public PaimonUtilsException(String message, Throwable e) {
