@@ -75,6 +75,8 @@ public class LocalTableQuery implements TableQuery {
 
     @Nullable private Cache<String, LookupFile> lookupFileCache;
 
+    private final RowType partitionType;
+
     public LocalTableQuery(FileStoreTable table) {
         this.options = table.coreOptions();
         this.tableView = new HashMap<>();
@@ -86,6 +88,7 @@ public class LocalTableQuery implements TableQuery {
         KeyValueFileStore store = (KeyValueFileStore) tableStore;
 
         this.readerFactoryBuilder = store.newReaderFactoryBuilder();
+        this.partitionType = table.schema().logicalPartitionType();
         RowType keyType = readerFactoryBuilder.keyType();
         this.keyComparatorSupplier = new KeyComparatorSupplier(readerFactoryBuilder.keyType());
         this.lookupStoreFactory =
@@ -129,6 +132,21 @@ public class LocalTableQuery implements TableQuery {
         }
     }
 
+    private String generatePrefix(BinaryRow partition, int bucket) {
+        InternalRow.FieldGetter[] getters = partitionType.fieldGetters();
+        StringBuilder builder = new StringBuilder();
+        for (InternalRow.FieldGetter getter : getters) {
+            Object part = getter.getFieldOrNull(partition);
+            if (part != null) {
+                builder.append(part);
+            } else {
+                builder.append("null");
+            }
+            builder.append("-");
+        }
+        return String.format("%s-%s", builder, bucket);
+    }
+
     private void newLookupLevels(BinaryRow partition, int bucket, List<DataFileMeta> dataFiles) {
         Levels levels = new Levels(keyComparatorSupplier.get(), dataFiles, options.numLevels());
         // TODO pass DeletionVector factory
@@ -142,6 +160,7 @@ public class LocalTableQuery implements TableQuery {
                             options.get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE));
         }
 
+        String prefix = generatePrefix(partition, bucket);
         LookupLevels<KeyValue> lookupLevels =
                 new LookupLevels<>(
                         levels,
@@ -155,9 +174,9 @@ public class LocalTableQuery implements TableQuery {
                                         file.fileName(),
                                         file.fileSize(),
                                         file.level()),
-                        () ->
+                        file ->
                                 Preconditions.checkNotNull(ioManager, "IOManager is required.")
-                                        .createChannel()
+                                        .createChannel(prefix + "-" + file)
                                         .getPathFile(),
                         lookupStoreFactory,
                         bfGenerator(options),

@@ -104,6 +104,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     private final FileIO fileIO;
     private final RowType keyType;
     private final RowType valueType;
+    private final RowType partitionType;
     @Nullable private final RecordLevelExpire recordLevelExpire;
     @Nullable private Cache<String, LookupFile> lookupFileCache;
 
@@ -112,6 +113,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             SchemaManager schemaManager,
             TableSchema schema,
             String commitUser,
+            RowType partitionType,
             RowType keyType,
             RowType valueType,
             Supplier<Comparator<InternalRow>> keyComparatorSupplier,
@@ -136,6 +138,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 deletionVectorsMaintainerFactory,
                 tableName);
         this.fileIO = fileIO;
+        this.partitionType = partitionType;
         this.keyType = keyType;
         this.valueType = valueType;
         this.udsComparatorSupplier = udsComparatorSupplier;
@@ -325,7 +328,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             return new LookupMergeTreeCompactRewriter(
                     maxLevel,
                     mergeEngine,
-                    createLookupLevels(levels, processor, lookupReaderFactory),
+                    createLookupLevels(partition, bucket, levels, processor, lookupReaderFactory),
                     readerFactory,
                     writerFactory,
                     keyComparator,
@@ -347,6 +350,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     }
 
     private <T> LookupLevels<T> createLookupLevels(
+            BinaryRow partition,
+            int bucket,
             Levels levels,
             LookupLevels.ValueProcessor<T> valueProcessor,
             FileReaderFactory<KeyValue> readerFactory) {
@@ -366,6 +371,18 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                             options.get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
                             options.get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE));
         }
+        InternalRow.FieldGetter[] getters = partitionType.fieldGetters();
+        StringBuilder builder = new StringBuilder();
+        for (InternalRow.FieldGetter getter : getters) {
+            Object part = getter.getFieldOrNull(partition);
+            if (part != null) {
+                builder.append(part);
+            } else {
+                builder.append("null");
+            }
+            builder.append("-");
+        }
+        String prefix = String.format("%s-%s", builder, bucket);
 
         return new LookupLevels<>(
                 levels,
@@ -373,7 +390,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 keyType,
                 valueProcessor,
                 readerFactory::createRecordReader,
-                () -> ioManager.createChannel().getPathFile(),
+                file -> ioManager.createChannel(prefix + "-" + file).getPathFile(),
                 lookupStoreFactory,
                 bfGenerator(options),
                 lookupFileCache);
