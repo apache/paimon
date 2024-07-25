@@ -45,28 +45,18 @@ public class NumericPrimitiveToTimestamp extends AbstractCastRule<Number, Timest
 
     @Override
     public CastExecutor<Number, Timestamp> create(DataType inputType, DataType targetType) {
-        if (targetType.is(DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE)) {
-            switch (inputType.getTypeRoot()) {
-                case INTEGER:
-                case BIGINT:
-                    return value ->
-                            Timestamp.fromLocalDateTime(
-                                    DateTimeUtils.toLocalDateTime(
-                                            value.longValue(), ZoneId.systemDefault()));
-                default:
-                    return null;
-            }
-        } else {
-            switch (inputType.getTypeRoot()) {
-                case INTEGER:
-                case BIGINT:
-                    return value ->
-                            Timestamp.fromLocalDateTime(
-                                    DateTimeUtils.toLocalDateTime(
-                                            value.longValue(), DateTimeUtils.UTC_ZONE.toZoneId()));
-                default:
-                    return null;
-            }
+        ZoneId zoneId =
+                targetType.is(DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE)
+                        ? ZoneId.systemDefault()
+                        : DateTimeUtils.UTC_ZONE.toZoneId();
+        switch (inputType.getTypeRoot()) {
+            case INTEGER:
+            case BIGINT:
+                return value ->
+                        Timestamp.fromLocalDateTime(
+                                DateTimeUtils.toLocalDateTime(value.longValue(), zoneId));
+            default:
+                return null;
         }
     }
 }
