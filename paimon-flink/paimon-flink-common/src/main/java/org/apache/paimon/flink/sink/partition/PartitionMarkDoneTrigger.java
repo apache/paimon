@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink.partition;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionTimeExtractor;
@@ -31,12 +32,13 @@ import org.apache.flink.api.common.typeutils.base.ListSerializer;
 import org.apache.flink.api.common.typeutils.base.StringSerializer;
 
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -123,14 +125,8 @@ public class PartitionMarkDoneTrigger {
             String partition = entry.getKey();
 
             long lastUpdateTime = entry.getValue();
-            LinkedHashMap<String, String> partitionSpec =
-                    extractPartitionSpecFromPath(new Path(partition));
             long partitionStartTime =
-                    timeExtractor
-                            .extract(
-                                    new ArrayList<>(partitionSpec.keySet()),
-                                    new ArrayList<>(partitionSpec.values()),
-                                    false)
+                    extractDateTime(partition)
                             .atZone(ZoneId.systemDefault())
                             .toInstant()
                             .toEpochMilli();
@@ -143,6 +139,15 @@ public class PartitionMarkDoneTrigger {
             }
         }
         return needDone;
+    }
+
+    @VisibleForTesting
+    LocalDateTime extractDateTime(String partition) {
+        try {
+            return timeExtractor.extract(extractPartitionSpecFromPath(new Path(partition)));
+        } catch (DateTimeParseException e) {
+            throw new RuntimeException("Can't extract datetime from partition " + partition, e);
+        }
     }
 
     public void snapshotState() throws Exception {
