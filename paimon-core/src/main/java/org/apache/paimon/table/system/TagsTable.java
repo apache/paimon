@@ -59,6 +59,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 
 /** A {@link Table} for showing tags of table. */
 public class TagsTable implements ReadonlyTable {
@@ -81,10 +82,16 @@ public class TagsTable implements ReadonlyTable {
 
     private final FileIO fileIO;
     private final Path location;
+    private final String branch;
 
     public TagsTable(FileIO fileIO, Path location) {
+        this(fileIO, location, DEFAULT_MAIN_BRANCH);
+    }
+
+    public TagsTable(FileIO fileIO, Path location, String branchName) {
         this.fileIO = fileIO;
         this.location = location;
+        this.branch = branchName;
     }
 
     @Override
@@ -114,7 +121,7 @@ public class TagsTable implements ReadonlyTable {
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new TagsTable(fileIO, location);
+        return new TagsTable(fileIO, location, branch);
     }
 
     private class TagsScan extends ReadOnceTableScan {
@@ -131,7 +138,7 @@ public class TagsTable implements ReadonlyTable {
         }
     }
 
-    private static class TagsSplit extends SingletonSplit {
+    private class TagsSplit extends SingletonSplit {
 
         private static final long serialVersionUID = 1L;
 
@@ -159,7 +166,7 @@ public class TagsTable implements ReadonlyTable {
         }
     }
 
-    private static class TagsRead implements InnerTableRead {
+    private class TagsRead implements InnerTableRead {
 
         private final FileIO fileIO;
         private int[][] projection;
@@ -191,7 +198,7 @@ public class TagsTable implements ReadonlyTable {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
             Path location = ((TagsSplit) split).location;
-            List<Pair<Tag, String>> tags = new TagManager(fileIO, location).tagObjects();
+            List<Pair<Tag, String>> tags = new TagManager(fileIO, location, branch).tagObjects();
             Map<String, Tag> nameToSnapshot = new LinkedHashMap<>();
             for (Pair<Tag, String> tag : tags) {
                 nameToSnapshot.put(tag.getValue(), tag.getKey());

@@ -53,6 +53,7 @@ import java.util.Map;
 import java.util.Objects;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 
 /** A {@link Table} for showing consumers of table. */
 public class ConsumersTable implements ReadonlyTable {
@@ -70,10 +71,16 @@ public class ConsumersTable implements ReadonlyTable {
 
     private final FileIO fileIO;
     private final Path location;
+    private final String branch;
 
     public ConsumersTable(FileIO fileIO, Path location) {
+        this(fileIO, location, DEFAULT_MAIN_BRANCH);
+    }
+
+    public ConsumersTable(FileIO fileIO, Path location, String branchName) {
         this.fileIO = fileIO;
         this.location = location;
+        this.branch = branchName;
     }
 
     @Override
@@ -103,7 +110,7 @@ public class ConsumersTable implements ReadonlyTable {
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new ConsumersTable(fileIO, location);
+        return new ConsumersTable(fileIO, location, branch);
     }
 
     private class ConsumersScan extends ReadOnceTableScan {
@@ -149,7 +156,7 @@ public class ConsumersTable implements ReadonlyTable {
     }
 
     /** {@link TableRead} implementation for {@link ConsumersTable}. */
-    private static class ConsumersRead implements InnerTableRead {
+    private class ConsumersRead implements InnerTableRead {
 
         private final FileIO fileIO;
         private int[][] projection;
@@ -180,7 +187,7 @@ public class ConsumersTable implements ReadonlyTable {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
             Path location = ((ConsumersTable.ConsumersSplit) split).location;
-            Map<String, Long> consumers = new ConsumerManager(fileIO, location).consumers();
+            Map<String, Long> consumers = new ConsumerManager(fileIO, location, branch).consumers();
             Iterator<InternalRow> rows =
                     Iterators.transform(consumers.entrySet().iterator(), this::toRow);
             if (projection != null) {

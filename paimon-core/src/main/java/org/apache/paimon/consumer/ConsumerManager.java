@@ -33,6 +33,8 @@ import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
+import static org.apache.paimon.utils.BranchManager.branchPath;
 import static org.apache.paimon.utils.FileUtils.listOriginalVersionedFiles;
 import static org.apache.paimon.utils.FileUtils.listVersionedFileStatus;
 
@@ -46,9 +48,16 @@ public class ConsumerManager implements Serializable {
     private final FileIO fileIO;
     private final Path tablePath;
 
+    private final String branch;
+
     public ConsumerManager(FileIO fileIO, Path tablePath) {
+        this(fileIO, tablePath, DEFAULT_MAIN_BRANCH);
+    }
+
+    public ConsumerManager(FileIO fileIO, Path tablePath, String branchName) {
         this.fileIO = fileIO;
         this.tablePath = tablePath;
+        this.branch = branchName;
     }
 
     public Optional<Consumer> consumer(String consumerId) {
@@ -119,10 +128,11 @@ public class ConsumerManager implements Serializable {
     }
 
     private Path consumerDirectory() {
-        return new Path(tablePath + "/consumer");
+        return new Path(branchPath(tablePath, branch) + "/consumer");
     }
 
     private Path consumerPath(String consumerId) {
-        return new Path(tablePath + "/consumer/" + CONSUMER_PREFIX + consumerId);
+        return new Path(
+                branchPath(tablePath, branch) + "/consumer/" + CONSUMER_PREFIX + consumerId);
     }
 }

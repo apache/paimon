@@ -78,6 +78,10 @@ public class SnapshotManager implements Serializable {
         this.branch = StringUtils.isBlank(branchName) ? DEFAULT_MAIN_BRANCH : branchName;
     }
 
+    public String branch() {
+        return branch;
+    }
+
     public SnapshotManager copyWithBranch(String branchName) {
         return new SnapshotManager(fileIO, tablePath, branchName);
     }

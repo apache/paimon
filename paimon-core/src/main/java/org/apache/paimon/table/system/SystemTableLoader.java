@@ -56,17 +56,18 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 public class SystemTableLoader {
 
     @Nullable
-    public static Table load(String type, FileIO fileIO, FileStoreTable dataTable) {
+    public static Table load(
+            String type, FileIO fileIO, FileStoreTable dataTable, String branchName) {
         Path location = dataTable.location();
         switch (type.toLowerCase()) {
             case MANIFESTS:
                 return new ManifestsTable(dataTable);
             case SNAPSHOTS:
-                return new SnapshotsTable(fileIO, location, dataTable);
+                return new SnapshotsTable(fileIO, location, dataTable, branchName);
             case OPTIONS:
-                return new OptionsTable(fileIO, location);
+                return new OptionsTable(fileIO, location, branchName);
             case SCHEMAS:
-                return new SchemasTable(fileIO, location);
+                return new SchemasTable(fileIO, location, branchName);
             case PARTITIONS:
                 return new PartitionsTable(dataTable);
             case AUDIT_LOG:
@@ -74,15 +75,15 @@ public class SystemTableLoader {
             case FILES:
                 return new FilesTable(dataTable);
             case TAGS:
-                return new TagsTable(fileIO, location);
+                return new TagsTable(fileIO, location, branchName);
             case BRANCHES:
                 return new BranchesTable(fileIO, location);
             case CONSUMERS:
-                return new ConsumersTable(fileIO, location);
+                return new ConsumersTable(fileIO, location, branchName);
             case READ_OPTIMIZED:
                 return new ReadOptimizedTable(dataTable);
             case AGGREGATION:
-                return new AggregationFieldsTable(fileIO, location);
+                return new AggregationFieldsTable(fileIO, location, branchName);
             case STATISTICS:
                 return new StatisticTable(fileIO, location, dataTable);
             default:

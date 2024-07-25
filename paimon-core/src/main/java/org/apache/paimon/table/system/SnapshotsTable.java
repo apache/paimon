@@ -68,6 +68,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 
 /** A {@link Table} for showing committing snapshots of table. */
 public class SnapshotsTable implements ReadonlyTable {
@@ -75,7 +76,7 @@ public class SnapshotsTable implements ReadonlyTable {
     private static final long serialVersionUID = 1L;
 
     public static final String SNAPSHOTS = "snapshots";
-
+    public final String branch;
     public static final RowType TABLE_TYPE =
             new RowType(
                     Arrays.asList(
@@ -110,9 +111,15 @@ public class SnapshotsTable implements ReadonlyTable {
     private final FileStoreTable dataTable;
 
     public SnapshotsTable(FileIO fileIO, Path location, FileStoreTable dataTable) {
+        this(fileIO, location, dataTable, DEFAULT_MAIN_BRANCH);
+    }
+
+    public SnapshotsTable(
+            FileIO fileIO, Path location, FileStoreTable dataTable, String branchName) {
         this.fileIO = fileIO;
         this.location = location;
         this.dataTable = dataTable;
+        this.branch = branchName;
     }
 
     @Override
@@ -142,7 +149,7 @@ public class SnapshotsTable implements ReadonlyTable {
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new SnapshotsTable(fileIO, location, dataTable.copy(dynamicOptions));
+        return new SnapshotsTable(fileIO, location, dataTable.copy(dynamicOptions), branch);
     }
 
     private class SnapshotsScan extends ReadOnceTableScan {
@@ -159,7 +166,7 @@ public class SnapshotsTable implements ReadonlyTable {
         }
     }
 
-    private static class SnapshotsSplit extends SingletonSplit {
+    private class SnapshotsSplit extends SingletonSplit {
 
         private static final long serialVersionUID = 1L;
 
@@ -187,7 +194,7 @@ public class SnapshotsTable implements ReadonlyTable {
         }
     }
 
-    private static class SnapshotsRead implements InnerTableRead {
+    private class SnapshotsRead implements InnerTableRead {
 
         private final FileIO fileIO;
         private int[][] projection;
@@ -255,7 +262,7 @@ public class SnapshotsTable implements ReadonlyTable {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
             SnapshotManager snapshotManager =
-                    new SnapshotManager(fileIO, ((SnapshotsSplit) split).location);
+                    new SnapshotManager(fileIO, ((SnapshotsSplit) split).location, branch);
             Iterator<Snapshot> snapshots =
                     snapshotManager.snapshotsWithinRange(
                             optionalFilterSnapshotIdMax, optionalFilterSnapshotIdMin);

@@ -56,6 +56,7 @@ import java.util.Objects;
 import java.util.function.Function;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 
 /** A {@link Table} for showing Aggregation of table. */
 public class AggregationFieldsTable implements ReadonlyTable {
@@ -76,10 +77,16 @@ public class AggregationFieldsTable implements ReadonlyTable {
 
     private final FileIO fileIO;
     private final Path location;
+    private final String branch;
 
     public AggregationFieldsTable(FileIO fileIO, Path location) {
+        this(fileIO, location, DEFAULT_MAIN_BRANCH);
+    }
+
+    public AggregationFieldsTable(FileIO fileIO, Path location, String branchName) {
         this.fileIO = fileIO;
         this.location = location;
+        this.branch = branchName;
     }
 
     @Override
@@ -109,7 +116,7 @@ public class AggregationFieldsTable implements ReadonlyTable {
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new AggregationFieldsTable(fileIO, location);
+        return new AggregationFieldsTable(fileIO, location, branch);
     }
 
     private class SchemasScan extends ReadOnceTableScan {
@@ -155,7 +162,7 @@ public class AggregationFieldsTable implements ReadonlyTable {
     }
 
     /** {@link TableRead} implementation for {@link AggregationFieldsTable}. */
-    private static class SchemasRead implements InnerTableRead {
+    private class SchemasRead implements InnerTableRead {
 
         private final FileIO fileIO;
         private int[][] projection;
@@ -186,7 +193,7 @@ public class AggregationFieldsTable implements ReadonlyTable {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
             Path location = ((AggregationSplit) split).location;
-            TableSchema schemas = new SchemaManager(fileIO, location).latest().get();
+            TableSchema schemas = new SchemaManager(fileIO, location, branch).latest().get();
             Iterator<InternalRow> rows = createInternalRowIterator(schemas);
             if (projection != null) {
                 rows =
