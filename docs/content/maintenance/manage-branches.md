@@ -207,7 +207,7 @@ ALTER TABLE `T$branch_test` SET (
 );
 
 -- write records into the streaming branch
-INSERT INTO `T$branch_test` VALUES ('20240725', 'apple', 4), ('20240726', 'cherry', 3), ('20240726', 'pear', 6);
+INSERT INTO `T$branch_test` VALUES ('20240725', 'apple', 4), ('20240725', 'peach', 10), ('20240726', 'cherry', 3), ('20240726', 'pear', 6);
 
 -- write records into the default branch
 INSERT INTO T VALUES ('20240725', 'apple', 5), ('20240725', 'banana', 7);
