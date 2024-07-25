@@ -100,6 +100,7 @@ public class CastExecutorTest {
         compareCastResult(
                 CastExecutors.resolve(new FloatType(false), new DoubleType(false)), 1F, 1D);
     }
+
     @Test
     public void testNumericToTimestamp() {
         compareCastResult(
