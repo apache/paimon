@@ -25,6 +25,9 @@ import org.apache.paimon.table.Table;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.flink.table.procedure.ProcedureContext;
 
+import java.util.Arrays;
+import java.util.stream.Collectors;
+
 /**
  * Create branch procedure for given tag. Usage:
  *
@@ -68,6 +71,26 @@ public class CreateBranchProcedure extends ProcedureBase {
         } else {
             table.createBranch(branchName);
         }
+        return new String[] {"Success"};
+    }
+
+    public String[] call(
+            ProcedureContext procedureContext,
+            String tableId,
+            String branchName,
+            String primaryKeys,
+            int bucket,
+            boolean copyOptions)
+            throws Catalog.TableNotExistException {
+        Table table = catalog.getTable(Identifier.fromString(tableId));
+        table.createBranch(
+                branchName,
+                Arrays.stream(primaryKeys.split(","))
+                        .map(String::trim)
+                        .filter(s -> !s.isEmpty())
+                        .collect(Collectors.toList()),
+                bucket,
+                copyOptions);
         return new String[] {"Success"};
     }
 }

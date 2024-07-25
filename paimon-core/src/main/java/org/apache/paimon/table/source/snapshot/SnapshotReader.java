@@ -56,6 +56,8 @@ public interface SnapshotReader {
 
     SnapshotReader withPartitionFilter(Predicate predicate);
 
+    SnapshotReader withPartitionFilter(List<BinaryRow> partitions);
+
     SnapshotReader withMode(ScanMode scanMode);
 
     SnapshotReader withLevelFilter(Filter<Integer> levelFilter);

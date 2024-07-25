@@ -18,11 +18,13 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.branch.TableBranch;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
@@ -32,11 +34,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.PriorityQueue;
+import java.util.Set;
 import java.util.SortedMap;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -130,6 +136,42 @@ public class BranchManager {
                             "Exception occurs when create branch '%s' (directory in %s).",
                             branchName, branchPath(tablePath, branchName)),
                     e);
+        }
+    }
+
+    public void createBranch(
+            String branchName, List<String> primaryKeys, int bucket, boolean copyOptions) {
+        Path path = schemaManager.copyWithBranch(branchName).toSchemaPath(0);
+        TableSchema oldSchema = schemaManager.latest().get();
+
+        Set<String> fieldNames = new HashSet<>(oldSchema.fieldNames());
+        for (String primaryKey : primaryKeys) {
+            Preconditions.checkArgument(
+                    fieldNames.contains(primaryKey),
+                    "Field " + primaryKey + " does not exist in the table");
+        }
+
+        Options newOptions = new Options();
+        newOptions.set(CoreOptions.BUCKET, bucket);
+        if (copyOptions) {
+            for (Map.Entry<String, String> entry : oldSchema.options().entrySet()) {
+                newOptions.set(entry.getKey(), entry.getValue());
+            }
+        }
+
+        TableSchema schema =
+                new TableSchema(
+                        0,
+                        oldSchema.fields(),
+                        oldSchema.highestFieldId(),
+                        oldSchema.partitionKeys(),
+                        primaryKeys,
+                        newOptions.toMap(),
+                        oldSchema.comment());
+        try {
+            fileIO.overwriteFileUtf8(path, schema.toString());
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
         }
     }
 

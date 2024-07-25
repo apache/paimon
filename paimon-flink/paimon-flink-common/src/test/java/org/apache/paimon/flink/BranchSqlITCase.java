@@ -32,13 +32,13 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.fail;
 
 /** IT cases for table with branches using SQL. */
 public class BranchSqlITCase extends CatalogITCaseBase {
 
     @Test
     public void testAlterBranchTable() throws Exception {
-
         sql(
                 "CREATE TABLE T ("
                         + " pt INT"
@@ -311,6 +311,63 @@ public class BranchSqlITCase extends CatalogITCaseBase {
                 .containsExactlyInAnyOrder("+I[1, 10, hunter]", "+I[2, 10, hunterX]");
 
         checkSnapshots(snapshotManager, 1, 2);
+    }
+
+    @Test
+    public void testFallbackBranchBatchRead() throws Exception {
+        sql(
+                "CREATE TABLE t ( pt INT NOT NULL, k INT NOT NULL, v STRING ) PARTITIONED BY (pt) WITH ( 'bucket' = '-1' )");
+        sql("CALL sys.create_branch('default.t', 'pk', 'pt, k', 2, true)");
+        sql("ALTER TABLE t SET ( 'scan.fallback-branch' = 'pk' )");
+
+        sql("INSERT INTO t VALUES (1, 10, 'apple'), (1, 20, 'banana')");
+        sql("INSERT INTO `t$branch_pk` VALUES (1, 10, 'cat'), (1, 20, 'dog')");
+        assertThat(collectResult("SELECT v, k FROM t"))
+                .containsExactlyInAnyOrder("+I[apple, 10]", "+I[banana, 20]");
+
+        sql("INSERT INTO `t$branch_pk` VALUES (2, 10, 'tiger'), (2, 20, 'wolf')");
+        assertThat(collectResult("SELECT v, k FROM t"))
+                .containsExactlyInAnyOrder(
+                        "+I[apple, 10]", "+I[banana, 20]", "+I[tiger, 10]", "+I[wolf, 20]");
+        assertThat(collectResult("SELECT v, k FROM t WHERE pt = 1"))
+                .containsExactlyInAnyOrder("+I[apple, 10]", "+I[banana, 20]");
+        assertThat(collectResult("SELECT v, k FROM t WHERE pt = 2"))
+                .containsExactlyInAnyOrder("+I[tiger, 10]", "+I[wolf, 20]");
+
+        sql("INSERT INTO `t$branch_pk` VALUES (2, 10, 'lion')");
+        assertThat(collectResult("SELECT v, k FROM t"))
+                .containsExactlyInAnyOrder(
+                        "+I[apple, 10]", "+I[banana, 20]", "+I[lion, 10]", "+I[wolf, 20]");
+    }
+
+    @Test
+    public void testInvalidPrimaryKeys() {
+        sql(
+                "CREATE TABLE t ( pt INT NOT NULL, k INT NOT NULL, v STRING ) PARTITIONED BY (pt) WITH ( 'bucket' = '-1' )");
+
+        try {
+            sql("CALL sys.create_branch('default.t', 'pk', 'pt, invalid', 2, true)");
+            fail("Expecting exceptions");
+        } catch (Exception e) {
+            assertThat(e).hasRootCauseMessage("Field invalid does not exist in the table");
+        }
+    }
+
+    @Test
+    public void testDifferentRowTypes() throws Exception {
+        sql(
+                "CREATE TABLE t ( pt INT NOT NULL, k INT NOT NULL, v STRING ) PARTITIONED BY (pt) WITH ( 'bucket' = '-1' )");
+        sql("CALL sys.create_branch('default.t', 'pk', 'pt, k', 2, true)");
+        sql("ALTER TABLE t SET ( 'scan.fallback-branch' = 'pk' )");
+        sql("ALTER TABLE `t$branch_pk` ADD (v2 INT)");
+
+        try {
+            sql("INSERT INTO t VALUES (1, 10, 'apple')");
+            fail("Expecting exceptions");
+        } catch (Exception e) {
+            assertThat(e)
+                    .hasMessageContaining("Branch main and pk does not have the same row type");
+        }
     }
 
     private List<String> collectResult(String sql) throws Exception {

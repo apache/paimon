@@ -177,6 +177,15 @@ public interface ReadonlyTable extends InnerTable {
     }
 
     @Override
+    default void createBranch(
+            String branchName, List<String> primaryKeys, int bucket, boolean copyOptions) {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support create empty branch.",
+                        this.getClass().getSimpleName()));
+    }
+
+    @Override
     default void createBranch(String branchName, long snapshotId) {
         throw new UnsupportedOperationException(
                 String.format(

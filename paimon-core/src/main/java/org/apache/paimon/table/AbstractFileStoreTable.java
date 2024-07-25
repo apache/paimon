@@ -563,6 +563,12 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public void createBranch(
+            String branchName, List<String> primaryKeys, int bucket, boolean copyOptions) {
+        branchManager().createBranch(branchName, primaryKeys, bucket, copyOptions);
+    }
+
+    @Override
     public void createBranch(String branchName, long snapshotId) {
         branchManager().createBranch(branchName, snapshotId);
     }
