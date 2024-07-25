@@ -59,8 +59,7 @@ be stored directly in the manifest, otherwise in the directory of the data file.
 which has a separate file definition and can contain different types of indexes with multiple columns.
 
 Different file index may be efficient in different scenario. For example bloom filter may speed up query in point lookup
-scenario. Using a bitmap may consume more space but can result in greater accuracy. Though we only realize bloom filter
-currently, but other types of index will be supported in the future.
+scenario. Using a bitmap may consume more space but can result in greater accuracy.
 
 Currently, file index is only supported in append-only table.
 
@@ -68,6 +67,9 @@ Currently, file index is only supported in append-only table.
 * `file-index.bloom-filter.columns`: specify the columns that need bloom filter index.
 * `file-index.bloom-filter.<column_name>.fpp` to config false positive probability.
 * `file-index.bloom-filter.<column_name>.items` to config the expected distinct items in one data file.
+
+`Bitmap`:
+* `file-index.bitmap.columns`: specify the columns that need bitmap index.
 
 More filter types will be supported...
 

@@ -142,8 +142,15 @@ public class CombinedTableCompactorSink implements Serializable {
         if (streamingCheckpointEnabled) {
             assertStreamingConfiguration(env);
         }
+
+        DataStream<MultiTableCommittable> partitioned =
+                FlinkStreamPartitioner.partition(
+                        written,
+                        new MultiTableCommittableChannelComputer(),
+                        written.getParallelism());
         SingleOutputStreamOperator<?> committed =
-                written.transform(
+                partitioned
+                        .transform(
                                 GLOBAL_COMMITTER_NAME,
                                 new MultiTableCommittableTypeInfo(),
                                 new CommitterOperator<>(
@@ -154,8 +161,7 @@ public class CombinedTableCompactorSink implements Serializable {
                                         createCommitterFactory(),
                                         createCommittableStateManager(),
                                         options.get(END_INPUT_WATERMARK)))
-                        .setParallelism(1)
-                        .setMaxParallelism(1);
+                        .setParallelism(written.getParallelism());
         return committed.addSink(new DiscardingSink<>()).name("end").setParallelism(1);
     }
 

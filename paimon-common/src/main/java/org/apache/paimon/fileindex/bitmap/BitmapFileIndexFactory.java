@@ -16,30 +16,25 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.disk;
+package org.apache.paimon.fileindex.bitmap;
 
-/** Channel with block count and numBytesInLastBlock of file. */
-public class ChannelWithMeta {
+import org.apache.paimon.fileindex.FileIndexer;
+import org.apache.paimon.fileindex.FileIndexerFactory;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.types.DataType;
 
-    private final FileIOChannel.ID channel;
-    private final int blockCount;
-    private final long numBytes;
+/** Factory to create {@link BitmapFileIndex}. */
+public class BitmapFileIndexFactory implements FileIndexerFactory {
 
-    public ChannelWithMeta(FileIOChannel.ID channel, int blockCount, long numEstimatedBytes) {
-        this.channel = channel;
-        this.blockCount = blockCount;
-        this.numBytes = numEstimatedBytes;
+    public static final String BITMAP_INDEX = "bitmap";
+
+    @Override
+    public String identifier() {
+        return BITMAP_INDEX;
     }
 
-    public FileIOChannel.ID getChannel() {
-        return channel;
-    }
-
-    public int getBlockCount() {
-        return blockCount;
-    }
-
-    public long getNumBytes() {
-        return numBytes;
+    @Override
+    public FileIndexer create(DataType dataType, Options options) {
+        return new BitmapFileIndex(dataType, options);
     }
 }

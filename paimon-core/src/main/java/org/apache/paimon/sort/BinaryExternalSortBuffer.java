@@ -251,7 +251,6 @@ public class BinaryExternalSortBuffer implements SortBuffer {
         channelManager.addChannel(channel);
 
         ChannelWriterOutputView output = null;
-        int bytesInLastBuffer;
         int blockCount;
 
         try {
@@ -260,7 +259,7 @@ public class BinaryExternalSortBuffer implements SortBuffer {
                             ioManager, channel, compressionCodecFactory, compressionBlockSize);
             new QuickSort().sort(inMemorySortBuffer);
             inMemorySortBuffer.writeToOutput(output);
-            bytesInLastBuffer = output.close();
+            output.close();
             blockCount = output.getBlockCount();
         } catch (IOException e) {
             if (output != null) {
@@ -270,9 +269,7 @@ public class BinaryExternalSortBuffer implements SortBuffer {
             throw e;
         }
 
-        spillChannelIDs.add(
-                new ChannelWithMeta(
-                        channel, blockCount, bytesInLastBuffer, output.getWriteBytes()));
+        spillChannelIDs.add(new ChannelWithMeta(channel, blockCount, output.getWriteBytes()));
         inMemorySortBuffer.clear();
     }
 }
