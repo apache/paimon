@@ -427,14 +427,14 @@ public class SchemaEvolutionTest {
                                 schemaManager.commitChanges(
                                         Collections.singletonList(SchemaChange.dropColumn("f0"))))
                 .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage(String.format("Cannot drop/rename partition key[%s]", "f0"));
+                .hasMessage(String.format("Cannot drop partition key or primary key: [%s]", "f0"));
 
         assertThatThrownBy(
                         () ->
                                 schemaManager.commitChanges(
                                         Collections.singletonList(SchemaChange.dropColumn("f2"))))
                 .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage(String.format("Cannot drop/rename primary key[%s]", "f2"));
+                .hasMessage(String.format("Cannot drop partition key or primary key: [%s]", "f2"));
     }
 
     @Test
