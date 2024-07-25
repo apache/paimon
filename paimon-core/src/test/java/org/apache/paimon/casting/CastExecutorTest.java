@@ -100,6 +100,18 @@ public class CastExecutorTest {
         compareCastResult(
                 CastExecutors.resolve(new FloatType(false), new DoubleType(false)), 1F, 1D);
     }
+    @Test
+    public void testNumericToTimestamp() {
+        compareCastResult(
+                CastExecutors.resolve(new BigIntType(false), new LocalZonedTimestampType(3)),
+                1721898748000l,
+                DateTimeUtils.parseTimestampData("2024-07-25 17:12:28.000", 3));
+
+        compareCastResult(
+                CastExecutors.resolve(new BigIntType(false), new TimestampType(3)),
+                1721898748000l,
+                DateTimeUtils.parseTimestampData("2024-07-25 09:12:28.000", 3));
+    }
 
     @Test
     public void testNumericToDecimal() {
