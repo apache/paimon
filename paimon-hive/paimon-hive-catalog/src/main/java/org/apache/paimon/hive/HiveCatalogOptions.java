@@ -85,5 +85,12 @@ public final class HiveCatalogOptions {
                                                             + "E.g. specifying \"conf:a.b.c\" will add \"a.b.c\" to the key, and so that configurations with different default catalog wouldn't share the same client pool. Multiple conf elements can be specified."))
                                     .build());
 
+    public static final ConfigOption<Boolean> CASE_SENSITIVE =
+            ConfigOptions.key("case-sensitive")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Is case sensitive. If case insensitive, you need to set this option to false, and the table name and fields be converted to lowercase.");
+
     private HiveCatalogOptions() {}
 }
