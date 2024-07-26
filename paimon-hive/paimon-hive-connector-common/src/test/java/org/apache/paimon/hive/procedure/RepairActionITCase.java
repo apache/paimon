@@ -95,4 +95,46 @@ public class RepairActionITCase extends ActionITCaseBase {
         assertThat(ret.size() == 1).isTrue();
         assertThat(ret.get(0).toString()).isEqualTo("+I[dt=2020-01-02/hh=09]");
     }
+
+    @Test
+    public void testCaseSensitive() throws Exception {
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        tEnv.executeSql(
+                "CREATE CATALOG PAIMON WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:"
+                        + PORT
+                        + "' , 'warehouse' = '"
+                        + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname)
+                        + "'), 'case-sensitive'=false");
+        tEnv.useCatalog("PAIMON");
+
+        tEnv.executeSql("CREATE DATABASE IF NOT EXISTS test_db;").await();
+        tEnv.executeSql("USE test_db").await();
+        tEnv.executeSql(
+                        "CREATE TABLE t_repair_hive (\n"
+                                + "    userID BIGINT,\n"
+                                + "    behavior STRING,\n"
+                                + "    dt STRING,\n"
+                                + "    hh STRING,\n"
+                                + "    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED\n"
+                                + ") PARTITIONED BY (dt, hh)"
+                                + " WITH (\n"
+                                + "'metastore.partitioned-table' = 'true'\n"
+                                + ");")
+                .await();
+        tEnv.executeSql("INSERT INTO t_repair_hive VALUES(1, 'login', '2020-01-02', '09')").await();
+        Map<String, String> catalogConf = new HashMap<>();
+        catalogConf.put("metastore", "hive");
+        catalogConf.put("uri", "thrift://localhost:" + PORT);
+        RepairAction repairAction =
+                new RepairAction(
+                        System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname),
+                        "test_db.t_repair_hive",
+                        catalogConf);
+        repairAction.run();
+
+        List<Row> ret =
+                ImmutableList.copyOf(tEnv.executeSql("SHOW PARTITIONS t_repair_hive").collect());
+        assertThat(ret.size() == 1).isTrue();
+        assertThat(ret.get(0).toString()).isEqualTo("+I[dt=2020-01-02/hh=09]");
+    }
 }
