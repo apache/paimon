@@ -106,7 +106,8 @@ public class CastExecutorTest {
         compareCastResult(
                 CastExecutors.resolve(new BigIntType(false), new LocalZonedTimestampType(3)),
                 1721898748000L,
-                DateTimeUtils.parseTimestampData("2024-07-25 09:12:28.000", 3, TimeZone.getTimeZone("Asia/Shanghai")));
+                DateTimeUtils.parseTimestampData(
+                        "2024-07-25 09:12:28.000", 3, TimeZone.getTimeZone("Asia/Shanghai")));
 
         compareCastResult(
                 CastExecutors.resolve(new BigIntType(false), new TimestampType(3)),
