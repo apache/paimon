@@ -38,8 +38,10 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.function.Predicate;
@@ -136,12 +138,21 @@ public class TagManager {
 
     /** Make sure the tagNames are ALL tags of one snapshot. */
     public void deleteAllTagsOfOneSnapshot(
-            List<String> tagNames, TagDeletion tagDeletion, SnapshotManager snapshotManager) {
+            List<String> tagNames,
+            TagDeletion tagDeletion,
+            SnapshotManager snapshotManager,
+            BranchManager branchManager) {
         Snapshot taggedSnapshot = taggedSnapshot(tagNames.get(0));
         List<Snapshot> taggedSnapshots;
 
+        Set<Snapshot> referencedSnapshotsByBranch =
+                branch.equals(DEFAULT_MAIN_BRANCH)
+                        ? branchManager.branchesCreateSnapshots().keySet()
+                        : Collections.emptySet();
+
         // skip file deletion if snapshot exists
-        if (snapshotManager.snapshotExists(taggedSnapshot.id())) {
+        if (snapshotManager.snapshotExists(taggedSnapshot.id())
+                || referencedSnapshotsByBranch.contains(taggedSnapshot)) {
             tagNames.forEach(tagName -> fileIO.deleteQuietly(tagPath(tagName)));
             return;
         } else {
@@ -150,36 +161,53 @@ public class TagManager {
             tagNames.forEach(tagName -> fileIO.deleteQuietly(tagPath(tagName)));
         }
 
-        doClean(taggedSnapshot, taggedSnapshots, snapshotManager, tagDeletion);
+        doClean(
+                taggedSnapshot,
+                SnapshotManager.mergeTreeSetToList(referencedSnapshotsByBranch, taggedSnapshots),
+                snapshotManager,
+                tagDeletion);
     }
 
     public void deleteTag(
             String tagName,
             TagDeletion tagDeletion,
             SnapshotManager snapshotManager,
+            BranchManager branchManager,
             List<TagCallback> callbacks) {
         checkArgument(!StringUtils.isBlank(tagName), "Tag name '%s' is blank.", tagName);
         checkArgument(tagExists(tagName), "Tag '%s' doesn't exist.", tagName);
 
-        Snapshot taggedSnapshot = taggedSnapshot(tagName);
-        List<Snapshot> taggedSnapshots;
+        // If the current branch is the master branch, snapshots referenced by other branches
+        // should be skipped.
+        Set<Snapshot> referencedSnapshotsByBranch =
+                branch.equals(DEFAULT_MAIN_BRANCH)
+                        ? branchManager.branchesCreateSnapshots().keySet()
+                        : Collections.emptySet();
 
-        // skip file deletion if snapshot exists
-        if (snapshotManager.copyWithBranch(branch).snapshotExists(taggedSnapshot.id())) {
+        Snapshot snapshotToClean = taggedSnapshot(tagName);
+
+        // skip file deletion if snapshot exists or the snapshot is still referenced by other
+        // branches or tags.
+        if (snapshotManager.copyWithBranch(branch).snapshotExists(snapshotToClean.id())
+                || referencedSnapshotsByBranch.contains(snapshotToClean)) {
+            // delete tag meta file.
             deleteTagMetaFile(tagName, callbacks);
             return;
-        } else {
-            // FileIO discovers tags by tag file, so we should read all tags before we delete tag
-            SortedMap<Snapshot, List<String>> tags = tags();
-            deleteTagMetaFile(tagName, callbacks);
-            // skip data file clean if more than 1 tags are created based on this snapshot
-            if (tags.get(taggedSnapshot).size() > 1) {
-                return;
-            }
-            taggedSnapshots = new ArrayList<>(tags.keySet());
         }
 
-        doClean(taggedSnapshot, taggedSnapshots, snapshotManager, tagDeletion);
+        // FileIO discovers tags by tag file, so we should read all tags before we delete tag.
+        SortedMap<Snapshot, List<String>> tags = tags();
+        deleteTagMetaFile(tagName, callbacks);
+        // skip data file clean if more than 1 tag are created based on this snapshot
+        if (tags.get(snapshotToClean).size() > 1) {
+            return;
+        }
+
+        doClean(
+                snapshotToClean,
+                SnapshotManager.mergeTreeSetToList(referencedSnapshotsByBranch, tags.keySet()),
+                snapshotManager,
+                tagDeletion);
     }
 
     private void deleteTagMetaFile(String tagName, List<TagCallback> callbacks) {
@@ -200,20 +228,9 @@ public class TagManager {
             TagDeletion tagDeletion) {
         // collect skipping sets from the left neighbor tag and the nearest right neighbor (either
         // the earliest snapshot or right neighbor tag)
-        List<Snapshot> skippedSnapshots = new ArrayList<>();
-
-        int index = findIndex(taggedSnapshot, taggedSnapshots);
-        // the left neighbor tag
-        if (index - 1 >= 0) {
-            skippedSnapshots.add(taggedSnapshots.get(index - 1));
-        }
-        // the nearest right neighbor
-        Snapshot right = snapshotManager.copyWithBranch(branch).earliestSnapshot();
-        if (index + 1 < taggedSnapshots.size()) {
-            Snapshot rightTag = taggedSnapshots.get(index + 1);
-            right = right.id() < rightTag.id() ? right : rightTag;
-        }
-        skippedSnapshots.add(right);
+        List<Snapshot> skippedSnapshots =
+                SnapshotManager.findNearestNeighborsSnapshot(
+                        taggedSnapshot, taggedSnapshots, snapshotManager.copyWithBranch(branch));
 
         // delete data files and empty directories
         Predicate<ManifestEntry> dataFileSkipper = null;
@@ -353,17 +370,5 @@ public class TagManager {
     @VisibleForTesting
     public List<String> allTagNames() {
         return tags().values().stream().flatMap(Collection::stream).collect(Collectors.toList());
-    }
-
-    private int findIndex(Snapshot taggedSnapshot, List<Snapshot> taggedSnapshots) {
-        for (int i = 0; i < taggedSnapshots.size(); i++) {
-            if (taggedSnapshot.id() == taggedSnapshots.get(i).id()) {
-                return i;
-            }
-        }
-        throw new RuntimeException(
-                String.format(
-                        "Didn't find tag with snapshot id '%s'.This is unexpected.",
-                        taggedSnapshot.id()));
     }
 }

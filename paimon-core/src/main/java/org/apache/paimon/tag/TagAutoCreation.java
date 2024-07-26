@@ -24,6 +24,7 @@ import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.TagTimeExtractor.ProcessTimeExtractor;
 import org.apache.paimon.tag.TagTimeExtractor.WatermarkExtractor;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -51,6 +52,8 @@ public class TagAutoCreation {
 
     private final SnapshotManager snapshotManager;
     private final TagManager tagManager;
+    private final BranchManager branchManager;
+
     private final TagDeletion tagDeletion;
     private final TagTimeExtractor timeExtractor;
     private final TagPeriodHandler periodHandler;
@@ -67,6 +70,7 @@ public class TagAutoCreation {
     private TagAutoCreation(
             SnapshotManager snapshotManager,
             TagManager tagManager,
+            BranchManager branchManager,
             TagDeletion tagDeletion,
             TagTimeExtractor timeExtractor,
             TagPeriodHandler periodHandler,
@@ -78,6 +82,7 @@ public class TagAutoCreation {
             List<TagCallback> callbacks) {
         this.snapshotManager = snapshotManager;
         this.tagManager = tagManager;
+        this.branchManager = branchManager;
         this.tagDeletion = tagDeletion;
         this.timeExtractor = timeExtractor;
         this.periodHandler = periodHandler;
@@ -182,6 +187,7 @@ public class TagAutoCreation {
                                 checkAndGetOneAutoTag(tag),
                                 tagDeletion,
                                 snapshotManager,
+                                branchManager,
                                 callbacks);
                         i++;
                         if (i == toDelete) {
@@ -211,6 +217,7 @@ public class TagAutoCreation {
             CoreOptions options,
             SnapshotManager snapshotManager,
             TagManager tagManager,
+            BranchManager branchManager,
             TagDeletion tagDeletion,
             List<TagCallback> callbacks) {
         TagTimeExtractor extractor = TagTimeExtractor.createForAutoTag(options);
@@ -220,6 +227,7 @@ public class TagAutoCreation {
         return new TagAutoCreation(
                 snapshotManager,
                 tagManager,
+                branchManager,
                 tagDeletion,
                 extractor,
                 TagPeriodHandler.create(options),

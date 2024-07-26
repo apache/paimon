@@ -115,7 +115,11 @@ public class BatchWriteGeneratorTagOperator<CommitT, GlobalCommitT>
             // If the tag already exists, delete the tag
             if (tagManager.tagExists(tagName)) {
                 tagManager.deleteTag(
-                        tagName, tagDeletion, snapshotManager, table.store().createTagCallbacks());
+                        tagName,
+                        tagDeletion,
+                        snapshotManager,
+                        table.branchManager(),
+                        table.store().createTagCallbacks());
             }
             // Create a new tag
             tagManager.createTag(
@@ -128,7 +132,11 @@ public class BatchWriteGeneratorTagOperator<CommitT, GlobalCommitT>
         } catch (Exception e) {
             if (tagManager.tagExists(tagName)) {
                 tagManager.deleteTag(
-                        tagName, tagDeletion, snapshotManager, table.store().createTagCallbacks());
+                        tagName,
+                        tagDeletion,
+                        snapshotManager,
+                        table.branchManager(),
+                        table.store().createTagCallbacks());
             }
         }
     }
@@ -148,7 +156,7 @@ public class BatchWriteGeneratorTagOperator<CommitT, GlobalCommitT>
                 for (List<String> tagNames : tagManager.tags().values()) {
                     if (tagCount - tagNames.size() >= tagNumRetainedMax) {
                         tagManager.deleteAllTagsOfOneSnapshot(
-                                tagNames, tagDeletion, snapshotManager);
+                                tagNames, tagDeletion, snapshotManager, table.branchManager());
                         tagCount = tagCount - tagNames.size();
                     } else {
                         List<String> sortedTagNames = tagManager.sortTagsOfOneSnapshot(tagNames);
@@ -157,6 +165,7 @@ public class BatchWriteGeneratorTagOperator<CommitT, GlobalCommitT>
                                     toBeDeleted,
                                     tagDeletion,
                                     snapshotManager,
+                                    table.branchManager(),
                                     table.store().createTagCallbacks());
                             tagCount--;
                             if (tagCount == tagNumRetainedMax) {

@@ -162,6 +162,7 @@ public class ExpireSnapshotsTest {
                         "tag" + id,
                         store.newTagDeletion(),
                         snapshotManager,
+                        store.newBranchManager(),
                         Collections.emptyList());
             }
         }

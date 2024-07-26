@@ -26,6 +26,7 @@ import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.operation.BranchDeletion;
 import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.FileStoreScan;
@@ -41,6 +42,7 @@ import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
@@ -162,6 +164,17 @@ public class PrivilegedFileStore<T> implements FileStore<T> {
     public TagManager newTagManager() {
         privilegeChecker.assertCanInsert(identifier);
         return wrapped.newTagManager();
+    }
+
+    @Override
+    public BranchManager newBranchManager() {
+        privilegeChecker.assertCanInsert(identifier);
+        return wrapped.newBranchManager();
+    }
+
+    @Override
+    public BranchDeletion newBranchDeletion() {
+        return wrapped.newBranchDeletion();
     }
 
     @Override

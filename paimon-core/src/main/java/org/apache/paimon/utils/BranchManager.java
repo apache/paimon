@@ -19,17 +19,29 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.branch.TableBranch;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.operation.BranchDeletion;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.SortedMap;
+import java.util.TreeMap;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -52,17 +64,21 @@ public class BranchManager {
     private final TagManager tagManager;
     private final SchemaManager schemaManager;
 
+    private final BranchDeletion branchDeletion;
+
     public BranchManager(
             FileIO fileIO,
             Path path,
             SnapshotManager snapshotManager,
             TagManager tagManager,
-            SchemaManager schemaManager) {
+            SchemaManager schemaManager,
+            BranchDeletion branchDeletion) {
         this.fileIO = fileIO;
         this.tablePath = path;
         this.snapshotManager = snapshotManager;
         this.tagManager = tagManager;
         this.schemaManager = schemaManager;
+        this.branchDeletion = branchDeletion;
     }
 
     /** Return the root Directory of branch. */
@@ -199,8 +215,39 @@ public class BranchManager {
     }
 
     public void deleteBranch(String branchName) {
+        checkArgument(!StringUtils.isBlank(branchName), "Branch name '%s' is blank.", branchName);
         checkArgument(branchExists(branchName), "Branch name '%s' doesn't exist.", branchName);
+
         try {
+
+            if (!branchExists(branchName)) {
+                return;
+            }
+
+            Snapshot snapshotToClean =
+                    snapshotManager.copyWithBranch(branchName).earliestSnapshot();
+
+            if (snapshotToClean != null) {
+                if (!snapshotManager.snapshotExists(snapshotToClean.id())) {
+                    SortedMap<Snapshot, List<TableBranch>> branchReferenceSnapshotsMap =
+                            branchesCreateSnapshots();
+                    // If the snapshotToClean is not referenced by other branches or tags, we need
+                    // to do clean the dataFiles and manifestFiles.
+                    if (branchReferenceSnapshotsMap
+                                            .getOrDefault(snapshotToClean, Collections.emptyList())
+                                            .size()
+                                    == 1
+                            && !tagManager.taggedSnapshots().contains(snapshotToClean)) {
+                        // do clean.
+                        doClean(
+                                snapshotToClean,
+                                SnapshotManager.mergeTreeSetToList(
+                                        branchReferenceSnapshotsMap.keySet(),
+                                        tagManager.taggedSnapshots()));
+                    }
+                }
+            }
+
             // Delete branch directory
             fileIO.delete(branchPath(branchName), true);
         } catch (IOException e) {
@@ -212,13 +259,40 @@ public class BranchManager {
         }
     }
 
+    public void doClean(Snapshot snapshotToDelete, List<Snapshot> referencedSnapshots) {
+        // collect skipping sets from the left neighbor branch and the nearest right neighbor
+        // (either the earliest snapshot or right neighbor branch)
+        List<Snapshot> skippedSnapshots =
+                SnapshotManager.findNearestNeighborsSnapshot(
+                        snapshotToDelete, referencedSnapshots, snapshotManager);
+
+        // delete data files and empty directories
+        Predicate<ManifestEntry> dataFileSkipper = null;
+        boolean success = true;
+        try {
+            dataFileSkipper = branchDeletion.dataFileSkipper(skippedSnapshots);
+        } catch (Exception e) {
+            LOG.info(
+                    String.format(
+                            "Skip cleaning data files for branch of snapshot %s due to failed to build skipping set.",
+                            snapshotToDelete.id()),
+                    e);
+            success = false;
+        }
+        if (success) {
+            branchDeletion.cleanUnusedDataFiles(snapshotToDelete, dataFileSkipper);
+            branchDeletion.cleanEmptyDirectories();
+        }
+
+        // delete manifests
+        branchDeletion.cleanUnusedManifests(
+                snapshotToDelete, branchDeletion.manifestSkippingSet(skippedSnapshots));
+    }
+
     /** Check if path exists. */
     public boolean fileExists(Path path) {
         try {
-            if (fileIO.exists(path)) {
-                return true;
-            }
-            return false;
+            return fileIO.exists(path);
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format("Failed to determine if path '%s' exists.", path), e);
@@ -315,5 +389,57 @@ public class BranchManager {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    /** Get all snapshots that are referenced by branches. */
+    public SortedMap<Snapshot, List<String>> branchesCreateSnapshots() {
+        TreeMap<Snapshot, List<String>> sortedSnapshots =
+                new TreeMap<>(Comparator.comparingLong(Snapshot::id));
+
+        for (String branchName : branches()) {
+            Snapshot branchCreateSnapshot =
+                    snapshotManager.copyWithBranch(branchName).earliestSnapshot();
+            if (branchCreateSnapshot == null) {
+                // Support empty branch.
+                branchSnapshots.put(new TableBranch(branchName, path.getValue()), null);
+                continue;
+            }
+            FileStoreTable branchTable =
+                    FileStoreTableFactory.create(
+                            fileIO, new Path(branchPath(tablePath, branchName)));
+            SortedMap<Snapshot, List<String>> snapshotTags = branchTable.tagManager().tags();
+            Snapshot earliestSnapshot = branchTable.snapshotManager().earliestSnapshot();
+            if (snapshotTags.isEmpty()) {
+                // Create based on snapshotId.
+                branchSnapshots.put(
+                        new TableBranch(branchName, earliestSnapshot.id(), path.getValue()),
+                        earliestSnapshot);
+            } else {
+                Snapshot snapshot = snapshotTags.firstKey();
+                // current branch is create from tag.
+                if (earliestSnapshot.id() == snapshot.id()) {
+                    List<String> tags = snapshotTags.get(snapshot);
+                    checkArgument(tags.size() == 1);
+                    branchSnapshots.put(
+                            new TableBranch(
+                                    branchName, tags.get(0), snapshot.id(), path.getValue()),
+                            snapshot);
+                } else {
+                    // Create based on snapshotId.
+                    branchSnapshots.put(
+                            new TableBranch(branchName, earliestSnapshot.id(), path.getValue()),
+                            earliestSnapshot);
+                }
+            }
+        }
+
+        for (Map.Entry<String, Snapshot> snapshotEntry : branches().entrySet()) {
+            if (snapshotEntry.getValue() != null) {
+                sortedSnapshots
+                        .computeIfAbsent(snapshotEntry.getValue(), s -> new ArrayList<>())
+                        .add(snapshotEntry.getKey());
+            }
+        }
+        return sortedSnapshots;
     }
 }

@@ -37,12 +37,12 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.function.Predicate;
 
-/** Delete tag files. */
-public class TagDeletion extends FileDeletionBase<Snapshot> {
+/** Delete branch files. */
+public class BranchDeletion extends FileDeletionBase<Snapshot> {
 
-    private static final Logger LOG = LoggerFactory.getLogger(TagDeletion.class);
+    private static final Logger LOG = LoggerFactory.getLogger(BranchDeletion.class);
 
-    public TagDeletion(
+    public BranchDeletion(
             FileIO fileIO,
             FileStorePathFactory pathFactory,
             ManifestFile manifestFile,
@@ -63,12 +63,12 @@ public class TagDeletion extends FileDeletionBase<Snapshot> {
     }
 
     @Override
-    public void cleanUnusedDataFiles(Snapshot taggedSnapshot, Predicate<ManifestEntry> skipper) {
+    public void cleanUnusedDataFiles(Snapshot snapshotToClean, Predicate<ManifestEntry> skipper) {
         Collection<ManifestEntry> manifestEntries;
         try {
-            manifestEntries = readMergedDataFiles(taggedSnapshot);
+            manifestEntries = readMergedDataFiles(snapshotToClean);
         } catch (IOException e) {
-            LOG.info("Skip data file clean for the tag of id {}.", taggedSnapshot.id(), e);
+            LOG.info("Skip data file clean for the snapshot {}.", snapshotToClean.id(), e);
             return;
         }
 
@@ -88,8 +88,8 @@ public class TagDeletion extends FileDeletionBase<Snapshot> {
     }
 
     @Override
-    public void cleanUnusedManifests(Snapshot taggedSnapshot, Set<String> skippingSet) {
+    public void cleanUnusedManifests(Snapshot snapshotToClean, Set<String> skippingSet) {
         // doesn't clean changelog files because they are handled by SnapshotDeletion
-        cleanUnusedManifests(taggedSnapshot, skippingSet, true, false);
+        cleanUnusedManifests(snapshotToClean, skippingSet, true, false);
     }
 }

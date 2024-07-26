@@ -20,6 +20,7 @@ package org.apache.paimon.tag;
 
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.sink.TagCallback;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -38,16 +39,19 @@ public class TagTimeExpire {
 
     private final SnapshotManager snapshotManager;
     private final TagManager tagManager;
+    private final BranchManager branchManager;
     private final TagDeletion tagDeletion;
     private final List<TagCallback> callbacks;
 
     private TagTimeExpire(
             SnapshotManager snapshotManager,
             TagManager tagManager,
+            BranchManager branchManager,
             TagDeletion tagDeletion,
             List<TagCallback> callbacks) {
         this.snapshotManager = snapshotManager;
         this.tagManager = tagManager;
+        this.branchManager = branchManager;
         this.tagDeletion = tagDeletion;
         this.callbacks = callbacks;
     }
@@ -67,7 +71,8 @@ public class TagTimeExpire {
                         "Delete tag {}, because its existence time has reached its timeRetained of {}.",
                         tagName,
                         timeRetained);
-                tagManager.deleteTag(tagName, tagDeletion, snapshotManager, callbacks);
+                tagManager.deleteTag(
+                        tagName, tagDeletion, snapshotManager, branchManager, callbacks);
             }
         }
     }
@@ -75,8 +80,10 @@ public class TagTimeExpire {
     public static TagTimeExpire create(
             SnapshotManager snapshotManager,
             TagManager tagManager,
+            BranchManager branchManager,
             TagDeletion tagDeletion,
             List<TagCallback> callbacks) {
-        return new TagTimeExpire(snapshotManager, tagManager, tagDeletion, callbacks);
+        return new TagTimeExpire(
+                snapshotManager, tagManager, branchManager, tagDeletion, callbacks);
     }
 }

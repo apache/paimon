@@ -29,6 +29,7 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.metastore.AddPartitionTagCallback;
 import org.apache.paimon.metastore.MetastoreClient;
+import org.apache.paimon.operation.BranchDeletion;
 import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.operation.PartitionExpire;
@@ -48,6 +49,7 @@ import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
@@ -253,6 +255,30 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     }
 
     @Override
+    public BranchManager newBranchManager() {
+        return new BranchManager(
+                fileIO,
+                options.path(),
+                snapshotManager(),
+                newTagManager(),
+                schemaManager,
+                newBranchDeletion());
+    }
+
+    @Override
+    public BranchDeletion newBranchDeletion() {
+        return new BranchDeletion(
+                fileIO,
+                pathFactory(),
+                manifestFileFactory().create(),
+                manifestListFactory().create(),
+                newIndexFileHandler(),
+                newStatsFileHandler(),
+                options.cleanEmptyDirectories(),
+                options.deleteFileThreadNum());
+    }
+
+    @Override
     public TagDeletion newTagDeletion() {
         return new TagDeletion(
                 fileIO,
@@ -297,6 +323,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options,
                 snapshotManager(),
                 newTagManager(),
+                newBranchManager(),
                 newTagDeletion(),
                 createTagCallbacks());
     }

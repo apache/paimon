@@ -351,13 +351,16 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public ExpireSnapshots newExpireSnapshots() {
         return new ExpireSnapshotsImpl(
-                snapshotManager(), store().newSnapshotDeletion(), store().newTagManager());
+                snapshotManager(),
+                store().newSnapshotDeletion(),
+                store().newTagManager(),
+                branchManager());
     }
 
     @Override
     public ExpireSnapshots newExpireChangelog() {
         return new ExpireChangelogImpl(
-                snapshotManager(), tagManager(), store().newChangelogDeletion());
+                snapshotManager(), tagManager(), store().newChangelogDeletion(), branchManager());
     }
 
     @Override
@@ -566,6 +569,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                         tagName,
                         store().newTagDeletion(),
                         snapshotManager(),
+                        branchManager(),
                         store().createTagCallbacks());
     }
 
@@ -627,7 +631,13 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public BranchManager branchManager() {
-        return new BranchManager(fileIO, path, snapshotManager(), tagManager(), schemaManager());
+        return new BranchManager(
+                fileIO,
+                path,
+                snapshotManager(),
+                tagManager(),
+                schemaManager(),
+                store().newBranchDeletion());
     }
 
     private RollbackHelper rollbackHelper() {

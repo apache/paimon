@@ -32,6 +32,7 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -39,6 +40,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BinaryOperator;
 import java.util.function.Function;
@@ -694,6 +696,50 @@ public class SnapshotManager implements Serializable {
             }
         }
         return -1;
+    }
+
+    public static int findIndex(Snapshot targetSnapshot, List<Snapshot> snapshotList) {
+        for (int i = 0; i < snapshotList.size(); i++) {
+            if (targetSnapshot.id() == snapshotList.get(i).id()) {
+                return i;
+            }
+        }
+        throw new RuntimeException(
+                String.format(
+                        "Didn't find tag with snapshot id '%s'.This is unexpected.",
+                        targetSnapshot.id()));
+    }
+
+    public static List<Snapshot> findNearestNeighborsSnapshot(
+            Snapshot targetSnapshot, List<Snapshot> snapshotList, SnapshotManager snapshotManager) {
+        List<Snapshot> skippedSnapshots = new ArrayList<>();
+
+        int index = SnapshotManager.findIndex(targetSnapshot, snapshotList);
+        // the left neighbor tag
+        if (index - 1 >= 0) {
+            skippedSnapshots.add(snapshotList.get(index - 1));
+        }
+        // the nearest right neighbor
+        Snapshot right = snapshotManager.earliestSnapshot();
+        if (index + 1 < snapshotList.size()) {
+            Snapshot rightTag = snapshotList.get(index + 1);
+            right = right.id() < rightTag.id() ? right : rightTag;
+        }
+        skippedSnapshots.add(right);
+        return skippedSnapshots;
+    }
+
+    public static List<Snapshot> mergeTreeSetToList(
+            Collection<Snapshot> set1, Collection<Snapshot> set2) {
+        if (set1 != null && set2 != null) {
+            if (!set1.isEmpty() || !set2.isEmpty()) {
+                TreeSet<Snapshot> re = new TreeSet<>(Comparator.comparingLong(Snapshot::id));
+                re.addAll(set1);
+                re.addAll(set2);
+                return new ArrayList<>(re);
+            }
+        }
+        return Collections.emptyList();
     }
 
     public void deleteLatestHint() throws IOException {
