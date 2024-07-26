@@ -463,6 +463,29 @@ public abstract class HiveCatalogITCaseBase {
                         "Cannot find table '`my_hive`.`test_db`.`hive_table`' in any of the catalogs [default_catalog, my_hive], nor as a temporary table.");
     }
 
+    @Test
+    public void testFlinkCreateBranchAndHiveRead() throws Exception {
+        tEnv.executeSql(
+                        "CREATE TABLE t ( "
+                                + "a INT, "
+                                + "b STRING"
+                                + ") WITH ( 'file.format' = 'avro' )")
+                .await();
+        tEnv.executeSql("Call sys.create_branch('test_db.t','b1')").await();
+        tEnv.executeSql("INSERT INTO t$branch_b1 VALUES (1,'x1'), (2,'x2')").await();
+        tEnv.executeSql("INSERT INTO t VALUES (3,'x3')").await();
+        hiveShell.execute("SET paimon.branch=b1");
+        assertThat(hiveShell.executeQuery("SELECT * FROM t"))
+                .isEqualTo(Arrays.asList("1\tx1", "2\tx2"));
+
+        tEnv.executeSql("Call sys.create_branch('test_db.t','b2')").await();
+        tEnv.executeSql("INSERT INTO t$branch_b2 VALUES (4,'x1'), (5,'x2')").await();
+        hiveShell.execute("SET paimon.branch=b2");
+        assertThat(hiveShell.executeQuery("SELECT * FROM t"))
+                .isEqualTo(Arrays.asList("4\tx1", "5\tx2"));
+        hiveShell.execute("SET paimon.branch=null");
+    }
+
     /**
      * Test flink writing and hive reading to compare partitions and non-partitions table results.
      */
@@ -534,6 +557,26 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql("INSERT INTO hive_test_table VALUES (1, 'Apache'), (2, 'Paimon')");
         List<Row> actual = collect("SELECT * FROM hive_test_table");
         assertThat(actual).contains(Row.of(1, "Apache"), Row.of(2, "Paimon"));
+    }
+
+    @Test
+    public void testBranchHiveCreateAndFlinkInsertRead() throws Exception {
+        hiveShell.execute("SET hive.metastore.warehouse.dir=" + path);
+        hiveShell.execute(
+                "CREATE TABLE hive_test_table ( a INT, b STRING ) "
+                        + "STORED BY '"
+                        + PaimonStorageHandler.class.getName()
+                        + "'"
+                        + "TBLPROPERTIES ("
+                        + "  'primary-key'='a'"
+                        + ")");
+        tEnv.executeSql("Call sys.create_branch('test_db.hive_test_table','b1')").await();
+        tEnv.executeSql("INSERT INTO hive_test_table$branch_b1 VALUES (1,'x1'), (2,'x2')").await();
+        tEnv.executeSql("INSERT INTO hive_test_table VALUES (3,'x3')").await();
+        hiveShell.execute("SET paimon.branch=b1");
+        assertThat(hiveShell.executeQuery("SELECT * FROM hive_test_table"))
+                .isEqualTo(Arrays.asList("1\tx1", "2\tx2"));
+        hiveShell.execute("SET paimon.branch=null");
     }
 
     @Test

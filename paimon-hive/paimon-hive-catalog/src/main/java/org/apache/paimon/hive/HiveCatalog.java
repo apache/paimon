@@ -392,8 +392,6 @@ public class HiveCatalog extends AbstractCatalog {
 
     @Override
     public TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
-        assertMainBranch(identifier);
-
         if (!tableExists(identifier)) {
             throw new TableNotExistException(identifier);
         }
