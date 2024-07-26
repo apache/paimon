@@ -87,7 +87,7 @@ import java.util.stream.Collectors;
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTOREWAREHOUSE;
 import static org.apache.paimon.hive.HiveCatalogLock.acquireTimeout;
 import static org.apache.paimon.hive.HiveCatalogLock.checkMaxSleep;
-import static org.apache.paimon.hive.HiveCatalogOptions.CASE_SENSITIVE;
+import static org.apache.paimon.hive.HiveCatalogOptions.CASE_INSENSITIVE;
 import static org.apache.paimon.hive.HiveCatalogOptions.HADOOP_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.HIVE_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.IDENTIFIER;
@@ -581,7 +581,7 @@ public class HiveCatalog extends AbstractCatalog {
 
     @Override
     public boolean caseSensitive() {
-        return catalogOptions.get(CASE_SENSITIVE);
+        return catalogOptions.get(CASE_INSENSITIVE);
     }
 
     @Override
