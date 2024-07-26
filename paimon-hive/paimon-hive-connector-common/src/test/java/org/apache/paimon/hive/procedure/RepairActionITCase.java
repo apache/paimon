@@ -115,7 +115,7 @@ public class RepairActionITCase extends ActionITCaseBase {
                                 + "    behavior STRING,\n"
                                 + "    dt STRING,\n"
                                 + "    hh STRING,\n"
-                                + "    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED\n"
+                                + "    PRIMARY KEY (dt, hh, userID) NOT ENFORCED\n"
                                 + ") PARTITIONED BY (dt, hh)"
                                 + " WITH (\n"
                                 + "'metastore.partitioned-table' = 'true'\n"
