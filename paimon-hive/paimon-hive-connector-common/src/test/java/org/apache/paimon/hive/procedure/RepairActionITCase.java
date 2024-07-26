@@ -104,7 +104,7 @@ public class RepairActionITCase extends ActionITCaseBase {
                         + PORT
                         + "' , 'warehouse' = '"
                         + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname)
-                        + "'), 'case-sensitive'=false");
+                        + "'), 'case-sensitive'=true");
         tEnv.useCatalog("PAIMON");
 
         tEnv.executeSql("CREATE DATABASE IF NOT EXISTS test_db;").await();
