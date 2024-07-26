@@ -707,20 +707,7 @@ public class CoreOptions implements Serializable {
                     .enumType(PartitionExpireStrategy.class)
                     .defaultValue(PartitionExpireStrategy.VALUES_TIME)
                     .withDescription(
-                            Description.builder()
-                                    .text(
-                                            "Specifies the expiration strategy for partition expiration.")
-                                    .linebreak()
-                                    .text("Possible values:")
-                                    .list(
-                                            text(
-                                                    PartitionExpireStrategy.VALUES_TIME.value
-                                                            + ": A partition expiration policy that compares the time extracted from the partition value with the current time."))
-                                    .list(
-                                            text(
-                                                    PartitionExpireStrategy.UPDATE_TIME.value
-                                                            + ": A partition expiration policy that compares the last update time of the partition with the current time."))
-                                    .build());
+                            "The strategy determines how to extract the partition time and compare it with the current time.");
 
     public static final ConfigOption<Duration> PARTITION_EXPIRATION_TIME =
             key("partition.expiration-time")
@@ -898,22 +885,7 @@ public class CoreOptions implements Serializable {
                     .enumType(StreamingReadMode.class)
                     .noDefaultValue()
                     .withDescription(
-                            Description.builder()
-                                    .text(
-                                            "The mode of streaming read that specifies to read the data of table file or log")
-                                    .linebreak()
-                                    .linebreak()
-                                    .text("Possible values:")
-                                    .linebreak()
-                                    .list(
-                                            text(
-                                                    StreamingReadMode.FILE.getValue()
-                                                            + ": Reads from the data of table file store."))
-                                    .list(
-                                            text(
-                                                    StreamingReadMode.LOG.getValue()
-                                                            + ": Read from the data of table log store."))
-                                    .build());
+                            "The mode of streaming read that specifies to read the data of table file or log.");
 
     public static final ConfigOption<Duration> CONSUMER_EXPIRATION_TIME =
             key("consumer.expiration-time")
@@ -2249,8 +2221,8 @@ public class CoreOptions implements Serializable {
 
     /** Specifies the type for streaming read. */
     public enum StreamingReadMode implements DescribedEnum {
-        LOG("log", "Reads from the log store."),
-        FILE("file", "Reads from the file store.");
+        LOG("log", "Read from the data of table log store."),
+        FILE("file", "Read from the data of table file store.");
 
         private final String value;
         private final String description;
@@ -2601,11 +2573,11 @@ public class CoreOptions implements Serializable {
     public enum PartitionExpireStrategy implements DescribedEnum {
         VALUES_TIME(
                 "values-time",
-                "The strategy compares the time extracted from the partition value with the current time."),
+                "This strategy compares the time extracted from the partition value with the current time."),
 
         UPDATE_TIME(
                 "update-time",
-                "The strategy compares the last update time of the partition with the current time.");
+                "This strategy compares the last update time of the partition with the current time.");
 
         private final String value;
 
