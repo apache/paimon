@@ -364,6 +364,58 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
+    public void testCreateInsensitiveTable() throws Exception {
+        tEnv.executeSql(
+                        String.join(
+                                "\n",
+                                "CREATE CATALOG paimon_catalog_01 WITH (",
+                                "  'type' = 'paimon',",
+                                "  'metastore' = 'hive',",
+                                "  'uri' = '',",
+                                "  'warehouse' = '" + path + "',",
+                                "  'lock.enabled' = 'true',",
+                                "  'table.type' = 'EXTERNAL',",
+                                "  'case-insensitive' = 'true'",
+                                ")"))
+                .await();
+        tEnv.executeSql("USE CATALOG paimon_catalog_01").await();
+        tEnv.executeSql("USE test_db").await();
+        tEnv.executeSql("CREATE TABLE t ( aa INT, Bb STRING ) WITH ( 'file.format' = 'avro' )")
+                .await();
+        assertThat(
+                        hiveShell
+                                .executeQuery("DESC FORMATTED t")
+                                .contains("Table Type:         \tEXTERNAL_TABLE      \tNULL"))
+                .isTrue();
+        tEnv.executeSql("DROP TABLE t").await();
+        Path tablePath = new Path(path, "test_db.db/t");
+        assertThat(tablePath.getFileSystem().exists(tablePath)).isTrue();
+
+        tEnv.executeSql(
+                        String.join(
+                                "\n",
+                                "CREATE CATALOG paimon_catalog_02 WITH (",
+                                "  'type' = 'paimon',",
+                                "  'metastore' = 'hive',",
+                                "  'uri' = '',",
+                                "  'warehouse' = '" + path + "',",
+                                "  'lock.enabled' = 'true',",
+                                "  'table.type' = 'EXTERNAL',",
+                                "  'case-insensitive' = 'false'",
+                                ")"))
+                .await();
+        tEnv.executeSql("USE CATALOG paimon_catalog_02").await();
+        tEnv.executeSql("USE test_db").await();
+
+        // set case-insensitive = false would throw exception out
+        assertThrows(
+                RuntimeException.class,
+                () ->
+                        tEnv.executeSql(
+                                "CREATE TABLE t1 ( aa INT, Bb STRING ) WITH ( 'file.format' = 'avro' )"));
+    }
+
+    @Test
     public void testFlinkWriteAndHiveRead() throws Exception {
         tEnv.executeSql(
                         "CREATE TABLE t ( "
