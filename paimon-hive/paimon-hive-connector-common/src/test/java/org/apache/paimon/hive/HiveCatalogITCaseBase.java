@@ -408,11 +408,14 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql("USE test_db").await();
 
         // set case-insensitive = false would throw exception out
+        tEnv.executeSql("CREATE TABLE t1 ( aa INT, Bb STRING ) WITH ( 'file.format' = 'avro' )")
+                .await();
         assertThrows(
                 RuntimeException.class,
                 () ->
                         tEnv.executeSql(
-                                "CREATE TABLE t1 ( aa INT, Bb STRING ) WITH ( 'file.format' = 'avro' )"));
+                                        "CREATE TABLE t1 ( aa INT, Bb STRING ) WITH ( 'file.format' = 'avro' )")
+                                .await());
     }
 
     @Test

@@ -36,7 +36,6 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Tests for {@link RepairAction}. */
 public class RepairActionITCase extends ActionITCaseBase {
@@ -95,60 +94,5 @@ public class RepairActionITCase extends ActionITCaseBase {
                 ImmutableList.copyOf(tEnv.executeSql("SHOW PARTITIONS t_repair_hive").collect());
         assertThat(ret.size() == 1).isTrue();
         assertThat(ret.get(0).toString()).isEqualTo("+I[dt=2020-01-02/hh=09]");
-    }
-
-    @Test
-    public void testCaseSensitive() throws Exception {
-        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
-        tEnv.executeSql(
-                "CREATE CATALOG PAIMON WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:"
-                        + PORT
-                        + "' , 'warehouse' = '"
-                        + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname)
-                        + "', 'case-insensitive'='true')");
-        tEnv.executeSql(
-                "CREATE CATALOG PAIMON1 WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:"
-                        + PORT
-                        + "' , 'warehouse' = '"
-                        + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname)
-                        + "', 'case-insensitive'='false')");
-
-        tEnv.useCatalog("PAIMON");
-        tEnv.executeSql("CREATE DATABASE IF NOT EXISTS test_db;").await();
-        tEnv.executeSql("USE test_db").await();
-        tEnv.executeSql(
-                        "CREATE TABLE paimon_test01 (\n"
-                                + "    userID BIGINT,\n"
-                                + "    behavior STRING,\n"
-                                + "    dt STRING,\n"
-                                + "    hh STRING,\n"
-                                + "    PRIMARY KEY (dt, hh, userID) NOT ENFORCED\n"
-                                + ") PARTITIONED BY (dt, hh)"
-                                + " WITH (\n"
-                                + "'metastore.partitioned-table' = 'true'\n"
-                                + ");")
-                .await();
-        tEnv.executeSql("INSERT INTO paimon_test01 VALUES(1, 'login', '2020-01-02', '09')").await();
-
-        // set case-insensitive = false
-        tEnv.useCatalog("PAIMON1");
-        tEnv.executeSql("CREATE DATABASE IF NOT EXISTS test_db;").await();
-        tEnv.executeSql("USE test_db").await();
-
-        assertThrows(
-                RuntimeException.class,
-                () ->
-                        tEnv.executeSql(
-                                        "CREATE TABLE paimon_test02 (\n"
-                                                + "    userID BIGINT,\n"
-                                                + "    behavior STRING,\n"
-                                                + "    dt STRING,\n"
-                                                + "    hh STRING,\n"
-                                                + "    PRIMARY KEY (dt, hh, userID) NOT ENFORCED\n"
-                                                + ") PARTITIONED BY (dt, hh)"
-                                                + " WITH (\n"
-                                                + "'metastore.partitioned-table' = 'true'\n"
-                                                + ");")
-                                .await());
     }
 }

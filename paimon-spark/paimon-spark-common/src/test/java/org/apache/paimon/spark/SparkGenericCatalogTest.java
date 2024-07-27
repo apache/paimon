@@ -41,10 +41,11 @@ public class SparkGenericCatalogTest {
 
     @BeforeEach
     public void startMetastoreAndSpark(@TempDir java.nio.file.Path tempDir) {
-        warehousePath = new Path("file:" + tempDir.toString());
+        warehousePath = new Path("file:" + tempDir.toString().replaceAll("C:", ""));
         spark =
                 SparkSession.builder()
                         .config("spark.sql.warehouse.dir", warehousePath.toString())
+                        .config("cd", "aa")
                         .master("local[2]")
                         .getOrCreate();
         spark.conf().set("spark.sql.catalog.spark_catalog", SparkGenericCatalog.class.getName());
@@ -73,6 +74,10 @@ public class SparkGenericCatalogTest {
 
         assertThat(spark.sql("SHOW NAMESPACES").collectAsList().stream().map(Object::toString))
                 .containsExactlyInAnyOrder("[default]", "[my_db]");
+
+        spark.sql(
+                "CREATE TABLE PT1 (a INT, bB INT, c STRING) USING paimon TBLPROPERTIES"
+                        + " ('file.format'='avro')");
     }
 
     @Test
