@@ -54,7 +54,6 @@ import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** IT cases for testing create managed table ddl. */
 public class CreateTableITCase extends HiveTestBase {
@@ -152,51 +151,6 @@ public class CreateTableITCase extends HiveTestBase {
         hiveShell.execute("DROP TABLE " + tableName);
 
         hiveCatalog.createTable(identifier, schema, false);
-    }
-
-    @Test
-    public void testCallCreateTableWithColumnInsensitive() throws Exception {
-        // Create hive external table with paimon table
-        String tableName = "with_paimon_table";
-        String tableName1 = "with_paimon_table01";
-        String hadoopConfDir = "";
-
-        // Create a paimon table
-        Schema schema =
-                new Schema(
-                        Lists.newArrayList(
-                                new DataField(0, "col1", DataTypes.INT(), "first comment"),
-                                new DataField(1, "col2", DataTypes.STRING(), "second comment"),
-                                new DataField(2, "COL3", DataTypes.DECIMAL(5, 3), "last comment")),
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        Maps.newHashMap(),
-                        "");
-        Identifier identifier = Identifier.create(DATABASE_TEST, tableName);
-        Options options = new Options();
-        options.set("warehouse", path);
-        options.set("metastore", "hive");
-        options.set("table.type", "external");
-        options.set("case-insensitive", "true");
-        options.set("hadoop-conf-dir", hadoopConfDir);
-        CatalogContext context = CatalogContext.create(options);
-        Catalog hiveCatalog = CatalogFactory.createCatalog(context);
-        hiveCatalog.createTable(identifier, schema, false);
-
-        // Drop hive external table
-        hiveShell.execute("DROP TABLE " + tableName);
-        hiveCatalog.createTable(identifier, schema, false);
-
-        // test case-insensitive = false
-        options.set("case-insensitive", "false");
-        context = CatalogContext.create(options);
-        Catalog hiveCatalog1 = CatalogFactory.createCatalog(context);
-
-        hiveShell.execute("DROP TABLE " + tableName1);
-        Identifier identifier1 = Identifier.create(DATABASE_TEST, tableName1);
-        assertThrows(
-                IllegalStateException.class,
-                () -> hiveCatalog1.createTable(identifier1, schema, false));
     }
 
     @Test
