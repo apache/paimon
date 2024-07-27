@@ -54,6 +54,7 @@ import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** IT cases for testing create managed table ddl. */
 public class CreateTableITCase extends HiveTestBase {
@@ -157,6 +158,7 @@ public class CreateTableITCase extends HiveTestBase {
     public void testCallCreateTableWithColumnInsensitive() throws Exception {
         // Create hive external table with paimon table
         String tableName = "with_paimon_table";
+        String tableName1 = "with_paimon_table01";
         String hadoopConfDir = "";
 
         // Create a paimon table
@@ -183,8 +185,18 @@ public class CreateTableITCase extends HiveTestBase {
 
         // Drop hive external table
         hiveShell.execute("DROP TABLE " + tableName);
-
         hiveCatalog.createTable(identifier, schema, false);
+
+        // test case-insensitive = false
+        options.set("case-insensitive", "false");
+        context = CatalogContext.create(options);
+        Catalog hiveCatalog1 = CatalogFactory.createCatalog(context);
+
+        hiveShell.execute("DROP TABLE " + tableName1);
+        Identifier identifier1 = Identifier.create(DATABASE_TEST, tableName1);
+        assertThrows(
+                IllegalStateException.class,
+                () -> hiveCatalog1.createTable(identifier1, schema, false));
     }
 
     @Test
