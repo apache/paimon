@@ -77,10 +77,10 @@ public abstract class FileDeletionBase<T extends Snapshot> {
 
     protected boolean changelogDecoupled;
 
-    /** Used to record which tag is cached. */
+    /** Used to record which snapshot is cached. */
     private long cachedSnapshotId = 0;
 
-    /** Used to cache data files used by current tag. */
+    /** Used to cache data files used by current snapshot. */
     private final Map<BinaryRow, Map<Integer, Set<String>>> cachedSnapshotDataFiles =
             new HashMap<>();
 
@@ -331,7 +331,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     public Predicate<ManifestEntry> dataFileSkipper(
             List<Snapshot> skippingSnapshots, long expiringSnapshotId) throws Exception {
         int index = SnapshotManager.findPreviousSnapshot(skippingSnapshots, expiringSnapshotId);
-        // refresh tag data files
+        // refresh snapshot data files
         if (index >= 0) {
             Snapshot previousSnapshot = skippingSnapshots.get(index);
             if (previousSnapshot.id() != cachedSnapshotId) {
