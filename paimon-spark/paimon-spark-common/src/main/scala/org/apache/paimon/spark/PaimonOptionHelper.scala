@@ -43,7 +43,7 @@ object PaimonOptionHelper extends SQLConfHelper {
     mergedOptions
   }
 
-  def withDynamicOptions[T <: Table](table: T, extraOptions: JMap[String, String] = null): T = {
+  def withDynamicOptions[T <: Table](table: T, extraOptions: JMap[String, String]): T = {
     val mergedOptions = mergeOptions(extraOptions)
     if (mergedOptions.isEmpty) {
       table
