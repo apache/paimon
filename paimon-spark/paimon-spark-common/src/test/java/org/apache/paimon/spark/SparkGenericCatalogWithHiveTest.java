@@ -53,7 +53,7 @@ public class SparkGenericCatalogWithHiveTest {
                 SparkSession.builder()
                         .config("spark.sql.warehouse.dir", warehousePath.toString())
                         // with case-insensitive true
-                        .config("spark.case-insensitive", "true")
+                        .config("spark.sql.caseSensitive", "false")
                         // with hive metastore
                         .config("spark.sql.catalogImplementation", "hive")
                         .config(
@@ -79,7 +79,7 @@ public class SparkGenericCatalogWithHiveTest {
                 SparkSession.builder()
                         .config("spark.sql.warehouse.dir", warehousePath.toString())
                         // with case-insensitive false
-                        .config("spark.case-insensitive", "false")
+                        .config("spark.sql.caseSensitive", "true")
                         // with hive metastore
                         .config("spark.sql.catalogImplementation", "hive")
                         .config(
