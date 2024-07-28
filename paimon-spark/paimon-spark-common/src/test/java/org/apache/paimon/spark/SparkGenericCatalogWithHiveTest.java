@@ -120,9 +120,9 @@ public class SparkGenericCatalogWithHiveTest {
                         + " ('file.format'='avro')");
 
         assertThat(
-                spark.sql("SHOW TABLES").collectAsList().stream()
-                        .map(s -> s.get(1))
-                        .map(Object::toString))
+                        spark.sql("SHOW TABLES").collectAsList().stream()
+                                .map(s -> s.get(1))
+                                .map(Object::toString))
                 .containsExactlyInAnyOrder("t1");
         spark.close();
 
@@ -148,5 +148,4 @@ public class SparkGenericCatalogWithHiveTest {
                                         + " ('file.format'='avro')"));
         spark1.close();
     }
-
 }
