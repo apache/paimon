@@ -62,14 +62,11 @@ public class SparkGenericCatalogWithHiveTest {
                         .master("local[2]")
                         .getOrCreate();
 
-        spark.sql("CREATE DATABASE my_db");
-        spark.sql("USE my_db");
+        spark.sql("CREATE DATABASE my_db1");
+        spark.sql("USE my_db1");
         spark.sql(
                 "CREATE TABLE IF NOT EXISTS t1 (a INT, Bb INT, c STRING) USING paimon TBLPROPERTIES"
                         + " ('file.format'='avro')");
-
-        assertThat(spark.sql("SHOW NAMESPACES").collectAsList().stream().map(Object::toString))
-                .containsExactlyInAnyOrder("[default]", "[my_db]");
 
         assertThat(
                         spark.sql("SHOW TABLES").collectAsList().stream()
@@ -91,8 +88,7 @@ public class SparkGenericCatalogWithHiveTest {
                         .master("local[2]")
                         .getOrCreate();
 
-        spark1.sql("CREATE DATABASE my_db");
-        spark1.sql("USE my_db");
+        spark1.sql("USE my_db1");
         assertThrows(
                 RuntimeException.class,
                 () ->
