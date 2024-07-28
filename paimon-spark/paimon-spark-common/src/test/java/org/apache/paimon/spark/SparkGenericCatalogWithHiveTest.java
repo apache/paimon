@@ -28,6 +28,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Base tests for spark read. */
 public class SparkGenericCatalogWithHiveTest {
@@ -51,6 +52,7 @@ public class SparkGenericCatalogWithHiveTest {
         SparkSession spark =
                 SparkSession.builder()
                         .config("spark.sql.warehouse.dir", warehousePath.toString())
+                        // with case-insensitive true
                         .config("spark.case-insensitive", "true")
                         // with hive metastore
                         .config("spark.sql.catalogImplementation", "hive")
@@ -75,6 +77,29 @@ public class SparkGenericCatalogWithHiveTest {
                                 .map(Object::toString))
                 .containsExactlyInAnyOrder("t1");
         spark.close();
+
+        SparkSession spark1 =
+                SparkSession.builder()
+                        .config("spark.sql.warehouse.dir", warehousePath.toString())
+                        // with case-insensitive false
+                        .config("spark.case-insensitive", "false")
+                        // with hive metastore
+                        .config("spark.sql.catalogImplementation", "hive")
+                        .config(
+                                "spark.sql.catalog.spark_catalog",
+                                SparkGenericCatalog.class.getName())
+                        .master("local[2]")
+                        .getOrCreate();
+
+        spark1.sql("CREATE DATABASE my_db");
+        spark1.sql("USE my_db");
+        assertThrows(
+                RuntimeException.class,
+                () ->
+                        spark1.sql(
+                                "CREATE TABLE IF NOT EXISTS t2 (a INT, Bb INT, c STRING) USING paimon TBLPROPERTIES"
+                                        + " ('file.format'='avro')"));
+        spark1.close();
     }
 
     @Test
