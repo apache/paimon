@@ -46,59 +46,6 @@ public class SparkGenericCatalogWithHiveTest {
     }
 
     @Test
-    public void testCreateTableCaseSensitive(@TempDir java.nio.file.Path tempDir) {
-        // firstly, we use hive metastore to creata table, and check the result.
-        Path warehousePath = new Path("file:" + tempDir.toString());
-        SparkSession spark =
-                SparkSession.builder()
-                        .config("spark.sql.warehouse.dir", warehousePath.toString())
-                        // with case-insensitive true
-                        .config("spark.case-insensitive", "true")
-                        // with hive metastore
-                        .config("spark.sql.catalogImplementation", "hive")
-                        .config(
-                                "spark.sql.catalog.spark_catalog",
-                                SparkGenericCatalog.class.getName())
-                        .master("local[2]")
-                        .getOrCreate();
-
-        spark.sql("CREATE DATABASE IF NOT EXISTS my_db1");
-        spark.sql("USE my_db1");
-        spark.sql(
-                "CREATE TABLE IF NOT EXISTS t1 (a INT, Bb INT, c STRING) USING paimon TBLPROPERTIES"
-                        + " ('file.format'='avro')");
-
-        assertThat(
-                        spark.sql("SHOW TABLES").collectAsList().stream()
-                                .map(s -> s.get(1))
-                                .map(Object::toString))
-                .containsExactlyInAnyOrder("t1");
-        spark.close();
-
-        SparkSession spark1 =
-                SparkSession.builder()
-                        .config("spark.sql.warehouse.dir", warehousePath.toString())
-                        // with case-insensitive false
-                        .config("spark.case-insensitive", "false")
-                        // with hive metastore
-                        .config("spark.sql.catalogImplementation", "hive")
-                        .config(
-                                "spark.sql.catalog.spark_catalog",
-                                SparkGenericCatalog.class.getName())
-                        .master("local[2]")
-                        .getOrCreate();
-
-        spark1.sql("USE my_db1");
-        assertThrows(
-                RuntimeException.class,
-                () ->
-                        spark1.sql(
-                                "CREATE TABLE IF NOT EXISTS t2 (a INT, Bb INT, c STRING) USING paimon TBLPROPERTIES"
-                                        + " ('file.format'='avro')"));
-        spark1.close();
-    }
-
-    @Test
     public void testBuildWithHive(@TempDir java.nio.file.Path tempDir) {
         // firstly, we use hive metastore to creata table, and check the result.
         Path warehousePath = new Path("file:" + tempDir.toString());
@@ -148,4 +95,58 @@ public class SparkGenericCatalogWithHiveTest {
                                 .map(Object::toString))
                 .containsExactlyInAnyOrder("t1");
     }
+
+    @Test
+    public void testCreateTableCaseSensitive(@TempDir java.nio.file.Path tempDir) {
+        // firstly, we use hive metastore to creata table, and check the result.
+        Path warehousePath = new Path("file:" + tempDir.toString());
+        SparkSession spark =
+                SparkSession.builder()
+                        .config("spark.sql.warehouse.dir", warehousePath.toString())
+                        // with case-insensitive true
+                        .config("spark.case-insensitive", "true")
+                        // with hive metastore
+                        .config("spark.sql.catalogImplementation", "hive")
+                        .config(
+                                "spark.sql.catalog.spark_catalog",
+                                SparkGenericCatalog.class.getName())
+                        .master("local[2]")
+                        .getOrCreate();
+
+        spark.sql("CREATE DATABASE IF NOT EXISTS my_db1");
+        spark.sql("USE my_db1");
+        spark.sql(
+                "CREATE TABLE IF NOT EXISTS t1 (a INT, Bb INT, c STRING) USING paimon TBLPROPERTIES"
+                        + " ('file.format'='avro')");
+
+        assertThat(
+                spark.sql("SHOW TABLES").collectAsList().stream()
+                        .map(s -> s.get(1))
+                        .map(Object::toString))
+                .containsExactlyInAnyOrder("t1");
+        spark.close();
+
+        SparkSession spark1 =
+                SparkSession.builder()
+                        .config("spark.sql.warehouse.dir", warehousePath.toString())
+                        // with case-insensitive false
+                        .config("spark.case-insensitive", "false")
+                        // with hive metastore
+                        .config("spark.sql.catalogImplementation", "hive")
+                        .config(
+                                "spark.sql.catalog.spark_catalog",
+                                SparkGenericCatalog.class.getName())
+                        .master("local[2]")
+                        .getOrCreate();
+
+        spark1.sql("USE my_db1");
+        assertThrows(
+                RuntimeException.class,
+                () ->
+                        spark1.sql(
+                                "CREATE TABLE IF NOT EXISTS t2 (a INT, Bb INT, c STRING) USING paimon TBLPROPERTIES"
+                                        + " ('file.format'='avro')"));
+        spark1.close();
+    }
+
 }
