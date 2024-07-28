@@ -46,57 +46,6 @@ public class SparkGenericCatalogWithHiveTest {
     }
 
     @Test
-    public void testBuildWithHive(@TempDir java.nio.file.Path tempDir) {
-        // firstly, we use hive metastore to creata table, and check the result.
-        Path warehousePath = new Path("file:" + tempDir.toString());
-        SparkSession spark =
-                SparkSession.builder()
-                        .config("spark.sql.warehouse.dir", warehousePath.toString())
-                        // with hive metastore
-                        .config("spark.sql.catalogImplementation", "hive")
-                        .config(
-                                "spark.sql.catalog.spark_catalog",
-                                SparkGenericCatalog.class.getName())
-                        .master("local[2]")
-                        .getOrCreate();
-
-        spark.sql("CREATE DATABASE my_db");
-        spark.sql("USE my_db");
-        spark.sql(
-                "CREATE TABLE IF NOT EXISTS t1 (a INT, b INT, c STRING) USING paimon TBLPROPERTIES"
-                        + " ('file.format'='avro')");
-
-        assertThat(spark.sql("SHOW NAMESPACES").collectAsList().stream().map(Object::toString))
-                .containsExactlyInAnyOrder("[default]", "[my_db]");
-
-        assertThat(
-                        spark.sql("SHOW TABLES").collectAsList().stream()
-                                .map(s -> s.get(1))
-                                .map(Object::toString))
-                .containsExactlyInAnyOrder("t1");
-        spark.close();
-
-        // secondly, we close catalog with hive metastore, and start a filesystem metastore to check
-        // the result.
-        SparkSession spark2 =
-                SparkSession.builder()
-                        .config("spark.sql.catalog.paimon.warehouse", warehousePath.toString())
-                        .config("spark.sql.catalogImplementation", "in-memory")
-                        .config("spark.sql.catalog.paimon", SparkCatalog.class.getName())
-                        .master("local[2]")
-                        .getOrCreate();
-        spark2.sql("USE paimon");
-        spark2.sql("USE my_db");
-        assertThat(spark2.sql("SHOW NAMESPACES").collectAsList().stream().map(Object::toString))
-                .containsExactlyInAnyOrder("[default]", "[my_db]");
-        assertThat(
-                        spark2.sql("SHOW TABLES").collectAsList().stream()
-                                .map(s -> s.get(1))
-                                .map(Object::toString))
-                .containsExactlyInAnyOrder("t1");
-    }
-
-    @Test
     public void testCreateTableCaseSensitive(@TempDir java.nio.file.Path tempDir) {
         // firstly, we use hive metastore to creata table, and check the result.
         Path warehousePath = new Path("file:" + tempDir.toString());
@@ -147,5 +96,56 @@ public class SparkGenericCatalogWithHiveTest {
                                 "CREATE TABLE IF NOT EXISTS t2 (a INT, Bb INT, c STRING) USING paimon TBLPROPERTIES"
                                         + " ('file.format'='avro')"));
         spark1.close();
+    }
+
+    @Test
+    public void testBuildWithHive(@TempDir java.nio.file.Path tempDir) {
+        // firstly, we use hive metastore to creata table, and check the result.
+        Path warehousePath = new Path("file:" + tempDir.toString());
+        SparkSession spark =
+                SparkSession.builder()
+                        .config("spark.sql.warehouse.dir", warehousePath.toString())
+                        // with hive metastore
+                        .config("spark.sql.catalogImplementation", "hive")
+                        .config(
+                                "spark.sql.catalog.spark_catalog",
+                                SparkGenericCatalog.class.getName())
+                        .master("local[2]")
+                        .getOrCreate();
+
+        spark.sql("CREATE DATABASE my_db");
+        spark.sql("USE my_db");
+        spark.sql(
+                "CREATE TABLE IF NOT EXISTS t1 (a INT, b INT, c STRING) USING paimon TBLPROPERTIES"
+                        + " ('file.format'='avro')");
+
+        assertThat(spark.sql("SHOW NAMESPACES").collectAsList().stream().map(Object::toString))
+                .containsExactlyInAnyOrder("[default]", "[my_db], [my_db1]");
+
+        assertThat(
+                        spark.sql("SHOW TABLES").collectAsList().stream()
+                                .map(s -> s.get(1))
+                                .map(Object::toString))
+                .containsExactlyInAnyOrder("t1");
+        spark.close();
+
+        // secondly, we close catalog with hive metastore, and start a filesystem metastore to check
+        // the result.
+        SparkSession spark2 =
+                SparkSession.builder()
+                        .config("spark.sql.catalog.paimon.warehouse", warehousePath.toString())
+                        .config("spark.sql.catalogImplementation", "in-memory")
+                        .config("spark.sql.catalog.paimon", SparkCatalog.class.getName())
+                        .master("local[2]")
+                        .getOrCreate();
+        spark2.sql("USE paimon");
+        spark2.sql("USE my_db");
+        assertThat(spark2.sql("SHOW NAMESPACES").collectAsList().stream().map(Object::toString))
+                .containsExactlyInAnyOrder("[default]", "[my_db]");
+        assertThat(
+                        spark2.sql("SHOW TABLES").collectAsList().stream()
+                                .map(s -> s.get(1))
+                                .map(Object::toString))
+                .containsExactlyInAnyOrder("t1");
     }
 }
