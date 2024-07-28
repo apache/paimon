@@ -65,14 +65,14 @@ public class SparkGenericCatalogWithHiveTest {
         spark.sql("CREATE DATABASE IF NOT EXISTS my_db1");
         spark.sql("USE my_db1");
         spark.sql(
-                "CREATE TABLE IF NOT EXISTS t1 (a INT, Bb INT, c STRING) USING paimon TBLPROPERTIES"
+                "CREATE TABLE IF NOT EXISTS t2 (a INT, Bb INT, c STRING) USING paimon TBLPROPERTIES"
                         + " ('file.format'='avro')");
 
         assertThat(
                         spark.sql("SHOW TABLES").collectAsList().stream()
                                 .map(s -> s.get(1))
                                 .map(Object::toString))
-                .containsExactlyInAnyOrder("t1");
+                .containsExactlyInAnyOrder("t2");
         spark.close();
 
         SparkSession spark1 =
@@ -93,7 +93,7 @@ public class SparkGenericCatalogWithHiveTest {
                 RuntimeException.class,
                 () ->
                         spark1.sql(
-                                "CREATE TABLE IF NOT EXISTS t2 (a INT, Bb INT, c STRING) USING paimon TBLPROPERTIES"
+                                "CREATE TABLE IF NOT EXISTS t3 (a INT, Bb INT, c STRING) USING paimon TBLPROPERTIES"
                                         + " ('file.format'='avro')"));
         spark1.close();
     }
