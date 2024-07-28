@@ -81,6 +81,7 @@ public class SparkCatalog extends SparkBaseCatalog {
         // add case-insensitive from sql conf
         newOptions.put(
                 caseInsensitive, Boolean.toString(!sessionState.conf().caseSensitiveAnalysis()));
+        options = new CaseInsensitiveStringMap(newOptions);
 
         this.catalog = CatalogFactory.createCatalog(catalogContext);
         this.defaultDatabase =
