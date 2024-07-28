@@ -62,8 +62,8 @@ public class SparkGenericCatalogWithHiveTest {
                         .master("local[2]")
                         .getOrCreate();
 
-        spark.sql("CREATE DATABASE IF NOT EXISTS my_db");
-        spark.sql("USE my_db");
+        spark.sql("CREATE DATABASE IF NOT EXISTS my_db1");
+        spark.sql("USE my_db1");
         spark.sql(
                 "CREATE TABLE IF NOT EXISTS t1 (a INT, Bb INT, c STRING) USING paimon TBLPROPERTIES"
                         + " ('file.format'='avro')");
@@ -88,7 +88,7 @@ public class SparkGenericCatalogWithHiveTest {
                         .master("local[2]")
                         .getOrCreate();
 
-        spark1.sql("USE my_db");
+        spark1.sql("USE my_db1");
         assertThrows(
                 RuntimeException.class,
                 () ->
