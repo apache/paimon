@@ -19,11 +19,8 @@
 package org.apache.paimon.privilege;
 
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogLockContext;
-import org.apache.paimon.catalog.CatalogLockFactory;
+import org.apache.paimon.catalog.DelegateCatalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.schema.Schema;
@@ -34,10 +31,9 @@ import org.apache.paimon.utils.Preconditions;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 /** {@link Catalog} which supports privilege system. */
-public class PrivilegedCatalog implements Catalog {
+public class PrivilegedCatalog extends DelegateCatalog {
 
     public static final ConfigOption<String> USER =
             ConfigOptions.key("user").stringType().defaultValue(PrivilegeManager.USER_ANONYMOUS);
@@ -46,11 +42,10 @@ public class PrivilegedCatalog implements Catalog {
                     .stringType()
                     .defaultValue(PrivilegeManager.PASSWORD_ANONYMOUS);
 
-    private final Catalog wrapped;
     private final PrivilegeManager privilegeManager;
 
     public PrivilegedCatalog(Catalog wrapped, PrivilegeManager privilegeManager) {
-        this.wrapped = wrapped;
+        super(wrapped);
         this.privilegeManager = privilegeManager;
     }
 
@@ -60,51 +55,6 @@ public class PrivilegedCatalog implements Catalog {
 
     public PrivilegeManager privilegeManager() {
         return privilegeManager;
-    }
-
-    @Override
-    public boolean caseSensitive() {
-        return wrapped.caseSensitive();
-    }
-
-    @Override
-    public String warehouse() {
-        return wrapped.warehouse();
-    }
-
-    @Override
-    public Map<String, String> options() {
-        return wrapped.options();
-    }
-
-    @Override
-    public FileIO fileIO() {
-        return wrapped.fileIO();
-    }
-
-    @Override
-    public Optional<CatalogLockFactory> lockFactory() {
-        return wrapped.lockFactory();
-    }
-
-    @Override
-    public Optional<CatalogLockContext> lockContext() {
-        return wrapped.lockContext();
-    }
-
-    @Override
-    public Optional<MetastoreClient.Factory> metastoreClientFactory(Identifier identifier) {
-        return wrapped.metastoreClientFactory(identifier);
-    }
-
-    @Override
-    public List<String> listDatabases() {
-        return wrapped.listDatabases();
-    }
-
-    @Override
-    public boolean databaseExists(String databaseName) {
-        return wrapped.databaseExists(databaseName);
     }
 
     @Override
@@ -122,27 +72,11 @@ public class PrivilegedCatalog implements Catalog {
     }
 
     @Override
-    public Map<String, String> loadDatabaseProperties(String name)
-            throws DatabaseNotExistException {
-        return wrapped.loadDatabaseProperties(name);
-    }
-
-    @Override
     public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
             throws DatabaseNotExistException, DatabaseNotEmptyException {
         privilegeManager.getPrivilegeChecker().assertCanDropDatabase(name);
         wrapped.dropDatabase(name, ignoreIfNotExists, cascade);
         privilegeManager.objectDropped(name);
-    }
-
-    @Override
-    public List<String> listTables(String databaseName) throws DatabaseNotExistException {
-        return wrapped.listTables(databaseName);
-    }
-
-    @Override
-    public boolean tableExists(Identifier identifier) {
-        return wrapped.tableExists(identifier);
     }
 
     @Override
@@ -205,11 +139,6 @@ public class PrivilegedCatalog implements Catalog {
             throws TableNotExistException, PartitionNotExistException {
         privilegeManager.getPrivilegeChecker().assertCanInsert(identifier);
         wrapped.dropPartition(identifier, partitions);
-    }
-
-    @Override
-    public void close() throws Exception {
-        wrapped.close();
     }
 
     public void createPrivilegedUser(String user, String password) {
