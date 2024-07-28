@@ -294,6 +294,7 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
         if (!insensitive.isEmpty()) {
             String key = sparkCaseInsensitive.replace("spark.", "");
             newOptions.put(key, insensitive.get());
+            sqlConf.caseSensitiveAnalysis()
         }
         return new CaseInsensitiveStringMap(newOptions);
     }
