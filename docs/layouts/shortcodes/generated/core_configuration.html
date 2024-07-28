@@ -519,7 +519,7 @@ This config option does not affect the default filesystem metastore.</td>
             <td><h5>partition.expiration-strategy</h5></td>
             <td style="word-wrap: break-word;">values-time</td>
             <td><p>Enum</p></td>
-            <td>Specifies the expiration strategy for partition expiration.<br />Possible values:<ul><li>values-time: A partition expiration policy that compares the time extracted from the partition value with the current time.</li></ul><ul><li>update-time: A partition expiration policy that compares the last update time of the partition with the current time.</li></ul><br /><br />Possible values:<ul><li>"values-time": The strategy compares the time extracted from the partition value with the current time.</li><li>"update-time": The strategy compares the last update time of the partition with the current time.</li></ul></td>
+            <td>The strategy determines how to extract the partition time and compare it with the current time.<br /><br />Possible values:<ul><li>"values-time": This strategy compares the time extracted from the partition value with the current time.</li><li>"update-time": This strategy compares the last update time of the partition with the current time.</li></ul></td>
         </tr>
         <tr>
             <td><h5>partition.expiration-time</h5></td>
@@ -748,7 +748,7 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td><h5>streaming-read-mode</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td><p>Enum</p></td>
-            <td>The mode of streaming read that specifies to read the data of table file or log<br /><br />Possible values:<br /><ul><li>file: Reads from the data of table file store.</li></ul><ul><li>log: Read from the data of table log store.</li></ul><br /><br />Possible values:<ul><li>"log": Reads from the log store.</li><li>"file": Reads from the file store.</li></ul></td>
+            <td>The mode of streaming read that specifies to read the data of table file or log.<br /><br />Possible values:<ul><li>"log": Read from the data of table log store.</li><li>"file": Read from the data of table file store.</li></ul></td>
         </tr>
         <tr>
             <td><h5>streaming-read-overwrite</h5></td>
