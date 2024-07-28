@@ -236,7 +236,7 @@ public class SparkCatalog extends SparkBaseCatalog {
         return loadSparkTable(
                 ident,
                 Collections.singletonMap(
-                        CoreOptions.SCAN_VERSION.key(), String.valueOf(timestamp)));
+                        CoreOptions.SCAN_TIMESTAMP_MILLIS.key(), String.valueOf(timestamp)));
     }
 
     @Override
