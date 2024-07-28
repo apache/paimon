@@ -61,6 +61,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.Callable;
 
+import scala.Option;
+
 import static org.apache.paimon.options.CatalogOptions.METASTORE;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
 import static org.apache.paimon.spark.SparkCatalogOptions.CREATE_UNDERLYING_SESSION_CATALOG;
@@ -84,6 +86,8 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
     private boolean underlyingSessionCatalogEnabled = false;
 
     private CatalogPlugin sessionCatalog = null;
+
+    private final String sparkCaseInsensitive = "spark.case-insensitive";
 
     @Override
     public Catalog paimonCatalog() {
@@ -284,6 +288,13 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
         Map<String, String> newOptions = new HashMap<>(options.asCaseSensitiveMap());
         fillAliyunConfigurations(newOptions, hadoopConf);
         fillCommonConfigurations(newOptions, sqlConf);
+
+        // add case-insensitive from sql conf
+        Option<String> insensitive = sqlConf.getAllConfs().get(sparkCaseInsensitive);
+        if (!insensitive.isEmpty()) {
+            String key = sparkCaseInsensitive.replace("spark.", "");
+            newOptions.put(key, insensitive.get());
+        }
         return new CaseInsensitiveStringMap(newOptions);
     }
 
