@@ -207,12 +207,11 @@ case class PaimonSparkWriter(table: FileStoreTable) {
     val sparkSession = deletionVectors.sparkSession
     import sparkSession.implicits._
     val snapshotId = table.snapshotManager().latestSnapshotId();
-    val fileStore = table.store()
     val serializedCommits = deletionVectors
       .groupByKey(_.partitionAndBucket)
       .mapGroups {
         case (_, iter: Iterator[SparkDeletionVectors]) =>
-          val indexHandler = fileStore.newIndexFileHandler()
+          val indexHandler = table.store().newIndexFileHandler()
           var dvIndexFileMaintainer: DeletionVectorIndexFileMaintainer = null
           while (iter.hasNext) {
             val sdv: SparkDeletionVectors = iter.next()
