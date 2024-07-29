@@ -54,7 +54,7 @@ public class NumericPrimitiveToTimestamp extends AbstractCastRule<Number, Timest
             case BIGINT:
                 return value ->
                         Timestamp.fromLocalDateTime(
-                                DateTimeUtils.toLocalDateTime(value.longValue(), zoneId));
+                                DateTimeUtils.toLocalDateTime(value.longValue() * 1000, zoneId));
             default:
                 return null;
         }

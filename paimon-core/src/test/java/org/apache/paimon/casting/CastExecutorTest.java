@@ -105,8 +105,17 @@ public class CastExecutorTest {
     public void testNumericToTimestamp() {
         compareCastResult(
                 CastExecutors.resolve(new BigIntType(false), new TimestampType(3)),
-                1721898748000L,
+                1721898748,
                 DateTimeUtils.parseTimestampData("2024-07-25 09:12:28.000", 3));
+
+        Timestamp timestamp = Timestamp.fromEpochMillis(1721898748000L);
+        String tsString = DateTimeUtils.formatTimestamp(timestamp, TimeZone.getDefault(), 3);
+        Timestamp timestamp1 = DateTimeUtils.parseTimestampData(tsString, 3);
+
+        compareCastResult(
+                CastExecutors.resolve(new BigIntType(false), new LocalZonedTimestampType(3)),
+                1721898748L,
+                timestamp1);
     }
 
     @Test
