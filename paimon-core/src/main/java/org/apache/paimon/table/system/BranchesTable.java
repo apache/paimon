@@ -78,6 +78,10 @@ public class BranchesTable implements ReadonlyTable {
     private final FileIO fileIO;
     private final Path location;
 
+    public BranchesTable(FileStoreTable dataTable) {
+        this(dataTable.fileIO(), dataTable.location());
+    }
+
     public BranchesTable(FileIO fileIO, Path location) {
         this.fileIO = fileIO;
         this.location = location;
