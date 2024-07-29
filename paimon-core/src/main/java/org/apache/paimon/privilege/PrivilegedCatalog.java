@@ -49,10 +49,6 @@ public class PrivilegedCatalog extends DelegateCatalog {
         this.privilegeManager = privilegeManager;
     }
 
-    public Catalog wrapped() {
-        return wrapped;
-    }
-
     public PrivilegeManager privilegeManager() {
         return privilegeManager;
     }

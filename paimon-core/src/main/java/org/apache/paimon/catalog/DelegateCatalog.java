@@ -37,6 +37,10 @@ public class DelegateCatalog implements Catalog {
         this.wrapped = wrapped;
     }
 
+    public Catalog wrapped() {
+        return wrapped;
+    }
+
     @Override
     public boolean caseSensitive() {
         return wrapped.caseSensitive();
@@ -134,6 +138,21 @@ public class DelegateCatalog implements Catalog {
     public void dropPartition(Identifier identifier, Map<String, String> partitions)
             throws TableNotExistException, PartitionNotExistException {
         wrapped.dropPartition(identifier, partitions);
+    }
+
+    @Override
+    public void repairCatalog() {
+        wrapped.repairCatalog();
+    }
+
+    @Override
+    public void repairDatabase(String databaseName) {
+        wrapped.repairDatabase(databaseName);
+    }
+
+    @Override
+    public void repairTable(Identifier identifier) throws TableNotExistException {
+        wrapped.repairTable(identifier);
     }
 
     @Override
