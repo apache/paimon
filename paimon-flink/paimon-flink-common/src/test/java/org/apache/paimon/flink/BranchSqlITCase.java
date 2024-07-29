@@ -338,6 +338,10 @@ public class BranchSqlITCase extends CatalogITCaseBase {
         assertThat(collectResult("SELECT v, k FROM t"))
                 .containsExactlyInAnyOrder(
                         "+I[apple, 10]", "+I[banana, 20]", "+I[lion, 10]", "+I[wolf, 20]");
+
+        sql("ALTER TABLE t RESET ( 'scan.fallback-branch' )");
+        assertThat(collectResult("SELECT v, k FROM t"))
+                .containsExactlyInAnyOrder("+I[apple, 10]", "+I[banana, 20]");
     }
 
     @Test

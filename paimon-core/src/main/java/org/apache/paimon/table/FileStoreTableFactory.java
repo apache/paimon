@@ -25,7 +25,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
 import java.io.IOException;
@@ -106,9 +105,6 @@ public class FileStoreTableFactory {
                             new SchemaManager(fileIO, tablePath, fallbackBranch).latest().get(),
                             branchOptions,
                             catalogEnvironment);
-
-            Preconditions.checkArgument(!(table instanceof FallbackReadFileStoreTable));
-            Preconditions.checkArgument(!(fallbackTable instanceof FallbackReadFileStoreTable));
             table = new FallbackReadFileStoreTable(table, fallbackTable);
         }
 

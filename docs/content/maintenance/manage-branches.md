@@ -223,6 +223,20 @@ SELECT * FROM T;
 |         20240726 |             pear |      6 |
 +------------------+------------------+--------+
 */
+
+-- reset fallback branch
+ALTER TABLE T RESET ( 'scan.fallback-branch' );
+
+-- now it only reads from default branch
+SELECT * FROM T;
+/*
++------------------+------------------+--------+
+|               dt |             name | amount |
++------------------+------------------+--------+
+|         20240725 |            apple |      5 |
+|         20240725 |           banana |      7 |
++------------------+------------------+--------+
+*/
 ```
 
 {{< /tab >}}

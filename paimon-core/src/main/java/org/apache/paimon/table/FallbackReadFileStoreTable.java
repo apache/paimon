@@ -60,6 +60,9 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         super(main);
         this.fallback = fallback;
 
+        Preconditions.checkArgument(!(main instanceof FallbackReadFileStoreTable));
+        Preconditions.checkArgument(!(fallback instanceof FallbackReadFileStoreTable));
+
         String mainBranch = main.coreOptions().branch();
         String fallbackBranch = fallback.coreOptions().branch();
         RowType mainRowType = main.schema().logicalRowType();
