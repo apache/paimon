@@ -38,20 +38,21 @@ case class PaimonStatistics[T <: PaimonBaseScan](scan: T) extends Statistics {
 
   private lazy val scannedTotalSize: Long = rowCount * scan.readSchema().defaultSize
 
-  private lazy val paimonStats: Optional[stats.Statistics] = scan.statistics
+  private lazy val paimonStats = scan.statistics.orElseGet(null)
 
-  override def sizeInBytes(): OptionalLong = if (paimonStats.isPresent)
-    paimonStats.get().mergedRecordSize()
-  else OptionalLong.of(scannedTotalSize)
+  lazy val paimonStatsEnabled: Boolean = paimonStats != null
+
+  override def sizeInBytes(): OptionalLong =
+    if (paimonStatsEnabled) paimonStats.mergedRecordSize() else OptionalLong.of(scannedTotalSize)
 
   override def numRows(): OptionalLong =
-    if (paimonStats.isPresent) paimonStats.get().mergedRecordCount() else OptionalLong.of(rowCount)
+    if (paimonStatsEnabled) paimonStats.mergedRecordCount() else OptionalLong.of(rowCount)
 
   override def columnStats(): java.util.Map[NamedReference, ColumnStatistics] = {
     val requiredFields = scan.requiredStatsSchema.fieldNames
     val resultMap = new java.util.HashMap[NamedReference, ColumnStatistics]()
-    if (paimonStats.isPresent) {
-      val paimonColStats = paimonStats.get().colStats()
+    if (paimonStatsEnabled) {
+      val paimonColStats = paimonStats.colStats()
       scan.tableRowType.getFields.asScala
         .filter {
           field => requiredFields.contains(field.name) && paimonColStats.containsKey(field.name())

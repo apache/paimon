@@ -127,9 +127,8 @@ abstract class PaimonBaseScan(
 
   override def estimateStatistics(): Statistics = {
     val stats = PaimonStatistics(this)
-    // When statistics doesn't exist, we don't need to perform FilterEstimation on stats,
-    // because in this scenario stats is calculated through splits and partition pruning has been done.
-    if (statistics.isPresent && reservedFilters.nonEmpty) {
+    // When using paimon stats, we need to perform additional FilterEstimation with reservedFilters on stats.
+    if (stats.paimonStatsEnabled && reservedFilters.nonEmpty) {
       filterStatistics(stats, reservedFilters)
     } else {
       stats
