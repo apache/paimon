@@ -159,9 +159,10 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected Map<String, String> loadDatabasePropertiesImpl(String databaseName) {
+    protected Map<String, String> loadDatabasePropertiesImpl(String databaseName)
+            throws DatabaseNotExistException {
         if (!JdbcUtils.databaseExists(connections, catalogKey, databaseName)) {
-            throw new RuntimeException(String.format("Database does not exist: %s", databaseName));
+            throw new DatabaseNotExistException(databaseName);
         }
         Map<String, String> properties = Maps.newHashMap();
         properties.putAll(fetchProperties(databaseName));
