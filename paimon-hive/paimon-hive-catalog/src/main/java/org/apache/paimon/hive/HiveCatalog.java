@@ -233,22 +233,6 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected boolean databaseExistsImpl(String databaseName) {
-        try {
-            clients.run(client -> client.getDatabase(databaseName));
-            return true;
-        } catch (NoSuchObjectException e) {
-            return false;
-        } catch (TException e) {
-            throw new RuntimeException(
-                    "Failed to determine if database " + databaseName + " exists", e);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException("Interrupted in call to databaseExists " + databaseName, e);
-        }
-    }
-
-    @Override
     protected void createDatabaseImpl(String name, Map<String, String> properties) {
         try {
             Database database = convertToHiveDatabase(name, properties);
@@ -286,9 +270,12 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public Map<String, String> loadDatabasePropertiesImpl(String name) {
+    public Map<String, String> loadDatabasePropertiesImpl(String name)
+            throws DatabaseNotExistException {
         try {
             return convertToProperties(clients.run(client -> client.getDatabase(name)));
+        } catch (NoSuchObjectException e) {
+            throw new DatabaseNotExistException(name);
         } catch (TException e) {
             throw new RuntimeException(
                     String.format("Failed to get database %s properties", name), e);
@@ -601,7 +588,7 @@ public class HiveCatalog extends AbstractCatalog {
         checkNotSystemDatabase(databaseName);
 
         // create database if needed
-        if (!databaseExistsImpl(databaseName)) {
+        if (!databaseExists(databaseName)) {
             createDatabaseImpl(databaseName, Collections.emptyMap());
         }
 
