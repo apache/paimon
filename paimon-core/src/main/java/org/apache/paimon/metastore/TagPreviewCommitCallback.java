@@ -19,8 +19,11 @@
 package org.apache.paimon.metastore;
 
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.tag.TagPreview;
+
+import javax.annotation.Nullable;
 
 import java.util.List;
 import java.util.Optional;
@@ -37,12 +40,19 @@ public class TagPreviewCommitCallback implements CommitCallback {
     }
 
     @Override
-    public void call(List<ManifestCommittable> committables) {
+    public void call(
+            List<ManifestEntry> committedEntries, long identifier, @Nullable Long watermark) {
         long currentMillis = System.currentTimeMillis();
-        for (ManifestCommittable c : committables) {
-            Optional<String> tagOptional = tagPreview.extractTag(currentMillis, c.watermark());
-            tagOptional.ifPresent(tagCallback::notifyCreation);
-        }
+        Optional<String> tagOptional = tagPreview.extractTag(currentMillis, watermark);
+        tagOptional.ifPresent(tagCallback::notifyCreation);
+    }
+
+    @Override
+    public void retry(ManifestCommittable committable) {
+        long currentMillis = System.currentTimeMillis();
+        Optional<String> tagOptional =
+                tagPreview.extractTag(currentMillis, committable.watermark());
+        tagOptional.ifPresent(tagCallback::notifyCreation);
     }
 
     @Override

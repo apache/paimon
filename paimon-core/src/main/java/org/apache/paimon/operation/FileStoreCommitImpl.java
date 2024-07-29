@@ -45,10 +45,12 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
@@ -121,6 +123,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     @Nullable private final Comparator<InternalRow> keyComparator;
     private final String branchName;
     @Nullable private final Integer manifestReadParallelism;
+    private final List<CommitCallback> commitCallbacks;
 
     @Nullable private Lock lock;
     private boolean ignoreEmptyCommit;
@@ -152,7 +155,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             String branchName,
             StatsFileHandler statsFileHandler,
             BucketMode bucketMode,
-            @Nullable Integer manifestReadParallelism) {
+            @Nullable Integer manifestReadParallelism,
+            List<CommitCallback> commitCallbacks) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.commitUser = commitUser;
@@ -172,6 +176,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.keyComparator = keyComparator;
         this.branchName = branchName;
         this.manifestReadParallelism = manifestReadParallelism;
+        this.commitCallbacks = commitCallbacks;
 
         this.lock = null;
         this.ignoreEmptyCommit = true;
@@ -193,25 +198,33 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
-    public Set<Long> filterCommitted(Set<Long> commitIdentifiers) {
+    public List<ManifestCommittable> filterCommitted(List<ManifestCommittable> committables) {
         // nothing to filter, fast exit
-        if (commitIdentifiers.isEmpty()) {
-            return commitIdentifiers;
+        if (committables.isEmpty()) {
+            return committables;
+        }
+
+        for (int i = 1; i < committables.size(); i++) {
+            Preconditions.checkArgument(
+                    committables.get(i).identifier() > committables.get(i - 1).identifier(),
+                    "Committables must be sorted according to identifiers before filtering. This is unexpected.");
         }
 
         Optional<Snapshot> latestSnapshot = snapshotManager.latestSnapshotOfUser(commitUser);
         if (latestSnapshot.isPresent()) {
-            Set<Long> result = new HashSet<>();
-            for (Long identifier : commitIdentifiers) {
+            List<ManifestCommittable> result = new ArrayList<>();
+            for (ManifestCommittable committable : committables) {
                 // if committable is newer than latest snapshot, then it hasn't been committed
-                if (identifier > latestSnapshot.get().commitIdentifier()) {
-                    result.add(identifier);
+                if (committable.identifier() > latestSnapshot.get().commitIdentifier()) {
+                    result.add(committable);
+                } else {
+                    commitCallbacks.forEach(callback -> callback.retry(committable));
                 }
             }
             return result;
         } else {
             // if there is no previous snapshots then nothing should be filtered
-            return commitIdentifiers;
+            return committables;
         }
     }
 
@@ -986,6 +999,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 identifier,
                                 commitKind.name()));
             }
+            commitCallbacks.forEach(callback -> callback.call(tableFiles, identifier, watermark));
             return true;
         }
 
@@ -1226,6 +1240,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         // clean up changelog manifests
         for (ManifestFileMeta meta : changelogMetas) {
             manifestList.delete(meta.fileName());
+        }
+    }
+
+    @Override
+    public void close() {
+        for (CommitCallback callback : commitCallbacks) {
+            IOUtils.closeQuietly(callback);
         }
     }
 
