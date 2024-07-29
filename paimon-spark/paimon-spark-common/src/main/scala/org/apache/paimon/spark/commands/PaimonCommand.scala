@@ -159,7 +159,6 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
     val metadataCols = Seq(FILE_PATH, ROW_INDEX)
     val filteredRelation = createNewScanPlan(candidateDataSplits, condition, relation, metadataCols)
 
-    val store = table.store()
     val location = table.location
     createDataset(sparkSession, filteredRelation)
       .select(FILE_PATH_COLUMN, ROW_INDEX_COLUMN)
@@ -174,7 +173,7 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
 
           val relativeFilePath = location.toUri.relativize(new URI(filePath)).toString
           val (partition, bucket) = dataFileToPartitionAndBucket.toMap.apply(relativeFilePath)
-          val pathFactory = store.pathFactory()
+          val pathFactory = table.store().pathFactory()
           val partitionAndBucket = pathFactory
             .relativePartitionAndBucketPath(partition, bucket)
             .toString
