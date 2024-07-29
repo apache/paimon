@@ -99,6 +99,28 @@ public class ObjectsCacheTest {
                         r -> r.getString(0).toString().endsWith("5"),
                         Filter.alwaysTrue());
         assertThat(values).isEmpty();
+
+        // test read concurrently
+        map.clear();
+        for (int i = 0; i < 10; i++) {
+            map.put(String.valueOf(i), Collections.singletonList(String.valueOf(i)));
+        }
+        map.keySet().stream()
+                .parallel()
+                .forEach(
+                        k -> {
+                            try {
+                                assertThat(
+                                                cache.read(
+                                                        k,
+                                                        null,
+                                                        Filter.alwaysTrue(),
+                                                        Filter.alwaysTrue()))
+                                        .containsExactly(k);
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                        });
     }
 
     private static class StringSerializer extends ObjectSerializer<String> {
