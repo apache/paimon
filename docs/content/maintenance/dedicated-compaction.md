@@ -271,7 +271,7 @@ If your table is configured with [dynamic bucket primary key table]({{< ref "pri
 or [append table]({{< ref "append-table/overview" >}}) ,
 you can trigger a compact with specified column sort to speed up queries.
 
-{{< tabs "database-compaction-job" >}}
+{{< tabs "sort-compaction-job" >}}
 
 {{< tab "Flink Action Jar" >}}
 
