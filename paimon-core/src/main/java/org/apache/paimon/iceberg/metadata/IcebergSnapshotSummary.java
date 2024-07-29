@@ -35,8 +35,8 @@ public class IcebergSnapshotSummary {
 
     private static final String FIELD_OPERATION = "operation";
 
-    public static final String OPERATION_APPEND = "append";
-    public static final String OPERATION_OVERWRITE = "overwrite";
+    public static final IcebergSnapshotSummary APPEND = new IcebergSnapshotSummary("append");
+    public static final IcebergSnapshotSummary OVERWRITE = new IcebergSnapshotSummary("overwrite");
 
     @JsonProperty(FIELD_OPERATION)
     private final String operation;

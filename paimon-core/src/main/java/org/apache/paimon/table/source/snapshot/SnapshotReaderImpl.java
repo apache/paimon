@@ -158,6 +158,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
+    public SnapshotReader withPartitionFilter(List<BinaryRow> partitions) {
+        scan.withPartitionFilter(partitions);
+        return this;
+    }
+
+    @Override
     public SnapshotReader withFilter(Predicate predicate) {
         List<String> partitionKeys = tableSchema.partitionKeys();
         int[] fieldIdxToPartitionIdx =

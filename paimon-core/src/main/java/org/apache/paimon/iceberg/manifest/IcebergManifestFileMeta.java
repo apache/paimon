@@ -157,6 +157,10 @@ public class IcebergManifestFileMeta {
         return deletedRowsCount;
     }
 
+    public long liveRowsCount() {
+        return addedRowsCount + existingRowsCount;
+    }
+
     public List<IcebergPartitionSummary> partitions() {
         return partitions;
     }
