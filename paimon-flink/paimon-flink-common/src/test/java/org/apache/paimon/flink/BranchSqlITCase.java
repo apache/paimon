@@ -24,8 +24,13 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TagManager;
 
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
@@ -33,6 +38,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -304,7 +310,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
         checkSnapshots(snapshotManager, 1, 2);
     }
 
-    /** Cleaning up snapshots or deleting tags should skip those referenced by branches. */
+    /** Expiring Snapshots should skip those referenced by branches. */
     @Test
     public void testSnapshotExpireSkipTheReferencedByBranches() throws Exception {
 
@@ -320,6 +326,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
 
         FileStoreTable table = paimonTable("T");
         SnapshotManager snapshotManager = table.snapshotManager();
+        BranchManager branchManager = table.branchManager();
 
         sql("INSERT INTO T VALUES (1, 10, 'hunter')");
         sql("INSERT INTO T VALUES (1, 20, 'hunter')");
@@ -333,19 +340,19 @@ public class BranchSqlITCase extends CatalogITCaseBase {
         sql("CALL sys.create_branch('default.T', 'test', 1)");
         sql("CALL sys.create_branch('default.T', 'test_1', 1)");
 
-        // create tag2 from snapshot 2.
-        sql("CALL sys.create_tag('default.T', 'tag2', 2)");
-        // create branch from tag2.
-        sql("CALL sys.create_branch('default.T', 'test2', 'tag2')");
+        // create tag from snapshot 2.
+        sql("CALL sys.create_tag('default.T', 'tag', 2)");
+        // create branch2 from tag.
+        sql("CALL sys.create_branch('default.T', 'test2', 'tag')");
 
         sql("CALL sys.create_branch('default.T', 'test3', 3)");
 
-        assertThat(
-                        table.branchManager().branchesCreateSnapshots().keySet().stream()
-                                .map(Snapshot::id))
+        // We have created 4 branches using 3 snapshots.
+        assertThat(branchManager.branchesCreateSnapshots().keySet().stream().map(Snapshot::id))
                 .containsExactlyInAnyOrder(1L, 2L, 3L);
 
-        // Only retain 5,6 snapshot, 1-4 will expire.
+        // Only retain snapshot 5,6 and snapshot 1-4 will expire. So all referenced snapshots will
+        // expire.
         sql(
                 "INSERT INTO T /*+ OPTIONS("
                         + "'snapshot.num-retained.min'= '2',"
@@ -354,34 +361,26 @@ public class BranchSqlITCase extends CatalogITCaseBase {
 
         checkSnapshots(snapshotManager, 5, 6);
 
+        branchManager = table.branchManager();
         // Snapshot 1-4 has expired, but still be referenced by branches;
-        assertThat(
-                        table.branchManager().branchesCreateSnapshots().keySet().stream()
-                                .map(Snapshot::id))
+        assertThat(branchManager.branchesCreateSnapshots().keySet().stream().map(Snapshot::id))
                 .containsExactlyInAnyOrder(1L, 2L, 3L);
 
-        checkSnapshots(paimonTable("T$branch_test").snapshotManager(), 1, 1);
-
-        // Created from tag2 and snapshot id is 2.
-        checkSnapshots(paimonTable("T$branch_test2").snapshotManager(), 2, 2);
-
-        // The data of snapshot 1-3 is still can be read by tag or branch, snapshot-4 had expire.
+        // The data of snapshot 1-3 is still can be read by branches.
         assertThat(collectResult("SELECT * FROM T$branch_test"))
                 .containsExactlyInAnyOrder("+I[1, 10, hunter]");
 
-        sql("CALL sys.delete_tag('default.T', 'tag2')");
         assertThat(collectResult("SELECT * FROM T$branch_test2"))
                 .containsExactlyInAnyOrder("+I[1, 10, hunter]", "+I[1, 20, hunter]");
 
-        // The branch still can be read.
         assertThat(collectResult("SELECT * FROM T$branch_test3"))
                 .containsExactlyInAnyOrder(
                         "+I[1, 10, hunter]", "+I[1, 20, hunter]", "+I[1, 30, hunter]");
     }
 
     /**
-     * Let's say snapshot-1 has expired, but the manifest is still referenced by some branches, so
-     * deleting the tag should skip those snapshots that are still referenced by other branches.
+     * Let's say snapshot has expired, but the manifest is still referenced by some branches, so
+     * deleting the tag should skip those snapshots.
      */
     @Test
     public void testDeleteTagsSkipTheReferencedByBranches() throws Exception {
@@ -397,6 +396,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
 
         FileStoreTable table = paimonTable("T");
         SnapshotManager snapshotManager = table.snapshotManager();
+        BranchManager branchManager = table.branchManager();
 
         sql("INSERT INTO T VALUES (1, 10, 'hunter')");
         sql("INSERT INTO T VALUES (2, 20, 'hunter2')");
@@ -406,10 +406,10 @@ public class BranchSqlITCase extends CatalogITCaseBase {
         // create branch from the snapshot-1.
         sql("CALL sys.create_branch('default.T', 'test', 1)");
 
-        // create tag from snapshot 1.
+        // create tag from snapshot-1.
         sql("CALL sys.create_tag('default.T', 'tag', 1)");
 
-        // Only retain 2,3 snapshot, snapshot-1 will be expired.
+        // Step1: Expire snapshot, only retain snapshot 2,3 and snapshot-1 will expire.
         sql(
                 "INSERT INTO T /*+ OPTIONS("
                         + "'snapshot.num-retained.min'= '2',"
@@ -417,24 +417,20 @@ public class BranchSqlITCase extends CatalogITCaseBase {
                         + " VALUES (3, 30, 'hunter3')");
 
         checkSnapshots(snapshotManager, 2, 3);
+        assertThat(branchManager.branchesCreateSnapshots().size()).isEqualTo(1);
 
-        assertThat(table.branchManager().branchesCreateSnapshots().size()).isEqualTo(1);
-        Snapshot branchCreateSnapshots =
-                table.branchManager().branchesCreateSnapshots().keySet().iterator().next();
-        assertThat(branchCreateSnapshots.id()).isEqualTo(1L);
+        Snapshot referencedSnapshot =
+                branchManager.branchesCreateSnapshots().keySet().iterator().next();
+        assertThat(referencedSnapshot.id()).isEqualTo(1L);
 
         // query branches data.
         assertThat(collectResult("SELECT * FROM T$branch_test"))
                 .containsExactlyInAnyOrder("+I[1, 10, hunter]");
 
-        // delete tag.
+        // Step2: Delete tag.
         sql("CALL sys.delete_tag('default.T', 'tag')");
 
-        // Verify that the maniFest file has not been deleted.
-        assertThat(manifestFileExist("T", branchCreateSnapshots.baseManifestList())).isTrue();
-        assertThat(manifestFileExist("T", branchCreateSnapshots.deltaManifestList())).isTrue();
-
-        // query branches data.
+        // Step3: Branches data still can be read.
         assertThat(collectResult("SELECT * FROM T$branch_test"))
                 .containsExactlyInAnyOrder("+I[1, 10, hunter]");
     }
@@ -459,22 +455,22 @@ public class BranchSqlITCase extends CatalogITCaseBase {
 
         checkSnapshots(snapshotManager, 1, 2);
 
-        // create branch from the snapshot-1.
+        // Create branch from the snapshot 1.
         sql("CALL sys.create_branch('default.T', 'test', 1)");
 
         sql("CALL sys.create_tag('default.T', 'tag', 1)");
 
-        // Only retain 2,3 snapshot, snapshot-1 will be expired.
+        // Only retain snapshot 2,3 and snapshot 1 will expire.
         sql(
                 "INSERT INTO T /*+ OPTIONS("
                         + "'snapshot.num-retained.min'= '2',"
                         + "'snapshot.num-retained.max'= '2' ) */"
                         + " VALUES (3, 30, 'hunter3')");
 
-        // delete tag.
+        // Delete branch.
         sql("CALL sys.delete_branch('default.T', 'test')");
 
-        // tag still can be read.
+        // The tag still can be read.
         assertThat(collectResult("SELECT * FROM T /*+ OPTIONS('scan.tag-name'='tag') */"))
                 .containsExactlyInAnyOrder("+I[1, 10, hunter]");
     }
@@ -500,22 +496,22 @@ public class BranchSqlITCase extends CatalogITCaseBase {
 
         checkSnapshots(snapshotManager, 1, 2);
 
-        // create branch from the snapshot-1.
+        // Create branch from the snapshot 1.
         sql("CALL sys.create_branch('default.T', 'test', 1)");
 
         sql("CALL sys.create_branch('default.T', 'test2', 1)");
 
-        // Only retain 2,3 snapshot, snapshot-1 will be expired.
+        // Only retain snapshot 2,3 and snapshot 1 will expire.
         sql(
                 "INSERT INTO T /*+ OPTIONS("
                         + "'snapshot.num-retained.min'= '2',"
                         + "'snapshot.num-retained.max'= '2' ) */"
                         + " VALUES (3, 30, 'hunter3')");
 
-        // delete branch.
+        // Delete branch test.
         sql("CALL sys.delete_branch('default.T', 'test')");
 
-        // branch still can be read.
+        // branch test2 still can be read.
         assertThat(collectResult("SELECT * FROM T$branch_test2"))
                 .containsExactlyInAnyOrder("+I[1, 10, hunter]");
     }
@@ -540,10 +536,24 @@ public class BranchSqlITCase extends CatalogITCaseBase {
 
         checkSnapshots(snapshotManager, 1, 2);
 
-        // create branch from the snapshot-1.
-        sql("CALL sys.create_branch('default.T', 'test', 1)");
         // this branch will be ignored.
         sql("CALL sys.create_branch('default.T', 'empty')");
+
+        // Case1 : Deleting a branch does not affect unexpired snapshots.
+        sql("CALL sys.create_branch('default.T', 'test', 1)");
+
+        sql("CALL sys.delete_branch('default.T', 'test')");
+
+        assertThat(collectResult("SELECT * FROM T /*+ OPTIONS('scan.snapshot-id'='1') */"))
+                .containsExactlyInAnyOrder("+I[1, 10, hunter]");
+
+        // Case2 : Deleting a branch does not affect snapshots that are referenced by branches or
+        // tags.
+        sql("CALL sys.create_branch('default.T', 'test', 1)");
+
+        // Create branch and tag and reference snapshot 1.
+        sql("CALL sys.create_branch('default.T', 'test2', 1)");
+        sql("CALL sys.create_tag('default.T', 'tag', 1)");
 
         // Only retain 2,3 snapshot, snapshot-1 will be expired.
         sql(
@@ -552,29 +562,58 @@ public class BranchSqlITCase extends CatalogITCaseBase {
                         + "'snapshot.num-retained.max'= '2' ) */"
                         + " VALUES (3, 30, 'hunter3')");
 
-        assertThat(table.branchManager().branchesCreateSnapshots().size()).isEqualTo(1);
-        Snapshot branchCreateSnapshots =
-                table.branchManager().branchesCreateSnapshots().keySet().iterator().next();
-        assertThat(branchCreateSnapshots.id()).isEqualTo(1L);
+        sql("CALL sys.delete_branch('default.T', 'test')");
 
-        // query branches data.
-        assertThat(collectResult("SELECT * FROM T$branch_test"))
+        // The branch test2 still can be read.
+        assertThat(collectResult("SELECT * FROM T$branch_test2"))
                 .containsExactlyInAnyOrder("+I[1, 10, hunter]");
+        sql("CALL sys.delete_branch('default.T', 'test2')");
 
-        // Verify that the maniFest file has not been deleted.
-        assertThat(manifestFileExist("T", branchCreateSnapshots.baseManifestList())).isTrue();
-        assertThat(manifestFileExist("T", branchCreateSnapshots.deltaManifestList())).isTrue();
+        // The tag still can be read.
+        assertThat(collectResult("SELECT * FROM T /*+ OPTIONS('scan.tag-name'='tag') */"))
+                .containsExactlyInAnyOrder("+I[1, 10, hunter]");
+        sql("CALL sys.delete_tag('default.T', 'tag')");
 
-        // delete tag.
+        // Case 3: Deleting a branch will also clean up unreferenced and expired snapshots.
+        checkSnapshots(snapshotManager, 2, 3);
+        sql("CALL sys.create_branch('default.T', 'test', 2)");
+
+        // Only retain snapshot 3,4, snapshot 2 will expire.
+        sql(
+                "INSERT INTO T /*+ OPTIONS("
+                        + "'snapshot.num-retained.min'= '2',"
+                        + "'snapshot.num-retained.max'= '2' ) */"
+                        + " VALUES (4, 40, 'hunter4')");
+        checkSnapshots(snapshotManager, 3, 4);
+
+        BranchManager branchManager = table.branchManager();
+        assertThat(branchManager.branches().keySet().stream().map(TableBranch::getBranchName))
+                .containsExactlyInAnyOrder("test", "empty");
+
+        Snapshot snapshotsToClean =
+                branchManager.branchesCreateSnapshots().keySet().iterator().next();
+        assertThat(snapshotsToClean.id()).isEqualTo(2L);
+
+        // Query branches data.
+        assertThat(collectResult("SELECT * FROM T$branch_test"))
+                .containsExactlyInAnyOrder("+I[1, 10, hunter]", "+I[2, 20, hunter2]");
+
+        // Verify that the manifest files exists.
+        assertThat(manifestFileExist("T", snapshotsToClean.baseManifestList())).isTrue();
+        assertThat(manifestFileExist("T", snapshotsToClean.deltaManifestList())).isTrue();
+
+        // Delete branch.
         sql("CALL sys.delete_branch('default.T', 'test')");
 
         // Verify that the manifest file has been deleted.
-        assertThat(manifestFileExist("T", branchCreateSnapshots.baseManifestList())).isFalse();
-        assertThat(manifestFileExist("T", branchCreateSnapshots.deltaManifestList())).isFalse();
+        assertThat(manifestFileExist("T", snapshotsToClean.baseManifestList())).isFalse();
+        assertThat(manifestFileExist("T", snapshotsToClean.deltaManifestList())).isFalse();
+
+        assertThat(branchManager.branchesCreateSnapshots().isEmpty()).isTrue();
     }
 
     @Test
-    public void testDeleteBranchCleanUnusedDataFileAndManifest() throws Exception {
+    public void testDeleteBranchCleanUnusedDataFiles() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " pt INT"
@@ -582,11 +621,13 @@ public class BranchSqlITCase extends CatalogITCaseBase {
                         + ", v STRING"
                         + ", PRIMARY KEY (pt, k) NOT ENFORCED"
                         + " ) PARTITIONED BY (pt) WITH ("
-                        + " 'bucket' = '2'"
+                        + " 'bucket' = '1'"
                         + " )");
 
         FileStoreTable table = paimonTable("T");
         SnapshotManager snapshotManager = table.snapshotManager();
+        TagManager tagManager = table.tagManager();
+        TagDeletion tagDeletion = table.store().newTagDeletion();
 
         sql("INSERT INTO T VALUES (1, 10, 'hunter')");
         sql("INSERT INTO T VALUES (2, 20, 'hunter2')");
@@ -595,33 +636,63 @@ public class BranchSqlITCase extends CatalogITCaseBase {
 
         checkSnapshots(snapshotManager, 1, 4);
 
+        // The following three snapshots will expire.
         sql("CALL sys.create_branch('default.T', 'test', 1)");
         sql("CALL sys.create_branch('default.T', 'test2', 2)");
-        sql("CALL sys.create_tag('default.T', 'tag', 3)");
+        sql("CALL sys.create_tag('default.T', 'tag3', 3)");
 
-        // Only retain 6 snapshot, snapshot 1-5 will be expired.
-        // here need update all the partition data.
+        // Only retain snapshot-6 and snapshot 1-5 will expire.
+        // Here we need to update all the partition data, the snapshot-6 is a compaction snapshot.
+        // Snapshot 6 records which data files should be deleted.
         sql(
                 "INSERT INTO T /*+ OPTIONS("
                         + "'full-compaction.delta-commits'='1',"
                         + "'snapshot.num-retained.min'= '1',"
                         + "'snapshot.num-retained.max'= '1' ) */"
-                        + " VALUES (1, 10, 'hunter'),(2, 20, 'hunter2'),(3, 30, 'hunter3'),(4, 40, 'hunter4')");
+                        + " VALUES (1, 10, 'hunter')"
+                        + ",(2, 20, 'hunter2')"
+                        + ",(3, 30, 'hunter3')"
+                        + ",(4, 40, 'hunter4')");
 
         checkSnapshots(snapshotManager, 6, 6);
 
         // delete branch should skip the nearest left neighbor snapshot and the nearest right
-        // neighbor.
+        // neighbor [branch_test, tag3].
         sql("CALL sys.delete_branch('default.T', 'test2')");
 
-        // tag still can be read.
-        assertThat(collectResult("SELECT * FROM T /*+ OPTIONS('scan.tag-name'='tag') */"))
+        // The tag still can be read.
+        assertThat(collectResult("SELECT * FROM T /*+ OPTIONS('scan.tag-name'='tag3') */"))
                 .containsExactlyInAnyOrder(
                         "+I[1, 10, hunter]", "+I[2, 20, hunter2]", "+I[3, 30, hunter3]");
 
-        // query branches data.
+        // The branch-test still can be read.
         assertThat(collectResult("SELECT * FROM T$branch_test"))
                 .containsExactlyInAnyOrder("+I[1, 10, hunter]");
+
+        sql("CALL sys.delete_branch('default.T', 'test')");
+
+        // The tag still can be read.
+        assertThat(collectResult("SELECT * FROM T /*+ OPTIONS('scan.tag-name'='tag3') */"))
+                .containsExactlyInAnyOrder(
+                        "+I[1, 10, hunter]", "+I[2, 20, hunter2]", "+I[3, 30, hunter3]");
+
+        Snapshot taggedSnapshot = tagManager.taggedSnapshot("tag3");
+        Collection<ManifestEntry> manifestEntries =
+                tagDeletion.getDataFilesFromSnapshot(taggedSnapshot);
+
+        assertThat(manifestEntries).allMatch(entry -> dataFileExist("T", entry));
+
+        sql("CALL sys.delete_tag('default.T', 'tag3')");
+
+        // All unused datafiles should be deleted.
+        assertThat(manifestEntries).allMatch(entry -> !dataFileExist("T", entry));
+
+        assertThat(collectResult("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(
+                        "+I[1, 10, hunter]",
+                        "+I[2, 20, hunter2]",
+                        "+I[3, 30, hunter3]",
+                        "+I[4, 40, hunter4]");
     }
 
     @Test
@@ -711,5 +782,23 @@ public class BranchSqlITCase extends CatalogITCaseBase {
 
     private boolean manifestFileExist(String tableName, String manifest) throws IOException {
         return fileIO.exists(new Path(getTableDirectory(tableName) + "/manifest/" + manifest));
+    }
+
+    private boolean dataFileExist(String tableName, ManifestEntry entry) {
+        if (entry.kind() == FileKind.ADD) {
+            try {
+                String partition = String.valueOf(entry.partition().getInt(0));
+                return fileIO.exists(
+                        new Path(
+                                String.format(
+                                        getTableDirectory(tableName) + "/pt=%s/bucket-%s/%s",
+                                        partition,
+                                        entry.bucket(),
+                                        entry.file().fileName())));
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+        return true;
     }
 }

@@ -706,7 +706,7 @@ public class SnapshotManager implements Serializable {
         }
         throw new RuntimeException(
                 String.format(
-                        "Didn't find tag with snapshot id '%s'.This is unexpected.",
+                        "Didn't find snapshot id '%s' in the list, this is unexpected.",
                         targetSnapshot.id()));
     }
 
@@ -715,17 +715,17 @@ public class SnapshotManager implements Serializable {
         List<Snapshot> skippedSnapshots = new ArrayList<>();
 
         int index = SnapshotManager.findIndex(targetSnapshot, snapshotList);
-        // the left neighbor tag
+        // the nearest left neighbor snapshot.
         if (index - 1 >= 0) {
             skippedSnapshots.add(snapshotList.get(index - 1));
         }
-        // the nearest right neighbor
-        Snapshot right = snapshotManager.earliestSnapshot();
+        // the nearest right neighbor snapshot.
+        Snapshot nearestRight = snapshotManager.earliestSnapshot();
         if (index + 1 < snapshotList.size()) {
-            Snapshot rightTag = snapshotList.get(index + 1);
-            right = right.id() < rightTag.id() ? right : rightTag;
+            Snapshot rightSnapshot = snapshotList.get(index + 1);
+            nearestRight = nearestRight.id() < rightSnapshot.id() ? nearestRight : rightSnapshot;
         }
-        skippedSnapshots.add(right);
+        skippedSnapshots.add(nearestRight);
         return skippedSnapshots;
     }
 

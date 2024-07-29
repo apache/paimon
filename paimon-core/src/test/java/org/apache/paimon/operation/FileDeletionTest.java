@@ -388,6 +388,7 @@ public class FileDeletionTest {
         TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 3);
         tagManager = new TagManager(fileIO, store.options().path());
         SnapshotManager snapshotManager = store.snapshotManager();
+        BranchManager branchManager = store.newBranchManager();
         TestKeyValueGenerator gen =
                 new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
         BinaryRow partition = gen.getPartition(gen.next());
@@ -439,7 +440,7 @@ public class FileDeletionTest {
                 "tag1",
                 store.newTagDeletion(),
                 snapshotManager,
-                store.newBranchManager(),
+                branchManager,
                 Collections.emptyList());
 
         // check data files
@@ -466,6 +467,7 @@ public class FileDeletionTest {
         TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 3);
         tagManager = new TagManager(fileIO, store.options().path());
         SnapshotManager snapshotManager = store.snapshotManager();
+        BranchManager branchManager = store.newBranchManager();
         TestKeyValueGenerator gen =
                 new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
         BinaryRow partition = gen.getPartition(gen.next());
@@ -520,7 +522,7 @@ public class FileDeletionTest {
                 "tag2",
                 store.newTagDeletion(),
                 snapshotManager,
-                store.newBranchManager(),
+                branchManager,
                 Collections.emptyList());
 
         // check data files

@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -150,13 +151,14 @@ public class BatchWriteGeneratorTagOperator<CommitT, GlobalCommitT>
             }
             TagManager tagManager = table.tagManager();
             TagDeletion tagDeletion = table.store().newTagDeletion();
+            BranchManager branchManager = table.branchManager();
             long tagCount = tagManager.tagCount();
 
             while (tagCount > tagNumRetainedMax) {
                 for (List<String> tagNames : tagManager.tags().values()) {
                     if (tagCount - tagNames.size() >= tagNumRetainedMax) {
                         tagManager.deleteAllTagsOfOneSnapshot(
-                                tagNames, tagDeletion, snapshotManager, table.branchManager());
+                                tagNames, tagDeletion, snapshotManager, branchManager);
                         tagCount = tagCount - tagNames.size();
                     } else {
                         List<String> sortedTagNames = tagManager.sortTagsOfOneSnapshot(tagNames);
@@ -165,7 +167,7 @@ public class BatchWriteGeneratorTagOperator<CommitT, GlobalCommitT>
                                     toBeDeleted,
                                     tagDeletion,
                                     snapshotManager,
-                                    table.branchManager(),
+                                    branchManager,
                                     table.store().createTagCallbacks());
                             tagCount--;
                             if (tagCount == tagNumRetainedMax) {

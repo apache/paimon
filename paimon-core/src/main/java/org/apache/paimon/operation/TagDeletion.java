@@ -19,6 +19,7 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
@@ -91,5 +92,11 @@ public class TagDeletion extends FileDeletionBase<Snapshot> {
     public void cleanUnusedManifests(Snapshot taggedSnapshot, Set<String> skippingSet) {
         // doesn't clean changelog files because they are handled by SnapshotDeletion
         cleanUnusedManifests(taggedSnapshot, skippingSet, true, false);
+    }
+
+    @VisibleForTesting
+    public Collection<ManifestEntry> getDataFilesFromSnapshot(Snapshot snapshot)
+            throws IOException {
+        return readMergedDataFiles(snapshot);
     }
 }
