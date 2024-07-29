@@ -52,10 +52,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.spark.PaimonOptionHelper.mergeOptions;
-import static org.apache.paimon.spark.PaimonOptionHelper.withDynamicOptions;
 import static org.apache.paimon.spark.SparkCatalogOptions.DEFAULT_DATABASE;
 import static org.apache.paimon.spark.SparkTypeUtils.toPaimonType;
+import static org.apache.paimon.spark.util.OptionUtils.mergeOptions;
+import static org.apache.paimon.spark.util.OptionUtils.withDynamicOptions;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Spark {@link TableCatalog} for paimon. */

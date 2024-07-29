@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark
+package org.apache.paimon.spark.util
 
 import org.apache.paimon.table.Table
 
@@ -26,7 +26,7 @@ import java.util.{HashMap => JHashMap, Map => JMap}
 
 import scala.collection.JavaConverters._
 
-object PaimonOptionHelper extends SQLConfHelper {
+object OptionUtils extends SQLConfHelper {
 
   private val PAIMON_OPTION_PREFIX = "spark.paimon."
 
