@@ -42,8 +42,8 @@ public class ObjectsCache<K, V> {
 
     private final SegmentsCache<K> cache;
     private final ObjectSerializer<V> serializer;
-    private final BiFunction<K, Long, CloseableIterator<InternalRow>> reader;
     private final ThreadLocal<InternalRowSerializer> threadLocalRowSerializer;
+    private final BiFunction<K, Long, CloseableIterator<InternalRow>> reader;
 
     public ObjectsCache(
             SegmentsCache<K> cache,
