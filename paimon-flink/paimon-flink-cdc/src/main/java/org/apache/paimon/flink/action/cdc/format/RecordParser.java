@@ -20,6 +20,7 @@ package org.apache.paimon.flink.action.cdc.format;
 
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
+import org.apache.paimon.flink.action.cdc.DatabaseSyncTableFilter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
@@ -73,12 +74,17 @@ public abstract class RecordParser
     protected static final String FIELD_DATABASE = "database";
     protected final TypeMapping typeMapping;
     protected final List<ComputedColumn> computedColumns;
+    @Nullable protected final DatabaseSyncTableFilter databaseSyncTableFilter;
 
     protected JsonNode root;
 
-    public RecordParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
+    public RecordParser(
+            TypeMapping typeMapping,
+            List<ComputedColumn> computedColumns,
+            @Nullable DatabaseSyncTableFilter databaseSyncTableFilter) {
         this.typeMapping = typeMapping;
         this.computedColumns = computedColumns;
+        this.databaseSyncTableFilter = databaseSyncTableFilter;
     }
 
     @Nullable
@@ -130,6 +136,10 @@ public abstract class RecordParser
     public void flatMap(CdcSourceRecord value, Collector<RichCdcMultiplexRecord> out) {
         try {
             setRoot(value);
+            if (databaseSyncTableFilter != null
+                    && !databaseSyncTableFilter.filter(getDatabaseName(), getTableName(), root)) {
+                return;
+            }
             extractRecords().forEach(out::collect);
         } catch (Exception e) {
             logInvalidSourceRecord(value);

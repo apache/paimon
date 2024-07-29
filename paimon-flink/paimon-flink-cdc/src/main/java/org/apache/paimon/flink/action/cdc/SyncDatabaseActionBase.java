@@ -41,7 +41,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Pattern;
 
 import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
 
@@ -127,8 +126,10 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
 
     @Override
     protected FlatMapFunction<CdcSourceRecord, RichCdcMultiplexRecord> recordParse() {
+        DatabaseSyncTableFilter databaseSyncTableFilter =
+                new DatabaseSyncTableFilter(includingTables, excludingTables);
         return syncJobHandler.provideRecordParser(
-                Collections.emptyList(), typeMapping, metadataConverters);
+                Collections.emptyList(), typeMapping, metadataConverters, databaseSyncTableFilter);
     }
 
     @Override
@@ -136,9 +137,6 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
         NewTableSchemaBuilder schemaBuilder =
                 new NewTableSchemaBuilder(
                         tableConfig, caseSensitive, partitionKeys, primaryKeys, metadataConverters);
-        Pattern includingPattern = Pattern.compile(includingTables);
-        Pattern excludingPattern =
-                excludingTables == null ? null : Pattern.compile(excludingTables);
         TableNameConverter tableNameConverter =
                 new TableNameConverter(caseSensitive, mergeShards, tablePrefix, tableSuffix);
         Set<String> createdTables;
@@ -149,11 +147,7 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
         }
         return () ->
                 new RichCdcMultiplexRecordEventParser(
-                        schemaBuilder,
-                        includingPattern,
-                        excludingPattern,
-                        tableNameConverter,
-                        createdTables);
+                        schemaBuilder, tableNameConverter, createdTables);
     }
 
     @Override
