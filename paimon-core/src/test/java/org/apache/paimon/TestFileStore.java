@@ -363,7 +363,9 @@ public class TestFileStore extends KeyValueFileStore {
 
         List<Snapshot> snapshots = new ArrayList<>();
         for (long id = snapshotIdBeforeCommit + 1; id <= snapshotIdAfterCommit; id++) {
-            snapshots.add(snapshotManager.snapshot(id));
+            if (snapshotManager.snapshotExists(id)) {
+                snapshots.add(snapshotManager.snapshot(id));
+            }
         }
         return snapshots;
     }

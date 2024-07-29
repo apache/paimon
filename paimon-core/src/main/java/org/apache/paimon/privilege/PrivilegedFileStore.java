@@ -39,6 +39,7 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -155,6 +156,12 @@ public class PrivilegedFileStore<T> implements FileStore<T> {
     public TagManager newTagManager() {
         privilegeChecker.assertCanInsert(identifier);
         return wrapped.newTagManager();
+    }
+
+    @Override
+    public BranchManager newBranchManager() {
+        privilegeChecker.assertCanInsert(identifier);
+        return wrapped.newBranchManager();
     }
 
     @Override

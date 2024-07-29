@@ -46,6 +46,7 @@ import org.apache.paimon.table.sink.CallbackUtils;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
@@ -205,7 +206,10 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.branch(),
                 newStatsFileHandler(),
                 bucketMode(),
-                options.scanManifestParallelism());
+                options.scanManifestParallelism(),
+                schema.options(),
+                newBranchManager(),
+                newTagManager());
     }
 
     @Override
@@ -238,6 +242,12 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     @Override
     public TagManager newTagManager() {
         return new TagManager(fileIO, options.path());
+    }
+
+    @Override
+    public BranchManager newBranchManager() {
+        return new BranchManager(
+                fileIO, options.path(), snapshotManager(), newTagManager(), schemaManager);
     }
 
     @Override

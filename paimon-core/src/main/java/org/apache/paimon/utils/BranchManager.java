@@ -284,7 +284,7 @@ public class BranchManager {
                             .collect(Collectors.toList());
 
             // Delete latest snapshot hint
-            snapshotManager.deleteLatestHint();
+            snapshotManager.removeSnapshotLatestHint();
 
             fileIO.deleteFilesQuietly(deletePaths);
             fileIO.copyFiles(
@@ -363,5 +363,19 @@ public class BranchManager {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    /** Get all branch createdFromSnapshots. */
+    public List<Snapshot> branchSnapshots() {
+        ArrayList<Snapshot> snapshotList = new ArrayList<>();
+        branches()
+                .forEach(
+                        b -> {
+                            long createdFromSnapshot = b.getCreatedFromSnapshot();
+                            if (snapshotManager.snapshotExists(createdFromSnapshot)) {
+                                snapshotList.add(snapshotManager.snapshot(createdFromSnapshot));
+                            }
+                        });
+        return snapshotList;
     }
 }

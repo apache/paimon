@@ -238,6 +238,9 @@ public interface FileIO extends Serializable {
         try {
             writeFile(tmp, content, false);
             success = rename(tmp, path);
+        } catch (IOException e) {
+            // try check once
+            success = exists(path) && !exists(tmp);
         } finally {
             if (!success) {
                 deleteQuietly(tmp);
