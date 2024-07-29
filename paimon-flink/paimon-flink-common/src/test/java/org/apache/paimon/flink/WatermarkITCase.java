@@ -41,6 +41,39 @@ public class WatermarkITCase extends CatalogITCaseBase {
         innerTestWatermark();
     }
 
+    @Test
+    public void testAuditLogWatermark() throws Exception {
+        String[] options =
+                new String[] {
+                    "'scan.watermark.idle-timeout'='1s'",
+                    "'scan.watermark.alignment.group'='group'",
+                    "'scan.watermark.alignment.update-interval'='2s'",
+                    "'scan.watermark.alignment.max-drift'='1s'"
+                };
+        sql(
+                "CREATE TABLE T (f0 INT, ts TIMESTAMP(3), WATERMARK FOR ts AS ts) WITH ("
+                        + String.join(",", options)
+                        + ")");
+
+        BlockingIterator<Row, Row> select =
+                BlockingIterator.of(
+                        streamSqlIter(
+                                "SELECT window_start, window_end, SUM(f0) FROM TABLE("
+                                        + "TUMBLE(TABLE T$audit_log, DESCRIPTOR(ts), INTERVAL '10' MINUTES))\n"
+                                        + "  GROUP BY window_start, window_end;"));
+
+        sql("INSERT INTO T VALUES (1, TIMESTAMP '2023-02-02 12:00:00')");
+        sql("INSERT INTO T VALUES (1, TIMESTAMP '2023-02-02 12:10:01')");
+
+        assertThat(select.collect(1))
+                .containsExactlyInAnyOrder(
+                        Row.of(
+                                LocalDateTime.parse("2023-02-02T12:00"),
+                                LocalDateTime.parse("2023-02-02T12:10"),
+                                1));
+        select.close();
+    }
+
     @Disabled // TODO unstable alignment may block watermark generation
     @Test
     public void testWatermarkAlignment() throws Exception {
@@ -61,7 +94,7 @@ public class WatermarkITCase extends CatalogITCaseBase {
                 BlockingIterator.of(
                         streamSqlIter(
                                 "SELECT window_start, window_end, SUM(f0) FROM TABLE("
-                                        + "TUMBLE(TABLE T, DESCRIPTOR(ts), INTERVAL '10' MINUTES))\n"
+                                        + "TUMBLE(TABLE T$audit_log, DESCRIPTOR(ts), INTERVAL '10' MINUTES))\n"
                                         + "  GROUP BY window_start, window_end;"));
 
         sql("INSERT INTO T VALUES (1, TIMESTAMP '2023-02-02 12:00:00')");
