@@ -42,7 +42,6 @@ import org.apache.paimon.utils.TagManager;
 
 import javax.annotation.Nullable;
 
-import java.io.Serializable;
 import java.util.List;
 
 /**
@@ -50,7 +49,7 @@ import java.util.List;
  *
  * @param <T> type of record to read and write.
  */
-public interface FileStore<T> extends Serializable {
+public interface FileStore<T> {
 
     FileStorePathFactory pathFactory();
 
