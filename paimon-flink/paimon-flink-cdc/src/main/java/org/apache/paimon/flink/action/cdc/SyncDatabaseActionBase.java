@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.action.cdc;
 
-import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.MultiTablesSinkMode;
@@ -120,9 +119,9 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
 
     @Override
     protected void validateCaseSensitivity() {
-        AbstractCatalog.validateCaseInsensitive(allowUpperCase, "Database", database);
-        AbstractCatalog.validateCaseInsensitive(allowUpperCase, "Table prefix", tablePrefix);
-        AbstractCatalog.validateCaseInsensitive(allowUpperCase, "Table suffix", tableSuffix);
+        Catalog.validateCaseInsensitive(allowUpperCase, "Database", database);
+        Catalog.validateCaseInsensitive(allowUpperCase, "Table prefix", tablePrefix);
+        Catalog.validateCaseInsensitive(allowUpperCase, "Table suffix", tableSuffix);
     }
 
     @Override

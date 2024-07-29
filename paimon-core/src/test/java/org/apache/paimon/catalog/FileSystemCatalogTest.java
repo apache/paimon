@@ -18,29 +18,15 @@
 
 package org.apache.paimon.catalog;
 
-import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.table.TableType;
 
-import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
+import org.junit.jupiter.api.BeforeEach;
 
-/** Factory to create {@link FileSystemCatalog}. */
-public class FileSystemCatalogFactory implements CatalogFactory {
+class FileSystemCatalogTest extends CatalogTestBase {
 
-    public static final String IDENTIFIER = "filesystem";
-
-    @Override
-    public String identifier() {
-        return IDENTIFIER;
-    }
-
-    @Override
-    public Catalog create(FileIO fileIO, Path warehouse, CatalogContext context) {
-        if (!TableType.MANAGED.equals(context.options().get(TABLE_TYPE))) {
-            throw new IllegalArgumentException(
-                    "Only managed table is supported in File system catalog.");
-        }
-
-        return new FileSystemCatalog(fileIO, warehouse, context.options());
+    @BeforeEach
+    public void setUp() throws Exception {
+        super.setUp();
+        catalog = new FileSystemCatalog(fileIO, new Path(warehouse));
     }
 }

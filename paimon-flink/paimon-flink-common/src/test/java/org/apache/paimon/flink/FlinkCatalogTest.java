@@ -19,7 +19,6 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.log.LogSinkProvider;
@@ -647,9 +646,18 @@ public class FlinkCatalogTest {
             CatalogTable t2,
             Map<String, String> optionsToAdd,
             Set<String> optionsToRemove) {
-        Path tablePath =
-                ((AbstractCatalog) ((FlinkCatalog) catalog).catalog())
-                        .getDataTableLocation(FlinkCatalog.toIdentifier(path));
+        Path tablePath;
+        try {
+            tablePath =
+                    new Path(
+                            ((FlinkCatalog) catalog)
+                                    .catalog()
+                                    .getTable(FlinkCatalog.toIdentifier(path))
+                                    .options()
+                                    .get(CoreOptions.PATH.key()));
+        } catch (org.apache.paimon.catalog.Catalog.TableNotExistException e) {
+            throw new RuntimeException(e);
+        }
         Map<String, String> options = new HashMap<>(t1.getOptions());
         options.put("path", tablePath.toString());
         options.putAll(optionsToAdd);

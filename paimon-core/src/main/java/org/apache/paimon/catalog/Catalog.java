@@ -26,10 +26,15 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
 
 import java.io.Serializable;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
+
+import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * This interface is responsible for reading and writing metadata such as database/table from a
@@ -47,6 +52,9 @@ public interface Catalog extends AutoCloseable {
     String SYSTEM_TABLE_SPLITTER = "$";
     String SYSTEM_DATABASE_NAME = "sys";
     String COMMENT_PROP = "comment";
+    String TABLE_DEFAULT_OPTION_PREFIX = "table-default.";
+    String DB_LOCATION_PROP = "location";
+    String DB_SUFFIX = ".db";
 
     /** Warehouse root path containing all database directories in this catalog. */
     String warehouse();
@@ -275,6 +283,29 @@ public interface Catalog extends AutoCloseable {
 
     default void repairTable(Identifier identifier) throws TableNotExistException {
         throw new UnsupportedOperationException();
+    }
+
+    static Map<String, String> tableDefaultOptions(Map<String, String> options) {
+        return convertToPropertiesPrefixKey(options, TABLE_DEFAULT_OPTION_PREFIX);
+    }
+
+    /** Validate database, table and field names must be lowercase when not case-sensitive. */
+    static void validateCaseInsensitive(boolean caseSensitive, String type, String... names) {
+        validateCaseInsensitive(caseSensitive, type, Arrays.asList(names));
+    }
+
+    /** Validate database, table and field names must be lowercase when not case-sensitive. */
+    static void validateCaseInsensitive(boolean caseSensitive, String type, List<String> names) {
+        if (caseSensitive) {
+            return;
+        }
+        List<String> illegalNames =
+                names.stream().filter(f -> !f.equals(f.toLowerCase())).collect(Collectors.toList());
+        checkArgument(
+                illegalNames.isEmpty(),
+                String.format(
+                        "%s name %s cannot contain upper case in the catalog.",
+                        type, illegalNames));
     }
 
     /** Exception for trying to drop on a database that is not empty. */

@@ -16,31 +16,27 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.catalog;
+package org.apache.paimon.utils;
 
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.table.TableType;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Ticker;
 
-import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
+import java.time.Duration;
+import java.util.concurrent.atomic.AtomicLong;
 
-/** Factory to create {@link FileSystemCatalog}. */
-public class FileSystemCatalogFactory implements CatalogFactory {
+/** A {@code Ticker} whose value can be advanced programmatically in tests. */
+public class FakeTicker implements Ticker {
 
-    public static final String IDENTIFIER = "filesystem";
+    private final AtomicLong nanos = new AtomicLong();
 
-    @Override
-    public String identifier() {
-        return IDENTIFIER;
+    public FakeTicker() {}
+
+    public FakeTicker advance(Duration duration) {
+        nanos.addAndGet(duration.toNanos());
+        return this;
     }
 
     @Override
-    public Catalog create(FileIO fileIO, Path warehouse, CatalogContext context) {
-        if (!TableType.MANAGED.equals(context.options().get(TABLE_TYPE))) {
-            throw new IllegalArgumentException(
-                    "Only managed table is supported in File system catalog.");
-        }
-
-        return new FileSystemCatalog(fileIO, warehouse, context.options());
+    public long read() {
+        return nanos.get();
     }
 }

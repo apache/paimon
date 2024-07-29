@@ -63,7 +63,7 @@ public class FileSystemCatalog extends AbstractCatalog {
 
     @Override
     protected void createDatabaseImpl(String name, Map<String, String> properties) {
-        if (properties.containsKey(AbstractCatalog.DB_LOCATION_PROP)) {
+        if (properties.containsKey(Catalog.DB_LOCATION_PROP)) {
             throw new IllegalArgumentException(
                     "Cannot specify location for a database when using fileSystem catalog.");
         }

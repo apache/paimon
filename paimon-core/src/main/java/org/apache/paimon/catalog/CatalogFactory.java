@@ -24,11 +24,16 @@ import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.privilege.FileBasedPrivilegeManager;
+import org.apache.paimon.privilege.PrivilegeManager;
+import org.apache.paimon.privilege.PrivilegedCatalog;
 import org.apache.paimon.utils.Preconditions;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 
+import static org.apache.paimon.options.CatalogOptions.CACHE_ENABLED;
+import static org.apache.paimon.options.CatalogOptions.CACHE_EXPIRATION_INTERVAL_MS;
 import static org.apache.paimon.options.CatalogOptions.METASTORE;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
 
@@ -67,6 +72,27 @@ public interface CatalogFactory extends Factory {
     }
 
     static Catalog createCatalog(CatalogContext context, ClassLoader classLoader) {
+        Catalog catalog = createUnwrappedCatalog(context, classLoader);
+
+        Options options = context.options();
+        if (options.get(CACHE_ENABLED)) {
+            catalog = new CachingCatalog(catalog, options.get(CACHE_EXPIRATION_INTERVAL_MS));
+        }
+
+        PrivilegeManager privilegeManager =
+                new FileBasedPrivilegeManager(
+                        catalog.warehouse(),
+                        catalog.fileIO(),
+                        context.options().get(PrivilegedCatalog.USER),
+                        context.options().get(PrivilegedCatalog.PASSWORD));
+        if (privilegeManager.privilegeEnabled()) {
+            catalog = new PrivilegedCatalog(catalog, privilegeManager);
+        }
+
+        return catalog;
+    }
+
+    static Catalog createUnwrappedCatalog(CatalogContext context, ClassLoader classLoader) {
         Options options = context.options();
         String metastore = options.get(METASTORE);
         CatalogFactory catalogFactory =

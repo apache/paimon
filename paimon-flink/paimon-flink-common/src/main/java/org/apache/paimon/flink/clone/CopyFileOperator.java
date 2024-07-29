@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.clone;
 
-import org.apache.paimon.catalog.AbstractCatalog;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.fs.FileIO;
@@ -34,6 +34,8 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 
+import static org.apache.paimon.CoreOptions.PATH;
+
 /** A Operator to copy files. */
 public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
         implements OneInputStreamOperator<CloneFileInfo, CloneFileInfo> {
@@ -43,8 +45,8 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
     private final Map<String, String> sourceCatalogConfig;
     private final Map<String, String> targetCatalogConfig;
 
-    private AbstractCatalog sourceCatalog;
-    private AbstractCatalog targetCatalog;
+    private Catalog sourceCatalog;
+    private Catalog targetCatalog;
 
     public CopyFileOperator(
             Map<String, String> sourceCatalogConfig, Map<String, String> targetCatalogConfig) {
@@ -55,13 +57,9 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
     @Override
     public void open() throws Exception {
         sourceCatalog =
-                (AbstractCatalog)
-                        FlinkCatalogFactory.createPaimonCatalog(
-                                Options.fromMap(sourceCatalogConfig));
+                FlinkCatalogFactory.createPaimonCatalog(Options.fromMap(sourceCatalogConfig));
         targetCatalog =
-                (AbstractCatalog)
-                        FlinkCatalogFactory.createPaimonCatalog(
-                                Options.fromMap(targetCatalogConfig));
+                FlinkCatalogFactory.createPaimonCatalog(Options.fromMap(targetCatalogConfig));
     }
 
     @Override
@@ -71,11 +69,19 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
         FileIO sourceTableFileIO = sourceCatalog.fileIO();
         FileIO targetTableFileIO = targetCatalog.fileIO();
         Path sourceTableRootPath =
-                sourceCatalog.getDataTableLocation(
-                        Identifier.fromString(cloneFileInfo.getSourceIdentifier()));
+                new Path(
+                        sourceCatalog
+                                .getTable(
+                                        Identifier.fromString(cloneFileInfo.getSourceIdentifier()))
+                                .options()
+                                .get(PATH.key()));
         Path targetTableRootPath =
-                targetCatalog.getDataTableLocation(
-                        Identifier.fromString(cloneFileInfo.getTargetIdentifier()));
+                new Path(
+                        targetCatalog
+                                .getTable(
+                                        Identifier.fromString(cloneFileInfo.getTargetIdentifier()))
+                                .options()
+                                .get(PATH.key()));
 
         String filePathExcludeTableRoot = cloneFileInfo.getFilePathExcludeTableRoot();
         Path sourcePath = new Path(sourceTableRootPath + filePathExcludeTableRoot);
