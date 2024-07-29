@@ -78,17 +78,6 @@ public class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public boolean databaseExists(String databaseName) {
-        return wrapped.databaseExists(databaseName);
-    }
-
-    @Override
-    public void createDatabase(String name, boolean ignoreIfExists)
-            throws DatabaseAlreadyExistException {
-        wrapped.createDatabase(name, ignoreIfExists);
-    }
-
-    @Override
     public void createDatabase(String name, boolean ignoreIfExists, Map<String, String> properties)
             throws DatabaseAlreadyExistException {
         wrapped.createDatabase(name, ignoreIfExists, properties);
@@ -112,11 +101,6 @@ public class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public boolean tableExists(Identifier identifier) {
-        return wrapped.tableExists(identifier);
-    }
-
-    @Override
     public void dropTable(Identifier identifier, boolean ignoreIfNotExists)
             throws TableNotExistException {
         wrapped.dropTable(identifier, ignoreIfNotExists);
@@ -132,12 +116,6 @@ public class DelegateCatalog implements Catalog {
     public void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)
             throws TableNotExistException, TableAlreadyExistException {
         wrapped.renameTable(fromTable, toTable, ignoreIfNotExists);
-    }
-
-    @Override
-    public void alterTable(Identifier identifier, SchemaChange change, boolean ignoreIfNotExists)
-            throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
-        wrapped.alterTable(identifier, change, ignoreIfNotExists);
     }
 
     @Override

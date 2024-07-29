@@ -85,7 +85,14 @@ public interface Catalog extends AutoCloseable {
      * @param databaseName Name of the database
      * @return true if the given database exists in the catalog false otherwise
      */
-    boolean databaseExists(String databaseName);
+    default boolean databaseExists(String databaseName) {
+        try {
+            loadDatabaseProperties(databaseName);
+            return true;
+        } catch (DatabaseNotExistException e) {
+            return false;
+        }
+    }
 
     /**
      * Create a database, see {@link Catalog#createDatabase(String name, boolean ignoreIfExists, Map

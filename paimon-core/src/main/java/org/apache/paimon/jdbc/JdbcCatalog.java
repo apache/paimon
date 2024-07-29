@@ -159,13 +159,8 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected boolean databaseExistsImpl(String databaseName) {
-        return JdbcUtils.databaseExists(connections, catalogKey, databaseName);
-    }
-
-    @Override
     protected Map<String, String> loadDatabasePropertiesImpl(String databaseName) {
-        if (!databaseExists(databaseName)) {
+        if (!JdbcUtils.databaseExists(connections, catalogKey, databaseName)) {
             throw new RuntimeException(String.format("Database does not exist: %s", databaseName));
         }
         Map<String, String> properties = Maps.newHashMap();
@@ -179,10 +174,6 @@ public class JdbcCatalog extends AbstractCatalog {
 
     @Override
     protected void createDatabaseImpl(String name, Map<String, String> properties) {
-        if (databaseExists(name)) {
-            throw new RuntimeException(String.format("Database already exists: %s", name));
-        }
-
         Map<String, String> createProps = new HashMap<>();
         createProps.put(DATABASE_EXISTS_PROPERTY, "true");
         if (properties != null && !properties.isEmpty()) {
@@ -206,9 +197,6 @@ public class JdbcCatalog extends AbstractCatalog {
 
     @Override
     protected List<String> listTablesImpl(String databaseName) {
-        if (!databaseExists(databaseName)) {
-            throw new RuntimeException(String.format("Database does not exist: %s", databaseName));
-        }
         return fetch(
                 row -> row.getString(JdbcUtils.TABLE_NAME),
                 JdbcUtils.LIST_TABLES_SQL,
@@ -312,9 +300,6 @@ public class JdbcCatalog extends AbstractCatalog {
             Identifier identifier, String branchName, List<SchemaChange> changes)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
         assertMainBranch(branchName);
-        if (!tableExists(identifier)) {
-            throw new RuntimeException("Table is not exists " + identifier.getFullName());
-        }
         SchemaManager schemaManager = getSchemaManager(identifier);
         schemaManager.commitChanges(changes);
     }
@@ -323,7 +308,11 @@ public class JdbcCatalog extends AbstractCatalog {
     protected TableSchema getDataTableSchema(Identifier identifier, String branchName)
             throws TableNotExistException {
         assertMainBranch(branchName);
-        if (!tableExists(identifier)) {
+        if (!JdbcUtils.tableExists(
+                connections,
+                catalogKey,
+                identifier.getDatabaseName(),
+                identifier.getObjectName())) {
             throw new TableNotExistException(identifier);
         }
         Path tableLocation = getDataTableLocation(identifier);
@@ -331,15 +320,6 @@ public class JdbcCatalog extends AbstractCatalog {
                 .latest()
                 .orElseThrow(
                         () -> new RuntimeException("There is no paimon table in " + tableLocation));
-    }
-
-    @Override
-    public boolean tableExists(Identifier identifier) {
-        if (isSystemTable(identifier)) {
-            return super.tableExists(identifier);
-        }
-        return JdbcUtils.tableExists(
-                connections, catalogKey, identifier.getDatabaseName(), identifier.getObjectName());
     }
 
     @Override
@@ -383,9 +363,6 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     private Map<String, String> fetchProperties(String databaseName) {
-        if (!databaseExists(databaseName)) {
-            throw new RuntimeException(String.format("Database does not exist: %s", databaseName));
-        }
         List<Map.Entry<String, String>> entries =
                 fetch(
                         row ->

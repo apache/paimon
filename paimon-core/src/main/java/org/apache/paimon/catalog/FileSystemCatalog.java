@@ -62,11 +62,6 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected boolean databaseExistsImpl(String databaseName) {
-        return uncheck(() -> fileIO.exists(newDatabasePath(databaseName)));
-    }
-
-    @Override
     protected void createDatabaseImpl(String name, Map<String, String> properties) {
         if (properties.containsKey(AbstractCatalog.DB_LOCATION_PROP)) {
             throw new IllegalArgumentException(
@@ -81,7 +76,11 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
-    public Map<String, String> loadDatabasePropertiesImpl(String name) {
+    public Map<String, String> loadDatabasePropertiesImpl(String name)
+            throws DatabaseNotExistException {
+        if (!uncheck(() -> fileIO.exists(newDatabasePath(name)))) {
+            throw new DatabaseNotExistException(name);
+        }
         return Collections.emptyMap();
     }
 
