@@ -186,7 +186,11 @@ public class FlinkCatalog extends AbstractCatalog {
     public CatalogDatabase getDatabase(String databaseName)
             throws CatalogException, DatabaseNotExistException {
         if (databaseExists(databaseName)) {
-            return new CatalogDatabaseImpl(Collections.emptyMap(), null);
+            try {
+                return new CatalogDatabaseImpl(catalog.loadDatabaseProperties(databaseName), null);
+            } catch (Catalog.DatabaseNotExistException e) {
+                throw new CatalogException(e);
+            }
         }
         throw new DatabaseNotExistException(getName(), databaseName);
     }
