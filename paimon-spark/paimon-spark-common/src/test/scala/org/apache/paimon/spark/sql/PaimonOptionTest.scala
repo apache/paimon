@@ -26,9 +26,26 @@ import org.junit.jupiter.api.Assertions
 
 class PaimonOptionTest extends PaimonSparkTestBase {
 
+  import testImplicits._
+
   test("Paimon Option: create table with sql conf") {
     withSQLConf("spark.paimon.file.block-size" -> "512M") {
       sql("CREATE TABLE T (id INT)")
+      val table = loadTable("T")
+      // check options in schema file directly
+      val fileStoreTable = FileStoreTableFactory.create(table.fileIO(), table.location())
+      Assertions.assertEquals("512M", fileStoreTable.options().get("file.block-size"))
+    }
+  }
+
+  test("Paimon Option: create table by dataframe with sql conf") {
+    withSQLConf("spark.paimon.file.block-size" -> "512M") {
+      Seq((1L, "x1"), (2L, "x2"))
+        .toDF("a", "b")
+        .write
+        .format("paimon")
+        .mode("append")
+        .saveAsTable("T")
       val table = loadTable("T")
       // check options in schema file directly
       val fileStoreTable = FileStoreTableFactory.create(table.fileIO(), table.location())
@@ -41,16 +58,21 @@ class PaimonOptionTest extends PaimonSparkTestBase {
     sql("INSERT INTO T VALUES 1")
     sql("INSERT INTO T VALUES 2")
     checkAnswer(sql("SELECT * FROM T ORDER BY id"), Row(1) :: Row(2) :: Nil)
+    val table = loadTable("T")
 
     // query with mutable option
     withSQLConf("spark.paimon.scan.snapshot-id" -> "1") {
       checkAnswer(sql("SELECT * FROM T ORDER BY id"), Row(1))
+      checkAnswer(spark.read.format("paimon").load(table.location().toString), Row(1))
     }
 
     // query with immutable option
     withSQLConf("spark.paimon.bucket" -> "1") {
       assertThrows[UnsupportedOperationException] {
         sql("SELECT * FROM T ORDER BY id")
+      }
+      assertThrows[UnsupportedOperationException] {
+        spark.read.format("paimon").load(table.location().toString)
       }
     }
   }

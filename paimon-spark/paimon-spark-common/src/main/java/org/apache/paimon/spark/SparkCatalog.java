@@ -54,8 +54,8 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.spark.SparkCatalogOptions.DEFAULT_DATABASE;
 import static org.apache.paimon.spark.SparkTypeUtils.toPaimonType;
-import static org.apache.paimon.spark.util.OptionUtils.mergeOptions;
-import static org.apache.paimon.spark.util.OptionUtils.withDynamicOptions;
+import static org.apache.paimon.spark.util.OptionUtils.copyWithSQLConf;
+import static org.apache.paimon.spark.util.OptionUtils.mergeSQLConf;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Spark {@link TableCatalog} for paimon. */
@@ -377,7 +377,7 @@ public class SparkCatalog extends SparkBaseCatalog {
                                     return references.length == 1
                                             && references[0] instanceof FieldReference;
                                 }));
-        Map<String, String> normalizedProperties = mergeOptions(properties);
+        Map<String, String> normalizedProperties = mergeSQLConf(properties);
         normalizedProperties.remove(PRIMARY_KEY_IDENTIFIER);
         normalizedProperties.remove(TableCatalog.PROP_COMMENT);
         String pkAsString = properties.get(PRIMARY_KEY_IDENTIFIER);
@@ -450,7 +450,7 @@ public class SparkCatalog extends SparkBaseCatalog {
             throws NoSuchTableException {
         try {
             return new SparkTable(
-                    withDynamicOptions(catalog.getTable(toIdentifier(ident)), extraOptions));
+                    copyWithSQLConf(catalog.getTable(toIdentifier(ident)), extraOptions));
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(ident);
         }

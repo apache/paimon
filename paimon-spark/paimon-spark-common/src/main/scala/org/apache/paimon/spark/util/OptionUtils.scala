@@ -30,7 +30,7 @@ object OptionUtils extends SQLConfHelper {
 
   private val PAIMON_OPTION_PREFIX = "spark.paimon."
 
-  def mergeOptions(extraOptions: JMap[String, String]): JMap[String, String] = {
+  def mergeSQLConf(extraOptions: JMap[String, String]): JMap[String, String] = {
     val mergedOptions = new JHashMap[String, String](
       conf.getAllConfs
         .filterKeys(_.startsWith(PAIMON_OPTION_PREFIX))
@@ -43,8 +43,8 @@ object OptionUtils extends SQLConfHelper {
     mergedOptions
   }
 
-  def withDynamicOptions[T <: Table](table: T, extraOptions: JMap[String, String]): T = {
-    val mergedOptions = mergeOptions(extraOptions)
+  def copyWithSQLConf[T <: Table](table: T, extraOptions: JMap[String, String]): T = {
+    val mergedOptions = mergeSQLConf(extraOptions)
     if (mergedOptions.isEmpty) {
       table
     } else {
