@@ -58,13 +58,6 @@ public class PrivilegedCatalog extends DelegateCatalog {
     }
 
     @Override
-    public void createDatabase(String name, boolean ignoreIfExists)
-            throws DatabaseAlreadyExistException {
-        privilegeManager.getPrivilegeChecker().assertCanCreateDatabase();
-        wrapped.createDatabase(name, ignoreIfExists);
-    }
-
-    @Override
     public void createDatabase(String name, boolean ignoreIfExists, Map<String, String> properties)
             throws DatabaseAlreadyExistException {
         privilegeManager.getPrivilegeChecker().assertCanCreateDatabase();
@@ -106,13 +99,6 @@ public class PrivilegedCatalog extends DelegateCatalog {
                         + " does not exist. There might be concurrent renaming. "
                         + "Aborting updates in privilege system.");
         privilegeManager.objectRenamed(fromTable.getFullName(), toTable.getFullName());
-    }
-
-    @Override
-    public void alterTable(Identifier identifier, SchemaChange change, boolean ignoreIfNotExists)
-            throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
-        privilegeManager.getPrivilegeChecker().assertCanAlterTable(identifier);
-        wrapped.alterTable(identifier, change, ignoreIfNotExists);
     }
 
     @Override
