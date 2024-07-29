@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.commands
 
-import org.apache.paimon.deletionvectors.{BitmapDeletionVector, DeletionVector}
+import org.apache.paimon.deletionvectors.BitmapDeletionVector
 import org.apache.paimon.fs.Path
 import org.apache.paimon.index.IndexFileMeta
 import org.apache.paimon.io.{CompactIncrement, DataFileMeta, DataIncrement, IndexIncrement}
@@ -159,7 +159,8 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
     val metadataCols = Seq(FILE_PATH, ROW_INDEX)
     val filteredRelation = createNewScanPlan(candidateDataSplits, condition, relation, metadataCols)
 
-    val location = table.location
+    val my_table = table
+    val location = my_table.location
     createDataset(sparkSession, filteredRelation)
       .select(FILE_PATH_COLUMN, ROW_INDEX_COLUMN)
       .as[(String, Long)]
@@ -173,7 +174,7 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
 
           val relativeFilePath = location.toUri.relativize(new URI(filePath)).toString
           val (partition, bucket) = dataFileToPartitionAndBucket.toMap.apply(relativeFilePath)
-          val pathFactory = table.store().pathFactory()
+          val pathFactory = my_table.store().pathFactory()
           val partitionAndBucket = pathFactory
             .relativePartitionAndBucketPath(partition, bucket)
             .toString
