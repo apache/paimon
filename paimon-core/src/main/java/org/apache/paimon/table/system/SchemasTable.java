@@ -29,6 +29,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerTableRead;
@@ -82,6 +83,10 @@ public class SchemasTable implements ReadonlyTable {
 
     private final FileIO fileIO;
     private final Path location;
+
+    public SchemasTable(FileStoreTable dataTable) {
+        this(dataTable.fileIO(), dataTable.location());
+    }
 
     public SchemasTable(FileIO fileIO, Path location) {
         this.fileIO = fileIO;

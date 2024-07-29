@@ -109,6 +109,10 @@ public class SnapshotsTable implements ReadonlyTable {
 
     private final FileStoreTable dataTable;
 
+    public SnapshotsTable(FileStoreTable dataTable) {
+        this(dataTable.fileIO(), dataTable.location(), dataTable);
+    }
+
     public SnapshotsTable(FileIO fileIO, Path location, FileStoreTable dataTable) {
         this.fileIO = fileIO;
         this.location = location;

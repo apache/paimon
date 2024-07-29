@@ -348,7 +348,7 @@ public abstract class AbstractCatalog implements Catalog {
             String type = splits[1];
             FileStoreTable originTable =
                     getDataTable(new Identifier(identifier.getDatabaseName(), tableName));
-            Table table = SystemTableLoader.load(type, fileIO, originTable);
+            Table table = SystemTableLoader.load(type, originTable);
             if (table == null) {
                 throw new TableNotExistException(identifier);
             }
