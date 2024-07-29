@@ -121,6 +121,19 @@ public class DeletionVectorsIndexFile extends IndexFile {
         return deletionVectors;
     }
 
+    public DeletionVector readDeletionVector(String dataFile, DeletionFile deletionFile) {
+        String indexFile = deletionFile.path();
+        try (SeekableInputStream inputStream = fileIO.newInputStream(new Path(indexFile))) {
+            checkVersion(inputStream);
+            checkArgument(deletionFile.path().equals(indexFile));
+            inputStream.seek(deletionFile.offset());
+            DataInputStream dataInputStream = new DataInputStream(inputStream);
+            return readDeletionVector(dataInputStream, (int) deletionFile.length());
+        } catch (Exception e) {
+            throw new RuntimeException("Unable to read deletion vector from file: " + indexFile, e);
+        }
+    }
+
     /**
      * Write deletion vectors to a new file, the format of this file can be referenced at: <a
      * href="https://cwiki.apache.org/confluence/x/Tws4EQ">PIP-16</a>.
