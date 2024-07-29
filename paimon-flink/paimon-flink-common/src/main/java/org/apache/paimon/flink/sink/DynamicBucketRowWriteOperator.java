@@ -22,7 +22,10 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.streaming.runtime.streamrecord.RecordAttributes;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+
+import javax.annotation.Nullable;
 
 /**
  * A {@link PrepareCommitOperator} to write {@link InternalRow} with bucket. Record schema is fixed.
@@ -31,12 +34,15 @@ public class DynamicBucketRowWriteOperator
         extends TableWriteOperator<Tuple2<InternalRow, Integer>> {
 
     private static final long serialVersionUID = 1L;
+    @Nullable private final RecordAttributesProcessor recordAttributesProcessor;
 
     public DynamicBucketRowWriteOperator(
             FileStoreTable table,
             StoreSinkWrite.Provider storeSinkWriteProvider,
-            String initialCommitUser) {
+            String initialCommitUser,
+            @Nullable RecordAttributesProcessor processor) {
         super(table, storeSinkWriteProvider, initialCommitUser);
+        recordAttributesProcessor = processor;
     }
 
     @Override
@@ -48,5 +54,14 @@ public class DynamicBucketRowWriteOperator
     public void processElement(StreamRecord<Tuple2<InternalRow, Integer>> element)
             throws Exception {
         write.write(element.getValue().f0, element.getValue().f1);
+    }
+
+    @Override
+    public void processRecordAttributes(RecordAttributes recordAttributes) throws Exception {
+        super.processRecordAttributes(recordAttributes);
+        if (recordAttributesProcessor != null) {
+            recordAttributesProcessor.processRecordAttributes(
+                    recordAttributes, new RecordAttributesProcessor.RecordAttributesContext(write));
+        }
     }
 }
