@@ -49,6 +49,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -1944,7 +1945,11 @@ public class CoreOptions implements Serializable {
                 continue;
             }
 
-            String param = options.get(callbackParam.key().replace("#", className));
+            String originParamKey = callbackParam.key().replace("#", className);
+            String param = options.get(originParamKey);
+            if (param == null) {
+                param = options.get(originParamKey.toLowerCase(Locale.ROOT));
+            }
             result.put(className, param);
         }
         return result;
