@@ -38,7 +38,7 @@ case class PaimonStatistics[T <: PaimonBaseScan](scan: T) extends Statistics {
 
   private lazy val scannedTotalSize: Long = rowCount * scan.readSchema().defaultSize
 
-  private lazy val paimonStats = scan.statistics.orElseGet(null)
+  private lazy val paimonStats = if (scan.statistics.isPresent) scan.statistics.get() else null
 
   lazy val paimonStatsEnabled: Boolean = paimonStats != null
 
