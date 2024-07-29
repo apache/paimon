@@ -33,6 +33,7 @@ import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.service.ServiceManager;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.types.RowType;
@@ -79,6 +80,8 @@ public interface FileStore<T> extends Serializable {
     FileStoreWrite<T> newWrite(String commitUser, ManifestCacheFilter manifestFilter);
 
     FileStoreCommit newCommit(String commitUser);
+
+    FileStoreCommit newCommit(String commitUser, List<CommitCallback> callbacks);
 
     SnapshotDeletion newSnapshotDeletion();
 

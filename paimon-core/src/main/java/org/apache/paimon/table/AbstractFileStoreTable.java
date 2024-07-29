@@ -367,8 +367,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         }
 
         return new TableCommitImpl(
-                store().newCommit(commitUser),
-                createCommitCallbacks(commitUser),
+                store().newCommit(commitUser, createCommitCallbacks(commitUser)),
                 snapshotExpire,
                 options.writeOnly() ? null : store().newPartitionExpire(commitUser),
                 options.writeOnly() ? null : store().newTagCreationManager(),
@@ -389,7 +388,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
         if (options.partitionedTableInMetastore()
                 && metastoreClientFactory != null
-                && tableSchema.partitionKeys().size() > 0) {
+                && !tableSchema.partitionKeys().isEmpty()) {
             callbacks.add(new AddPartitionCommitCallback(metastoreClientFactory.create()));
         }
 

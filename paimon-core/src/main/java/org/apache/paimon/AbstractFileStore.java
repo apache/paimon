@@ -43,6 +43,7 @@ import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.sink.CallbackUtils;
+import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.types.RowType;
@@ -55,6 +56,7 @@ import javax.annotation.Nullable;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
@@ -184,6 +186,11 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @Override
     public FileStoreCommitImpl newCommit(String commitUser) {
+        return newCommit(commitUser, Collections.emptyList());
+    }
+
+    @Override
+    public FileStoreCommitImpl newCommit(String commitUser, List<CommitCallback> callbacks) {
         return new FileStoreCommitImpl(
                 fileIO,
                 schemaManager,
@@ -205,7 +212,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.branch(),
                 newStatsFileHandler(),
                 bucketMode(),
-                options.scanManifestParallelism());
+                options.scanManifestParallelism(),
+                callbacks);
     }
 
     @Override
