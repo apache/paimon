@@ -27,8 +27,11 @@ import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.cdc.watermark.CdcWatermarkStrategy;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
+import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -79,7 +82,6 @@ public abstract class SynchronizationActionBase extends ActionBase {
         this.cdcSourceConfig = Configuration.fromMap(cdcSourceConfig);
         this.syncJobHandler = syncJobHandler;
         this.caseSensitive = catalog.caseSensitive();
-
         this.syncJobHandler.registerJdbcDriver();
     }
 
@@ -177,7 +179,8 @@ public abstract class SynchronizationActionBase extends ActionBase {
             DataStream<RichCdcMultiplexRecord> input,
             EventParser.Factory<RichCdcMultiplexRecord> parserFactory);
 
-    protected FileStoreTable alterTableOptions(Identifier identifier, FileStoreTable table) {
+    protected FileStoreTable alterTableSchema(
+            Identifier identifier, FileStoreTable table, Schema paimonSchema) {
         // doesn't support altering bucket here
         Map<String, String> dynamicOptions = new HashMap<>(tableConfig);
         dynamicOptions.remove(CoreOptions.BUCKET.key());
@@ -199,6 +202,14 @@ public abstract class SynchronizationActionBase extends ActionBase {
                         .map(entry -> SchemaChange.setOption(entry.getKey(), entry.getValue()))
                         .collect(Collectors.toList());
 
+        // alter the table schema
+        List<SchemaChange> columnChanges =
+                UpdatedDataFieldsProcessFunction.extractSchemaChanges(
+                        new SchemaManager(table.fileIO(), table.location()),
+                        paimonSchema.fields(),
+                        caseSensitive);
+
+        optionChanges.addAll(columnChanges);
         try {
             catalog.alterTable(identifier, optionChanges, false);
         } catch (Catalog.TableNotExistException
