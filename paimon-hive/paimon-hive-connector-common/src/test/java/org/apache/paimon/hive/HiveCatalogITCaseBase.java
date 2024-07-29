@@ -375,7 +375,7 @@ public abstract class HiveCatalogITCaseBase {
                                 "  'warehouse' = '" + path + "',",
                                 "  'lock.enabled' = 'true',",
                                 "  'table.type' = 'EXTERNAL',",
-                                "  'case-insensitive' = 'true'",
+                                "  'assert-upper-case' = 'true'",
                                 ")"))
                 .await();
         tEnv.executeSql("USE CATALOG paimon_catalog_01").await();
@@ -401,13 +401,13 @@ public abstract class HiveCatalogITCaseBase {
                                 "  'warehouse' = '" + path + "',",
                                 "  'lock.enabled' = 'true',",
                                 "  'table.type' = 'EXTERNAL',",
-                                "  'case-insensitive' = 'false'",
+                                "  'assert-upper-case' = 'false'",
                                 ")"))
                 .await();
         tEnv.executeSql("USE CATALOG paimon_catalog_02").await();
         tEnv.executeSql("USE test_db").await();
 
-        // set case-insensitive = false would throw exception out
+        // set case-sensitive = false would throw exception out
         assertThrows(
                 RuntimeException.class,
                 () ->

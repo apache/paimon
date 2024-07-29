@@ -54,6 +54,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.options.CatalogOptions.ASSERT_UPPER_CASE;
 import static org.apache.paimon.spark.SparkCatalogOptions.DEFAULT_DATABASE;
 import static org.apache.paimon.spark.SparkTypeUtils.toPaimonType;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -80,7 +81,8 @@ public class SparkCatalog extends SparkBaseCatalog {
 
         // add case-insensitive from sql conf
         newOptions.put(
-                caseInsensitive, Boolean.toString(!sessionState.conf().caseSensitiveAnalysis()));
+                ASSERT_UPPER_CASE.key(),
+                Boolean.toString(!sessionState.conf().caseSensitiveAnalysis()));
         options = new CaseInsensitiveStringMap(newOptions);
 
         this.catalog = CatalogFactory.createCatalog(catalogContext);

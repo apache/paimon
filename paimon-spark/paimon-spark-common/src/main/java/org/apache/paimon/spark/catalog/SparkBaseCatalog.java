@@ -35,8 +35,6 @@ public abstract class SparkBaseCatalog
 
     protected String catalogName;
 
-    public static String caseInsensitive = "case-insensitive";
-
     @Override
     public String name() {
         return catalogName;
