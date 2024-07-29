@@ -81,7 +81,7 @@ public class SystemTableLoader {
 
     @Nullable
     public static Table load(String type, FileStoreTable dataTable) {
-        return Optional.ofNullable(SYSTEM_TABLE_LOADERS.get(type))
+        return Optional.ofNullable(SYSTEM_TABLE_LOADERS.get(type.toLowerCase()))
                 .map(f -> f.apply(dataTable))
                 .orElse(null);
     }
