@@ -43,6 +43,7 @@ public class ObjectsCache<K, V> {
     private final SegmentsCache<K> cache;
     private final ObjectSerializer<V> serializer;
     private final BiFunction<K, Long, CloseableIterator<InternalRow>> reader;
+    private final ThreadLocal<InternalRowSerializer> threadLocalRowSerializer;
 
     public ObjectsCache(
             SegmentsCache<K> cache,
@@ -50,6 +51,8 @@ public class ObjectsCache<K, V> {
             BiFunction<K, Long, CloseableIterator<InternalRow>> reader) {
         this.cache = cache;
         this.serializer = serializer;
+        this.threadLocalRowSerializer =
+                ThreadLocal.withInitial(() -> new InternalRowSerializer(serializer.fieldTypes()));
         this.reader = reader;
     }
 
@@ -59,7 +62,7 @@ public class ObjectsCache<K, V> {
             Filter<InternalRow> loadFilter,
             Filter<InternalRow> readFilter)
             throws IOException {
-        InternalRowSerializer rowSerializer = new InternalRowSerializer(serializer.fieldTypes());
+        InternalRowSerializer rowSerializer = threadLocalRowSerializer.get();
         Segments segments =
                 cache.getSegments(key, k -> readSegments(k, fileSize, loadFilter, rowSerializer));
         List<V> entries = new ArrayList<>();
