@@ -275,7 +275,6 @@ public class SnapshotManagerTest {
         assertThat(exception.get()).isNull();
 
         // test throw exception
-        Snapshot.CACHE.invalidateAll();
         thread =
                 new Thread(
                         () -> {

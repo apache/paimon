@@ -78,7 +78,6 @@ class PaimonHiveTestBase extends PaimonSparkTestBase {
   override protected def beforeEach(): Unit = {
     spark.sql(s"USE $sparkCatalogName")
     spark.sql(s"USE $hiveDbName")
-    Snapshot.CACHE.invalidateAll()
   }
 }
 

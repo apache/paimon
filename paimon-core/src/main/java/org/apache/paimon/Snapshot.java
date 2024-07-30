@@ -26,10 +26,7 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.utils.JsonSerdeUtil;
-import org.apache.paimon.utils.Pair;
 
-import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
-import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -40,7 +37,6 @@ import javax.annotation.Nullable;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -70,14 +66,6 @@ import java.util.Objects;
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Snapshot {
-
-    public static final Cache<Pair<FileIO, Path>, Snapshot> CACHE =
-            Caffeine.newBuilder()
-                    .expireAfterAccess(Duration.ofSeconds(60))
-                    .maximumSize(300)
-                    .softValues()
-                    .executor(Runnable::run)
-                    .build();
 
     public static final long FIRST_SNAPSHOT_ID = 1;
 
@@ -468,14 +456,7 @@ public class Snapshot {
     }
 
     private static Snapshot fromPathThrowsException(FileIO fileIO, Path path) throws IOException {
-        Pair<FileIO, Path> cacheKey = Pair.of(fileIO, path);
-        Snapshot snapshot = CACHE.getIfPresent(cacheKey);
-        if (snapshot == null) {
-            String json = fileIO.readFileUtf8(path);
-            snapshot = Snapshot.fromJson(json);
-            CACHE.put(cacheKey, snapshot);
-        }
-        return snapshot;
+        return Snapshot.fromJson(fileIO.readFileUtf8(path));
     }
 
     @Override

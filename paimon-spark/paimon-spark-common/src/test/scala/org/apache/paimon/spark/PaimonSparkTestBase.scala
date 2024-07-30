@@ -100,7 +100,6 @@ class PaimonSparkTestBase
     spark.sql(s"USE paimon")
     spark.sql(s"USE paimon.$dbName0")
     spark.sql(s"DROP TABLE IF EXISTS $tableName0")
-    Snapshot.CACHE.invalidateAll()
   }
 
   protected def withTempDirs(f: (File, File) => Unit): Unit = {
