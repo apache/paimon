@@ -24,7 +24,10 @@ import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.utils.DateTimeUtils;
 
-/** {@link DataTypeFamily#TIMESTAMP} to {@link DataTypeFamily#NUMERIC} cast rule. */
+/**
+ * @link DataTypeRoot#TIMESTAMP_WITHOUT_TIME_ZONE}/{@link
+ *     DataTypeRoot#TIMESTAMP_WITH_LOCAL_TIME_ZONE} to {@link DataTypeFamily#NUMERIC} cast rule.
+ */
 public class TimestampToNumericPrimitiveCastRule extends AbstractCastRule<Timestamp, Number> {
 
     static final TimestampToNumericPrimitiveCastRule INSTANCE =
