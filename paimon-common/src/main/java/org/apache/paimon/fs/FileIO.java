@@ -297,15 +297,17 @@ public interface FileIO extends Serializable {
     /** Read file from {@link #overwriteFileUtf8} file. */
     default Optional<String> readOverwrittenFileUtf8(Path path) throws IOException {
         int retryNumber = 0;
-        IOException exception = null;
+        Exception exception = null;
         while (retryNumber++ < 5) {
             try {
+                return Optional.of(readFileUtf8(path));
+            } catch (FileNotFoundException e) {
+                return Optional.empty();
+            } catch (Exception e) {
                 if (!exists(path)) {
                     return Optional.empty();
                 }
 
-                return Optional.of(readFileUtf8(path));
-            } catch (IOException e) {
                 if (e.getClass()
                         .getName()
                         .endsWith("org.apache.hadoop.fs.s3a.RemoteFileChangedException")) {
@@ -322,7 +324,10 @@ public interface FileIO extends Serializable {
             }
         }
 
-        throw exception;
+        if (exception instanceof IOException) {
+            throw (IOException) exception;
+        }
+        throw new RuntimeException(exception);
     }
 
     // -------------------------------------------------------------------------

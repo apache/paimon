@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.Snapshot
 import org.apache.paimon.catalog.{Catalog, CatalogContext, CatalogFactory, Identifier}
 import org.apache.paimon.options.{CatalogOptions, Options}
 import org.apache.paimon.spark.catalog.Catalogs

@@ -611,10 +611,6 @@ public class SnapshotManager implements Serializable {
 
     private @Nullable Long findLatest(Path dir, String prefix, Function<Long, Path> file)
             throws IOException {
-        if (!fileIO.exists(dir)) {
-            return null;
-        }
-
         Long snapshotId = readHint(LATEST, dir);
         if (snapshotId != null && snapshotId > 0) {
             long nextSnapshot = snapshotId + 1;
@@ -628,10 +624,6 @@ public class SnapshotManager implements Serializable {
 
     private @Nullable Long findEarliest(Path dir, String prefix, Function<Long, Path> file)
             throws IOException {
-        if (!fileIO.exists(dir)) {
-            return null;
-        }
-
         Long snapshotId = readHint(EARLIEST, dir);
         // null and it is the earliest only it exists
         if (snapshotId != null && fileIO.exists(file.apply(snapshotId))) {
