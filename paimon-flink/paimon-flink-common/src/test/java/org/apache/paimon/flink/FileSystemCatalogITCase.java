@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogLock;
 import org.apache.paimon.catalog.CatalogLockContext;
@@ -98,7 +97,7 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
         Identifier identifier = new Identifier(DB_NAME, "t3");
         Catalog catalog =
                 ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
-        Path tablePath = ((AbstractCatalog) catalog).getDataTableLocation(identifier);
+        Path tablePath = new Path(catalog.getTable(identifier).options().get("path"));
         assertThat(tablePath.toString())
                 .isEqualTo(new File(path, DB_NAME + ".db" + File.separator + "t3").toString());
 

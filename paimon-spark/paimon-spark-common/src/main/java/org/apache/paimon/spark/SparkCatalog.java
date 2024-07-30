@@ -220,6 +220,14 @@ public class SparkCatalog extends SparkBaseCatalog {
     }
 
     @Override
+    public void invalidateTable(Identifier ident) {
+        try {
+            catalog.invalidateTable(toIdentifier(ident));
+        } catch (NoSuchTableException ignored) {
+        }
+    }
+
+    @Override
     public SparkTable loadTable(Identifier ident) throws NoSuchTableException {
         return loadSparkTable(ident, Collections.emptyMap());
     }

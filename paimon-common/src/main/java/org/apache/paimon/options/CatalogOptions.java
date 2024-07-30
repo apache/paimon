@@ -91,6 +91,20 @@ public class CatalogOptions {
                     .defaultValue(2)
                     .withDescription("Configure the size of the connection pool.");
 
+    public static final ConfigOption<Boolean> CACHE_ENABLED =
+            key("cache-enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Controls whether the catalog will cache databases, tables and manifests.");
+
+    public static final ConfigOption<Duration> CACHE_EXPIRATION_INTERVAL_MS =
+            key("cache.expiration-interval")
+                    .durationType()
+                    .defaultValue(Duration.ofSeconds(60))
+                    .withDescription(
+                            "Controls the duration for which databases and tables in the catalog are cached.");
+
     public static final ConfigOption<String> LINEAGE_META =
             key("lineage-meta")
                     .stringType()

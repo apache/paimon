@@ -36,9 +36,6 @@ import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.options.OptionsUtils;
-import org.apache.paimon.privilege.FileBasedPrivilegeManager;
-import org.apache.paimon.privilege.PrivilegeManager;
-import org.apache.paimon.privilege.PrivilegedCatalog;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -875,25 +872,12 @@ public class HiveCatalog extends AbstractCatalog {
             throw new UncheckedIOException(e);
         }
 
-        Catalog catalog =
-                new HiveCatalog(
-                        fileIO,
-                        hiveConf,
-                        options.get(HiveCatalogFactory.METASTORE_CLIENT_CLASS),
-                        options,
-                        warehouse.toUri().toString());
-
-        PrivilegeManager privilegeManager =
-                new FileBasedPrivilegeManager(
-                        warehouse.toString(),
-                        fileIO,
-                        context.options().get(PrivilegedCatalog.USER),
-                        context.options().get(PrivilegedCatalog.PASSWORD));
-        if (privilegeManager.privilegeEnabled()) {
-            catalog = new PrivilegedCatalog(catalog, privilegeManager);
-        }
-
-        return catalog;
+        return new HiveCatalog(
+                fileIO,
+                hiveConf,
+                options.get(HiveCatalogFactory.METASTORE_CLIENT_CLASS),
+                options,
+                warehouse.toUri().toString());
     }
 
     public static HiveConf createHiveConf(CatalogContext context) {
