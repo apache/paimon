@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.catalyst.analysis
 
-import org.apache.paimon.spark.{SparkConnectorOptions, SparkTable}
+import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation.isPaimonTable
 import org.apache.paimon.spark.commands.{PaimonAnalyzeTableColumnCommand, PaimonDynamicPartitionOverwriteCommand, PaimonTruncateTableCommand}
@@ -30,7 +30,7 @@ import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, Expression, 
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
-import org.apache.spark.sql.types.{ArrayType, DataType, MapType, StructField, StructType}
+import org.apache.spark.sql.types.{ArrayType, DataType, MapType, StructType}
 
 import scala.collection.JavaConverters._
 
@@ -42,8 +42,7 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
         if !schemaCompatible(
           a.query.output.toStructType,
           table.output.toStructType,
-          paimonTable.partitionKeys().asScala,
-          ignoreNullabilityCheck(paimonTable)) =>
+          paimonTable.partitionKeys().asScala) =>
       val newQuery = resolveQueryColumns(a.query, table.output)
       if (newQuery != a.query) {
         Compatibility.withNewQuery(a, newQuery)
@@ -86,9 +85,6 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
 
     dataSchema.zip(tableSchema).forall {
       case (f1, f2) =>
-        if (!ignoreNullabilityCheck) {
-          checkNullability(f1, f2, partitionCols, parent)
-        }
         f1.name == f2.name && dataTypeCompatible(f1.name, f1.dataType, f2.dataType)
     }
   }
@@ -118,26 +114,6 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
     val cast = Compatibility.cast(expr, dataType, Option(conf.sessionLocalTimeZone))
     cast.setTagValue(Compatibility.castByTableInsertionTag, ())
     cast
-  }
-
-  private def checkNullability(
-      input: StructField,
-      expected: StructField,
-      partitionCols: Seq[String],
-      parent: Array[String] = Array.empty): Unit = {
-    val fullColumnName = (parent ++ Array(input.name)).mkString(".")
-    if (!partitionCols.contains(fullColumnName) && input.nullable && !expected.nullable) {
-      throw new RuntimeException("Cannot write nullable values to non-null column")
-    }
-  }
-
-  private def ignoreNullabilityCheck(paimonTable: FileStoreTable): Boolean = {
-    paimonTable
-      .options()
-      .asScala
-      .get(SparkConnectorOptions.IGNORE_NULLABLE_CHECK.key)
-      .map(_.toBoolean)
-      .getOrElse(SparkConnectorOptions.IGNORE_NULLABLE_CHECK.defaultValue)
   }
 }
 
