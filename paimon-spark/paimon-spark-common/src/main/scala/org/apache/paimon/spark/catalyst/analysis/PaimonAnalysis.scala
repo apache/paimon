@@ -26,11 +26,11 @@ import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.analysis.ResolvedTable
-import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, Cast, Expression, NamedExpression}
+import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, Expression, NamedExpression}
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
-import org.apache.spark.sql.types.{ArrayType, DataType, MapType, StructField, StructType}
+import org.apache.spark.sql.types.{ArrayType, DataType, MapType, StructType}
 
 import scala.collection.JavaConverters._
 
@@ -58,8 +58,8 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
   }
 
   private def schemaCompatible(
-      tableSchema: StructType,
       dataSchema: StructType,
+      tableSchema: StructType,
       partitionCols: Seq[String],
       parent: Array[String] = Array.empty): Boolean = {
 
@@ -82,9 +82,8 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
       }
     }
 
-    tableSchema.zip(dataSchema).forall {
+    dataSchema.zip(tableSchema).forall {
       case (f1, f2) =>
-        checkNullability(f1, f2, partitionCols, parent)
         f1.name == f2.name && dataTypeCompatible(f1.name, f1.dataType, f2.dataType)
     }
   }
@@ -114,17 +113,6 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
     val cast = Compatibility.cast(expr, dataType, Option(conf.sessionLocalTimeZone))
     cast.setTagValue(Compatibility.castByTableInsertionTag, ())
     cast
-  }
-
-  private def checkNullability(
-      input: StructField,
-      expected: StructField,
-      partitionCols: Seq[String],
-      parent: Array[String] = Array.empty): Unit = {
-    val fullColumnName = (parent ++ Array(input.name)).mkString(".")
-    if (!partitionCols.contains(fullColumnName) && input.nullable && !expected.nullable) {
-      throw new RuntimeException("Cannot write nullable values to non-null column")
-    }
   }
 }
 
