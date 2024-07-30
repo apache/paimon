@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
@@ -90,6 +91,8 @@ public abstract class SparkReadTestBase {
 
     @BeforeEach
     public void beforeEach() throws Exception {
+
+        Snapshot.CACHE.invalidateAll();
 
         // Paimon sink
         tablePath1 = new Path(warehousePath, "default.db/t1");

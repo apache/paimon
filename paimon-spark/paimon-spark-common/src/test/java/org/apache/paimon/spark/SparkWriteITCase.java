@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions;
 
@@ -68,6 +69,7 @@ public class SparkWriteITCase {
     @AfterEach
     public void afterEach() {
         spark.sql("DROP TABLE T");
+        Snapshot.CACHE.invalidateAll();
     }
 
     @Test
