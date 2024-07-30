@@ -60,6 +60,7 @@ import java.util.Map;
 import java.util.Objects;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 
 /** A {@link Table} for showing schemas of table. */
 public class SchemasTable implements ReadonlyTable {
@@ -83,14 +84,20 @@ public class SchemasTable implements ReadonlyTable {
 
     private final FileIO fileIO;
     private final Path location;
+    private final String branch;
 
     public SchemasTable(FileStoreTable dataTable) {
         this(dataTable.fileIO(), dataTable.location());
     }
 
     public SchemasTable(FileIO fileIO, Path location) {
+        this(fileIO, location, DEFAULT_MAIN_BRANCH);
+    }
+
+    public SchemasTable(FileIO fileIO, Path location, String branchName) {
         this.fileIO = fileIO;
         this.location = location;
+        this.branch = branchName;
     }
 
     @Override
@@ -120,7 +127,7 @@ public class SchemasTable implements ReadonlyTable {
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new SchemasTable(fileIO, location);
+        return new SchemasTable(fileIO, location, branch);
     }
 
     private class SchemasScan extends ReadOnceTableScan {
@@ -137,7 +144,7 @@ public class SchemasTable implements ReadonlyTable {
     }
 
     /** {@link Split} implementation for {@link SchemasTable}. */
-    private static class SchemasSplit extends SingletonSplit {
+    private class SchemasSplit extends SingletonSplit {
 
         private static final long serialVersionUID = 1L;
 
@@ -165,7 +172,7 @@ public class SchemasTable implements ReadonlyTable {
     }
 
     /** {@link TableRead} implementation for {@link SchemasTable}. */
-    private static class SchemasRead implements InnerTableRead {
+    private class SchemasRead implements InnerTableRead {
 
         private final FileIO fileIO;
         private int[][] projection;
@@ -197,7 +204,7 @@ public class SchemasTable implements ReadonlyTable {
             }
             Path location = ((SchemasSplit) split).location;
             Iterator<TableSchema> schemas =
-                    new SchemaManager(fileIO, location).listAll().iterator();
+                    new SchemaManager(fileIO, location, branch).listAll().iterator();
             Iterator<InternalRow> rows = Iterators.transform(schemas, this::toRow);
             if (projection != null) {
                 rows =
