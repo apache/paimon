@@ -486,6 +486,57 @@ public abstract class HiveCatalogITCaseBase {
         hiveShell.execute("SET paimon.branch=null");
     }
 
+    @Test
+    public void testFlinkAlterBranchAndHiveRead() throws Exception {
+        tEnv.executeSql(
+                        "CREATE TABLE t ( "
+                                + "a INT, "
+                                + "b STRING"
+                                + ") WITH ( 'file.format' = 'avro' )")
+                .await();
+        tEnv.executeSql("Call sys.create_branch('test_db.t','b1')").await();
+        tEnv.executeSql("INSERT INTO t$branch_b1 VALUES (1,'x1'), (2,'x2')").await();
+        tEnv.executeSql("INSERT INTO t VALUES (3,'x3')").await();
+        hiveShell.execute("SET paimon.branch=b1");
+        assertThat(hiveShell.executeQuery("SELECT * FROM t"))
+                .isEqualTo(Arrays.asList("1\tx1", "2\tx2"));
+        hiveShell.execute("SET paimon.branch=null");
+        tEnv.executeSql("ALTER TABLE `t$branch_b1` ADD (c INT)").await();
+        tEnv.executeSql(
+                        "INSERT INTO `t$branch_b1` VALUES "
+                                + "(1, 'x10', 100), (2, 'x11', 200), (2, 'x12', 400)")
+                .await();
+        assertThat(collectString("SELECT * FROM t$branch_b1"))
+                .containsExactlyInAnyOrder(
+                        "+I[1, x10, 100]",
+                        "+I[1, x1, null]",
+                        "+I[2, x2, null]",
+                        "+I[2, x11, 200]",
+                        "+I[2, x12, 400]");
+        assertThat(collectString("SELECT * FROM t")).containsExactlyInAnyOrder("+I[3, x3]");
+    }
+
+    @Test
+    public void testHiveCreateAndFlinkCreateBranchAndHiveRead() throws Exception {
+        hiveShell.execute("SET hive.metastore.warehouse.dir=" + path);
+        hiveShell.execute(
+                "CREATE TABLE hive_test_table ( a INT, b STRING ) "
+                        + "STORED BY '"
+                        + PaimonStorageHandler.class.getName()
+                        + "'"
+                        + "TBLPROPERTIES ("
+                        + "  'primary-key'='a'"
+                        + ")");
+        tEnv.executeSql("Call sys.create_branch('test_db.hive_test_table','b1')").await();
+        tEnv.executeSql("INSERT INTO hive_test_table$branch_b1 VALUES (1,'x1'), (2,'x2')").await();
+        tEnv.executeSql("INSERT INTO hive_test_table VALUES (3,'x3')").await();
+        hiveShell.execute("SET paimon.branch=b1");
+        assertThat(hiveShell.executeQuery("SELECT * FROM hive_test_table"))
+                .isEqualTo(Arrays.asList("1\tx1", "2\tx2"));
+        hiveShell.execute("SET paimon.branch=null");
+        assertThat(hiveShell.executeQuery("SELECT * FROM hive_test_table"))
+                .isEqualTo(Collections.singletonList("3\tx3"));
+    }
     /**
      * Test flink writing and hive reading to compare partitions and non-partitions table results.
      */
@@ -557,26 +608,6 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql("INSERT INTO hive_test_table VALUES (1, 'Apache'), (2, 'Paimon')");
         List<Row> actual = collect("SELECT * FROM hive_test_table");
         assertThat(actual).contains(Row.of(1, "Apache"), Row.of(2, "Paimon"));
-    }
-
-    @Test
-    public void testBranchHiveCreateAndFlinkInsertRead() throws Exception {
-        hiveShell.execute("SET hive.metastore.warehouse.dir=" + path);
-        hiveShell.execute(
-                "CREATE TABLE hive_test_table ( a INT, b STRING ) "
-                        + "STORED BY '"
-                        + PaimonStorageHandler.class.getName()
-                        + "'"
-                        + "TBLPROPERTIES ("
-                        + "  'primary-key'='a'"
-                        + ")");
-        tEnv.executeSql("Call sys.create_branch('test_db.hive_test_table','b1')").await();
-        tEnv.executeSql("INSERT INTO hive_test_table$branch_b1 VALUES (1,'x1'), (2,'x2')").await();
-        tEnv.executeSql("INSERT INTO hive_test_table VALUES (3,'x3')").await();
-        hiveShell.execute("SET paimon.branch=b1");
-        assertThat(hiveShell.executeQuery("SELECT * FROM hive_test_table"))
-                .isEqualTo(Arrays.asList("1\tx1", "2\tx2"));
-        hiveShell.execute("SET paimon.branch=null");
     }
 
     @Test
@@ -1506,6 +1537,16 @@ public abstract class HiveCatalogITCaseBase {
         try (CloseableIterator<Row> it = tEnv.executeSql(sql).collect()) {
             while (it.hasNext()) {
                 result.add(it.next());
+            }
+        }
+        return result;
+    }
+
+    private List<String> collectString(String sql) throws Exception {
+        List<String> result = new ArrayList<>();
+        try (CloseableIterator<Row> it = tEnv.executeSql(sql).collect()) {
+            while (it.hasNext()) {
+                result.add(it.next().toString());
             }
         }
         return result;
