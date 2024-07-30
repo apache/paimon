@@ -467,7 +467,7 @@ public class SchemaManagerTest {
 
         // set immutable options and set primary keys
         manager.commitChanges(
-                SchemaChange.setOption("primary-key", "f0,f1"),
+                SchemaChange.setOption("primary-key", "f0, f1"),
                 SchemaChange.setOption("partition", "f0"),
                 SchemaChange.setOption("bucket", "2"),
                 SchemaChange.setOption("merge-engine", "first-row"));
