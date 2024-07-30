@@ -244,6 +244,16 @@ public interface Catalog extends AutoCloseable {
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException;
 
     /**
+     * Invalidate cached table metadata for an {@link Identifier identifier}.
+     *
+     * <p>If the table is already loaded or cached, drop cached data. If the table does not exist or
+     * is not cached, do nothing. Calling this method should not query remote services.
+     *
+     * @param identifier a table identifier
+     */
+    default void invalidateTable(Identifier identifier) {}
+
+    /**
      * Drop the partition of the specify table.
      *
      * @param identifier path of the table to drop partition

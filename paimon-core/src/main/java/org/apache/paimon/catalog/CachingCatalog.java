@@ -168,20 +168,24 @@ public class CachingCatalog extends DelegateCatalog {
 
     private class TableInvalidatingRemovalListener implements RemovalListener<Identifier, Table> {
         @Override
-        public void onRemoval(
-                Identifier tableIdentifier, Table table, @NonNull RemovalCause cause) {
-            LOG.debug("Evicted {} from the table cache ({})", tableIdentifier, cause);
+        public void onRemoval(Identifier identifier, Table table, @NonNull RemovalCause cause) {
+            LOG.debug("Evicted {} from the table cache ({})", identifier, cause);
             if (RemovalCause.EXPIRED.equals(cause)) {
-                if (!isSpecifiedSystemTable(tableIdentifier)) {
-                    tableCache.invalidateAll(allSystemTables(tableIdentifier));
-                }
+                tryInvalidateSysTables(identifier);
             }
         }
     }
 
-    private void invalidateTable(Identifier identifier) {
+    @Override
+    public void invalidateTable(Identifier identifier) {
         tableCache.invalidate(identifier);
-        tableCache.invalidateAll(allSystemTables(identifier));
+        tryInvalidateSysTables(identifier);
+    }
+
+    private void tryInvalidateSysTables(Identifier identifier) {
+        if (!isSpecifiedSystemTable(identifier)) {
+            tableCache.invalidateAll(allSystemTables(identifier));
+        }
     }
 
     private static Iterable<Identifier> allSystemTables(Identifier ident) {
