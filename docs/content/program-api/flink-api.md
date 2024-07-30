@@ -69,6 +69,7 @@ See [DataStream API Integration](https://nightlies.apache.org/flink/flink-docs-s
 ```java
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.sink.FlinkSinkBuilder;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.Table;
@@ -129,6 +130,7 @@ public class WriteToTable {
 ```java
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.source.FlinkSourceBuilder;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.Table;
@@ -185,6 +187,7 @@ Here is an example to use `RichCdcSinkBuilder` API:
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
+import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.sink.cdc.RichCdcRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcSinkBuilder;
