@@ -40,6 +40,7 @@ import org.apache.spark.sql.connector.catalog.TableChange;
 import org.apache.spark.sql.connector.expressions.FieldReference;
 import org.apache.spark.sql.connector.expressions.NamedReference;
 import org.apache.spark.sql.connector.expressions.Transform;
+import org.apache.spark.sql.internal.SessionState;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
@@ -53,6 +54,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.options.CatalogOptions.ASSERT_UPPER_CASE;
 import static org.apache.paimon.spark.SparkCatalogOptions.DEFAULT_DATABASE;
 import static org.apache.paimon.spark.SparkTypeUtils.toPaimonType;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -71,10 +73,18 @@ public class SparkCatalog extends SparkBaseCatalog {
     @Override
     public void initialize(String name, CaseInsensitiveStringMap options) {
         this.catalogName = name;
+        Map<String, String> newOptions = new HashMap<>(options.asCaseSensitiveMap());
+        SessionState sessionState = SparkSession.active().sessionState();
+
         CatalogContext catalogContext =
-                CatalogContext.create(
-                        Options.fromMap(options),
-                        SparkSession.active().sessionState().newHadoopConf());
+                CatalogContext.create(Options.fromMap(options), sessionState.newHadoopConf());
+
+        // add case-insensitive from sql conf
+        newOptions.put(
+                ASSERT_UPPER_CASE.key(),
+                Boolean.toString(!sessionState.conf().caseSensitiveAnalysis()));
+        options = new CaseInsensitiveStringMap(newOptions);
+
         this.catalog = CatalogFactory.createCatalog(catalogContext);
         this.defaultDatabase =
                 options.getOrDefault(DEFAULT_DATABASE.key(), DEFAULT_DATABASE.defaultValue());

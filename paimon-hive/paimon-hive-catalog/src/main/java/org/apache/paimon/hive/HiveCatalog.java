@@ -91,6 +91,7 @@ import static org.apache.paimon.hive.HiveCatalogOptions.HADOOP_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.HIVE_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalogOptions.LOCATION_IN_PROPERTIES;
+import static org.apache.paimon.options.CatalogOptions.ASSERT_UPPER_CASE;
 import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -567,7 +568,7 @@ public class HiveCatalog extends AbstractCatalog {
 
     @Override
     public boolean caseSensitive() {
-        return false;
+        return catalogOptions.get(ASSERT_UPPER_CASE);
     }
 
     @Override
