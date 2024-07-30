@@ -19,8 +19,8 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.hive.TestHiveMetastore
-
 import org.apache.hadoop.conf.Configuration
+import org.apache.paimon.Snapshot
 import org.apache.spark.SparkConf
 import org.apache.spark.paimon.Utils
 
@@ -77,6 +77,7 @@ class PaimonHiveTestBase extends PaimonSparkTestBase {
   override protected def beforeEach(): Unit = {
     spark.sql(s"USE $sparkCatalogName")
     spark.sql(s"USE $hiveDbName")
+    Snapshot.CACHE.invalidateAll()
   }
 }
 
