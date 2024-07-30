@@ -300,12 +300,14 @@ public interface FileIO extends Serializable {
         IOException exception = null;
         while (retryNumber++ < 5) {
             try {
+                return Optional.of(readFileUtf8(path));
+            } catch (FileNotFoundException e) {
+                return Optional.empty();
+            } catch (IOException e) {
                 if (!exists(path)) {
                     return Optional.empty();
                 }
 
-                return Optional.of(readFileUtf8(path));
-            } catch (IOException e) {
                 if (e.getClass()
                         .getName()
                         .endsWith("org.apache.hadoop.fs.s3a.RemoteFileChangedException")) {

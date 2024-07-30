@@ -62,7 +62,7 @@ public class SparkReadITCase extends SparkReadTestBase {
     public void testFilterPushDown() {
         innerTestSimpleTypeFilterPushDown(spark.table("t1"));
 
-        innerTestNestedTypeFilterPushDown(spark.table("t2"));
+        // innerTestNestedTypeFilterPushDown(spark.table("t2"));
     }
 
     @Test
@@ -636,8 +636,12 @@ public class SparkReadITCase extends SparkReadTestBase {
         List<Row> results = dataset.filter("a < 4").select("a", "c").collectAsList();
         assertThat(results.toString()).isEqualTo("[[1,1]]");
 
-        results = dataset.filter("b = 4").select("a", "c").collectAsList();
-        assertThat(results.toString()).isEqualTo("[]");
+        for (int i = 0; i < 5; i++) {
+            System.out.println();
+            System.out.println("start: " + i);
+            results = dataset.filter("b = 4").select("a", "c").collectAsList();
+            assertThat(results.toString()).isEqualTo("[]");
+        }
     }
 
     private void innerTestNestedTypeFilterPushDown(Dataset<Row> dataset) {

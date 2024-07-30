@@ -68,11 +68,13 @@ public class LocalFileIO implements FileIO {
 
     @Override
     public SeekableInputStream newInputStream(Path path) throws IOException {
+        System.out.println("newInputStream: " + path);
         return new LocalSeekableInputStream(toFile(path));
     }
 
     @Override
     public PositionOutputStream newOutputStream(Path path, boolean overwrite) throws IOException {
+        System.out.println("newOutputStream: " + path);
         if (exists(path) && !overwrite) {
             throw new FileAlreadyExistsException("File already exists: " + path);
         }
@@ -87,6 +89,7 @@ public class LocalFileIO implements FileIO {
 
     @Override
     public FileStatus getFileStatus(Path path) throws IOException {
+        System.out.println("getFileStatus: " + path);
         final File file = toFile(path);
         if (file.exists()) {
             return new LocalFileStatus(file, SCHEME);
@@ -103,6 +106,7 @@ public class LocalFileIO implements FileIO {
 
     @Override
     public FileStatus[] listStatus(Path path) throws IOException {
+        System.out.println("listStatus: " + path);
         final File file = toFile(path);
         FileStatus[] results = new FileStatus[0];
 
@@ -133,11 +137,13 @@ public class LocalFileIO implements FileIO {
 
     @Override
     public boolean exists(Path path) throws IOException {
+        System.out.println("exists: " + path);
         return toFile(path).exists();
     }
 
     @Override
     public boolean delete(Path path, boolean recursive) throws IOException {
+        System.out.println("delete: " + path);
         File file = toFile(path);
         if (file.isFile()) {
             return file.delete();
@@ -175,6 +181,7 @@ public class LocalFileIO implements FileIO {
 
     @Override
     public boolean mkdirs(Path path) throws IOException {
+        System.out.println("mkdirs: " + path);
         return mkdirsInternal(toFile(path));
     }
 
@@ -196,6 +203,7 @@ public class LocalFileIO implements FileIO {
 
     @Override
     public boolean rename(Path src, Path dst) throws IOException {
+        System.out.println("rename: " + src);
         File srcFile = toFile(src);
         File dstFile = toFile(dst);
         File dstParent = dstFile.getParentFile();

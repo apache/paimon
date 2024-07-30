@@ -26,7 +26,11 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.utils.JsonSerdeUtil;
+import org.apache.paimon.utils.Pair;
 
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
+import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -37,6 +41,7 @@ import javax.annotation.Nullable;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -66,6 +71,16 @@ import java.util.Objects;
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Snapshot {
+
+    private static final Cache<Pair<FileIO, Path>, Snapshot> SNAPSHOT_CACHE =
+            Caffeine.newBuilder()
+                    // estimated maximum planning/startup time
+                    .expireAfterAccess(Duration.ofMinutes(5))
+                    // estimated cache size
+                    .maximumSize(300)
+                    .softValues()
+                    .executor(MoreExecutors.directExecutor())
+                    .build();
 
     public static final long FIRST_SNAPSHOT_ID = 1;
 
@@ -440,8 +455,7 @@ public class Snapshot {
 
     public static Snapshot fromPath(FileIO fileIO, Path path) {
         try {
-            String json = fileIO.readFileUtf8(path);
-            return Snapshot.fromJson(json);
+            return fromPathThrowsException(fileIO, path);
         } catch (IOException e) {
             throw new RuntimeException("Fails to read snapshot from path " + path, e);
         }
@@ -450,11 +464,21 @@ public class Snapshot {
     @Nullable
     public static Snapshot safelyFromPath(FileIO fileIO, Path path) throws IOException {
         try {
-            String json = fileIO.readFileUtf8(path);
-            return Snapshot.fromJson(json);
+            return fromPathThrowsException(fileIO, path);
         } catch (FileNotFoundException e) {
             return null;
         }
+    }
+
+    private static Snapshot fromPathThrowsException(FileIO fileIO, Path path) throws IOException {
+        Pair<FileIO, Path> cacheKey = Pair.of(fileIO, path);
+        Snapshot snapshot = SNAPSHOT_CACHE.getIfPresent(cacheKey);
+        if (snapshot == null) {
+            String json = fileIO.readFileUtf8(path);
+            snapshot = Snapshot.fromJson(json);
+            SNAPSHOT_CACHE.put(cacheKey, snapshot);
+        }
+        return snapshot;
     }
 
     @Override
