@@ -27,6 +27,11 @@ import java.time.Duration;
 
 /** Options for flink catalog. */
 public class FlinkCatalogOptions {
+    @ExcludeFromDocumentation("Only for internal use")
+    public static final ConfigOption<String> CATALOG_TYPE =
+            ConfigOptions.key("catalog-type")
+                    .stringType()
+                    .defaultValue(FlinkCatalogFactory.IDENTIFIER);
 
     public static final ConfigOption<String> DEFAULT_DATABASE =
             ConfigOptions.key("default-database")

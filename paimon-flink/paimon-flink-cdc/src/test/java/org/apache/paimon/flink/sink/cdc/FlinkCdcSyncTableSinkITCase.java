@@ -158,7 +158,7 @@ public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
         Options catalogOptions = new Options();
         catalogOptions.set("warehouse", tempDir.toString());
         Catalog.Loader catalogLoader =
-                () -> FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
+                () -> FlinkCatalogFactory.INSTANCE.createPaimonCatalog(catalogOptions);
 
         new CdcSinkBuilder<TestCdcEvent>()
                 .withInput(source)
