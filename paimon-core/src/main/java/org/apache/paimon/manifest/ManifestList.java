@@ -22,6 +22,7 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.ObjectsFile;
@@ -46,7 +47,7 @@ public class ManifestList extends ObjectsFile<ManifestFileMeta> {
             FormatWriterFactory writerFactory,
             String compression,
             PathFactory pathFactory,
-            @Nullable SegmentsCache<String> cache) {
+            @Nullable SegmentsCache<Path> cache) {
         super(fileIO, serializer, readerFactory, writerFactory, compression, pathFactory, cache);
     }
 
@@ -66,14 +67,14 @@ public class ManifestList extends ObjectsFile<ManifestFileMeta> {
         private final FileFormat fileFormat;
         private final String compression;
         private final FileStorePathFactory pathFactory;
-        @Nullable private final SegmentsCache<String> cache;
+        @Nullable private final SegmentsCache<Path> cache;
 
         public Factory(
                 FileIO fileIO,
                 FileFormat fileFormat,
                 String compression,
                 FileStorePathFactory pathFactory,
-                @Nullable SegmentsCache<String> cache) {
+                @Nullable SegmentsCache<Path> cache) {
             this.fileIO = fileIO;
             this.fileFormat = fileFormat;
             this.compression = compression;

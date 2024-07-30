@@ -48,7 +48,7 @@ public class ObjectsFile<T> {
     protected final String compression;
     protected final PathFactory pathFactory;
 
-    @Nullable private final ObjectsCache<String, T> cache;
+    @Nullable private final ObjectsCache<Path, T> cache;
 
     public ObjectsFile(
             FileIO fileIO,
@@ -57,7 +57,7 @@ public class ObjectsFile<T> {
             FormatWriterFactory writerFactory,
             String compression,
             PathFactory pathFactory,
-            @Nullable SegmentsCache<String> cache) {
+            @Nullable SegmentsCache<Path> cache) {
         this.fileIO = fileIO;
         this.serializer = serializer;
         this.readerFactory = readerFactory;
@@ -123,12 +123,13 @@ public class ObjectsFile<T> {
             Filter<InternalRow> loadFilter,
             Filter<InternalRow> readFilter)
             throws IOException {
+        Path path = pathFactory.toPath(fileName);
         if (cache != null) {
-            return cache.read(fileName, fileSize, loadFilter, readFilter);
+            return cache.read(path, fileSize, loadFilter, readFilter);
         }
 
         RecordReader<InternalRow> reader =
-                createFormatReader(fileIO, readerFactory, pathFactory.toPath(fileName), fileSize);
+                createFormatReader(fileIO, readerFactory, path, fileSize);
         if (readFilter != Filter.ALWAYS_TRUE) {
             reader = reader.filter(readFilter);
         }
@@ -163,11 +164,9 @@ public class ObjectsFile<T> {
         }
     }
 
-    private CloseableIterator<InternalRow> createIterator(
-            String fileName, @Nullable Long fileSize) {
+    private CloseableIterator<InternalRow> createIterator(Path file, @Nullable Long fileSize) {
         try {
-            return createFormatReader(fileIO, readerFactory, pathFactory.toPath(fileName), fileSize)
-                    .toCloseableIterator();
+            return createFormatReader(fileIO, readerFactory, file, fileSize).toCloseableIterator();
         } catch (IOException e) {
             throw new RuntimeException(e);
         }

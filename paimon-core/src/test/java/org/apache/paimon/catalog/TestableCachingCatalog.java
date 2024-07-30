@@ -18,6 +18,7 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.table.Table;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
@@ -35,7 +36,7 @@ public class TestableCachingCatalog extends CachingCatalog {
     private final Duration cacheExpirationInterval;
 
     public TestableCachingCatalog(Catalog catalog, Duration expirationInterval, Ticker ticker) {
-        super(catalog, expirationInterval, ticker);
+        super(catalog, expirationInterval, MemorySize.ZERO, ticker);
         this.cacheExpirationInterval = expirationInterval;
     }
 

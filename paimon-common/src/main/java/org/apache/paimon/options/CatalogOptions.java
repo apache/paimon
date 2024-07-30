@@ -105,6 +105,12 @@ public class CatalogOptions {
                     .withDescription(
                             "Controls the duration for which databases and tables in the catalog are cached.");
 
+    public static final ConfigOption<MemorySize> CACHE_MANIFEST_MAX_MEMORY =
+            key("cache.manifest-max-memory")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(0))
+                    .withDescription("Controls the maximum memory to cache manifest content.");
+
     public static final ConfigOption<String> LINEAGE_META =
             key("lineage-meta")
                     .stringType()

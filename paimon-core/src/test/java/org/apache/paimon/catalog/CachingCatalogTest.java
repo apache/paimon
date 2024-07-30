@@ -18,9 +18,17 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.FakeTicker;
@@ -41,6 +49,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.apache.paimon.data.BinaryString.fromString;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -284,5 +293,39 @@ class CachingCatalogTest extends CatalogTestBase {
         return SystemTableLoader.SYSTEM_TABLES.stream()
                 .map(type -> Identifier.fromString(tableIdent.getFullName() + "$" + type))
                 .toArray(Identifier[]::new);
+    }
+
+    @Test
+    public void testManifestCache() throws Exception {
+        Catalog catalog =
+                new CachingCatalog(this.catalog, Duration.ofSeconds(10), MemorySize.ofMebiBytes(1));
+        Identifier tableIdent = new Identifier("db", "tbl");
+        catalog.createTable(new Identifier("db", "tbl"), DEFAULT_TABLE_SCHEMA, false);
+
+        // write
+        Table table = catalog.getTable(tableIdent);
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(1, fromString("1"), fromString("1")));
+            write.write(GenericRow.of(2, fromString("2"), fromString("2")));
+            commit.commit(write.prepareCommit());
+        }
+
+        // repeat read
+        for (int i = 0; i < 5; i++) {
+            table = catalog.getTable(tableIdent);
+            ReadBuilder readBuilder = table.newReadBuilder();
+            TableScan scan = readBuilder.newScan();
+            TableRead read = readBuilder.newRead();
+            read.createReader(scan.plan()).forEachRemaining(r -> {});
+
+            // delete manifest to validate cache
+            if (i == 0) {
+                Path manifestPath = new Path(table.options().get("path"), "manifest");
+                assertThat(fileIO.exists(manifestPath)).isTrue();
+                fileIO.deleteDirectoryQuietly(manifestPath);
+            }
+        }
     }
 }

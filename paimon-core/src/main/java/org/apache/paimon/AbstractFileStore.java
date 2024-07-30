@@ -21,6 +21,7 @@ package org.apache.paimon;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.HashIndexFile;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.IndexManifestFile;
@@ -74,7 +75,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     protected final RowType partitionType;
     private final CatalogEnvironment catalogEnvironment;
 
-    @Nullable private final SegmentsCache<String> writeManifestCache;
+    @Nullable private final SegmentsCache<Path> writeManifestCache;
+    @Nullable private SegmentsCache<Path> readManifestCache;
 
     protected AbstractFileStore(
             FileIO fileIO,
@@ -89,11 +91,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         this.options = options;
         this.partitionType = partitionType;
         this.catalogEnvironment = catalogEnvironment;
-        MemorySize writeManifestCache = options.writeManifestCache();
         this.writeManifestCache =
-                writeManifestCache.getBytes() == 0
-                        ? null
-                        : new SegmentsCache<>(options.pageSize(), writeManifestCache);
+                SegmentsCache.create(options.pageSize(), options.writeManifestCache());
     }
 
     @Override
@@ -124,7 +123,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.manifestCompression(),
                 pathFactory(),
                 options.manifestTargetSize().getBytes(),
-                forWrite ? writeManifestCache : null);
+                forWrite ? writeManifestCache : readManifestCache);
     }
 
     @Override
@@ -138,7 +137,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.manifestFormat(),
                 options.manifestCompression(),
                 pathFactory(),
-                forWrite ? writeManifestCache : null);
+                forWrite ? writeManifestCache : readManifestCache);
     }
 
     protected IndexManifestFile.Factory indexManifestFileFactory() {
@@ -313,5 +312,10 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     @Override
     public ServiceManager newServiceManager() {
         return new ServiceManager(fileIO, options.path());
+    }
+
+    @Override
+    public void setManifestCache(SegmentsCache<Path> manifestCache) {
+        this.readManifestCache = manifestCache;
     }
 }

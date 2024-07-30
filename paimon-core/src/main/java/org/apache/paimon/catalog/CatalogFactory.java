@@ -34,6 +34,7 @@ import java.io.UncheckedIOException;
 
 import static org.apache.paimon.options.CatalogOptions.CACHE_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.CACHE_EXPIRATION_INTERVAL_MS;
+import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_MAX_MEMORY;
 import static org.apache.paimon.options.CatalogOptions.METASTORE;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
 
@@ -76,7 +77,11 @@ public interface CatalogFactory extends Factory {
 
         Options options = context.options();
         if (options.get(CACHE_ENABLED)) {
-            catalog = new CachingCatalog(catalog, options.get(CACHE_EXPIRATION_INTERVAL_MS));
+            catalog =
+                    new CachingCatalog(
+                            catalog,
+                            options.get(CACHE_EXPIRATION_INTERVAL_MS),
+                            options.get(CACHE_MANIFEST_MAX_MEMORY));
         }
 
         PrivilegeManager privilegeManager =

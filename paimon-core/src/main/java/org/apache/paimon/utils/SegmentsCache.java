@@ -23,9 +23,12 @@ import org.apache.paimon.options.MemorySize;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
-import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
+
+import javax.annotation.Nullable;
 
 import java.util.function.Function;
+
+import static org.apache.paimon.CoreOptions.PAGE_SIZE;
 
 /** Cache {@link Segments}. */
 public class SegmentsCache<T> {
@@ -39,9 +42,10 @@ public class SegmentsCache<T> {
         this.pageSize = pageSize;
         this.cache =
                 Caffeine.newBuilder()
+                        .softValues()
                         .weigher(this::weigh)
                         .maximumWeight(maxMemorySize.getBytes())
-                        .executor(MoreExecutors.directExecutor())
+                        .executor(Runnable::run)
                         .build();
     }
 
@@ -55,5 +59,19 @@ public class SegmentsCache<T> {
 
     private int weigh(T cacheKey, Segments segments) {
         return OBJECT_MEMORY_SIZE + segments.segments().size() * pageSize;
+    }
+
+    @Nullable
+    public static <T> SegmentsCache<T> create(MemorySize maxMemorySize) {
+        return create((int) PAGE_SIZE.defaultValue().getBytes(), maxMemorySize);
+    }
+
+    @Nullable
+    public static <T> SegmentsCache<T> create(int pageSize, MemorySize maxMemorySize) {
+        if (maxMemorySize.getBytes() == 0) {
+            return null;
+        }
+
+        return new SegmentsCache<>(pageSize, maxMemorySize);
     }
 }
