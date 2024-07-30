@@ -120,9 +120,9 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
 
     @Override
     protected void validateCaseSensitivity() {
-        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Database", database);
-        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Table prefix", tablePrefix);
-        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Table suffix", tableSuffix);
+        AbstractCatalog.validateCaseInsensitive(allowUpperCase, "Database", database);
+        AbstractCatalog.validateCaseInsensitive(allowUpperCase, "Table prefix", tablePrefix);
+        AbstractCatalog.validateCaseInsensitive(allowUpperCase, "Table suffix", tableSuffix);
     }
 
     @Override
@@ -135,12 +135,16 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
     protected EventParser.Factory<RichCdcMultiplexRecord> buildEventParserFactory() {
         NewTableSchemaBuilder schemaBuilder =
                 new NewTableSchemaBuilder(
-                        tableConfig, caseSensitive, partitionKeys, primaryKeys, metadataConverters);
+                        tableConfig,
+                        allowUpperCase,
+                        partitionKeys,
+                        primaryKeys,
+                        metadataConverters);
         Pattern includingPattern = Pattern.compile(includingTables);
         Pattern excludingPattern =
                 excludingTables == null ? null : Pattern.compile(excludingTables);
         TableNameConverter tableNameConverter =
-                new TableNameConverter(caseSensitive, mergeShards, tablePrefix, tableSuffix);
+                new TableNameConverter(allowUpperCase, mergeShards, tablePrefix, tableSuffix);
         Set<String> createdTables;
         try {
             createdTables = new HashSet<>(catalog.listTables(database));

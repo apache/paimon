@@ -111,10 +111,11 @@ public class CatalogOptions {
                                                     "\"custom\": You can implement LineageMetaFactory and LineageMeta to store lineage information in customized storage."))
                                     .build());
 
-    public static final ConfigOption<Boolean> ASSERT_UPPER_CASE =
-            ConfigOptions.key("assert-upper-case")
+    public static final ConfigOption<Boolean> ALLOW_UPPER_CASE =
+            ConfigOptions.key("allow-upper-case")
                     .booleanType()
-                    .defaultValue(false)
+                    .noDefaultValue()
                     .withDescription(
-                            "If column name contains upper-case during create table would not support when spark.sql.caseSensitive=true, you can set spark.sql.caseSensitive=false to support upper-case condition. ");
+                            "Indicates whether this catalog allow upper case, "
+                                    + "its default value depends on the implementation of the specific catalog.");
 }

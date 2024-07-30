@@ -176,7 +176,7 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
-    public boolean caseSensitive() {
+    public boolean allowUpperCase() {
         return catalogOptions.get(CASE_SENSITIVE);
     }
 }

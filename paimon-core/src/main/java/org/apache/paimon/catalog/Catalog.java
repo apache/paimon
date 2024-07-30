@@ -262,10 +262,8 @@ public interface Catalog extends AutoCloseable {
         alterTable(identifier, Collections.singletonList(change), ignoreIfNotExists);
     }
 
-    /** Return a boolean that indicates whether this catalog is case-sensitive. */
-    default boolean caseSensitive() {
-        return true;
-    }
+    /** Return a boolean that indicates whether this catalog allow upper case. */
+    boolean allowUpperCase();
 
     default void repairCatalog() {
         throw new UnsupportedOperationException();

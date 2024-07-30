@@ -107,15 +107,15 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
                 tableConfig,
                 retrievedSchema,
                 metadataConverters,
-                caseSensitive,
+                allowUpperCase,
                 true,
                 true);
     }
 
     @Override
     protected void validateCaseSensitivity() {
-        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Database", database);
-        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Table", table);
+        AbstractCatalog.validateCaseInsensitive(allowUpperCase, "Database", database);
+        AbstractCatalog.validateCaseInsensitive(allowUpperCase, "Table", table);
     }
 
     @Override
@@ -142,7 +142,7 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
                         buildComputedColumns(
                                 computedColumnArgs,
                                 fileStoreTable.schema().fields(),
-                                caseSensitive);
+                                allowUpperCase);
                 // check partition keys and primary keys in case that user specified them
                 checkConstraints();
             }
@@ -162,7 +162,7 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
 
     @Override
     protected EventParser.Factory<RichCdcMultiplexRecord> buildEventParserFactory() {
-        boolean caseSensitive = this.caseSensitive;
+        boolean caseSensitive = this.allowUpperCase;
         return () -> new RichCdcMultiplexRecordEventParser(caseSensitive);
     }
 

@@ -375,7 +375,7 @@ public abstract class HiveCatalogITCaseBase {
                                 "  'warehouse' = '" + path + "',",
                                 "  'lock.enabled' = 'true',",
                                 "  'table.type' = 'EXTERNAL',",
-                                "  'assert-upper-case' = 'true'",
+                                "  'allow-upper-case' = 'true'",
                                 ")"))
                 .await();
         tEnv.executeSql("USE CATALOG paimon_catalog_01").await();
@@ -401,7 +401,7 @@ public abstract class HiveCatalogITCaseBase {
                                 "  'warehouse' = '" + path + "',",
                                 "  'lock.enabled' = 'true',",
                                 "  'table.type' = 'EXTERNAL',",
-                                "  'assert-upper-case' = 'false'",
+                                "  'allow-upper-case' = 'false'",
                                 ")"))
                 .await();
         tEnv.executeSql("USE CATALOG paimon_catalog_02").await();

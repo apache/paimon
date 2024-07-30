@@ -42,8 +42,8 @@ public class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public boolean caseSensitive() {
-        return wrapped.caseSensitive();
+    public boolean allowUpperCase() {
+        return wrapped.allowUpperCase();
     }
 
     @Override

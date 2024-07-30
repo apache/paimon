@@ -54,6 +54,7 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.createCommitUser;
+import static org.apache.paimon.options.CatalogOptions.ALLOW_UPPER_CASE;
 import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
@@ -127,6 +128,11 @@ public abstract class AbstractCatalog implements Catalog {
 
     protected boolean lockEnabled() {
         return catalogOptions.get(LOCK_ENABLED);
+    }
+
+    @Override
+    public boolean allowUpperCase() {
+        return catalogOptions.getOptional(ALLOW_UPPER_CASE).orElse(true);
     }
 
     @Override
@@ -520,8 +526,8 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     protected void validateIdentifierNameCaseInsensitive(Identifier identifier) {
-        validateCaseInsensitive(caseSensitive(), "Database", identifier.getDatabaseName());
-        validateCaseInsensitive(caseSensitive(), "Table", identifier.getObjectName());
+        validateCaseInsensitive(allowUpperCase(), "Database", identifier.getDatabaseName());
+        validateCaseInsensitive(allowUpperCase(), "Table", identifier.getObjectName());
     }
 
     private void validateFieldNameCaseInsensitiveInSchemaChange(List<SchemaChange> changes) {
@@ -539,7 +545,7 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     protected void validateFieldNameCaseInsensitive(List<String> fieldNames) {
-        validateCaseInsensitive(caseSensitive(), "Field", fieldNames);
+        validateCaseInsensitive(allowUpperCase(), "Field", fieldNames);
     }
 
     private void validateAutoCreateClose(Map<String, String> options) {

@@ -49,7 +49,7 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
 
     protected final Catalog.Loader catalogLoader;
     protected Catalog catalog;
-    private boolean caseSensitive;
+    private boolean allowUpperCase;
 
     private static final List<DataTypeRoot> STRING_TYPES =
             Arrays.asList(DataTypeRoot.CHAR, DataTypeRoot.VARCHAR);
@@ -76,7 +76,7 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
     @Override
     public void open(Configuration parameters) {
         this.catalog = catalogLoader.load();
-        this.caseSensitive = this.catalog.caseSensitive();
+        this.allowUpperCase = this.catalog.allowUpperCase();
     }
 
     protected void applySchemaChange(
@@ -203,7 +203,7 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
         List<SchemaChange> result = new ArrayList<>();
         for (DataField newField : updatedDataFields) {
             String newFieldName =
-                    StringUtils.caseSensitiveConversion(newField.name(), caseSensitive);
+                    StringUtils.caseSensitiveConversion(newField.name(), allowUpperCase);
             if (oldFields.containsKey(newFieldName)) {
                 DataField oldField = oldFields.get(newFieldName);
                 // we compare by ignoring nullable, because partition keys and primary keys might be
