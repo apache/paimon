@@ -34,8 +34,8 @@ import java.util.List;
 public class TableFormatReadWriteTest extends TableTestBase {
 
     private Table createTable(String format) throws Exception {
-        catalog.createTable(identifier(), schema(format), true);
-        return catalog.getTable(identifier());
+        catalog.createTable(identifier(format), schema(format), true);
+        return catalog.getTable(identifier(format));
     }
 
     private Schema schema(String format) {
