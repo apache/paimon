@@ -43,6 +43,10 @@ public class FullStartingScanner extends AbstractStartingScanner {
     @Override
     public Result scan(SnapshotReader snapshotReader) {
         if (startingSnapshotId == null) {
+            // try to get first snapshot again
+            startingSnapshotId = snapshotManager.latestSnapshotId();
+        }
+        if (startingSnapshotId == null) {
             LOG.debug("There is currently no snapshot. Waiting for snapshot generation.");
             return new NoSnapshot();
         }
