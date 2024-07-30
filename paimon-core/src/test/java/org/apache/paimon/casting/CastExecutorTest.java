@@ -296,13 +296,19 @@ public class CastExecutorTest {
                 DateTimeUtils.timestampWithLocalZoneToTimestamp(timestamp, TimeZone.getDefault());
 
         long millisecond1 =
-                timestamp
+                timestamp1
                                 .toLocalDateTime()
                                 .atZone(DateTimeUtils.UTC_ZONE.toZoneId())
                                 .toInstant()
                                 .toEpochMilli()
                         / 1000L;
-        long millisecond2 = timestamp.getMillisecond() / 1000L;
+        long millisecond2 =
+                timestamp2
+                                .toLocalDateTime()
+                                .atZone(TimeZone.getDefault().toZoneId())
+                                .toInstant()
+                                .toEpochMilli()
+                        / 1000L;
 
         compareCastResult(
                 CastExecutors.resolve(new TimestampType(3), new BigIntType(false)),
