@@ -193,11 +193,7 @@ public class SparkReadITCase extends SparkReadTestBase {
         assertThat(spark.sql("SHOW CREATE TABLE partitionedTableAs").collectAsList().toString())
                 .isEqualTo(
                         String.format(
-                                "[[%s"
-                                        + "PARTITIONED BY (a)\n"
-                                        + "TBLPROPERTIES (\n"
-                                        + "  'path' = '%s')\n"
-                                        + "]]",
+                                "[[%s" + "PARTITIONED BY (a)\n" + "LOCATION '%s'\n" + "]]",
                                 showCreateString(
                                         "partitionedTableAs", "a BIGINT", "b STRING", "c STRING"),
                                 new Path(warehousePath, "default.db/partitionedTableAs")));
@@ -221,9 +217,9 @@ public class SparkReadITCase extends SparkReadTestBase {
                 .isEqualTo(
                         String.format(
                                 "[[%s"
+                                        + "LOCATION '%s'\n"
                                         + "TBLPROPERTIES (\n"
-                                        + "  'file.format' = 'parquet',\n"
-                                        + "  'path' = '%s')\n"
+                                        + "  'file.format' = 'parquet')\n"
                                         + "]]",
                                 showCreateString(
                                         "testTableAs", "a BIGINT", "b VARCHAR(10)", "c CHAR(10)"),
@@ -248,7 +244,9 @@ public class SparkReadITCase extends SparkReadTestBase {
         assertThat(spark.sql("SHOW CREATE TABLE t_pk_as").collectAsList().toString())
                 .isEqualTo(
                         String.format(
-                                "[[%sTBLPROPERTIES (\n  'path' = '%s',\n  'primary-key' = 'a')\n]]",
+                                "[[%s"
+                                        + "LOCATION '%s'\n"
+                                        + "TBLPROPERTIES (\n  'primary-key' = 'a')\n]]",
                                 showCreateString(
                                         "t_pk_as", "a BIGINT NOT NULL", "b STRING", "c STRING"),
                                 new Path(warehousePath, "default.db/t_pk_as")));
@@ -275,8 +273,8 @@ public class SparkReadITCase extends SparkReadTestBase {
                         String.format(
                                 "[[%s"
                                         + "PARTITIONED BY (dt)\n"
+                                        + "LOCATION '%s'\n"
                                         + "TBLPROPERTIES (\n"
-                                        + "  'path' = '%s',\n"
                                         + "  'primary-key' = 'dt,hh')\n"
                                         + "]]",
                                 showCreateString(
@@ -369,9 +367,9 @@ public class SparkReadITCase extends SparkReadTestBase {
                                 "[[%s"
                                         + "PARTITIONED BY (b)\n"
                                         + "COMMENT 'tbl comment'\n"
+                                        + "LOCATION '%s'\n"
                                         + "TBLPROPERTIES (\n"
                                         + "  'k1' = 'v1',\n"
-                                        + "  'path' = '%s',\n"
                                         + "  'primary-key' = 'a,b')\n]]",
                                 showCreateString(
                                         "tbl",
