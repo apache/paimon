@@ -45,6 +45,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.Nullable;
@@ -108,14 +109,14 @@ public class SchemaManager implements Serializable {
         try {
             return listVersionedFiles(fileIO, schemaDirectory(), SCHEMA_PREFIX)
                     .reduce(Math::max)
-                    .map(id -> schema(id));
+                    .map(this::schema);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
     }
 
     public List<TableSchema> listAll() {
-        return listAllIds().stream().map(id -> schema(id)).collect(Collectors.toList());
+        return listAllIds().stream().map(this::schema).collect(Collectors.toList());
     }
 
     /** List all schema IDs. */
@@ -184,24 +185,31 @@ public class SchemaManager implements Serializable {
     public TableSchema commitChanges(List<SchemaChange> changes)
             throws Catalog.TableNotExistException, Catalog.ColumnAlreadyExistException,
                     Catalog.ColumnNotExistException {
+        SnapshotManager snapshotManager = new SnapshotManager(fileIO, tableRoot, branch);
+        boolean hasSnapshots = (snapshotManager.latestSnapshotId() != null);
+
         while (true) {
-            TableSchema schema =
+            TableSchema oldTableSchema =
                     latest().orElseThrow(
                                     () ->
                                             new Catalog.TableNotExistException(
                                                     fromPath(branchPath(), true)));
-            Map<String, String> newOptions = new HashMap<>(schema.options());
-            List<DataField> newFields = new ArrayList<>(schema.fields());
-            AtomicInteger highestFieldId = new AtomicInteger(schema.highestFieldId());
-            String newComment = schema.comment();
+            Map<String, String> newOptions = new HashMap<>(oldTableSchema.options());
+            List<DataField> newFields = new ArrayList<>(oldTableSchema.fields());
+            AtomicInteger highestFieldId = new AtomicInteger(oldTableSchema.highestFieldId());
+            String newComment = oldTableSchema.comment();
             for (SchemaChange change : changes) {
                 if (change instanceof SetOption) {
                     SetOption setOption = (SetOption) change;
-                    checkAlterTableOption(setOption.key());
+                    if (hasSnapshots) {
+                        checkAlterTableOption(setOption.key());
+                    }
                     newOptions.put(setOption.key(), setOption.value());
                 } else if (change instanceof RemoveOption) {
                     RemoveOption removeOption = (RemoveOption) change;
-                    checkAlterTableOption(removeOption.key());
+                    if (hasSnapshots) {
+                        checkAlterTableOption(removeOption.key());
+                    }
                     newOptions.remove(removeOption.key());
                 } else if (change instanceof UpdateComment) {
                     UpdateComment updateComment = (UpdateComment) change;
@@ -245,7 +253,7 @@ public class SchemaManager implements Serializable {
 
                 } else if (change instanceof RenameColumn) {
                     RenameColumn rename = (RenameColumn) change;
-                    validateNotPrimaryAndPartitionKey(schema, rename.fieldName());
+                    validateNotPrimaryAndPartitionKey(oldTableSchema, rename.fieldName());
                     if (newFields.stream().anyMatch(f -> f.name().equals(rename.newName()))) {
                         throw new Catalog.ColumnAlreadyExistException(
                                 fromPath(branchPath(), true), rename.fieldName());
@@ -263,7 +271,7 @@ public class SchemaManager implements Serializable {
                                             field.description()));
                 } else if (change instanceof DropColumn) {
                     DropColumn drop = (DropColumn) change;
-                    validateNotPrimaryAndPartitionKey(schema, drop.fieldName());
+                    validateNotPrimaryAndPartitionKey(oldTableSchema, drop.fieldName());
                     if (!newFields.removeIf(
                             f -> f.name().equals(((DropColumn) change).fieldName()))) {
                         throw new Catalog.ColumnNotExistException(
@@ -274,7 +282,7 @@ public class SchemaManager implements Serializable {
                     }
                 } else if (change instanceof UpdateColumnType) {
                     UpdateColumnType update = (UpdateColumnType) change;
-                    if (schema.partitionKeys().contains(update.fieldName())) {
+                    if (oldTableSchema.partitionKeys().contains(update.fieldName())) {
                         throw new IllegalArgumentException(
                                 String.format(
                                         "Cannot update partition column [%s] type in the table[%s].",
@@ -310,7 +318,7 @@ public class SchemaManager implements Serializable {
                     UpdateColumnNullability update = (UpdateColumnNullability) change;
                     if (update.fieldNames().length == 1
                             && update.newNullability()
-                            && schema.primaryKeys().contains(update.fieldNames()[0])) {
+                            && oldTableSchema.primaryKeys().contains(update.fieldNames()[0])) {
                         throw new UnsupportedOperationException(
                                 "Cannot change nullability of primary key");
                     }
@@ -346,20 +354,29 @@ public class SchemaManager implements Serializable {
                 }
             }
 
-            TableSchema newSchema =
-                    new TableSchema(
-                            schema.id() + 1,
+            // We change TableSchema to Schema, because we want to deal with primary-key and
+            // partition in options.
+            Schema newSchema =
+                    new Schema(
                             newFields,
-                            highestFieldId.get(),
-                            schema.partitionKeys(),
-                            schema.primaryKeys(),
+                            oldTableSchema.partitionKeys(),
+                            oldTableSchema.primaryKeys(),
                             newOptions,
                             newComment);
+            TableSchema newTableSchema =
+                    new TableSchema(
+                            oldTableSchema.id() + 1,
+                            newSchema.fields(),
+                            highestFieldId.get(),
+                            newSchema.partitionKeys(),
+                            newSchema.primaryKeys(),
+                            newSchema.options(),
+                            newSchema.comment());
 
             try {
-                boolean success = commit(newSchema);
+                boolean success = commit(newTableSchema);
                 if (success) {
-                    return newSchema;
+                    return newTableSchema;
                 }
             } catch (Exception e) {
                 throw new RuntimeException(e);
