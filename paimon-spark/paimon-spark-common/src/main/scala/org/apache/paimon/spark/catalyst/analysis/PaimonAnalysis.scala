@@ -61,7 +61,6 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
       dataSchema: StructType,
       tableSchema: StructType,
       partitionCols: Seq[String],
-      ignoreNullabilityCheck: Boolean = false,
       parent: Array[String] = Array.empty): Boolean = {
 
     if (tableSchema.size != dataSchema.size) {
@@ -71,7 +70,7 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
     def dataTypeCompatible(column: String, dt1: DataType, dt2: DataType): Boolean = {
       (dt1, dt2) match {
         case (s1: StructType, s2: StructType) =>
-          schemaCompatible(s1, s2, partitionCols, ignoreNullabilityCheck, Array(column))
+          schemaCompatible(s1, s2, partitionCols, Array(column))
         case (a1: ArrayType, a2: ArrayType) =>
           dataTypeCompatible(column, a1.elementType, a2.elementType)
         case (m1: MapType, m2: MapType) =>
