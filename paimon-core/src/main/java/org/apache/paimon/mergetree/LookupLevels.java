@@ -39,6 +39,7 @@ import org.apache.paimon.utils.IOFunction;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.RemovalCause;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Weigher;
 import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
 
 import javax.annotation.Nullable;
@@ -61,7 +62,7 @@ import static org.apache.paimon.utils.VarLengthIntUtils.decodeLong;
 import static org.apache.paimon.utils.VarLengthIntUtils.encodeLong;
 
 /** Provide lookup by key. */
-public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
+public class LookupLevels<T> implements Levels.DropFileCallback {
 
     private final Levels levels;
     private final Comparator<InternalRow> keyComparator;
@@ -81,9 +82,8 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
             IOFunction<DataFileMeta, RecordReader<KeyValue>> fileReaderFactory,
             Supplier<File> localFileFactory,
             LookupStoreFactory lookupStoreFactory,
-            Duration fileRetention,
-            MemorySize maxDiskSize,
-            Function<Long, BloomFilter.Builder> bfGenerator) {
+            Function<Long, BloomFilter.Builder> bfGenerator,
+            Cache<String, LookupFile> lookupFiles) {
         this.levels = levels;
         this.keyComparator = keyComparator;
         this.keySerializer = new RowCompactedSerializer(keyType);
@@ -91,16 +91,20 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         this.fileReaderFactory = fileReaderFactory;
         this.localFileFactory = localFileFactory;
         this.lookupStoreFactory = lookupStoreFactory;
-        this.lookupFiles =
-                Caffeine.newBuilder()
-                        .expireAfterAccess(fileRetention)
-                        .maximumWeight(maxDiskSize.getKibiBytes())
-                        .weigher(this::fileWeigh)
-                        .removalListener(this::removalCallback)
-                        .executor(MoreExecutors.directExecutor())
-                        .build();
         this.bfGenerator = bfGenerator;
+        this.lookupFiles = lookupFiles;
         levels.addDropFileCallback(this);
+    }
+
+    public static Cache<String, LookupFile> createCache(
+            Duration fileRetention, MemorySize maxDiskSize) {
+        return Caffeine.newBuilder()
+                .expireAfterAccess(fileRetention)
+                .maximumWeight(maxDiskSize.getKibiBytes())
+                .weigher((Weigher<String, LookupFile>) LookupLevels::fileWeigh)
+                .removalListener(LookupLevels::removalCallback)
+                .executor(MoreExecutors.directExecutor())
+                .build();
     }
 
     public Levels getLevels() {
@@ -151,11 +155,11 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
                 key, lookupFile.remoteFile().level(), valueBytes, file.fileName());
     }
 
-    private int fileWeigh(String file, LookupFile lookupFile) {
+    private static int fileWeigh(String file, LookupFile lookupFile) {
         return fileKibiBytes(lookupFile.localFile);
     }
 
-    private void removalCallback(String key, LookupFile file, RemovalCause cause) {
+    private static void removalCallback(String key, LookupFile file, RemovalCause cause) {
         if (file != null) {
             try {
                 file.close();
@@ -207,12 +211,8 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         return new LookupFile(localFile, file, lookupStoreFactory.createReader(localFile, context));
     }
 
-    @Override
-    public void close() throws IOException {
-        lookupFiles.invalidateAll();
-    }
-
-    private static class LookupFile implements Closeable {
+    /** Lookup file. */
+    public static class LookupFile implements Closeable {
 
         private final File localFile;
         private final DataFileMeta remoteFile;

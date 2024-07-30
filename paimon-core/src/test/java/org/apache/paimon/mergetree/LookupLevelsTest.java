@@ -119,9 +119,6 @@ public class LookupLevelsTest {
         // no exists
         kv = lookupLevels.lookup(row(4), 1);
         assertThat(kv).isNull();
-
-        lookupLevels.close();
-        assertThat(lookupLevels.lookupFiles().estimatedSize()).isEqualTo(0);
     }
 
     @Test
@@ -164,9 +161,6 @@ public class LookupLevelsTest {
             KeyValue kv = lookupLevels.lookup(row(key), 1);
             assertThat(kv).isNull();
         }
-
-        lookupLevels.close();
-        assertThat(lookupLevels.lookupFiles().estimatedSize()).isEqualTo(0);
     }
 
     @Test
@@ -200,9 +194,6 @@ public class LookupLevelsTest {
                 tempDir.toFile().list((dir, name) -> name.startsWith(LOOKUP_FILE_PREFIX));
         assertThat(lookupFiles).isNotNull();
         assertThat(fileNumber).isNotEqualTo(fileNum).isEqualTo(lookupFiles.length);
-
-        lookupLevels.close();
-        assertThat(lookupLevels.lookupFiles().estimatedSize()).isEqualTo(0);
     }
 
     @Test
@@ -271,9 +262,8 @@ public class LookupLevelsTest {
                 () -> new File(tempDir.toFile(), LOOKUP_FILE_PREFIX + UUID.randomUUID()),
                 new HashLookupStoreFactory(
                         new CacheManager(MemorySize.ofMebiBytes(1)), 2048, 0.75, "none"),
-                Duration.ofHours(1),
-                maxDiskSize,
-                rowCount -> BloomFilter.builder(rowCount, 0.05));
+                rowCount -> BloomFilter.builder(rowCount, 0.05),
+                LookupLevels.createCache(Duration.ofHours(1), maxDiskSize));
     }
 
     private KeyValue kv(int key, int value) {

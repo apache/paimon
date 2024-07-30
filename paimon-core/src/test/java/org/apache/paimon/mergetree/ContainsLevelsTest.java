@@ -105,9 +105,6 @@ public class ContainsLevelsTest {
 
         // no exists
         assertThat(containsLevels.lookup(row(4), 1)).isNull();
-
-        containsLevels.close();
-        assertThat(containsLevels.lookupFiles().estimatedSize()).isEqualTo(0);
     }
 
     @Test
@@ -145,9 +142,6 @@ public class ContainsLevelsTest {
         for (int key : notContains) {
             assertThat(containsLevels.lookup(row(key), 1)).isNull();
         }
-
-        containsLevels.close();
-        assertThat(containsLevels.lookupFiles().estimatedSize()).isEqualTo(0);
     }
 
     @Test
@@ -177,9 +171,6 @@ public class ContainsLevelsTest {
                 tempDir.toFile().list((dir, name) -> name.startsWith(LOOKUP_FILE_PREFIX));
         assertThat(lookupFiles).isNotNull();
         assertThat(fileNumber).isNotEqualTo(fileNum).isEqualTo(lookupFiles.length);
-
-        lookupLevels.close();
-        assertThat(lookupLevels.lookupFiles().estimatedSize()).isEqualTo(0);
     }
 
     private LookupLevels<Boolean> createContainsLevels(Levels levels, MemorySize maxDiskSize) {
@@ -195,9 +186,8 @@ public class ContainsLevelsTest {
                 () -> new File(tempDir.toFile(), LOOKUP_FILE_PREFIX + UUID.randomUUID()),
                 new HashLookupStoreFactory(
                         new CacheManager(MemorySize.ofMebiBytes(1)), 2048, 0.75, "none"),
-                Duration.ofHours(1),
-                maxDiskSize,
-                rowCount -> BloomFilter.builder(rowCount, 0.01));
+                rowCount -> BloomFilter.builder(rowCount, 0.01),
+                LookupLevels.createCache(Duration.ofHours(1), maxDiskSize));
     }
 
     private KeyValue kv(int key, int value) {
