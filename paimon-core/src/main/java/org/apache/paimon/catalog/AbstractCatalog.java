@@ -332,10 +332,23 @@ public abstract class AbstractCatalog implements Catalog {
         } else if (isSpecifiedSystemTable(identifier)) {
             String[] splits = tableAndSystemName(identifier);
             String tableName = splits[0];
-            String type = splits[1];
+            String tableType = splits[1];
+            String branchName = DEFAULT_MAIN_BRANCH;
+            if (splits.length == 3) {
+                tableName = tableName + SYSTEM_TABLE_SPLITTER + splits[1];
+                tableType = splits[2];
+                branchName =
+                        splits[1].substring(
+                                splits[1].indexOf(BRANCH_PREFIX) + BRANCH_PREFIX.length());
+            }
             FileStoreTable originTable =
                     getDataTable(new Identifier(identifier.getDatabaseName(), tableName));
-            Table table = SystemTableLoader.load(type, originTable);
+            Table table;
+            if (branchName.equals(DEFAULT_MAIN_BRANCH)) {
+                table = SystemTableLoader.load(tableType, originTable);
+            } else {
+                table = SystemTableLoader.load(tableType, fileIO, originTable, branchName);
+            }
             if (table == null) {
                 throw new TableNotExistException(identifier);
             }
@@ -439,8 +452,13 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     public static boolean isSpecifiedSystemTable(Identifier identifier) {
-        return identifier.getObjectName().contains(SYSTEM_TABLE_SPLITTER)
-                && !getOriginalIdentifierAndBranch(identifier).isPresent();
+        Optional<Pair<Identifier, String>> optionalBranchName =
+                getOriginalIdentifierAndBranch(identifier);
+        String branch = identifier.getObjectName();
+        if (optionalBranchName.isPresent()) {
+            branch = optionalBranchName.get().getRight();
+        }
+        return branch.contains(SYSTEM_TABLE_SPLITTER);
     }
 
     protected static boolean isSystemTable(Identifier identifier) {
@@ -461,13 +479,7 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     public static String[] tableAndSystemName(Identifier identifier) {
-        String[] splits = StringUtils.split(identifier.getObjectName(), SYSTEM_TABLE_SPLITTER);
-        if (splits.length != 2) {
-            throw new IllegalArgumentException(
-                    "System table can only contain one '$' separator, but this is: "
-                            + identifier.getObjectName());
-        }
-        return splits;
+        return StringUtils.split(identifier.getObjectName(), SYSTEM_TABLE_SPLITTER);
     }
 
     public static Path newTableLocation(String warehouse, Identifier identifier) {

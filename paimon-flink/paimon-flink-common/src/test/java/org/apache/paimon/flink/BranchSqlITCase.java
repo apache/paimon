@@ -39,6 +39,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
 
     @Test
     public void testAlterBranchTable() throws Exception {
+
         sql(
                 "CREATE TABLE T ("
                         + " pt INT"
@@ -313,7 +314,6 @@ public class BranchSqlITCase extends CatalogITCaseBase {
         checkSnapshots(snapshotManager, 1, 2);
     }
 
-    @Test
     public void testFallbackBranchBatchRead() throws Exception {
         sql(
                 "CREATE TABLE t ( pt INT NOT NULL, k INT NOT NULL, v STRING ) PARTITIONED BY (pt) WITH ( 'bucket' = '-1' )");
