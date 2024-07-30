@@ -124,10 +124,9 @@ public abstract class SparkReadTestBase {
 
     @AfterEach
     public void afterEach() {
-        //        List<Row> tables = spark.sql("show tables").collectAsList();
-        //        tables.forEach(
-        //                table -> spark.sql("DROP TABLE " + table.getString(0) + "." +
-        // table.getString(1)));
+        List<Row> tables = spark.sql("show tables").collectAsList();
+        tables.forEach(
+                table -> spark.sql("DROP TABLE " + table.getString(0) + "." + table.getString(1)));
     }
 
     protected void innerTestSimpleType(Dataset<Row> dataset) {
