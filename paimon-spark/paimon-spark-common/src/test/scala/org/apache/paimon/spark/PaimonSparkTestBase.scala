@@ -25,6 +25,7 @@ import org.apache.paimon.spark.catalog.Catalogs
 import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
 import org.apache.paimon.spark.sql.{SparkVersionSupport, WithTableOptions}
 import org.apache.paimon.table.FileStoreTable
+
 import org.apache.spark.SparkConf
 import org.apache.spark.paimon.Utils
 import org.apache.spark.sql.QueryTest
@@ -39,6 +40,7 @@ import java.io.File
 import java.util
 import java.util.{HashMap => JHashMap}
 import java.util.TimeZone
+
 import scala.util.Random
 
 class PaimonSparkTestBase
