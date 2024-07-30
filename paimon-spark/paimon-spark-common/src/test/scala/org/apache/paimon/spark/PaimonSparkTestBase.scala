@@ -18,13 +18,13 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.Snapshot
 import org.apache.paimon.catalog.{Catalog, CatalogContext, CatalogFactory, Identifier}
 import org.apache.paimon.options.{CatalogOptions, Options}
 import org.apache.paimon.spark.catalog.Catalogs
 import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
 import org.apache.paimon.spark.sql.{SparkVersionSupport, WithTableOptions}
 import org.apache.paimon.table.FileStoreTable
-
 import org.apache.spark.SparkConf
 import org.apache.spark.paimon.Utils
 import org.apache.spark.sql.QueryTest
@@ -39,7 +39,6 @@ import java.io.File
 import java.util
 import java.util.{HashMap => JHashMap}
 import java.util.TimeZone
-
 import scala.util.Random
 
 class PaimonSparkTestBase
@@ -99,6 +98,7 @@ class PaimonSparkTestBase
     spark.sql(s"USE paimon")
     spark.sql(s"USE paimon.$dbName0")
     spark.sql(s"DROP TABLE IF EXISTS $tableName0")
+    Snapshot.CACHE.invalidateAll()
   }
 
   protected def withTempDirs(f: (File, File) => Unit): Unit = {
