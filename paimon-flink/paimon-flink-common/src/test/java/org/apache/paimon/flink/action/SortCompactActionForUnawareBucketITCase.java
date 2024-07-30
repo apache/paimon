@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
@@ -311,6 +312,7 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
         Assertions.assertThat(files.size()).isEqualTo(3);
 
         dropTable();
+        Snapshot.CACHE.invalidateAll();
         prepareSameData(200);
         Assertions.assertThatCode(() -> zorder(Arrays.asList("f1", "f2")))
                 .doesNotThrowAnyException();

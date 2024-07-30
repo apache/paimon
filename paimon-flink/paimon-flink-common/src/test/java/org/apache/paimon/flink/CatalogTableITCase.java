@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.table.system.AllTableOptionsTable;
 import org.apache.paimon.table.system.CatalogOptionsTable;
@@ -880,6 +881,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         innerTestReadOptimizedTable();
 
         sql("DROP TABLE T");
+        Snapshot.CACHE.invalidateAll();
         sql("CREATE TABLE T (k INT, v INT, PRIMARY KEY (k) NOT ENFORCED) WITH ('bucket' = '-1')");
         innerTestReadOptimizedTable();
     }
