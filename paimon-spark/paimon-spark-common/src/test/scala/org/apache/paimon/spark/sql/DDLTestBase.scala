@@ -63,6 +63,22 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon DDL: write.check.ignoreNullability") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT NOT NULL, ts TIMESTAMP NOT NULL)
+            |TBLPROPERTIES ("write.check.ignoreNullability" = "true")
+            |""".stripMargin)
+
+      sql("INSERT INTO T SELECT 1, TO_TIMESTAMP('2024-07-01 16:00:00')")
+
+      checkAnswer(
+        sql("SELECT * FROM T ORDER BY id"),
+        Row(1, Timestamp.valueOf("2024-07-01 16:00:00")) :: Nil
+      )
+    }
+  }
+
   test("Paimon DDL: Create Table As Select") {
     withTable("source", "t1", "t2") {
       Seq((1L, "x1", "2023"), (2L, "x2", "2023"))

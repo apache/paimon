@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.catalyst.analysis
 
-import org.apache.paimon.spark.SparkTable
+import org.apache.paimon.spark.{SparkConnectorOptions, SparkTable}
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation.isPaimonTable
 import org.apache.paimon.spark.commands.{PaimonAnalyzeTableColumnCommand, PaimonDynamicPartitionOverwriteCommand, PaimonTruncateTableCommand}
@@ -26,7 +26,7 @@ import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.analysis.ResolvedTable
-import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, Cast, Expression, NamedExpression}
+import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, Expression, NamedExpression}
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
@@ -42,7 +42,8 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
         if !schemaCompatible(
           a.query.output.toStructType,
           table.output.toStructType,
-          paimonTable.partitionKeys().asScala) =>
+          paimonTable.partitionKeys().asScala,
+          ignoreNullabilityCheck(paimonTable)) =>
       val newQuery = resolveQueryColumns(a.query, table.output)
       if (newQuery != a.query) {
         Compatibility.withNewQuery(a, newQuery)
@@ -58,9 +59,10 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
   }
 
   private def schemaCompatible(
-      tableSchema: StructType,
       dataSchema: StructType,
+      tableSchema: StructType,
       partitionCols: Seq[String],
+      ignoreNullabilityCheck: Boolean = false,
       parent: Array[String] = Array.empty): Boolean = {
 
     if (tableSchema.size != dataSchema.size) {
@@ -70,7 +72,7 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
     def dataTypeCompatible(column: String, dt1: DataType, dt2: DataType): Boolean = {
       (dt1, dt2) match {
         case (s1: StructType, s2: StructType) =>
-          schemaCompatible(s1, s2, partitionCols, Array(column))
+          schemaCompatible(s1, s2, partitionCols, ignoreNullabilityCheck, Array(column))
         case (a1: ArrayType, a2: ArrayType) =>
           dataTypeCompatible(column, a1.elementType, a2.elementType)
         case (m1: MapType, m2: MapType) =>
@@ -82,9 +84,11 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
       }
     }
 
-    tableSchema.zip(dataSchema).forall {
+    dataSchema.zip(tableSchema).forall {
       case (f1, f2) =>
-        checkNullability(f1, f2, partitionCols, parent)
+        if (!ignoreNullabilityCheck) {
+          checkNullability(f1, f2, partitionCols, parent)
+        }
         f1.name == f2.name && dataTypeCompatible(f1.name, f1.dataType, f2.dataType)
     }
   }
@@ -125,6 +129,15 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
     if (!partitionCols.contains(fullColumnName) && input.nullable && !expected.nullable) {
       throw new RuntimeException("Cannot write nullable values to non-null column")
     }
+  }
+
+  private def ignoreNullabilityCheck(paimonTable: FileStoreTable): Boolean = {
+    paimonTable
+      .options()
+      .asScala
+      .get(SparkConnectorOptions.IGNORE_NULLABLE_CHECK.key)
+      .map(_.toBoolean)
+      .getOrElse(SparkConnectorOptions.IGNORE_NULLABLE_CHECK.defaultValue)
   }
 }
 

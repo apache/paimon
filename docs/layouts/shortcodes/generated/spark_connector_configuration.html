@@ -27,6 +27,24 @@ under the License.
     </thead>
     <tbody>
         <tr>
+            <td><h5>write.merge-schema</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, merge the data schema and the table schema automatically before write data.</td>
+        </tr>
+        <tr>
+            <td><h5>write.merge-schema.explicit-cast</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, allow to merge data types if the two types meet the rules for explicit casting.</td>
+        </tr>
+        <tr>
+            <td><h5>write.check.ignoreNullability</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, skip the check whether the nullability of incoming data is compatible with the table's.</td>
+        </tr>
+        <tr>
             <td><h5>read.changelog</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -61,18 +79,6 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>Long</td>
             <td>The minimum number of rows returned in a single batch, which used to create MinRowsReadLimit with read.stream.maxTriggerDelayMs together.</td>
-        </tr>
-        <tr>
-            <td><h5>write.merge-schema</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>If true, merge the data schema and the table schema automatically before write data.</td>
-        </tr>
-        <tr>
-            <td><h5>write.merge-schema.explicit-cast</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>If true, allow to merge data types if the two types meet the rules for explicit casting.</td>
         </tr>
     </tbody>
 </table>

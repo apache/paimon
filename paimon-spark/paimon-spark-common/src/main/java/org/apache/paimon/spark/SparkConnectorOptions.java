@@ -39,6 +39,13 @@ public class SparkConnectorOptions {
                     .withDescription(
                             "If true, allow to merge data types if the two types meet the rules for explicit casting.");
 
+    public static final ConfigOption<Boolean> IGNORE_NULLABLE_CHECK =
+            key("write.check.ignoreNullability")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, skip the check whether the nullability of incoming data is compatible with the table's.");
+
     public static final ConfigOption<Integer> MAX_FILES_PER_TRIGGER =
             key("read.stream.maxFilesPerTrigger")
                     .intType()
