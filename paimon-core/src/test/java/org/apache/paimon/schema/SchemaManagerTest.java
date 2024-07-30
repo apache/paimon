@@ -19,9 +19,18 @@
 package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -440,5 +449,82 @@ public class SchemaManagerTest {
         manager.applyMove(fields, moveBefore);
         Assertions.assertEquals(
                 2, fields.get(0).id(), "The field id should remain as 2 after moving f2 before f0");
+    }
+
+    @Test
+    public void testAlterImmutableOptionsOnEmptyTable() throws Exception {
+        // create table without primary keys
+        Schema schema =
+                new Schema(
+                        rowType.getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "");
+        Path tableRoot = new Path(tempDir.toString(), "table");
+        SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
+        manager.createTable(schema);
+
+        // set immutable options and set primary keys
+        manager.commitChanges(
+                SchemaChange.setOption("primary-key", "f0,f1"),
+                SchemaChange.setOption("partition", "f0"),
+                SchemaChange.setOption("bucket", "2"),
+                SchemaChange.setOption("merge-engine", "first-row"));
+
+        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tableRoot);
+        assertThat(table.schema().partitionKeys()).containsExactly("f0");
+        assertThat(table.schema().primaryKeys()).containsExactly("f0", "f1");
+
+        // read and write data to check that table is really a primary key table with first-row
+        // merge engine
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser).withIOManager(IOManager.create(tempDir + "/io"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10L, BinaryString.fromString("apple")));
+        write.write(GenericRow.of(1, 20L, BinaryString.fromString("banana")));
+        write.write(GenericRow.of(2, 10L, BinaryString.fromString("cat")));
+        write.write(GenericRow.of(2, 20L, BinaryString.fromString("dog")));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.write(GenericRow.of(1, 20L, BinaryString.fromString("peach")));
+        write.write(GenericRow.of(1, 30L, BinaryString.fromString("mango")));
+        write.write(GenericRow.of(2, 20L, BinaryString.fromString("tiger")));
+        write.write(GenericRow.of(2, 30L, BinaryString.fromString("wolf")));
+        commit.commit(2, write.prepareCommit(false, 2));
+        write.close();
+        commit.close();
+
+        List<String> actual = new ArrayList<>();
+        try (RecordReaderIterator<InternalRow> it =
+                new RecordReaderIterator<>(
+                        table.newRead().createReader(table.newSnapshotReader().read()))) {
+            while (it.hasNext()) {
+                InternalRow row = it.next();
+                actual.add(
+                        String.format(
+                                "%s %d %d %s",
+                                row.getRowKind().shortString(),
+                                row.getInt(0),
+                                row.getLong(1),
+                                row.getString(2)));
+            }
+        }
+        assertThat(actual)
+                .containsExactlyInAnyOrder(
+                        "+I 1 10 apple",
+                        "+I 1 20 banana",
+                        "+I 1 30 mango",
+                        "+I 2 10 cat",
+                        "+I 2 20 dog",
+                        "+I 2 30 wolf");
+
+        // now that table is not empty, we cannot change immutable options
+        assertThatThrownBy(
+                        () ->
+                                manager.commitChanges(
+                                        SchemaChange.setOption("merge-engine", "deduplicate")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Change 'merge-engine' is not supported yet.");
     }
 }
