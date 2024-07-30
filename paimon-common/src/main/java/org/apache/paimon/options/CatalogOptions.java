@@ -101,7 +101,7 @@ public class CatalogOptions {
     public static final ConfigOption<Duration> CACHE_EXPIRATION_INTERVAL_MS =
             key("cache.expiration-interval")
                     .durationType()
-                    .defaultValue(Duration.ofSeconds(30))
+                    .defaultValue(Duration.ofSeconds(60))
                     .withDescription(
                             "Controls the duration for which entries in the catalog are cached.");
 
