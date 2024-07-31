@@ -105,4 +105,16 @@ public class LookupFile implements Closeable {
             }
         }
     }
+
+    public static String localFilePrefix(
+            String partition, int bucket, String remoteFileName, int length) {
+        String identifier;
+        if (partition.isEmpty()) {
+            identifier = String.format("%s-%s", bucket, remoteFileName);
+        } else {
+            identifier = String.format("%s-%s-%s", partition, bucket, remoteFileName);
+        }
+
+        return identifier.substring(0, Math.min(identifier.length(), length));
+    }
 }

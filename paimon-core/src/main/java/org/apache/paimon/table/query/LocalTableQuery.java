@@ -39,6 +39,7 @@ import org.apache.paimon.mergetree.LookupLevels;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.KeyComparatorSupplier;
 import org.apache.paimon.utils.Preconditions;
 
@@ -132,21 +133,6 @@ public class LocalTableQuery implements TableQuery {
         }
     }
 
-    private String generatePrefix(BinaryRow partition, int bucket) {
-        InternalRow.FieldGetter[] getters = partitionType.fieldGetters();
-        StringBuilder builder = new StringBuilder();
-        for (InternalRow.FieldGetter getter : getters) {
-            Object part = getter.getFieldOrNull(partition);
-            if (part != null) {
-                builder.append(part);
-            } else {
-                builder.append("null");
-            }
-            builder.append("-");
-        }
-        return String.format("%s-%s", builder, bucket);
-    }
-
     private void newLookupLevels(BinaryRow partition, int bucket, List<DataFileMeta> dataFiles) {
         Levels levels = new Levels(keyComparatorSupplier.get(), dataFiles, options.numLevels());
         // TODO pass DeletionVector factory
@@ -160,7 +146,6 @@ public class LocalTableQuery implements TableQuery {
                             options.get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE));
         }
 
-        String prefix = generatePrefix(partition, bucket);
         LookupLevels<KeyValue> lookupLevels =
                 new LookupLevels<>(
                         levels,
@@ -176,7 +161,16 @@ public class LocalTableQuery implements TableQuery {
                                         file.level()),
                         file ->
                                 Preconditions.checkNotNull(ioManager, "IOManager is required.")
-                                        .createChannel(prefix + "-" + file)
+                                        .createChannel(
+                                                LookupFile.localFilePrefix(
+                                                        InternalRowPartitionComputer
+                                                                .paritionToString(
+                                                                        partitionType,
+                                                                        partition,
+                                                                        "-"),
+                                                        bucket,
+                                                        file,
+                                                        100))
                                         .getPathFile(),
                         lookupStoreFactory,
                         bfGenerator(options),

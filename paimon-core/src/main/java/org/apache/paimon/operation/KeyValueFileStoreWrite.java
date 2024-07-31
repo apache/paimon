@@ -69,6 +69,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
 
@@ -371,26 +372,22 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                             options.get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
                             options.get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE));
         }
-        InternalRow.FieldGetter[] getters = partitionType.fieldGetters();
-        StringBuilder builder = new StringBuilder();
-        for (InternalRow.FieldGetter getter : getters) {
-            Object part = getter.getFieldOrNull(partition);
-            if (part != null) {
-                builder.append(part);
-            } else {
-                builder.append("null");
-            }
-            builder.append("-");
-        }
-        String prefix = String.format("%s-%s", builder, bucket);
-
         return new LookupLevels<>(
                 levels,
                 keyComparatorSupplier.get(),
                 keyType,
                 valueProcessor,
                 readerFactory::createRecordReader,
-                file -> ioManager.createChannel(prefix + "-" + file).getPathFile(),
+                file ->
+                        ioManager
+                                .createChannel(
+                                        LookupFile.localFilePrefix(
+                                                InternalRowPartitionComputer.paritionToString(
+                                                        partitionType, partition, "-"),
+                                                bucket,
+                                                file,
+                                                100))
+                                .getPathFile(),
                 lookupStoreFactory,
                 bfGenerator(options),
                 lookupFileCache);

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.RowType;
 
@@ -76,5 +77,23 @@ public class InternalRowPartitionComputer {
                                     entry.getValue(), partType.getField(entry.getKey()).type()));
         }
         return partValues;
+    }
+
+    public static String paritionToString(
+            RowType partitionType, BinaryRow partition, String delimiter) {
+        InternalRow.FieldGetter[] getters = partitionType.fieldGetters();
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < getters.length; i++) {
+            Object part = getters[i].getFieldOrNull(partition);
+            if (part != null) {
+                builder.append(part);
+            } else {
+                builder.append("null");
+            }
+            if (i != getters.length - 1) {
+                builder.append(delimiter);
+            }
+        }
+        return builder.toString();
     }
 }
