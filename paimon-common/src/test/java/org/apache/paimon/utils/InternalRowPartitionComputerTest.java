@@ -35,16 +35,15 @@ public class InternalRowPartitionComputerTest {
     public void testPartitionToString() {
         RowType rowType = RowType.of();
         BinaryRow binaryRow = new BinaryRow(0);
-        BinaryRowWriter writer = new BinaryRowWriter(binaryRow);
-        assertThat(InternalRowPartitionComputer.paritionToString(rowType, binaryRow, "-"))
+        assertThat(InternalRowPartitionComputer.toSimpleString(rowType, binaryRow, "-", 30))
                 .isEqualTo("");
 
         rowType = RowType.of(DataTypes.STRING(), DataTypes.INT());
         binaryRow = new BinaryRow(2);
-        writer = new BinaryRowWriter(binaryRow);
+        BinaryRowWriter writer = new BinaryRowWriter(binaryRow);
         writer.writeString(0, BinaryString.fromString("20240731"));
         writer.writeInt(1, 10);
-        assertThat(InternalRowPartitionComputer.paritionToString(rowType, binaryRow, "-"))
+        assertThat(InternalRowPartitionComputer.toSimpleString(rowType, binaryRow, "-", 30))
                 .isEqualTo("20240731-10");
 
         rowType = RowType.of(DataTypes.STRING(), DataTypes.INT());
@@ -52,7 +51,7 @@ public class InternalRowPartitionComputerTest {
         writer = new BinaryRowWriter(binaryRow);
         writer.setNullAt(0);
         writer.writeInt(1, 10);
-        assertThat(InternalRowPartitionComputer.paritionToString(rowType, binaryRow, "-"))
+        assertThat(InternalRowPartitionComputer.toSimpleString(rowType, binaryRow, "-", 30))
                 .isEqualTo("null-10");
     }
 }

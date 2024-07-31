@@ -79,8 +79,8 @@ public class InternalRowPartitionComputer {
         return partValues;
     }
 
-    public static String paritionToString(
-            RowType partitionType, BinaryRow partition, String delimiter) {
+    public static String toSimpleString(
+            RowType partitionType, BinaryRow partition, String delimiter, int maxLength) {
         InternalRow.FieldGetter[] getters = partitionType.fieldGetters();
         StringBuilder builder = new StringBuilder();
         for (int i = 0; i < getters.length; i++) {
@@ -94,6 +94,7 @@ public class InternalRowPartitionComputer {
                 builder.append(delimiter);
             }
         }
-        return builder.toString();
+        String result = builder.toString();
+        return result.substring(0, Math.min(result.length(), maxLength));
     }
 }

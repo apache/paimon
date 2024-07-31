@@ -18,9 +18,11 @@
 
 package org.apache.paimon.mergetree;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.lookup.LookupStoreReader;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
@@ -37,6 +39,7 @@ import java.io.UncheckedIOException;
 import java.time.Duration;
 
 import static org.apache.paimon.mergetree.LookupUtils.fileKibiBytes;
+import static org.apache.paimon.utils.InternalRowPartitionComputer.toSimpleString;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Lookup file for cache remote file to local. */
@@ -107,14 +110,12 @@ public class LookupFile implements Closeable {
     }
 
     public static String localFilePrefix(
-            String partition, int bucket, String remoteFileName, int length) {
-        String identifier;
-        if (partition.isEmpty()) {
-            identifier = String.format("%s-%s", bucket, remoteFileName);
+            RowType partitionType, BinaryRow partition, int bucket, String remoteFileName) {
+        if (partition.getFieldCount() == 0) {
+            return String.format("%s-%s", bucket, remoteFileName);
         } else {
-            identifier = String.format("%s-%s-%s", partition, bucket, remoteFileName);
+            String partitionString = toSimpleString(partitionType, partition, "-", 20);
+            return String.format("%s-%s-%s", partitionString, bucket, remoteFileName);
         }
-
-        return identifier.substring(0, Math.min(identifier.length(), length));
     }
 }

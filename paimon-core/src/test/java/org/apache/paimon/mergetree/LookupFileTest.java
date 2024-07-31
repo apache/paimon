@@ -18,8 +18,14 @@
 
 package org.apache.paimon.mergetree;
 
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
+
 import org.junit.jupiter.api.Test;
 
+import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
+import static org.apache.paimon.data.BinaryRow.singleColumn;
+import static org.apache.paimon.mergetree.LookupFile.localFilePrefix;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link LookupFile}. */
@@ -27,23 +33,28 @@ public class LookupFileTest {
 
     @Test
     public void testLocalFilePrefix() {
+        RowType partType = RowType.of(DataTypes.STRING());
         assertThat(
-                        LookupFile.localFilePrefix(
-                                "2024073105",
+                        localFilePrefix(
+                                partType,
+                                singleColumn("2024073105"),
                                 10,
-                                "data-ccbb95e7-8b8c-4549-8ca9-f553843d67ad-3.orc",
-                                100))
+                                "data-ccbb95e7-8b8c-4549-8ca9-f553843d67ad-3.orc"))
                 .isEqualTo("2024073105-10-data-ccbb95e7-8b8c-4549-8ca9-f553843d67ad-3.orc");
         assertThat(
-                        LookupFile.localFilePrefix(
-                                "", 10, "data-ccbb95e7-8b8c-4549-8ca9-f553843d67ad-3.orc", 100))
+                        localFilePrefix(
+                                RowType.of(),
+                                EMPTY_ROW,
+                                10,
+                                "data-ccbb95e7-8b8c-4549-8ca9-f553843d67ad-3.orc"))
                 .isEqualTo("10-data-ccbb95e7-8b8c-4549-8ca9-f553843d67ad-3.orc");
         assertThat(
-                        LookupFile.localFilePrefix(
-                                "2024073105",
+                        localFilePrefix(
+                                partType,
+                                singleColumn("2024073105-05-2123232313123123123213123"),
                                 10,
-                                "data-ccbb95e7-8b8c-4549-8ca9-f553843d67ad-3.orc",
-                                20))
-                .isEqualTo("2024073105-10-data-c");
+                                "data-ccbb95e7-8b8c-4549-8ca9-f553843d67ad-3.orc"))
+                .isEqualTo(
+                        "2024073105-05-212323-10-data-ccbb95e7-8b8c-4549-8ca9-f553843d67ad-3.orc");
     }
 }

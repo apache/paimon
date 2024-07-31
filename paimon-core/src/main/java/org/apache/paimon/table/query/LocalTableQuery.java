@@ -39,7 +39,6 @@ import org.apache.paimon.mergetree.LookupLevels;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.KeyComparatorSupplier;
 import org.apache.paimon.utils.Preconditions;
 
@@ -56,6 +55,7 @@ import java.util.function.Supplier;
 
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 import static org.apache.paimon.lookup.LookupStoreFactory.bfGenerator;
+import static org.apache.paimon.mergetree.LookupFile.localFilePrefix;
 
 /** Implementation for {@link TableQuery} for caching data and file in local. */
 public class LocalTableQuery implements TableQuery {
@@ -162,15 +162,8 @@ public class LocalTableQuery implements TableQuery {
                         file ->
                                 Preconditions.checkNotNull(ioManager, "IOManager is required.")
                                         .createChannel(
-                                                LookupFile.localFilePrefix(
-                                                        InternalRowPartitionComputer
-                                                                .paritionToString(
-                                                                        partitionType,
-                                                                        partition,
-                                                                        "-"),
-                                                        bucket,
-                                                        file,
-                                                        100))
+                                                localFilePrefix(
+                                                        partitionType, partition, bucket, file))
                                         .getPathFile(),
                         lookupStoreFactory,
                         bfGenerator(options),

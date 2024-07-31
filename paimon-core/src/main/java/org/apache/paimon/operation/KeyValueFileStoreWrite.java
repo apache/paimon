@@ -69,7 +69,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
 
@@ -89,6 +88,7 @@ import java.util.function.Supplier;
 import static org.apache.paimon.CoreOptions.ChangelogProducer.FULL_COMPACTION;
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 import static org.apache.paimon.lookup.LookupStoreFactory.bfGenerator;
+import static org.apache.paimon.mergetree.LookupFile.localFilePrefix;
 
 /** {@link FileStoreWrite} for {@link KeyValueFileStore}. */
 public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
@@ -381,12 +381,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 file ->
                         ioManager
                                 .createChannel(
-                                        LookupFile.localFilePrefix(
-                                                InternalRowPartitionComputer.paritionToString(
-                                                        partitionType, partition, "-"),
-                                                bucket,
-                                                file,
-                                                100))
+                                        localFilePrefix(partitionType, partition, bucket, file))
                                 .getPathFile(),
                 lookupStoreFactory,
                 bfGenerator(options),
