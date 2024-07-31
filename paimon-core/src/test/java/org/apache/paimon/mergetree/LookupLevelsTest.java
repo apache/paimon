@@ -193,6 +193,8 @@ public class LookupLevelsTest {
             assertThat(kv.level()).isEqualTo(1);
             assertThat(kv.value().getInt(1)).isEqualTo(i);
         }
+        assertThat(lookupLevels.lookupFiles().asMap().keySet())
+                .isEqualTo(lookupLevels.cachedFiles());
 
         // some files are invalided
         long fileNumber = lookupLevels.lookupFiles().estimatedSize();
@@ -202,6 +204,7 @@ public class LookupLevelsTest {
         assertThat(fileNumber).isNotEqualTo(fileNum).isEqualTo(lookupFiles.length);
 
         lookupLevels.close();
+        assertThat(lookupLevels.cachedFiles()).isEmpty();
         assertThat(lookupLevels.lookupFiles().estimatedSize()).isEqualTo(0);
     }
 

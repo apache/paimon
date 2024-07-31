@@ -120,10 +120,14 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         return lookupFiles;
     }
 
+    @VisibleForTesting
+    Set<String> cachedFiles() {
+        return cachedFiles;
+    }
+
     @Override
     public void notifyDropFile(String file) {
         lookupFiles.invalidate(file);
-        cachedFiles.remove(file);
     }
 
     @Nullable
@@ -214,12 +218,14 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
             context = kvWriter.close();
         }
 
-        return new LookupFile(localFile, file, lookupStoreFactory.createReader(localFile, context));
+        return new LookupFile(
+                localFile, file, lookupStoreFactory.createReader(localFile, context), cachedFiles);
     }
 
     @Override
     public void close() throws IOException {
-        for (String cachedFile : cachedFiles) {
+        Set<String> toClean = new HashSet<>(cachedFiles);
+        for (String cachedFile : toClean) {
             lookupFiles.invalidate(cachedFile);
         }
     }
@@ -230,13 +236,19 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         private final File localFile;
         private final DataFileMeta remoteFile;
         private final LookupStoreReader reader;
+        private final Set<String> cachedFiles;
 
         private boolean isClosed = false;
 
-        public LookupFile(File localFile, DataFileMeta remoteFile, LookupStoreReader reader) {
+        public LookupFile(
+                File localFile,
+                DataFileMeta remoteFile,
+                LookupStoreReader reader,
+                Set<String> cachedFiles) {
             this.localFile = localFile;
             this.remoteFile = remoteFile;
             this.reader = reader;
+            this.cachedFiles = cachedFiles;
         }
 
         @Nullable
@@ -253,6 +265,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         public void close() throws IOException {
             reader.close();
             isClosed = true;
+            cachedFiles.remove(remoteFile.fileName());
             FileIOUtils.deleteFileOrDirectory(localFile);
         }
     }
