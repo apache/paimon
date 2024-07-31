@@ -193,7 +193,8 @@ public class SchemaManager implements Serializable {
                     latest().orElseThrow(
                                     () ->
                                             new Catalog.TableNotExistException(
-                                                    fromPath(branchPath(), true)));
+                                                    identifierFromPath(
+                                                            tableRoot.toString(), true, branch)));
             Map<String, String> newOptions = new HashMap<>(oldTableSchema.options());
             List<DataField> newFields = new ArrayList<>(oldTableSchema.fields());
             AtomicInteger highestFieldId = new AtomicInteger(oldTableSchema.highestFieldId());
@@ -219,13 +220,14 @@ public class SchemaManager implements Serializable {
                     SchemaChange.Move move = addColumn.move();
                     if (newFields.stream().anyMatch(f -> f.name().equals(addColumn.fieldName()))) {
                         throw new Catalog.ColumnAlreadyExistException(
-                                fromPath(branchPath(), true), addColumn.fieldName());
+                                identifierFromPath(tableRoot.toString(), true, branch),
+                                addColumn.fieldName());
                     }
                     Preconditions.checkArgument(
                             addColumn.dataType().isNullable(),
                             "Column %s cannot specify NOT NULL in the %s table.",
                             addColumn.fieldName(),
-                            fromPath(branchPath(), true).getFullName());
+                            identifierFromPath(tableRoot.toString(), true, branch).getFullName());
                     int id = highestFieldId.incrementAndGet();
                     DataType dataType =
                             ReassignFieldId.reassign(addColumn.dataType(), highestFieldId);
@@ -256,7 +258,8 @@ public class SchemaManager implements Serializable {
                     validateNotPrimaryAndPartitionKey(oldTableSchema, rename.fieldName());
                     if (newFields.stream().anyMatch(f -> f.name().equals(rename.newName()))) {
                         throw new Catalog.ColumnAlreadyExistException(
-                                fromPath(branchPath(), true), rename.fieldName());
+                                identifierFromPath(tableRoot.toString(), true, branch),
+                                rename.fieldName());
                     }
 
                     updateNestedColumn(
@@ -275,7 +278,8 @@ public class SchemaManager implements Serializable {
                     if (!newFields.removeIf(
                             f -> f.name().equals(((DropColumn) change).fieldName()))) {
                         throw new Catalog.ColumnNotExistException(
-                                fromPath(branchPath(), true), drop.fieldName());
+                                identifierFromPath(tableRoot.toString(), true, branch),
+                                drop.fieldName());
                     }
                     if (newFields.isEmpty()) {
                         throw new IllegalArgumentException("Cannot drop all fields in table");
@@ -511,7 +515,8 @@ public class SchemaManager implements Serializable {
         }
         if (!found) {
             throw new Catalog.ColumnNotExistException(
-                    fromPath(branchPath(), true), Arrays.toString(updateFieldNames));
+                    identifierFromPath(tableRoot.toString(), true, branch),
+                    Arrays.toString(updateFieldNames));
         }
     }
 
@@ -587,13 +592,18 @@ public class SchemaManager implements Serializable {
         }
     }
 
-    public static Identifier fromPath(String tablePath, boolean ignoreIfUnknownDatabase) {
+    public static Identifier identifierFromPath(String tablePath, boolean ignoreIfUnknownDatabase) {
+        return identifierFromPath(tablePath, ignoreIfUnknownDatabase, null);
+    }
+
+    public static Identifier identifierFromPath(
+            String tablePath, boolean ignoreIfUnknownDatabase, @Nullable String branchName) {
         String[] paths = tablePath.split("/");
         if (paths.length < 2) {
             if (!ignoreIfUnknownDatabase) {
                 throw new IllegalArgumentException(
                         String.format(
-                                "Path '%s' is not a legacy path, please use catalog table path instead: 'warehouse_path/your_database.db/your_table'.",
+                                "Path '%s' is not a valid path, please use catalog table path instead: 'warehouse_path/your_database.db/your_table'.",
                                 tablePath));
             }
             return new Identifier(UNKNOWN_DATABASE, paths[0]);
@@ -605,12 +615,12 @@ public class SchemaManager implements Serializable {
             if (!ignoreIfUnknownDatabase) {
                 throw new IllegalArgumentException(
                         String.format(
-                                "Path '%s' is not a legacy path, please use catalog table path instead: 'warehouse_path/your_database.db/your_table'.",
+                                "Path '%s' is not a valid path, please use catalog table path instead: 'warehouse_path/your_database.db/your_table'.",
                                 tablePath));
             }
-            return new Identifier(UNKNOWN_DATABASE, paths[paths.length - 1]);
+            return new Identifier(UNKNOWN_DATABASE, paths[paths.length - 1], branchName, null);
         }
         database = database.substring(0, index);
-        return new Identifier(database, paths[paths.length - 1]);
+        return new Identifier(database, paths[paths.length - 1], branchName, null);
     }
 }

@@ -214,7 +214,7 @@ public class JdbcCatalog extends AbstractCatalog {
                             JdbcUtils.DROP_TABLE_SQL,
                             catalogKey,
                             identifier.getDatabaseName(),
-                            identifier.getObjectName());
+                            identifier.getTableName());
 
             if (deletedRecords == 0) {
                 LOG.info("Skipping drop, table does not exist: {}", identifier);
@@ -248,7 +248,7 @@ public class JdbcCatalog extends AbstractCatalog {
                                                 JdbcUtils.DO_COMMIT_CREATE_TABLE_SQL)) {
                                     sql.setString(1, catalogKey);
                                     sql.setString(2, identifier.getDatabaseName());
-                                    sql.setString(3, identifier.getObjectName());
+                                    sql.setString(3, identifier.getTableName());
                                     return sql.executeUpdate();
                                 }
                             });
@@ -277,7 +277,7 @@ public class JdbcCatalog extends AbstractCatalog {
             updateTable(connections, catalogKey, fromTable, toTable);
 
             Path fromPath = getDataTableLocation(fromTable);
-            if (new SchemaManager(fileIO, fromPath).listAllIds().size() > 0) {
+            if (!new SchemaManager(fileIO, fromPath).listAllIds().isEmpty()) {
                 // Rename the file system's table directory. Maintain consistency between tables in
                 // the file system and tables in the Hive Metastore.
                 Path toPath = getDataTableLocation(toTable);
@@ -297,23 +297,18 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected void alterTableImpl(
-            Identifier identifier, String branchName, List<SchemaChange> changes)
+    protected void alterTableImpl(Identifier identifier, List<SchemaChange> changes)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
-        assertMainBranch(branchName);
+        assertMainBranch(identifier);
         SchemaManager schemaManager = getSchemaManager(identifier);
         schemaManager.commitChanges(changes);
     }
 
     @Override
-    protected TableSchema getDataTableSchema(Identifier identifier, String branchName)
-            throws TableNotExistException {
-        assertMainBranch(branchName);
+    protected TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
+        assertMainBranch(identifier);
         if (!JdbcUtils.tableExists(
-                connections,
-                catalogKey,
-                identifier.getDatabaseName(),
-                identifier.getObjectName())) {
+                connections, catalogKey, identifier.getDatabaseName(), identifier.getTableName())) {
             throw new TableNotExistException(identifier);
         }
         Path tableLocation = getDataTableLocation(identifier);

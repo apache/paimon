@@ -21,7 +21,11 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
+
+import javax.annotation.Nullable;
 
 import java.io.Serializable;
 import java.util.Objects;
@@ -41,11 +45,27 @@ public class Identifier implements Serializable {
     public static final String UNKNOWN_DATABASE = "unknown";
 
     private final String database;
-    private final String table;
+    private final String object;
 
-    public Identifier(String database, String table) {
+    public Identifier(String database, String object) {
         this.database = database;
-        this.table = table;
+        this.object = object;
+    }
+
+    public Identifier(
+            String database, String table, @Nullable String branch, @Nullable String systemTable) {
+        this.database = database;
+
+        StringBuilder builder = new StringBuilder(table);
+        if (branch != null) {
+            builder.append(Catalog.SYSTEM_TABLE_SPLITTER)
+                    .append(Catalog.SYSTEM_BRANCH_PREFIX)
+                    .append(branch);
+        }
+        if (systemTable != null) {
+            builder.append(Catalog.SYSTEM_TABLE_SPLITTER).append(systemTable);
+        }
+        this.object = builder.toString();
     }
 
     public String getDatabaseName() {
@@ -53,13 +73,52 @@ public class Identifier implements Serializable {
     }
 
     public String getObjectName() {
-        return table;
+        return object;
     }
 
     public String getFullName() {
         return UNKNOWN_DATABASE.equals(this.database)
-                ? table
-                : String.format("%s.%s", database, table);
+                ? object
+                : String.format("%s.%s", database, object);
+    }
+
+    public String getTableName() {
+        return splitObjectName()[0];
+    }
+
+    public @Nullable String getBranchName() {
+        return splitObjectName()[1];
+    }
+
+    public String getBranchNameOrDefault() {
+        String branch = getBranchName();
+        return branch == null ? BranchManager.DEFAULT_MAIN_BRANCH : branch;
+    }
+
+    public @Nullable String getSystemTableName() {
+        return splitObjectName()[2];
+    }
+
+    private String[] splitObjectName() {
+        String[] splits = StringUtils.split(object, Catalog.SYSTEM_TABLE_SPLITTER);
+        if (splits.length == 1) {
+            return new String[] {object, null, null};
+        } else if (splits.length == 2) {
+            if (splits[1].startsWith(Catalog.SYSTEM_BRANCH_PREFIX)) {
+                return new String[] {
+                    splits[0], splits[1].substring(Catalog.SYSTEM_BRANCH_PREFIX.length()), null
+                };
+            } else {
+                return new String[] {splits[0], null, splits[1]};
+            }
+        } else if (splits.length == 3) {
+            Preconditions.checkArgument(splits[1].startsWith(Catalog.SYSTEM_BRANCH_PREFIX));
+            return new String[] {
+                splits[0], splits[1].substring(Catalog.SYSTEM_BRANCH_PREFIX.length()), splits[2]
+            };
+        } else {
+            throw new IllegalArgumentException("Invalid object name: " + object);
+        }
     }
 
     public String getEscapedFullName() {
@@ -68,11 +127,11 @@ public class Identifier implements Serializable {
 
     public String getEscapedFullName(char escapeChar) {
         return String.format(
-                "%c%s%c.%c%s%c", escapeChar, database, escapeChar, escapeChar, table, escapeChar);
+                "%c%s%c.%c%s%c", escapeChar, database, escapeChar, escapeChar, object, escapeChar);
     }
 
-    public static Identifier create(String db, String table) {
-        return new Identifier(db, table);
+    public static Identifier create(String db, String object) {
+        return new Identifier(db, object);
     }
 
     public static Identifier fromString(String fullName) {
@@ -84,7 +143,7 @@ public class Identifier implements Serializable {
         if (paths.length != 2) {
             throw new IllegalArgumentException(
                     String.format(
-                            "Cannot get splits from '%s' to get database and table", fullName));
+                            "Cannot get splits from '%s' to get database and object", fullName));
         }
 
         return new Identifier(paths[0], paths[1]);
@@ -99,17 +158,17 @@ public class Identifier implements Serializable {
             return false;
         }
         Identifier that = (Identifier) o;
-        return Objects.equals(database, that.database) && Objects.equals(table, that.table);
+        return Objects.equals(database, that.database) && Objects.equals(object, that.object);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(database, table);
+        return Objects.hash(database, object);
     }
 
     @Override
     public String toString() {
-        return "Identifier{" + "database='" + database + '\'' + ", table='" + table + '\'' + '}';
+        return String.format("Identifier{database='%s', object='%s'}", database, object);
     }
 
     public static RowType schema() {

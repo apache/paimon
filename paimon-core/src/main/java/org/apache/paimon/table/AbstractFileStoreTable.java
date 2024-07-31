@@ -116,16 +116,24 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public String name() {
-        Identifier identifier = catalogEnvironment.identifier();
-        return identifier == null ? location().getName() : identifier.getObjectName();
+        return identifier().getObjectName();
     }
 
     @Override
     public String fullName() {
+        return identifier().getFullName();
+    }
+
+    public Identifier identifier() {
         Identifier identifier = catalogEnvironment.identifier();
         return identifier == null
-                ? SchemaManager.fromPath(location().toUri().toString(), true).getFullName()
-                : identifier.getFullName();
+                ? SchemaManager.identifierFromPath(
+                        location().toUri().toString(),
+                        true,
+                        options().containsKey(CoreOptions.BRANCH.key())
+                                ? coreOptions().branch()
+                                : null)
+                : identifier;
     }
 
     @Override
