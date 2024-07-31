@@ -30,7 +30,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for */
+/** Test for {@link InternalRowPartitionComputer}. */
 public class InternalRowPartitionComputerTest {
 
     @Test

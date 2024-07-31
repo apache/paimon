@@ -24,6 +24,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/** Test for {@link LookupFile}. */
 public class LookupFileTest {
 
     @Test
