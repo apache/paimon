@@ -18,7 +18,10 @@
 
 package org.apache.paimon.format.fs;
 
+import org.apache.paimon.cache.BlockCacheConfig;
+import org.apache.paimon.cache.CachedSeekableInputStream;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.SeekableInputStream;
 
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
@@ -35,9 +38,11 @@ import java.net.URI;
 public class HadoopReadOnlyFileSystem extends FileSystem {
 
     private final FileIO fileIO;
+    private final BlockCacheConfig blockCacheConfig;
 
-    public HadoopReadOnlyFileSystem(FileIO fileIO) {
+    public HadoopReadOnlyFileSystem(FileIO fileIO, BlockCacheConfig blockCacheConfig) {
         this.fileIO = fileIO;
+        this.blockCacheConfig = blockCacheConfig;
     }
 
     @Override
@@ -47,8 +52,16 @@ public class HadoopReadOnlyFileSystem extends FileSystem {
 
     @Override
     public FSDataInputStream open(Path path) throws IOException {
-        return new FSDataInputStream(
-                new FSDataWrappedInputStream(fileIO.newInputStream(toPaimonPath(path))));
+        SeekableInputStream inputStream = fileIO.newInputStream(toPaimonPath(path));
+        if (blockCacheConfig.enabled) {
+            inputStream =
+                    new CachedSeekableInputStream(
+                            inputStream,
+                            toPaimonPath(path),
+                            fileIO.getFileSize(toPaimonPath(path)),
+                            blockCacheConfig);
+        }
+        return new FSDataInputStream(new FSDataWrappedInputStream(inputStream));
     }
 
     @Override

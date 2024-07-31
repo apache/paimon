@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.orc;
 
+import org.apache.paimon.cache.BlockCacheConfig;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarRow;
@@ -68,6 +69,8 @@ public class OrcReaderFactory implements FormatReaderFactory {
 
     protected final int batchSize;
 
+    private final BlockCacheConfig blockCacheConfig;
+
     /**
      * @param hadoopConfig the hadoop config for orc reader.
      * @param conjunctPredicates the filter predicates that can be evaluated.
@@ -77,12 +80,14 @@ public class OrcReaderFactory implements FormatReaderFactory {
             final org.apache.hadoop.conf.Configuration hadoopConfig,
             final RowType readType,
             final List<OrcFilters.Predicate> conjunctPredicates,
-            final int batchSize) {
+            final int batchSize,
+            final BlockCacheConfig blockCacheConfig) {
         this.hadoopConfig = checkNotNull(hadoopConfig);
         this.schema = toOrcType(readType);
         this.tableType = readType;
         this.conjunctPredicates = checkNotNull(conjunctPredicates);
         this.batchSize = batchSize;
+        this.blockCacheConfig = blockCacheConfig;
     }
 
     // ------------------------------------------------------------------------
@@ -104,7 +109,8 @@ public class OrcReaderFactory implements FormatReaderFactory {
                         context.fileIO(),
                         context.filePath(),
                         0,
-                        context.fileSize());
+                        context.fileSize(),
+                        blockCacheConfig);
         return new OrcVectorizedReader(orcReader, poolOfBatches);
     }
 
@@ -251,9 +257,10 @@ public class OrcReaderFactory implements FormatReaderFactory {
             FileIO fileIO,
             org.apache.paimon.fs.Path path,
             long splitStart,
-            long splitLength)
+            long splitLength,
+            BlockCacheConfig config)
             throws IOException {
-        org.apache.orc.Reader orcReader = createReader(conf, fileIO, path);
+        org.apache.orc.Reader orcReader = createReader(conf, fileIO, path, config);
         try {
             // get offset and length for the stripes that start in the split
             Pair<Long, Long> offsetAndLength =
@@ -328,7 +335,8 @@ public class OrcReaderFactory implements FormatReaderFactory {
     public static org.apache.orc.Reader createReader(
             org.apache.hadoop.conf.Configuration conf,
             FileIO fileIO,
-            org.apache.paimon.fs.Path path)
+            org.apache.paimon.fs.Path path,
+            BlockCacheConfig config)
             throws IOException {
         // open ORC file and create reader
         org.apache.hadoop.fs.Path hPath = new org.apache.hadoop.fs.Path(path.toUri());
@@ -336,7 +344,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
         OrcFile.ReaderOptions readerOptions = OrcFile.readerOptions(conf);
 
         // configure filesystem from Paimon FileIO
-        readerOptions.filesystem(new HadoopReadOnlyFileSystem(fileIO));
+        readerOptions.filesystem(new HadoopReadOnlyFileSystem(fileIO, config));
 
         return OrcFile.createReader(hPath, readerOptions);
     }
