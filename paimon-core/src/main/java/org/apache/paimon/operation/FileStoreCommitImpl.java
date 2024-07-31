@@ -39,6 +39,7 @@ import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.operation.metrics.CommitMetrics;
 import org.apache.paimon.operation.metrics.CommitStats;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
@@ -422,27 +423,23 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         try {
             boolean skipOverwrite = false;
             // partition filter is built from static or dynamic partition according to properties
-            Predicate partitionFilter = null;
+            PartitionPredicate partitionFilter = null;
             if (dynamicPartitionOverwrite) {
                 if (appendTableFiles.isEmpty()) {
                     // in dynamic mode, if there is no changes to commit, no data will be deleted
                     skipOverwrite = true;
                 } else {
-                    partitionFilter =
+                    Set<BinaryRow> partitions =
                             appendTableFiles.stream()
                                     .map(ManifestEntry::partition)
-                                    .distinct()
-                                    // partition filter is built from new data's partitions
-                                    .map(p -> createPartitionPredicate(partitionType, p))
-                                    .reduce(PredicateBuilder::or)
-                                    .orElseThrow(
-                                            () ->
-                                                    new RuntimeException(
-                                                            "Failed to get dynamic partition filter. This is unexpected."));
+                                    .collect(Collectors.toSet());
+                    partitionFilter = PartitionPredicate.fromMultiple(partitionType, partitions);
                 }
             } else {
-                partitionFilter =
+                Predicate partitionPredicate =
                         createPartitionPredicate(partition, partitionType, partitionDefaultName);
+                partitionFilter =
+                        PartitionPredicate.fromPredicate(partitionType, partitionPredicate);
                 // sanity check, all changes must be done within the given partition
                 if (partitionFilter != null) {
                     for (ManifestEntry entry : appendTableFiles) {
@@ -511,7 +508,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     partitions.stream().map(Objects::toString).collect(Collectors.joining(",")));
         }
 
-        Predicate partitionFilter =
+        // partitions may have partial partition fields, so here must to use predicate way.
+        Predicate predicate =
                 partitions.stream()
                         .map(
                                 partition ->
@@ -519,6 +517,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                                 partition, partitionType, partitionDefaultName))
                         .reduce(PredicateBuilder::or)
                         .orElseThrow(() -> new RuntimeException("Failed to get partition filter."));
+        PartitionPredicate partitionFilter =
+                PartitionPredicate.fromPredicate(partitionType, predicate);
 
         tryOverwrite(
                 partitionFilter,
@@ -722,7 +722,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     private int tryOverwrite(
-            Predicate partitionFilter,
+            @Nullable PartitionPredicate partitionFilter,
             List<ManifestEntry> changes,
             List<IndexManifestEntry> indexFiles,
             long identifier,
@@ -736,11 +736,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             List<ManifestEntry> changesWithOverwrite = new ArrayList<>();
             List<IndexManifestEntry> indexChangesWithOverwrite = new ArrayList<>();
             if (latestSnapshot != null) {
-                List<ManifestEntry> currentEntries =
-                        scan.withSnapshot(latestSnapshot)
-                                .withPartitionFilter(partitionFilter)
-                                .plan()
-                                .files();
+                FileStoreScan scan = this.scan.withSnapshot(latestSnapshot);
+                if (partitionFilter != null) {
+                    scan.withPartitionFilter(partitionFilter);
+                }
+                List<ManifestEntry> currentEntries = scan.plan().files();
                 for (ManifestEntry entry : currentEntries) {
                     changesWithOverwrite.add(
                             new ManifestEntry(
@@ -784,7 +784,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @VisibleForTesting
-    public boolean tryCommitOnce(
+    boolean tryCommitOnce(
             List<ManifestEntry> tableFiles,
             List<ManifestEntry> changelogFiles,
             List<IndexManifestEntry> indexFiles,
@@ -804,13 +804,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         : snapshotManager.copyWithBranch(branchName).snapshotPath(newSnapshotId);
 
         if (LOG.isDebugEnabled()) {
-            LOG.debug("Ready to commit table files to snapshot #" + newSnapshotId);
+            LOG.debug("Ready to commit table files to snapshot {}", newSnapshotId);
             for (ManifestEntry entry : tableFiles) {
-                LOG.debug("  * " + entry.toString());
+                LOG.debug("  * {}", entry);
             }
-            LOG.debug("Ready to commit changelog to snapshot #" + newSnapshotId);
+            LOG.debug("Ready to commit changelog to snapshot {}", newSnapshotId);
             for (ManifestEntry entry : changelogFiles) {
-                LOG.debug("  * " + entry.toString());
+                LOG.debug("  * {}", entry);
             }
         }
 
@@ -1292,7 +1292,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return latestSnapshot -> false;
     }
 
-    public static ConflictCheck mustConflictCheck() {
+    @VisibleForTesting
+    static ConflictCheck mustConflictCheck() {
         return latestSnapshot -> true;
     }
 }
