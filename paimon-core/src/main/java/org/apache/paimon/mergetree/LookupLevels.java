@@ -33,6 +33,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.IOFunction;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 
@@ -129,13 +130,16 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
     private T lookup(InternalRow key, DataFileMeta file) throws IOException {
         LookupFile lookupFile = lookupFileCache.getIfPresent(file.fileName());
 
-        while (lookupFile == null || lookupFile.isClosed()) {
+        if (lookupFile == null) {
             lookupFile = createLookupFile(file);
-            lookupFileCache.put(file.fileName(), lookupFile);
+            lookupFileCache.put(file.fileName(), lookupFile.pin());
         }
+        Preconditions.checkArgument(
+                !lookupFile.isClosed(), "The new create lookup file should not be closed.");
 
         byte[] keyBytes = keySerializer.serializeToBytes(key);
         byte[] valueBytes = lookupFile.get(keyBytes);
+        lookupFileCache.asMap().computeIfPresent(file.fileName(), (k, v) -> v.unPin());
         if (valueBytes == null) {
             return null;
         }
