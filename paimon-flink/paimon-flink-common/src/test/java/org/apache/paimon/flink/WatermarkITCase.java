@@ -63,7 +63,7 @@ public class WatermarkITCase extends CatalogITCaseBase {
                                         + "  GROUP BY window_start, window_end;"));
 
         sql("INSERT INTO T VALUES (1, TIMESTAMP '2023-02-02 12:00:00')");
-        sql("INSERT INTO T VALUES (1, TIMESTAMP '2023-02-02 12:10:01')");
+        sql("INSERT INTO T VALUES (1, TIMESTAMP '2023-02-02 12:10:05')");
 
         assertThat(select.collect(1))
                 .containsExactlyInAnyOrder(
