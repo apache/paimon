@@ -47,6 +47,10 @@ public class Identifier implements Serializable {
     private final String database;
     private final String object;
 
+    private transient String table;
+    private transient String branch;
+    private transient String systemTable;
+
     public Identifier(String database, String object) {
         this.database = database;
         this.object = object;
@@ -66,6 +70,10 @@ public class Identifier implements Serializable {
             builder.append(Catalog.SYSTEM_TABLE_SPLITTER).append(systemTable);
         }
         this.object = builder.toString();
+
+        this.table = table;
+        this.branch = branch;
+        this.systemTable = systemTable;
     }
 
     public String getDatabaseName() {
@@ -83,11 +91,13 @@ public class Identifier implements Serializable {
     }
 
     public String getTableName() {
-        return splitObjectName()[0];
+        splitObjectName();
+        return table;
     }
 
     public @Nullable String getBranchName() {
-        return splitObjectName()[1];
+        splitObjectName();
+        return branch;
     }
 
     public String getBranchNameOrDefault() {
@@ -96,26 +106,34 @@ public class Identifier implements Serializable {
     }
 
     public @Nullable String getSystemTableName() {
-        return splitObjectName()[2];
+        splitObjectName();
+        return systemTable;
     }
 
-    private String[] splitObjectName() {
+    private void splitObjectName() {
+        if (table != null) {
+            return;
+        }
+
         String[] splits = StringUtils.split(object, Catalog.SYSTEM_TABLE_SPLITTER);
         if (splits.length == 1) {
-            return new String[] {object, null, null};
+            table = object;
+            branch = null;
+            systemTable = null;
         } else if (splits.length == 2) {
+            table = splits[0];
             if (splits[1].startsWith(Catalog.SYSTEM_BRANCH_PREFIX)) {
-                return new String[] {
-                    splits[0], splits[1].substring(Catalog.SYSTEM_BRANCH_PREFIX.length()), null
-                };
+                branch = splits[1].substring(Catalog.SYSTEM_BRANCH_PREFIX.length());
+                systemTable = null;
             } else {
-                return new String[] {splits[0], null, splits[1]};
+                branch = null;
+                systemTable = splits[1];
             }
         } else if (splits.length == 3) {
             Preconditions.checkArgument(splits[1].startsWith(Catalog.SYSTEM_BRANCH_PREFIX));
-            return new String[] {
-                splits[0], splits[1].substring(Catalog.SYSTEM_BRANCH_PREFIX.length()), splits[2]
-            };
+            table = splits[0];
+            branch = splits[1].substring(Catalog.SYSTEM_BRANCH_PREFIX.length());
+            systemTable = splits[2];
         } else {
             throw new IllegalArgumentException("Invalid object name: " + object);
         }
