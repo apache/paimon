@@ -598,6 +598,10 @@ public class SchemaManager implements Serializable {
 
     public static Identifier identifierFromPath(
             String tablePath, boolean ignoreIfUnknownDatabase, @Nullable String branchName) {
+        if (DEFAULT_MAIN_BRANCH.equals(branchName)) {
+            branchName = null;
+        }
+
         String[] paths = tablePath.split("/");
         if (paths.length < 2) {
             if (!ignoreIfUnknownDatabase) {
@@ -621,6 +625,7 @@ public class SchemaManager implements Serializable {
             return new Identifier(UNKNOWN_DATABASE, paths[paths.length - 1], branchName, null);
         }
         database = database.substring(0, index);
+
         return new Identifier(database, paths[paths.length - 1], branchName, null);
     }
 }

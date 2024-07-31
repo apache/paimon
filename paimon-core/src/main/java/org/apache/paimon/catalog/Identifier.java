@@ -115,7 +115,7 @@ public class Identifier implements Serializable {
             return;
         }
 
-        String[] splits = StringUtils.split(object, Catalog.SYSTEM_TABLE_SPLITTER);
+        String[] splits = StringUtils.split(object, Catalog.SYSTEM_TABLE_SPLITTER, -1, true);
         if (splits.length == 1) {
             table = object;
             branch = null;
@@ -130,7 +130,9 @@ public class Identifier implements Serializable {
                 systemTable = splits[1];
             }
         } else if (splits.length == 3) {
-            Preconditions.checkArgument(splits[1].startsWith(Catalog.SYSTEM_BRANCH_PREFIX));
+            Preconditions.checkArgument(
+                    splits[1].startsWith(Catalog.SYSTEM_BRANCH_PREFIX),
+                    "System table can only contain one '$' separator, but this is: " + object);
             table = splits[0];
             branch = splits[1].substring(Catalog.SYSTEM_BRANCH_PREFIX.length());
             systemTable = splits[2];

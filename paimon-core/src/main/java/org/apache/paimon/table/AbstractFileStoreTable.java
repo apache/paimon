@@ -130,9 +130,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 ? SchemaManager.identifierFromPath(
                         location().toUri().toString(),
                         true,
-                        options().containsKey(CoreOptions.BRANCH.key())
-                                ? coreOptions().branch()
-                                : null)
+                        options().get(CoreOptions.BRANCH.key()))
                 : identifier;
     }
 
