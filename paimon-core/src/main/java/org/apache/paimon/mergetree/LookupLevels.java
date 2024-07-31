@@ -51,6 +51,8 @@ import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -62,7 +64,7 @@ import static org.apache.paimon.utils.VarLengthIntUtils.decodeLong;
 import static org.apache.paimon.utils.VarLengthIntUtils.encodeLong;
 
 /** Provide lookup by key. */
-public class LookupLevels<T> implements Levels.DropFileCallback {
+public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
 
     private final Levels levels;
     private final Comparator<InternalRow> keyComparator;
@@ -73,6 +75,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback {
     private final LookupStoreFactory lookupStoreFactory;
     private final Cache<String, LookupFile> lookupFiles;
     private final Function<Long, BloomFilter.Builder> bfGenerator;
+    private final Set<String> cachedFiles;
 
     public LookupLevels(
             Levels levels,
@@ -93,6 +96,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback {
         this.lookupStoreFactory = lookupStoreFactory;
         this.bfGenerator = bfGenerator;
         this.lookupFiles = lookupFiles;
+        this.cachedFiles = new HashSet<>();
         levels.addDropFileCallback(this);
     }
 
@@ -119,6 +123,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback {
     @Override
     public void notifyDropFile(String file) {
         lookupFiles.invalidate(file);
+        cachedFiles.remove(file);
     }
 
     @Nullable
@@ -142,6 +147,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback {
 
         while (lookupFile == null || lookupFile.isClosed) {
             lookupFile = createLookupFile(file);
+            cachedFiles.add(file.fileName());
             lookupFiles.put(file.fileName(), lookupFile);
         }
 
@@ -209,6 +215,13 @@ public class LookupLevels<T> implements Levels.DropFileCallback {
         }
 
         return new LookupFile(localFile, file, lookupStoreFactory.createReader(localFile, context));
+    }
+
+    @Override
+    public void close() throws IOException {
+        for (String cachedFile : cachedFiles) {
+            lookupFiles.invalidate(cachedFile);
+        }
     }
 
     /** Lookup file. */

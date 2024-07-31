@@ -105,6 +105,9 @@ public class ContainsLevelsTest {
 
         // no exists
         assertThat(containsLevels.lookup(row(4), 1)).isNull();
+
+        containsLevels.close();
+        assertThat(containsLevels.lookupFiles().estimatedSize()).isEqualTo(0);
     }
 
     @Test
@@ -142,6 +145,9 @@ public class ContainsLevelsTest {
         for (int key : notContains) {
             assertThat(containsLevels.lookup(row(key), 1)).isNull();
         }
+
+        containsLevels.close();
+        assertThat(containsLevels.lookupFiles().estimatedSize()).isEqualTo(0);
     }
 
     @Test
@@ -171,6 +177,9 @@ public class ContainsLevelsTest {
                 tempDir.toFile().list((dir, name) -> name.startsWith(LOOKUP_FILE_PREFIX));
         assertThat(lookupFiles).isNotNull();
         assertThat(fileNumber).isNotEqualTo(fileNum).isEqualTo(lookupFiles.length);
+
+        lookupLevels.close();
+        assertThat(lookupLevels.lookupFiles().estimatedSize()).isEqualTo(0);
     }
 
     private LookupLevels<Boolean> createContainsLevels(Levels levels, MemorySize maxDiskSize) {

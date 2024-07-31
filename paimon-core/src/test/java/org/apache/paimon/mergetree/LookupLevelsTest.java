@@ -119,6 +119,9 @@ public class LookupLevelsTest {
         // no exists
         kv = lookupLevels.lookup(row(4), 1);
         assertThat(kv).isNull();
+
+        lookupLevels.close();
+        assertThat(lookupLevels.lookupFiles().estimatedSize()).isEqualTo(0);
     }
 
     @Test
@@ -161,6 +164,9 @@ public class LookupLevelsTest {
             KeyValue kv = lookupLevels.lookup(row(key), 1);
             assertThat(kv).isNull();
         }
+
+        lookupLevels.close();
+        assertThat(lookupLevels.lookupFiles().estimatedSize()).isEqualTo(0);
     }
 
     @Test
@@ -194,6 +200,9 @@ public class LookupLevelsTest {
                 tempDir.toFile().list((dir, name) -> name.startsWith(LOOKUP_FILE_PREFIX));
         assertThat(lookupFiles).isNotNull();
         assertThat(fileNumber).isNotEqualTo(fileNum).isEqualTo(lookupFiles.length);
+
+        lookupLevels.close();
+        assertThat(lookupLevels.lookupFiles().estimatedSize()).isEqualTo(0);
     }
 
     @Test

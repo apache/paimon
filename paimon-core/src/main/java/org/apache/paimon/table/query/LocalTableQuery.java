@@ -205,6 +205,13 @@ public class LocalTableQuery implements TableQuery {
 
     @Override
     public void close() throws IOException {
+        for (Map.Entry<BinaryRow, Map<Integer, LookupLevels<KeyValue>>> buckets :
+                tableView.entrySet()) {
+            for (Map.Entry<Integer, LookupLevels<KeyValue>> bucket :
+                    buckets.getValue().entrySet()) {
+                bucket.getValue().close();
+            }
+        }
         if (lookupFileCache != null) {
             lookupFileCache.invalidateAll();
         }

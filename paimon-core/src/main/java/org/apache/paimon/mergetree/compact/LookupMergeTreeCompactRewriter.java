@@ -130,7 +130,9 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
     }
 
     @Override
-    public void close() throws IOException {}
+    public void close() throws IOException {
+        lookupLevels.close();
+    }
 
     /** Factory to create {@link MergeFunctionWrapper}. */
     public interface MergeFunctionWrapperFactory<T> {
