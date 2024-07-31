@@ -1021,6 +1021,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             // If the commit succeeds, we ignore all exceptions thrown by the successful commit;
             // otherwise, we throw an exception.
             if (!success && useSerializableIsolation) {
+                cleanUpTmpManifests(
+                        previousChangesListName,
+                        newChangesListName,
+                        changelogListName,
+                        newIndexManifest,
+                        oldMetas,
+                        newMetas,
+                        changelogMetas);
                 throw new CommitFailedException(e.getMessage(), e);
             }
         }
