@@ -21,7 +21,6 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.jdbc.JdbcCatalog;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
@@ -58,7 +57,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** Base test class of paimon catalog in {@link Catalog}. */
 public abstract class CatalogTestBase {
 
-    @TempDir java.nio.file.Path tempFile;
+    @TempDir protected java.nio.file.Path tempFile;
     protected String warehouse;
     protected FileIO fileIO;
     protected Catalog catalog;
@@ -374,27 +373,6 @@ public abstract class CatalogTestBase {
                 .isThrownBy(
                         () -> catalog.getTable(Identifier.create("non_existing_db", "test_table")))
                 .withMessage("Table non_existing_db.test_table does not exist.");
-    }
-
-    @Test
-    public void testGetDataTableLocation() {
-        Path path =
-                ((JdbcCatalog) catalog)
-                        .getDataTableLocation(Identifier.create("test_db", "test_table$branch_a"));
-        assertThat(path.toString())
-                .isEqualTo(
-                        new File(
-                                        "file:/" + tempFile,
-                                        "test_db"
-                                                + ".db"
-                                                + File.separator
-                                                + "test_table"
-                                                + File.separator
-                                                + "branch"
-                                                + File.separator
-                                                + BranchManager.BRANCH_PREFIX
-                                                + "a")
-                                .toString());
     }
 
     @Test
