@@ -436,6 +436,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     partitionFilter = PartitionPredicate.fromMultiple(partitionType, partitions);
                 }
             } else {
+                // partition may be partial partition fields, so here must to use predicate way.
                 Predicate partitionPredicate =
                         createPartitionPredicate(partition, partitionType, partitionDefaultName);
                 partitionFilter =
@@ -508,7 +509,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     partitions.stream().map(Objects::toString).collect(Collectors.joining(",")));
         }
 
-        // partitions may have partial partition fields, so here must to use predicate way.
+        // partitions may be partial partition fields, so here must to use predicate way.
         Predicate predicate =
                 partitions.stream()
                         .map(
@@ -736,11 +737,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             List<ManifestEntry> changesWithOverwrite = new ArrayList<>();
             List<IndexManifestEntry> indexChangesWithOverwrite = new ArrayList<>();
             if (latestSnapshot != null) {
-                FileStoreScan scan = this.scan.withSnapshot(latestSnapshot);
-                if (partitionFilter != null) {
-                    scan.withPartitionFilter(partitionFilter);
-                }
-                List<ManifestEntry> currentEntries = scan.plan().files();
+                List<ManifestEntry> currentEntries =
+                        scan.withSnapshot(latestSnapshot)
+                                .withPartitionFilter(partitionFilter)
+                                .plan()
+                                .files();
                 for (ManifestEntry entry : currentEntries) {
                     changesWithOverwrite.add(
                             new ManifestEntry(
