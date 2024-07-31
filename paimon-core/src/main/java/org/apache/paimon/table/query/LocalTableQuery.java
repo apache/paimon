@@ -34,6 +34,7 @@ import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.LookupStoreFactory;
 import org.apache.paimon.mergetree.Levels;
+import org.apache.paimon.mergetree.LookupFile;
 import org.apache.paimon.mergetree.LookupLevels;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
@@ -72,7 +73,7 @@ public class LocalTableQuery implements TableQuery {
 
     private IOManager ioManager;
 
-    private Cache<String, LookupLevels.LookupFile> lookupFileCache;
+    @Nullable private Cache<String, LookupFile> lookupFileCache;
 
     public LocalTableQuery(FileStoreTable table) {
         this.options = table.coreOptions();
@@ -136,7 +137,7 @@ public class LocalTableQuery implements TableQuery {
         Options options = this.options.toConfiguration();
         if (lookupFileCache == null) {
             lookupFileCache =
-                    LookupLevels.createCache(
+                    LookupFile.createCache(
                             options.get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
                             options.get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE));
         }

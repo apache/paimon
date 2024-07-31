@@ -24,10 +24,8 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.RowCompactedSerializer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.lookup.LookupStoreFactory;
-import org.apache.paimon.lookup.LookupStoreReader;
 import org.apache.paimon.lookup.LookupStoreWriter;
 import org.apache.paimon.memory.MemorySegment;
-import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.RowKind;
@@ -37,18 +35,12 @@ import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.IOFunction;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
-import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
-import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.RemovalCause;
-import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Weigher;
-import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
 
 import javax.annotation.Nullable;
 
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.time.Duration;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -57,8 +49,6 @@ import java.util.TreeSet;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-import static org.apache.paimon.mergetree.LookupUtils.fileKibiBytes;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.VarLengthIntUtils.MAX_VAR_LONG_SIZE;
 import static org.apache.paimon.utils.VarLengthIntUtils.decodeLong;
 import static org.apache.paimon.utils.VarLengthIntUtils.encodeLong;
@@ -73,9 +63,10 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
     private final IOFunction<DataFileMeta, RecordReader<KeyValue>> fileReaderFactory;
     private final Supplier<File> localFileFactory;
     private final LookupStoreFactory lookupStoreFactory;
-    private final Cache<String, LookupFile> lookupFiles;
     private final Function<Long, BloomFilter.Builder> bfGenerator;
-    private final Set<String> cachedFiles;
+
+    private final Cache<String, LookupFile> lookupFileCache;
+    private final Set<String> ownCachedFiles;
 
     public LookupLevels(
             Levels levels,
@@ -86,7 +77,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
             Supplier<File> localFileFactory,
             LookupStoreFactory lookupStoreFactory,
             Function<Long, BloomFilter.Builder> bfGenerator,
-            Cache<String, LookupFile> lookupFiles) {
+            Cache<String, LookupFile> lookupFileCache) {
         this.levels = levels;
         this.keyComparator = keyComparator;
         this.keySerializer = new RowCompactedSerializer(keyType);
@@ -95,20 +86,9 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         this.localFileFactory = localFileFactory;
         this.lookupStoreFactory = lookupStoreFactory;
         this.bfGenerator = bfGenerator;
-        this.lookupFiles = lookupFiles;
-        this.cachedFiles = new HashSet<>();
+        this.lookupFileCache = lookupFileCache;
+        this.ownCachedFiles = new HashSet<>();
         levels.addDropFileCallback(this);
-    }
-
-    public static Cache<String, LookupFile> createCache(
-            Duration fileRetention, MemorySize maxDiskSize) {
-        return Caffeine.newBuilder()
-                .expireAfterAccess(fileRetention)
-                .maximumWeight(maxDiskSize.getKibiBytes())
-                .weigher((Weigher<String, LookupFile>) LookupLevels::fileWeigh)
-                .removalListener(LookupLevels::removalCallback)
-                .executor(MoreExecutors.directExecutor())
-                .build();
     }
 
     public Levels getLevels() {
@@ -117,17 +97,17 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
 
     @VisibleForTesting
     Cache<String, LookupFile> lookupFiles() {
-        return lookupFiles;
+        return lookupFileCache;
     }
 
     @VisibleForTesting
     Set<String> cachedFiles() {
-        return cachedFiles;
+        return ownCachedFiles;
     }
 
     @Override
     public void notifyDropFile(String file) {
-        lookupFiles.invalidate(file);
+        lookupFileCache.invalidate(file);
     }
 
     @Nullable
@@ -147,12 +127,11 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
 
     @Nullable
     private T lookup(InternalRow key, DataFileMeta file) throws IOException {
-        LookupFile lookupFile = lookupFiles.getIfPresent(file.fileName());
+        LookupFile lookupFile = lookupFileCache.getIfPresent(file.fileName());
 
-        while (lookupFile == null || lookupFile.isClosed) {
+        while (lookupFile == null || lookupFile.isClosed()) {
             lookupFile = createLookupFile(file);
-            cachedFiles.add(file.fileName());
-            lookupFiles.put(file.fileName(), lookupFile);
+            lookupFileCache.put(file.fileName(), lookupFile);
         }
 
         byte[] keyBytes = keySerializer.serializeToBytes(key);
@@ -163,20 +142,6 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
 
         return valueProcessor.readFromDisk(
                 key, lookupFile.remoteFile().level(), valueBytes, file.fileName());
-    }
-
-    private static int fileWeigh(String file, LookupFile lookupFile) {
-        return fileKibiBytes(lookupFile.localFile);
-    }
-
-    private static void removalCallback(String key, LookupFile file, RemovalCause cause) {
-        if (file != null) {
-            try {
-                file.close();
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
-        }
     }
 
     private LookupFile createLookupFile(DataFileMeta file) throws IOException {
@@ -218,55 +183,19 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
             context = kvWriter.close();
         }
 
+        ownCachedFiles.add(file.fileName());
         return new LookupFile(
-                localFile, file, lookupStoreFactory.createReader(localFile, context), cachedFiles);
+                localFile,
+                file,
+                lookupStoreFactory.createReader(localFile, context),
+                () -> ownCachedFiles.remove(file.fileName()));
     }
 
     @Override
     public void close() throws IOException {
-        Set<String> toClean = new HashSet<>(cachedFiles);
+        Set<String> toClean = new HashSet<>(ownCachedFiles);
         for (String cachedFile : toClean) {
-            lookupFiles.invalidate(cachedFile);
-        }
-    }
-
-    /** Lookup file. */
-    public static class LookupFile implements Closeable {
-
-        private final File localFile;
-        private final DataFileMeta remoteFile;
-        private final LookupStoreReader reader;
-        private final Set<String> cachedFiles;
-
-        private boolean isClosed = false;
-
-        public LookupFile(
-                File localFile,
-                DataFileMeta remoteFile,
-                LookupStoreReader reader,
-                Set<String> cachedFiles) {
-            this.localFile = localFile;
-            this.remoteFile = remoteFile;
-            this.reader = reader;
-            this.cachedFiles = cachedFiles;
-        }
-
-        @Nullable
-        public byte[] get(byte[] key) throws IOException {
-            checkArgument(!isClosed);
-            return reader.lookup(key);
-        }
-
-        public DataFileMeta remoteFile() {
-            return remoteFile;
-        }
-
-        @Override
-        public void close() throws IOException {
-            reader.close();
-            isClosed = true;
-            cachedFiles.remove(remoteFile.fileName());
-            FileIOUtils.deleteFileOrDirectory(localFile);
+            lookupFileCache.invalidate(cachedFile);
         }
     }
 

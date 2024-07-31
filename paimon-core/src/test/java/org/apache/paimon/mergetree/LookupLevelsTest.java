@@ -275,7 +275,7 @@ public class LookupLevelsTest {
                 new HashLookupStoreFactory(
                         new CacheManager(MemorySize.ofMebiBytes(1)), 2048, 0.75, "none"),
                 rowCount -> BloomFilter.builder(rowCount, 0.05),
-                LookupLevels.createCache(Duration.ofHours(1), maxDiskSize));
+                LookupFile.createCache(Duration.ofHours(1), maxDiskSize));
     }
 
     private KeyValue kv(int key, int value) {

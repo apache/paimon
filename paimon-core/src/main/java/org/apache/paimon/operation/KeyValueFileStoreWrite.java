@@ -43,6 +43,7 @@ import org.apache.paimon.io.RecordLevelExpire;
 import org.apache.paimon.lookup.LookupStoreFactory;
 import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.mergetree.Levels;
+import org.apache.paimon.mergetree.LookupFile;
 import org.apache.paimon.mergetree.LookupLevels;
 import org.apache.paimon.mergetree.LookupLevels.ContainsValueProcessor;
 import org.apache.paimon.mergetree.LookupLevels.KeyValueProcessor;
@@ -104,7 +105,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     private final RowType keyType;
     private final RowType valueType;
     @Nullable private final RecordLevelExpire recordLevelExpire;
-    private Cache<String, LookupLevels.LookupFile> lookupFileCache;
+    @Nullable private Cache<String, LookupFile> lookupFileCache;
 
     public KeyValueFileStoreWrite(
             FileIO fileIO,
@@ -361,7 +362,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
         Options options = this.options.toConfiguration();
         if (lookupFileCache == null) {
             lookupFileCache =
-                    LookupLevels.createCache(
+                    LookupFile.createCache(
                             options.get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
                             options.get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE));
         }
