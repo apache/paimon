@@ -94,7 +94,7 @@ public class WatermarkITCase extends CatalogITCaseBase {
                 BlockingIterator.of(
                         streamSqlIter(
                                 "SELECT window_start, window_end, SUM(f0) FROM TABLE("
-                                        + "TUMBLE(TABLE T$audit_log, DESCRIPTOR(ts), INTERVAL '10' MINUTES))\n"
+                                        + "TUMBLE(TABLE T, DESCRIPTOR(ts), INTERVAL '10' MINUTES))\n"
                                         + "  GROUP BY window_start, window_end;"));
 
         sql("INSERT INTO T VALUES (1, TIMESTAMP '2023-02-02 12:00:00')");
