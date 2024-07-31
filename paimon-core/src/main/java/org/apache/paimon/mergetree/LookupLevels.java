@@ -47,7 +47,6 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.Function;
-import java.util.function.Supplier;
 
 import static org.apache.paimon.utils.VarLengthIntUtils.MAX_VAR_LONG_SIZE;
 import static org.apache.paimon.utils.VarLengthIntUtils.decodeLong;
@@ -61,7 +60,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
     private final RowCompactedSerializer keySerializer;
     private final ValueProcessor<T> valueProcessor;
     private final IOFunction<DataFileMeta, RecordReader<KeyValue>> fileReaderFactory;
-    private final Supplier<File> localFileFactory;
+    private final Function<String, File> localFileFactory;
     private final LookupStoreFactory lookupStoreFactory;
     private final Function<Long, BloomFilter.Builder> bfGenerator;
 
@@ -74,7 +73,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
             RowType keyType,
             ValueProcessor<T> valueProcessor,
             IOFunction<DataFileMeta, RecordReader<KeyValue>> fileReaderFactory,
-            Supplier<File> localFileFactory,
+            Function<String, File> localFileFactory,
             LookupStoreFactory lookupStoreFactory,
             Function<Long, BloomFilter.Builder> bfGenerator,
             Cache<String, LookupFile> lookupFileCache) {
@@ -145,7 +144,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
     }
 
     private LookupFile createLookupFile(DataFileMeta file) throws IOException {
-        File localFile = localFileFactory.get();
+        File localFile = localFileFactory.apply(file.fileName());
         if (!localFile.createNewFile()) {
             throw new IOException("Can not create new file: " + localFile);
         }

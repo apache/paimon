@@ -169,6 +169,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 schemaManager,
                 schema,
                 commitUser,
+                partitionType,
                 keyType,
                 valueType,
                 keyComparatorSupplier,

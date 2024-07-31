@@ -39,6 +39,7 @@ import org.apache.paimon.mergetree.LookupLevels;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.KeyComparatorSupplier;
 import org.apache.paimon.utils.Preconditions;
 
@@ -75,6 +76,8 @@ public class LocalTableQuery implements TableQuery {
 
     @Nullable private Cache<String, LookupFile> lookupFileCache;
 
+    private final RowType partitionType;
+
     public LocalTableQuery(FileStoreTable table) {
         this.options = table.coreOptions();
         this.tableView = new HashMap<>();
@@ -86,6 +89,7 @@ public class LocalTableQuery implements TableQuery {
         KeyValueFileStore store = (KeyValueFileStore) tableStore;
 
         this.readerFactoryBuilder = store.newReaderFactoryBuilder();
+        this.partitionType = table.schema().logicalPartitionType();
         RowType keyType = readerFactoryBuilder.keyType();
         this.keyComparatorSupplier = new KeyComparatorSupplier(readerFactoryBuilder.keyType());
         this.lookupStoreFactory =
@@ -155,9 +159,18 @@ public class LocalTableQuery implements TableQuery {
                                         file.fileName(),
                                         file.fileSize(),
                                         file.level()),
-                        () ->
+                        file ->
                                 Preconditions.checkNotNull(ioManager, "IOManager is required.")
-                                        .createChannel()
+                                        .createChannel(
+                                                LookupFile.localFilePrefix(
+                                                        InternalRowPartitionComputer
+                                                                .paritionToString(
+                                                                        partitionType,
+                                                                        partition,
+                                                                        "-"),
+                                                        bucket,
+                                                        file,
+                                                        100))
                                         .getPathFile(),
                         lookupStoreFactory,
                         bfGenerator(options),

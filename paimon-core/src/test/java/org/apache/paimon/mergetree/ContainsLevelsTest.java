@@ -192,7 +192,7 @@ public class ContainsLevelsTest {
                         createReaderFactory()
                                 .createRecordReader(
                                         0, file.fileName(), file.fileSize(), file.level()),
-                () -> new File(tempDir.toFile(), LOOKUP_FILE_PREFIX + UUID.randomUUID()),
+                file -> new File(tempDir.toFile(), LOOKUP_FILE_PREFIX + UUID.randomUUID()),
                 new HashLookupStoreFactory(
                         new CacheManager(MemorySize.ofMebiBytes(1)), 2048, 0.75, "none"),
                 rowCount -> BloomFilter.builder(rowCount, 0.01),
