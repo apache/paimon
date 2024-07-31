@@ -42,7 +42,7 @@ under the License.
             <td><h5>bucket</h5></td>
             <td style="word-wrap: break-word;">-1</td>
             <td>Integer</td>
-            <td>Bucket number for file store.<br />It should either be equal to -1 (dynamic bucket mode), or it must be greater than 0 (fixed bucket mode).</td>
+            <td>Bucket number for file store.<br />It should either be equal to -1 (dynamic bucket mode or unaware bucket mode), or it must be greater than 0 (fixed bucket mode).</td>
         </tr>
         <tr>
             <td><h5>bucket-key</h5></td>
@@ -742,7 +742,7 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td><h5>source.split.target-size</h5></td>
             <td style="word-wrap: break-word;">128 mb</td>
             <td>MemorySize</td>
-            <td>Target size of a source split when scanning a bucket.</td>
+            <td>Target size of a source split when scanning a partition (unaware bucket mode) or bucket (non unaware bucket mode).</td>
         </tr>
         <tr>
             <td><h5>spill-compression</h5></td>
@@ -856,7 +856,7 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td><h5>write-max-writers-to-spill</h5></td>
             <td style="word-wrap: break-word;">5</td>
             <td>Integer</td>
-            <td>When in batch append inserting, if the writer number is greater than this option, we open the buffer cache and spill function to avoid out-of-memory. </td>
+            <td>When in batch append inserting, if the writer number is greater than this option, we open the buffer cache and spill function to avoid out-of-memory.</td>
         </tr>
         <tr>
             <td><h5>write-only</h5></td>

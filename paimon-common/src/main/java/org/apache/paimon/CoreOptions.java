@@ -93,7 +93,7 @@ public class CoreOptions implements Serializable {
                                     .text("Bucket number for file store.")
                                     .linebreak()
                                     .text(
-                                            "It should either be equal to -1 (dynamic bucket mode), or it must be greater than 0 (fixed bucket mode).")
+                                            "It should either be equal to -1 (dynamic bucket mode or unaware bucket mode), or it must be greater than 0 (fixed bucket mode).")
                                     .build());
 
     @Immutable
@@ -368,7 +368,8 @@ public class CoreOptions implements Serializable {
             key("source.split.target-size")
                     .memoryType()
                     .defaultValue(MemorySize.ofMebiBytes(128))
-                    .withDescription("Target size of a source split when scanning a bucket.");
+                    .withDescription(
+                            "Target size of a source split when scanning a partition (unaware bucket mode) or bucket (non unaware bucket mode).");
 
     public static final ConfigOption<MemorySize> SOURCE_SPLIT_OPEN_FILE_COST =
             key("source.split.open-file-cost")
@@ -412,7 +413,7 @@ public class CoreOptions implements Serializable {
                     .intType()
                     .defaultValue(5)
                     .withDescription(
-                            "When in batch append inserting, if the writer number is greater than this option, we open the buffer cache and spill function to avoid out-of-memory. ");
+                            "When in batch append inserting, if the writer number is greater than this option, we open the buffer cache and spill function to avoid out-of-memory.");
 
     public static final ConfigOption<MemorySize> WRITE_MANIFEST_CACHE =
             key("write-manifest-cache")

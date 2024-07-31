@@ -145,6 +145,7 @@ public class ManifestEntry implements FileEntry {
      */
     public static Filter<InternalRow> createCacheRowFilter(
             @Nullable ManifestCacheFilter manifestCacheFilter, int numOfBuckets) {
+        // manifestCacheFilter is not null only when write
         if (manifestCacheFilter == null) {
             return Filter.alwaysTrue();
         }

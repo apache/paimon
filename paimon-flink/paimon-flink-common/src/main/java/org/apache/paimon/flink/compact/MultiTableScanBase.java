@@ -42,10 +42,10 @@ import static org.apache.paimon.flink.utils.MultiTablesCompactorUtil.shouldCompa
  *
  * @param <T> the result of scanning file :
  *     <ol>
- *       <li>Tuple2<{@link Split},String> for the table with multi buckets, such as dynamic or fixed
- *           bucket table.
- *       <li>{@link MultiTableAppendOnlyCompactionTask} for the table witch fixed single bucket
- *           ,such as unaware bucket table.
+ *       <li>Tuple2<{@link Split}, String> for the table with multi buckets, such as dynamic or
+ *           fixed bucket table.
+ *       <li>{@link MultiTableAppendOnlyCompactionTask} for the table with fixed single bucket ,
+ *           such as unaware bucket table.
  *     </ol>
  */
 public abstract class MultiTableScanBase<T> implements AutoCloseable {

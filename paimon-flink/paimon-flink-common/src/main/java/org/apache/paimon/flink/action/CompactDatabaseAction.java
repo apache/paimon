@@ -185,7 +185,6 @@ public class CompactDatabaseAction extends ActionBase {
     }
 
     private void buildForCombinedMode() {
-
         ReadableConfig conf = env.getConfiguration();
         boolean isStreaming =
                 conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING;
@@ -224,7 +223,6 @@ public class CompactDatabaseAction extends ActionBase {
             String fullName,
             FileStoreTable table,
             boolean isStreaming) {
-
         CompactorSourceBuilder sourceBuilder = new CompactorSourceBuilder(fullName, table);
         CompactorSinkBuilder sinkBuilder = new CompactorSinkBuilder(table);
 

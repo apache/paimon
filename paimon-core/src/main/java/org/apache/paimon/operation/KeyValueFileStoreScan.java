@@ -52,7 +52,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
     public KeyValueFileStoreScan(
             RowType partitionType,
-            ScanBucketFilter bucketFilter,
+            ScanBucketFilter bucketKeyFilter,
             SnapshotManager snapshotManager,
             SchemaManager schemaManager,
             TableSchema schema,
@@ -66,7 +66,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             MergeEngine mergeEngine) {
         super(
                 partitionType,
-                bucketFilter,
+                bucketKeyFilter,
                 snapshotManager,
                 schemaManager,
                 schema,
@@ -152,8 +152,8 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     }
 
     private List<ManifestEntry> filterWholeBucketAllFiles(List<ManifestEntry> entries) {
-        // entries come from the same bucket, if any of it doesn't meet the request, we could
-        // filter the bucket.
+        // entries come from the same bucket, if any of it meet the request, we could
+        // filter the whole bucket.
         for (ManifestEntry entry : entries) {
             if (filterByValueFilter(entry)) {
                 return entries;

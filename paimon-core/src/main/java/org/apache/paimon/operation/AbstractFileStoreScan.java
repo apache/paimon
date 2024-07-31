@@ -298,6 +298,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         List<ManifestEntry> files = new ArrayList<>();
         long skippedByPartitionAndStats = startDataFiles - mergedEntries.size();
         for (ManifestEntry file : mergedEntries) {
+            // checkNumOfBuckets is true only when write
             if (checkNumOfBuckets && file.totalBuckets() != numOfBuckets) {
                 String partInfo =
                         partitionType.getFieldCount() > 0
@@ -487,6 +488,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                 .read(
                         manifest.fileName(),
                         manifest.fileSize(),
+                        // ManifestEntry#createCacheRowFilter alway return true when read
                         ManifestEntry.createCacheRowFilter(manifestCacheFilter, numOfBuckets),
                         ManifestEntry.createEntryRowFilter(
                                 partitionFilter, bucketFilter, fileNameFilter, numOfBuckets));
@@ -502,6 +504,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                         // use filter for ManifestEntry
                         // currently, projection is not pushed down to file format
                         // see SimpleFileEntrySerializer
+                        // ManifestEntry#createCacheRowFilter alway return true when read
                         ManifestEntry.createCacheRowFilter(manifestCacheFilter, numOfBuckets),
                         ManifestEntry.createEntryRowFilter(
                                 partitionFilter, bucketFilter, fileNameFilter, numOfBuckets));

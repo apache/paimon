@@ -84,9 +84,9 @@ public class CombinedAwareBatchSourceFunction
             if (scanResult == IS_EMPTY) {
                 // Currently, in the combined mode, there are two scan tasks for the table of two
                 // different bucket type (multi bucket & unaware bucket) running concurrently.
-                // There will be a situation that there is only one task compaction , therefore this
+                // There will be a situation that there is only one task compaction, therefore this
                 // should not be thrown exception here.
-                LOGGER.info("No file were collected for the table of aware-bucket");
+                LOGGER.info("No file were collected for the table of aware-bucket.");
             }
         }
     }

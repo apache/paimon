@@ -123,6 +123,7 @@ public class ObjectsFile<T> {
             Filter<InternalRow> loadFilter,
             Filter<InternalRow> readFilter)
             throws IOException {
+        // cache is alway null when read
         if (cache != null) {
             return cache.read(fileName, fileSize, loadFilter, readFilter);
         }

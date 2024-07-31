@@ -129,7 +129,7 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
             //   filter: value = 1
             // if we perform filter push down on values, data file 1 will be chosen, but data
             // file 2 will be ignored, and the final result will be key = a, value = 1 while the
-            // correct result is an empty set
+            // correct result is an empty set.
             List<Predicate> keyFilters =
                     pickTransformFieldMapping(
                             splitAnd(predicate),

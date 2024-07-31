@@ -53,7 +53,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
     public AppendOnlyFileStoreScan(
             RowType partitionType,
-            ScanBucketFilter bucketFilter,
+            ScanBucketFilter bucketKeyFilter,
             SnapshotManager snapshotManager,
             SchemaManager schemaManager,
             TableSchema schema,
@@ -65,7 +65,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
             boolean fileIndexReadEnabled) {
         super(
                 partitionType,
-                bucketFilter,
+                bucketKeyFilter,
                 snapshotManager,
                 schemaManager,
                 schema,

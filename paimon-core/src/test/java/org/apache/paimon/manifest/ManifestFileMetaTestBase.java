@@ -133,7 +133,7 @@ public abstract class ManifestFileMetaTestBase {
                                 path,
                                 getPartitionType(),
                                 "default",
-                                CoreOptions.FILE_FORMAT.defaultValue().toString()),
+                                CoreOptions.FILE_FORMAT.defaultValue()),
                         Long.MAX_VALUE,
                         null)
                 .create();
@@ -166,7 +166,7 @@ public abstract class ManifestFileMetaTestBase {
 
     protected List<ManifestFileMeta> createBaseManifestFileMetas(boolean hasPartition) {
         List<ManifestFileMeta> input = new ArrayList<>();
-        // base with 3 partition ,16 entry each parition
+        // base with 3 partition, 16 entry each partition
         for (int j = 0; j < 3; j++) {
             List<ManifestEntry> entrys = new ArrayList<>();
             for (int i = 0; i < 16; i++) {

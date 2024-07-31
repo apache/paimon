@@ -246,7 +246,6 @@ public class ManifestFileMeta {
             @Nullable Integer manifestReadParallelism)
             throws Exception {
         // 1. should trigger full compaction
-
         List<ManifestFileMeta> base = new ArrayList<>();
         long totalManifestSize = 0;
         int i = 0;
@@ -276,14 +275,12 @@ public class ManifestFileMeta {
         }
 
         // 2. do full compaction
-
         LOG.info(
                 "Start Manifest File Full Compaction, pick the number of delete file: {}, total manifest file size: {}",
                 deltaDeleteFileNum,
                 totalManifestSize);
 
         // 2.1. try to skip base files by partition filter
-
         Map<Identifier, ManifestEntry> deltaMerged = new LinkedHashMap<>();
         FileEntry.mergeEntries(manifestFile, delta, deltaMerged, manifestReadParallelism);
 
@@ -317,7 +314,6 @@ public class ManifestFileMeta {
         }
 
         // 2.2. try to skip base files by reading entries
-
         Set<Identifier> deleteEntries = new HashSet<>();
         deltaMerged.forEach(
                 (k, v) -> {
@@ -349,7 +345,6 @@ public class ManifestFileMeta {
         }
 
         // 2.3. merge
-
         RollingFileWriter<ManifestEntry, ManifestFileMeta> writer =
                 manifestFile.createRollingWriter();
         Exception exception = null;

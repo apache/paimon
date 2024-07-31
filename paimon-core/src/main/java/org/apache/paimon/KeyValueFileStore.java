@@ -204,7 +204,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     }
 
     private KeyValueFileStoreScan newScan(boolean forWrite) {
-        ScanBucketFilter bucketFilter =
+        ScanBucketFilter bucketKeyFilter =
                 new ScanBucketFilter(bucketKeyType) {
                     @Override
                     public void pushdown(Predicate keyFilter) {
@@ -224,7 +224,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 };
         return new KeyValueFileStoreScan(
                 partitionType,
-                bucketFilter,
+                bucketKeyFilter,
                 snapshotManager(),
                 schemaManager,
                 schema,

@@ -108,7 +108,6 @@ public class BinaryRowTest {
 
     @Test
     public void testWriter() {
-
         int arity = 13;
         BinaryRow row = new BinaryRow(arity);
         BinaryRowWriter writer = new BinaryRowWriter(row, 20);

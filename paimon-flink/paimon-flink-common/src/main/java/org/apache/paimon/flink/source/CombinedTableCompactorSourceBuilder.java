@@ -37,10 +37,11 @@ import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import java.util.regex.Pattern;
 
 /**
- * source builder to build a Flink compactor source for multi-tables. This is for dedicated
- * compactor jobs in combined mode.
+ * Source builder to build a Flink compactor source for multi-tables. This is for dedicated
+ * compactor jobs with combined mode.
  */
 public class CombinedTableCompactorSourceBuilder {
+
     private final Catalog.Loader catalogLoader;
     private final Pattern includingPattern;
     private final Pattern excludingPattern;

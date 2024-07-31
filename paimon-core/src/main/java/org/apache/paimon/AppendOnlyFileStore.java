@@ -107,7 +107,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
     }
 
     private AppendOnlyFileStoreScan newScan(boolean forWrite) {
-        ScanBucketFilter bucketFilter =
+        ScanBucketFilter bucketKeyFilter =
                 new ScanBucketFilter(bucketKeyType) {
                     @Override
                     public void pushdown(Predicate predicate) {
@@ -132,7 +132,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
 
         return new AppendOnlyFileStoreScan(
                 partitionType,
-                bucketFilter,
+                bucketKeyFilter,
                 snapshotManager(),
                 schemaManager,
                 schema,

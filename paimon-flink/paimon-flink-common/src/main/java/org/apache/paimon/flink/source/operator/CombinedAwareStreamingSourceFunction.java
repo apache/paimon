@@ -95,7 +95,6 @@ public class CombinedAwareStreamingSourceFunction
             Pattern excludingPattern,
             Pattern databasePattern,
             long monitorInterval) {
-
         CombinedAwareStreamingSourceFunction function =
                 new CombinedAwareStreamingSourceFunction(
                         catalogLoader,
