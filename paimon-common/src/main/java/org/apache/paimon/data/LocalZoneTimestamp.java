@@ -20,38 +20,27 @@ package org.apache.paimon.data;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.types.LocalZonedTimestampType;
-import org.apache.paimon.types.TimestampType;
-import org.apache.paimon.utils.Preconditions;
 
 import java.io.Serializable;
 import java.time.Instant;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.LocalTime;
+
+import static org.apache.paimon.data.Timestamp.MICROS_PER_MILLIS;
+import static org.apache.paimon.data.Timestamp.NANOS_PER_MICROS;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
- * An internal data structure representing data of {@link TimestampType}.
+ * An internal data structure representing data of {@link LocalZonedTimestampType}.
  *
  * <p>This data structure is immutable and consists of a milliseconds and nanos-of-millisecond since
  * {@code 1970-01-01 00:00:00}. It might be stored in a compact representation (as a long value) if
  * values are small enough.
  *
- * <p>Legacy: This class represents {@link LocalZonedTimestampType} too, now it is recommended to
- * use {@link LocalZoneTimestamp}.
- *
- * @since 0.4.0
+ * @since 0.9.0
  */
 @Public
-public final class Timestamp implements Comparable<Timestamp>, Serializable {
+public final class LocalZoneTimestamp implements Comparable<LocalZoneTimestamp>, Serializable {
 
     private static final long serialVersionUID = 1L;
-
-    // the number of milliseconds in a day
-    public static final long MILLIS_PER_DAY = 86400000; // = 24 * 60 * 60 * 1000
-
-    public static final long MICROS_PER_MILLIS = 1000L;
-
-    public static final long NANOS_PER_MICROS = 1000L;
 
     // this field holds the integral second and the milli-of-second
     private final long millisecond;
@@ -59,8 +48,8 @@ public final class Timestamp implements Comparable<Timestamp>, Serializable {
     // this field holds the nano-of-millisecond
     private final int nanoOfMillisecond;
 
-    private Timestamp(long millisecond, int nanoOfMillisecond) {
-        Preconditions.checkArgument(nanoOfMillisecond >= 0 && nanoOfMillisecond <= 999_999);
+    private LocalZoneTimestamp(long millisecond, int nanoOfMillisecond) {
+        checkArgument(nanoOfMillisecond >= 0 && nanoOfMillisecond <= 999_999);
         this.millisecond = millisecond;
         this.nanoOfMillisecond = nanoOfMillisecond;
     }
@@ -79,35 +68,16 @@ public final class Timestamp implements Comparable<Timestamp>, Serializable {
         return nanoOfMillisecond;
     }
 
-    /** Converts this {@link Timestamp} object to a {@link java.sql.Timestamp}. */
+    /** Converts this {@link LocalZoneTimestamp} object to a {@link java.sql.Timestamp}. */
     public java.sql.Timestamp toSQLTimestamp() {
-        return java.sql.Timestamp.valueOf(toLocalDateTime());
+        return java.sql.Timestamp.from(toInstant());
     }
 
-    public Timestamp toMillisTimestamp() {
+    public LocalZoneTimestamp toMillisTimestamp() {
         return fromEpochMillis(millisecond);
     }
 
-    /** Converts this {@link Timestamp} object to a {@link LocalDateTime}. */
-    public LocalDateTime toLocalDateTime() {
-        int date = (int) (millisecond / MILLIS_PER_DAY);
-        int time = (int) (millisecond % MILLIS_PER_DAY);
-        if (time < 0) {
-            --date;
-            time += MILLIS_PER_DAY;
-        }
-        long nanoOfDay = time * 1_000_000L + nanoOfMillisecond;
-        LocalDate localDate = LocalDate.ofEpochDay(date);
-        LocalTime localTime = LocalTime.ofNanoOfDay(nanoOfDay);
-        return LocalDateTime.of(localDate, localTime);
-    }
-
-    /**
-     * Converts this {@link Timestamp} object to a {@link Instant}.
-     *
-     * @deprecated use {@link LocalZoneTimestamp}.
-     */
-    @Deprecated
+    /** Converts this {@link LocalZoneTimestamp} object to a {@link Instant}. */
     public Instant toInstant() {
         long epochSecond = millisecond / 1000;
         int milliOfSecond = (int) (millisecond % 1000);
@@ -119,14 +89,14 @@ public final class Timestamp implements Comparable<Timestamp>, Serializable {
         return Instant.ofEpochSecond(epochSecond, nanoAdjustment);
     }
 
-    /** Converts this {@link Timestamp} object to micros. */
+    /** Converts this {@link LocalZoneTimestamp} object to micros. */
     public long toMicros() {
         long micros = Math.multiplyExact(millisecond, MICROS_PER_MILLIS);
         return micros + nanoOfMillisecond / NANOS_PER_MICROS;
     }
 
     @Override
-    public int compareTo(Timestamp that) {
+    public int compareTo(LocalZoneTimestamp that) {
         int cmp = Long.compare(this.millisecond, that.millisecond);
         if (cmp == 0) {
             cmp = this.nanoOfMillisecond - that.nanoOfMillisecond;
@@ -136,17 +106,17 @@ public final class Timestamp implements Comparable<Timestamp>, Serializable {
 
     @Override
     public boolean equals(Object obj) {
-        if (!(obj instanceof Timestamp)) {
+        if (!(obj instanceof LocalZoneTimestamp)) {
             return false;
         }
-        Timestamp that = (Timestamp) obj;
+        LocalZoneTimestamp that = (LocalZoneTimestamp) obj;
         return this.millisecond == that.millisecond
                 && this.nanoOfMillisecond == that.nanoOfMillisecond;
     }
 
     @Override
     public String toString() {
-        return toLocalDateTime().toString();
+        return toSQLTimestamp().toLocalDateTime().toString();
     }
 
     @Override
@@ -159,80 +129,65 @@ public final class Timestamp implements Comparable<Timestamp>, Serializable {
     // Constructor Utilities
     // ------------------------------------------------------------------------------------------
 
-    /** Creates an instance of {@link Timestamp} for now. */
-    public static Timestamp now() {
-        return fromLocalDateTime(LocalDateTime.now());
+    /** Creates an instance of {@link LocalZoneTimestamp} for now. */
+    public static LocalZoneTimestamp now() {
+        return fromInstant(Instant.now());
     }
 
     /**
-     * Creates an instance of {@link Timestamp} from milliseconds.
+     * Creates an instance of {@link LocalZoneTimestamp} from milliseconds.
      *
      * <p>The nanos-of-millisecond field will be set to zero.
      *
      * @param milliseconds the number of milliseconds since {@code 1970-01-01 00:00:00}; a negative
      *     number is the number of milliseconds before {@code 1970-01-01 00:00:00}
      */
-    public static Timestamp fromEpochMillis(long milliseconds) {
-        return new Timestamp(milliseconds, 0);
+    public static LocalZoneTimestamp fromEpochMillis(long milliseconds) {
+        return new LocalZoneTimestamp(milliseconds, 0);
     }
 
     /**
-     * Creates an instance of {@link Timestamp} from milliseconds and a nanos-of-millisecond.
+     * Creates an instance of {@link LocalZoneTimestamp} from milliseconds and a
+     * nanos-of-millisecond.
      *
      * @param milliseconds the number of milliseconds since {@code 1970-01-01 00:00:00}; a negative
      *     number is the number of milliseconds before {@code 1970-01-01 00:00:00}
      * @param nanosOfMillisecond the nanoseconds within the millisecond, from 0 to 999,999
      */
-    public static Timestamp fromEpochMillis(long milliseconds, int nanosOfMillisecond) {
-        return new Timestamp(milliseconds, nanosOfMillisecond);
+    public static LocalZoneTimestamp fromEpochMillis(long milliseconds, int nanosOfMillisecond) {
+        return new LocalZoneTimestamp(milliseconds, nanosOfMillisecond);
     }
 
     /**
-     * Creates an instance of {@link Timestamp} from an instance of {@link LocalDateTime}.
-     *
-     * @param dateTime an instance of {@link LocalDateTime}
-     */
-    public static Timestamp fromLocalDateTime(LocalDateTime dateTime) {
-        long epochDay = dateTime.toLocalDate().toEpochDay();
-        long nanoOfDay = dateTime.toLocalTime().toNanoOfDay();
-
-        long millisecond = epochDay * MILLIS_PER_DAY + nanoOfDay / 1_000_000;
-        int nanoOfMillisecond = (int) (nanoOfDay % 1_000_000);
-
-        return new Timestamp(millisecond, nanoOfMillisecond);
-    }
-
-    /**
-     * Creates an instance of {@link Timestamp} from an instance of {@link java.sql.Timestamp}.
+     * Creates an instance of {@link LocalZoneTimestamp} from an instance of {@link
+     * java.sql.Timestamp}.
      *
      * @param timestamp an instance of {@link java.sql.Timestamp}
      */
-    public static Timestamp fromSQLTimestamp(java.sql.Timestamp timestamp) {
-        return fromLocalDateTime(timestamp.toLocalDateTime());
+    public static LocalZoneTimestamp fromSQLTimestamp(java.sql.Timestamp timestamp) {
+        return fromInstant(timestamp.toInstant());
     }
 
     /**
-     * Creates an instance of {@link Timestamp} from an instance of {@link Instant}.
+     * Creates an instance of {@link LocalZoneTimestamp} from an instance of {@link Instant}.
      *
      * @param instant an instance of {@link Instant}
-     * @deprecated use {@link LocalZoneTimestamp}.
      */
-    @Deprecated
-    public static Timestamp fromInstant(Instant instant) {
+    public static LocalZoneTimestamp fromInstant(Instant instant) {
         long epochSecond = instant.getEpochSecond();
         int nanoSecond = instant.getNano();
 
         long millisecond = epochSecond * 1_000 + nanoSecond / 1_000_000;
         int nanoOfMillisecond = nanoSecond % 1_000_000;
 
-        return new Timestamp(millisecond, nanoOfMillisecond);
+        return new LocalZoneTimestamp(millisecond, nanoOfMillisecond);
     }
 
-    /** Creates an instance of {@link Timestamp} from micros. */
-    public static Timestamp fromMicros(long micros) {
+    /** Creates an instance of {@link LocalZoneTimestamp} from micros. */
+    public static LocalZoneTimestamp fromMicros(long micros) {
         long mills = Math.floorDiv(micros, MICROS_PER_MILLIS);
         long nanos = (micros - mills * MICROS_PER_MILLIS) * NANOS_PER_MICROS;
-        return Timestamp.fromEpochMillis(mills, (int) nanos);
+        return LocalZoneTimestamp.fromEpochMillis(mills, (int) nanos);
     }
 
     /**
