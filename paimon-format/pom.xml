@@ -166,6 +166,14 @@ under the License.
             </exclusions>
         </dependency>
 
+        <!-- Fix cve problem -->
+        <!-- From org.apache.avro -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-compress</artifactId>
+            <version>${commons-compress.version}</version>
+        </dependency>
+
         <dependency>
             <groupId>joda-time</groupId>
             <artifactId>joda-time</artifactId>
