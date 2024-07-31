@@ -39,7 +39,6 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
 import java.time.Duration;
-import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
@@ -166,12 +165,6 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     @Override
     public void createBranch(String branchName) {
         wrapped.createBranch(branchName);
-    }
-
-    @Override
-    public void createBranch(
-            String branchName, List<String> primaryKeys, int bucket, boolean copyOptions) {
-        wrapped.createBranch(branchName, primaryKeys, bucket, copyOptions);
     }
 
     @Override

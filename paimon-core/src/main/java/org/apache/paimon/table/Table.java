@@ -116,13 +116,6 @@ public interface Table extends Serializable {
     @Experimental
     void createBranch(String branchName);
 
-    /**
-     * Create an empty branch. Primary keys and bucket number can be different from the original
-     * branch.
-     */
-    @Experimental
-    void createBranch(String branchName, List<String> primaryKeys, int bucket, boolean copyOptions);
-
     /** Create a branch from given snapshot. */
     @Experimental
     void createBranch(String branchName, long snapshotId);

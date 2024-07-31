@@ -192,9 +192,13 @@ CREATE TABLE T (
 ) PARTITIONED BY (dt);
 
 -- create a branch for streaming job
--- you can even specify primary keys and bucket number, even if the original branch has no primary key
--- in this example, we create a new branch `test`, uses `dt` and `name` as primary keys, has a bucket number of 2, and will copy the table options from the original branch
-CALL sys.create_branch('default.T', 'test', 'dt, name', 2, true);
+CALL sys.create_branch('default.T', 'test');
+
+-- set primary key and bucket number for the branch
+ALTER TABLE `T$branch_test` SET (
+    'primary-key' = 'dt,name',
+    'bucket' = '2'
+);
 
 -- set fallback branch
 ALTER TABLE T SET (
