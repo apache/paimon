@@ -370,25 +370,13 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testInvalidPrimaryKeys() {
-        sql(
-                "CREATE TABLE t ( pt INT NOT NULL, k INT NOT NULL, v STRING ) PARTITIONED BY (pt) WITH ( 'bucket' = '-1' )");
-
-        try {
-            sql("CALL sys.create_branch('default.t', 'pk', 'pt, invalid', 2, true)");
-            fail("Expecting exceptions");
-        } catch (Exception e) {
-            assertThat(e).hasRootCauseMessage("Field invalid does not exist in the table");
-        }
-    }
-
-    @Test
     public void testDifferentRowTypes() throws Exception {
         sql(
                 "CREATE TABLE t ( pt INT NOT NULL, k INT NOT NULL, v STRING ) PARTITIONED BY (pt) WITH ( 'bucket' = '-1' )");
-        sql("CALL sys.create_branch('default.t', 'pk', 'pt, k', 2, true)");
-        sql("ALTER TABLE t SET ( 'scan.fallback-branch' = 'pk' )");
+        sql("CALL sys.create_branch('default.t', 'pk')");
+        sql("ALTER TABLE `t$branch_pk` SET ( 'primary-key' = 'pt, k', 'bucket' = '2' )");
         sql("ALTER TABLE `t$branch_pk` ADD (v2 INT)");
+        sql("ALTER TABLE t SET ( 'scan.fallback-branch' = 'pk' )");
 
         try {
             sql("INSERT INTO t VALUES (1, 10, 'apple')");
