@@ -57,6 +57,14 @@ under the License.
             <version>${airlift.version}</version>
         </dependency>
 
+        <!-- From paimon-format -->
+        <!-- From org.apache.avro -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-compress</artifactId>
+            <version>${commons-compress.version}</version>
+        </dependency>
+
         <!-- From paimon-bundle -->
         <dependency>
             <groupId>org.lz4</groupId>
