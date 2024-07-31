@@ -197,17 +197,13 @@ CALL sys.create_branch('default.T', 'test');
 -- set primary key and bucket number for the branch
 ALTER TABLE `T$branch_test` SET (
     'primary-key' = 'dt,name',
-    'bucket' = '2'
+    'bucket' = '2',
+    'changelog-producer' = 'lookup'
 );
 
 -- set fallback branch
 ALTER TABLE T SET (
     'scan.fallback-branch' = 'test'
-);
-
--- set changelog producer for the streaming branch, in case a streaming job would like to read from it in the future
-ALTER TABLE `T$branch_test` SET (
-    'changelog-producer' = 'lookup'
 );
 
 -- write records into the streaming branch

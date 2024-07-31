@@ -85,21 +85,16 @@ public class FileStoreTableFactory {
             Options dynamicOptions,
             CatalogEnvironment catalogEnvironment) {
         FileStoreTable table =
-                tableSchema.primaryKeys().isEmpty()
-                        ? new AppendOnlyFileStoreTable(
-                                fileIO, tablePath, tableSchema, catalogEnvironment)
-                        : new PrimaryKeyFileStoreTable(
-                                fileIO, tablePath, tableSchema, catalogEnvironment);
-        table = table.copy(dynamicOptions.toMap());
+                createWithoutFallbackBranch(
+                        fileIO, tablePath, tableSchema, dynamicOptions, catalogEnvironment);
 
         Options options = new Options(table.options());
         String fallbackBranch = options.get(CoreOptions.SCAN_FALLBACK_BRANCH);
         if (!StringUtils.isNullOrWhitespaceOnly(fallbackBranch)) {
             Options branchOptions = new Options();
             branchOptions.set(CoreOptions.BRANCH, fallbackBranch);
-            branchOptions.set(CoreOptions.SCAN_FALLBACK_BRANCH, "");
             FileStoreTable fallbackTable =
-                    FileStoreTableFactory.create(
+                    createWithoutFallbackBranch(
                             fileIO,
                             tablePath,
                             new SchemaManager(fileIO, tablePath, fallbackBranch).latest().get(),
@@ -109,5 +104,20 @@ public class FileStoreTableFactory {
         }
 
         return table;
+    }
+
+    private static FileStoreTable createWithoutFallbackBranch(
+            FileIO fileIO,
+            Path tablePath,
+            TableSchema tableSchema,
+            Options dynamicOptions,
+            CatalogEnvironment catalogEnvironment) {
+        FileStoreTable table =
+                tableSchema.primaryKeys().isEmpty()
+                        ? new AppendOnlyFileStoreTable(
+                                fileIO, tablePath, tableSchema, catalogEnvironment)
+                        : new PrimaryKeyFileStoreTable(
+                                fileIO, tablePath, tableSchema, catalogEnvironment);
+        return table.copy(dynamicOptions.toMap());
     }
 }
