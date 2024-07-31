@@ -71,6 +71,8 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
 
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -102,6 +104,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     private final RowType keyType;
     private final RowType valueType;
     @Nullable private final RecordLevelExpire recordLevelExpire;
+    private Cache<String, LookupLevels.LookupFile> lookupFileCache;
 
     public KeyValueFileStoreWrite(
             FileIO fileIO,
@@ -356,6 +359,13 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         cacheManager,
                         new RowCompactedSerializer(keyType).createSliceComparator());
         Options options = this.options.toConfiguration();
+        if (lookupFileCache == null) {
+            lookupFileCache =
+                    LookupLevels.createCache(
+                            options.get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
+                            options.get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE));
+        }
+
         return new LookupLevels<>(
                 levels,
                 keyComparatorSupplier.get(),
@@ -364,8 +374,15 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 readerFactory::createRecordReader,
                 () -> ioManager.createChannel().getPathFile(),
                 lookupStoreFactory,
-                options.get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
-                options.get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE),
-                bfGenerator(options));
+                bfGenerator(options),
+                lookupFileCache);
+    }
+
+    @Override
+    public void close() throws Exception {
+        super.close();
+        if (lookupFileCache != null) {
+            lookupFileCache.invalidateAll();
+        }
     }
 }

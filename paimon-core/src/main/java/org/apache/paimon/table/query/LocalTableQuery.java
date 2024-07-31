@@ -41,6 +41,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.KeyComparatorSupplier;
 import org.apache.paimon.utils.Preconditions;
 
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
+
 import javax.annotation.Nullable;
 
 import java.io.IOException;
@@ -69,6 +71,8 @@ public class LocalTableQuery implements TableQuery {
     private final int startLevel;
 
     private IOManager ioManager;
+
+    private Cache<String, LookupLevels.LookupFile> lookupFileCache;
 
     public LocalTableQuery(FileStoreTable table) {
         this.options = table.coreOptions();
@@ -130,6 +134,13 @@ public class LocalTableQuery implements TableQuery {
         KeyValueFileReaderFactory factory =
                 readerFactoryBuilder.build(partition, bucket, DeletionVector.emptyFactory());
         Options options = this.options.toConfiguration();
+        if (lookupFileCache == null) {
+            lookupFileCache =
+                    LookupLevels.createCache(
+                            options.get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
+                            options.get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE));
+        }
+
         LookupLevels<KeyValue> lookupLevels =
                 new LookupLevels<>(
                         levels,
@@ -148,9 +159,8 @@ public class LocalTableQuery implements TableQuery {
                                         .createChannel()
                                         .getPathFile(),
                         lookupStoreFactory,
-                        options.get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
-                        options.get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE),
-                        bfGenerator(options));
+                        bfGenerator(options),
+                        lookupFileCache);
 
         tableView.computeIfAbsent(partition, k -> new HashMap<>()).put(bucket, lookupLevels);
     }
@@ -201,6 +211,9 @@ public class LocalTableQuery implements TableQuery {
                     buckets.getValue().entrySet()) {
                 bucket.getValue().close();
             }
+        }
+        if (lookupFileCache != null) {
+            lookupFileCache.invalidateAll();
         }
         tableView.clear();
     }
