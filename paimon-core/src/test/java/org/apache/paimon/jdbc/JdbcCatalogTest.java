@@ -131,7 +131,7 @@ public class JdbcCatalogTest extends CatalogTestBase {
     public void testGetDataTableLocation() {
         Path path =
                 ((AbstractCatalog) catalog)
-                        .getDataTableLocation(Identifier.create("test_db", "test_table$branch_a"));
+                        .getDataTableLocation(Identifier.create("test_db", "test_table$branch_a1"));
         assertThat(path.toString())
                 .isEqualTo(
                         new File(
@@ -144,7 +144,7 @@ public class JdbcCatalogTest extends CatalogTestBase {
                                                 + "branch"
                                                 + File.separator
                                                 + BranchManager.BRANCH_PREFIX
-                                                + "a")
+                                                + "a1")
                                 .toString());
     }
 }
