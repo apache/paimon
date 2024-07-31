@@ -112,7 +112,7 @@ public interface Table extends Serializable {
     @Experimental
     void rollbackTo(String tagName);
 
-    /** Create a empty branch. */
+    /** Create an empty branch. */
     @Experimental
     void createBranch(String branchName);
 
