@@ -787,19 +787,20 @@ public class FileDeletionTest {
                                                 entry.file()))
                         .collect(Collectors.toList());
         // commit
-        store.newCommit()
-                .tryCommitOnce(
-                        delete,
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        commitIdentifier++,
-                        null,
-                        Collections.emptyMap(),
-                        Snapshot.CommitKind.APPEND,
-                        store.snapshotManager().latestSnapshot(),
-                        mustConflictCheck(),
-                        DEFAULT_MAIN_BRANCH,
-                        null);
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            commit.tryCommitOnce(
+                    delete,
+                    Collections.emptyList(),
+                    Collections.emptyList(),
+                    commitIdentifier++,
+                    null,
+                    Collections.emptyMap(),
+                    Snapshot.CommitKind.APPEND,
+                    store.snapshotManager().latestSnapshot(),
+                    mustConflictCheck(),
+                    DEFAULT_MAIN_BRANCH,
+                    null);
+        }
     }
 
     private void createTag(Snapshot snapshot, String tagName, Duration timeRetained) {
