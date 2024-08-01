@@ -60,8 +60,7 @@ case class SparkTable(table: Table)
           properties.put(CoreOptions.PRIMARY_KEY.key, String.join(",", table.primaryKeys))
         }
         properties.put(TableCatalog.PROP_PROVIDER, SparkSource.NAME)
-        val location = properties.remove(CoreOptions.PATH.key())
-        properties.put(TableCatalog.PROP_LOCATION, location)
+        properties.put(TableCatalog.PROP_LOCATION, properties.get(CoreOptions.PATH.key()))
         if (table.comment.isPresent) {
           properties.put(TableCatalog.PROP_COMMENT, table.comment.get)
         }
