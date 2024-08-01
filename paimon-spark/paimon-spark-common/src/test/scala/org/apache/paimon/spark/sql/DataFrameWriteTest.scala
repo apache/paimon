@@ -56,6 +56,35 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
     Assertions.assertFalse(paimonTable.options().containsKey("write.merge-schema.explicit-cast"))
   }
 
+  fileFormats.foreach {
+    fileFormat =>
+      test(s"Paimon: DataFrameWrite.saveAsTable in ByName mode, file.format: $fileFormat") {
+        withTable("t1", "t2") {
+          spark.sql(s"""
+                       |CREATE TABLE t1 (col1 STRING, col2 INT, col3 DOUBLE)
+                       |TBLPROPERTIES ('file.format' = '$fileFormat')
+                       |""".stripMargin)
+
+          spark.sql(s"""
+                       |CREATE TABLE t2 (col2 INT, col3 DOUBLE, col1 STRING)
+                       |TBLPROPERTIES ('file.format' = '$fileFormat')
+                       |""".stripMargin)
+
+          sql(s"""
+                 |INSERT INTO TABLE t1 VALUES
+                 |("Hello", 1, 1.1),
+                 |("World", 2, 2.2),
+                 |("Paimon", 3, 3.3);
+                 |""".stripMargin)
+
+          spark.table("t1").write.format("paimon").mode("append").saveAsTable("t2")
+          checkAnswer(
+            sql("SELECT * FROM t2 ORDER BY col2"),
+            Row(1, 1.1d, "Hello") :: Row(2, 2.2d, "World") :: Row(3, 3.3d, "Paimon") :: Nil)
+        }
+      }
+  }
+
   withPk.foreach {
     hasPk =>
       bucketModes.foreach {
