@@ -118,7 +118,7 @@ public class FileSystemCatalog extends AbstractCatalog {
                                 return s;
                             }
                         })
-                .orElseThrow(() -> new TableNotExistException(identifier));
+                .orElseThrow(() -> new TableNotExistException(identifier, branchName));
     }
 
     @Override

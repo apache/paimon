@@ -29,6 +29,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BranchManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
@@ -38,6 +39,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -51,7 +53,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** Base test class of paimon catalog in {@link Catalog}. */
 public abstract class CatalogTestBase {
 
-    @TempDir java.nio.file.Path tempFile;
+    @TempDir protected java.nio.file.Path tempFile;
     protected String warehouse;
     protected FileIO fileIO;
     protected Catalog catalog;
@@ -347,6 +349,28 @@ public abstract class CatalogTestBase {
                 .isThrownBy(
                         () -> catalog.getTable(Identifier.create("non_existing_db", "test_table")))
                 .withMessage("Table non_existing_db.test_table does not exist.");
+    }
+
+    @Test
+    public void testNewTableLocation() {
+        Path path =
+                AbstractCatalog.newTableLocation(
+                        String.valueOf(tempFile),
+                        Identifier.create("test_db", "test_table$branch_a"));
+        assertThat(path.toString())
+                .isEqualTo(
+                        new File(
+                                        String.valueOf(tempFile),
+                                        "test_db"
+                                                + ".db"
+                                                + File.separator
+                                                + "test_table"
+                                                + File.separator
+                                                + "branch"
+                                                + File.separator
+                                                + BranchManager.BRANCH_PREFIX
+                                                + "a")
+                                .toString());
     }
 
     @Test
