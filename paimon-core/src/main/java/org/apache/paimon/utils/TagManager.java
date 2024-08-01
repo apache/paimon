@@ -372,7 +372,7 @@ public class TagManager {
         List<Snapshot> snapshots = new ArrayList<>();
         int right = findPreviousTag(taggedSnapshots, endExclusive);
         if (right >= 0) {
-            int left = Math.max(findPreviousOrEqualTag(taggedSnapshots, beginInclusive), 0);
+            int left = Math.max(findNextOrEqualTag(taggedSnapshots, beginInclusive), 0);
             for (int i = left; i <= right; i++) {
                 snapshots.add(taggedSnapshots.get(i));
             }
@@ -389,10 +389,9 @@ public class TagManager {
         return -1;
     }
 
-    private static int findPreviousOrEqualTag(
-            List<Snapshot> taggedSnapshots, long targetSnapshotId) {
-        for (int i = taggedSnapshots.size() - 1; i >= 0; i--) {
-            if (taggedSnapshots.get(i).id() <= targetSnapshotId) {
+    private static int findNextOrEqualTag(List<Snapshot> taggedSnapshots, long targetSnapshotId) {
+        for (int i = 0; i < taggedSnapshots.size(); i++) {
+            if (taggedSnapshots.get(i).id() >= targetSnapshotId) {
                 return i;
             }
         }
