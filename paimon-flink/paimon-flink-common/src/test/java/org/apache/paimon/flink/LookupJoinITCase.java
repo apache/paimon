@@ -641,25 +641,28 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @Test
-    public void testLookupMaxPtPartitionedTablePartialCache() throws Exception {
-        innerTestLookupMaxPtPartitionedTable(LookupCacheMode.AUTO);
-    }
-
-    @Test
-    public void testLookupMaxPtPartitionedTableFullCache() throws Exception {
-        innerTestLookupMaxPtPartitionedTable(LookupCacheMode.FULL);
-    }
-
-    private void innerTestLookupMaxPtPartitionedTable(LookupCacheMode mode) throws Exception {
-        tEnv.executeSql(
-                "CREATE TABLE PARTITIONED_DIM (pt STRING, k INT, v INT, PRIMARY KEY (pt, k) NOT ENFORCED)"
+    @ParameterizedTest
+    @EnumSource(LookupCacheMode.class)
+    public void testLookupMaxPtPartitionedTable(LookupCacheMode mode) throws Exception {
+        boolean testDynamicBucket = ThreadLocalRandom.current().nextBoolean();
+        String primaryKeys;
+        String bucket;
+        if (testDynamicBucket) {
+            primaryKeys = "k";
+            bucket = "-1";
+        } else {
+            primaryKeys = "pt, k";
+            bucket = "1";
+        }
+        sql(
+                "CREATE TABLE PARTITIONED_DIM (pt STRING, k INT, v INT, PRIMARY KEY (%s) NOT ENFORCED)"
                         + "PARTITIONED BY (`pt`) WITH ("
-                        + "'bucket' = '1', "
+                        + "'bucket' = '%s', "
                         + "'lookup.dynamic-partition' = 'max_pt()', "
                         + "'lookup.dynamic-partition.refresh-interval' = '1 ms', "
-                        + String.format("'lookup.cache' = '%s', ", mode)
-                        + "'continuous.discovery-interval'='1 ms')");
+                        + "'lookup.cache' = '%s', "
+                        + "'continuous.discovery-interval'='1 ms')",
+                primaryKeys, bucket, mode);
         String query =
                 "SELECT T.i, D.v FROM T LEFT JOIN PARTITIONED_DIM for system_time as of T.proctime AS D ON T.i = D.k";
         BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
