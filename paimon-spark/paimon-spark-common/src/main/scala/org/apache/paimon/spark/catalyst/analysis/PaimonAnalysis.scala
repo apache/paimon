@@ -89,7 +89,8 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
         val outputAttr = output
           .find(t => session.sessionState.conf.resolver(t.name, attr.name))
           .getOrElse {
-            throw new RuntimeException("xxx")
+            throw new RuntimeException(
+              s"Cannot find ${attr.name} in data columns: ${output.map(_.name).mkString(", ")}")
           }
         addCastToColumn(outputAttr, attr)
     }
