@@ -35,7 +35,6 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.BiFunction;
 
 import static org.apache.paimon.utils.ObjectsFile.readFromIterator;
 
@@ -47,14 +46,14 @@ public class ObjectsCache<K, V> {
     private final ObjectSerializer<V> projectedSerializer;
     private final ThreadLocal<InternalRowSerializer> formatSerializer;
     private final FunctionWithIOException<K, Long> fileSizeFunction;
-    private final BiFunction<K, Long, CloseableIterator<InternalRow>> reader;
+    private final BiFunctionWithIOE<K, Long, CloseableIterator<InternalRow>> reader;
 
     public ObjectsCache(
             SegmentsCache<K> cache,
             ObjectSerializer<V> projectedSerializer,
             RowType formatSchema,
             FunctionWithIOException<K, Long> fileSizeFunction,
-            BiFunction<K, Long, CloseableIterator<InternalRow>> reader) {
+            BiFunctionWithIOE<K, Long, CloseableIterator<InternalRow>> reader) {
         this.cache = cache;
         this.projectedSerializer = projectedSerializer;
         this.formatSerializer =

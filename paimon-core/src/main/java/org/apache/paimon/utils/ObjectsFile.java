@@ -165,13 +165,10 @@ public class ObjectsFile<T> {
         }
     }
 
-    private CloseableIterator<InternalRow> createIterator(Path file, @Nullable Long fileSize) {
-        try {
-            return FileUtils.createFormatReader(fileIO, readerFactory, file, fileSize)
-                    .toCloseableIterator();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+    private CloseableIterator<InternalRow> createIterator(Path file, @Nullable Long fileSize)
+            throws IOException {
+        return FileUtils.createFormatReader(fileIO, readerFactory, file, fileSize)
+                .toCloseableIterator();
     }
 
     private long fileSize(Path file) throws IOException {
