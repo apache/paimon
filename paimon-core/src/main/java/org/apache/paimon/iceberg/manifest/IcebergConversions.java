@@ -19,7 +19,10 @@
 package org.apache.paimon.iceberg.manifest;
 
 import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.LocalZonedTimestampType;
+import org.apache.paimon.types.TimestampType;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -42,6 +45,9 @@ public class IcebergConversions {
             ThreadLocal.withInitial(StandardCharsets.UTF_8::newEncoder);
 
     public static ByteBuffer toByteBuffer(DataType type, Object value) {
+        int precision;
+        Timestamp timestamp;
+        long timestampValue = 0;
         switch (type.getTypeRoot()) {
             case BOOLEAN:
                 return ByteBuffer.allocate(1).put(0, (Boolean) value ? (byte) 0x01 : (byte) 0x00);
@@ -74,6 +80,33 @@ public class IcebergConversions {
             case DECIMAL:
                 Decimal decimal = (Decimal) value;
                 return ByteBuffer.wrap((decimal.toUnscaledBytes()));
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+                final TimestampType timestampType = (TimestampType) type;
+                precision = timestampType.getPrecision();
+                timestamp = (Timestamp) value;
+                if (precision <= 6) {
+                    timestampValue = timestamp.getMillisecond();
+                } else if (precision > 6) {
+                    timestampValue = timestamp.getNanoOfMillisecond();
+                }
+                return ByteBuffer.allocate(8)
+                        .order(ByteOrder.LITTLE_ENDIAN)
+                        .putLong(timestampValue);
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                final LocalZonedTimestampType localTimestampType = (LocalZonedTimestampType) type;
+                precision = localTimestampType.getPrecision();
+                timestamp = (Timestamp) value;
+                if (precision <= 6) {
+                    timestampValue = timestamp.getMillisecond();
+                } else if (precision > 6) {
+                    timestampValue = timestamp.getNanoOfMillisecond();
+                }
+                return ByteBuffer.allocate(8)
+                        .order(ByteOrder.LITTLE_ENDIAN)
+                        .putLong(timestampValue);
+            case TIME_WITHOUT_TIME_ZONE:
+                Long time = ((Integer) value).longValue();
+                return ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putLong(0, time);
             default:
                 throw new UnsupportedOperationException("Cannot serialize type: " + type);
         }
