@@ -778,7 +778,10 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     private SchemaManager schemaManager(Identifier identifier) {
-        return new SchemaManager(fileIO, getDataTableLocation(identifier))
+        return new SchemaManager(
+                        fileIO,
+                        getDataTableLocation(identifier),
+                        identifier.getBranchNameOrDefault())
                 .withLock(lock(identifier));
     }
 

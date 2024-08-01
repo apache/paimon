@@ -200,17 +200,9 @@ public class HiveSchema {
         Path path = new Path(location);
         Options options = HiveUtils.extractCatalogConfig(configuration);
         options.set(CoreOptions.PATH, location);
-
         CatalogContext context = CatalogContext.create(options, configuration);
         try {
-            if (!options.contains(CoreOptions.BRANCH)) {
-                return new SchemaManager(FileIO.get(path, context), path).latest();
-            } else {
-                return new SchemaManager(
-                                FileIO.get(path, context), path, options.get(CoreOptions.BRANCH))
-                        .latest();
-            }
-
+            return new SchemaManager(FileIO.get(path, context), path).latest();
         } catch (IOException e) {
             LOG.warn(
                     "Failed to fetch Paimon table schema from path "

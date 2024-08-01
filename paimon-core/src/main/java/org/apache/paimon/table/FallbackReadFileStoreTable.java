@@ -34,6 +34,7 @@ import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Preconditions;
@@ -68,7 +69,7 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         RowType mainRowType = main.schema().logicalRowType();
         RowType fallbackRowType = fallback.schema().logicalRowType();
         Preconditions.checkArgument(
-                mainRowType.equals(fallbackRowType),
+                sameRowTypeIgnoreNullable(mainRowType, fallbackRowType),
                 "Branch %s and %s does not have the same row type.\n"
                         + "Row type of branch %s is %s.\n"
                         + "Row type of branch %s is %s.",
@@ -102,6 +103,20 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
                     fallbackBranch,
                     fallbackPrimaryKeys);
         }
+    }
+
+    private boolean sameRowTypeIgnoreNullable(RowType mainRowType, RowType fallbackRowType) {
+        if (mainRowType.getFieldCount() != fallbackRowType.getFieldCount()) {
+            return false;
+        }
+        for (int i = 0; i < mainRowType.getFieldCount(); i++) {
+            DataType mainType = mainRowType.getFields().get(i).type();
+            DataType fallbackType = fallbackRowType.getFields().get(i).type();
+            if (!mainType.equalsIgnoreNullable(fallbackType)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     @Override
