@@ -488,4 +488,21 @@ public abstract class FileDeletionBase<T extends Snapshot> {
             throw new RuntimeException(e);
         }
     }
+
+    public Set<Path> extractDataFilePaths(
+            Collection<ManifestEntry> manifestEntries, Predicate<ManifestEntry> skipper) {
+        Set<Path> dataFileToDelete = new HashSet<>();
+        for (ManifestEntry entry : manifestEntries) {
+            if (!skipper.test(entry)) {
+                Path bucketPath = pathFactory.bucketPath(entry.partition(), entry.bucket());
+                dataFileToDelete.add(new Path(bucketPath, entry.file().fileName()));
+                for (String file : entry.file().extraFiles()) {
+                    dataFileToDelete.add(new Path(bucketPath, file));
+                }
+
+                recordDeletionBuckets(entry);
+            }
+        }
+        return dataFileToDelete;
+    }
 }

@@ -20,7 +20,6 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
@@ -33,7 +32,6 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.Collection;
-import java.util.HashSet;
 import java.util.Set;
 import java.util.function.Predicate;
 
@@ -68,23 +66,11 @@ public class BranchDeletion extends FileDeletionBase<Snapshot> {
         try {
             manifestEntries = readMergedDataFiles(snapshotToClean);
         } catch (IOException e) {
-            LOG.info("Skip data file clean for the snapshot {}.", snapshotToClean.id(), e);
+            LOG.info("Skip data file clean for the branch of id {}.", snapshotToClean.id(), e);
             return;
         }
 
-        Set<Path> dataFileToDelete = new HashSet<>();
-        for (ManifestEntry entry : manifestEntries) {
-            if (!skipper.test(entry)) {
-                Path bucketPath = pathFactory.bucketPath(entry.partition(), entry.bucket());
-                dataFileToDelete.add(new Path(bucketPath, entry.file().fileName()));
-                for (String file : entry.file().extraFiles()) {
-                    dataFileToDelete.add(new Path(bucketPath, file));
-                }
-
-                recordDeletionBuckets(entry);
-            }
-        }
-        deleteFiles(dataFileToDelete, fileIO::deleteQuietly);
+        deleteFiles(extractDataFilePaths(manifestEntries, skipper), fileIO::deleteQuietly);
     }
 
     @Override
