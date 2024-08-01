@@ -45,10 +45,22 @@ under the License.
             <td>Controls the duration for which databases and tables in the catalog are cached.</td>
         </tr>
         <tr>
-            <td><h5>cache.manifest-max-memory</h5></td>
-            <td style="word-wrap: break-word;">0 bytes</td>
+            <td><h5>cache.manifest.max-memory</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
             <td>MemorySize</td>
             <td>Controls the maximum memory to cache manifest content.</td>
+        </tr>
+        <tr>
+            <td><h5>cache.manifest.small-file-memory</h5></td>
+            <td style="word-wrap: break-word;">128 mb</td>
+            <td>MemorySize</td>
+            <td>Controls the cache memory to cache small manifest files.</td>
+        </tr>
+        <tr>
+            <td><h5>cache.manifest.small-file-threshold</h5></td>
+            <td style="word-wrap: break-word;">512 kb</td>
+            <td>MemorySize</td>
+            <td>Controls the threshold of small manifest file.</td>
         </tr>
         <tr>
             <td><h5>client-pool-size</h5></td>

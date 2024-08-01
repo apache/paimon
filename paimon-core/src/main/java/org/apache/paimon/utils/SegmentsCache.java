@@ -26,8 +26,6 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caff
 
 import javax.annotation.Nullable;
 
-import java.util.function.Function;
-
 import static org.apache.paimon.CoreOptions.PAGE_SIZE;
 
 /** Cache {@link Segments}. */
@@ -37,8 +35,9 @@ public class SegmentsCache<T> {
 
     private final int pageSize;
     private final Cache<T, Segments> cache;
+    private final long maxElementSize;
 
-    public SegmentsCache(int pageSize, MemorySize maxMemorySize) {
+    public SegmentsCache(int pageSize, MemorySize maxMemorySize, long maxElementSize) {
         this.pageSize = pageSize;
         this.cache =
                 Caffeine.newBuilder()
@@ -47,14 +46,24 @@ public class SegmentsCache<T> {
                         .maximumWeight(maxMemorySize.getBytes())
                         .executor(Runnable::run)
                         .build();
+        this.maxElementSize = maxElementSize;
     }
 
     public int pageSize() {
         return pageSize;
     }
 
-    public Segments getSegments(T key, Function<T, Segments> viewFunction) {
-        return cache.get(key, viewFunction);
+    public long maxElementSize() {
+        return maxElementSize;
+    }
+
+    @Nullable
+    public Segments getIfPresents(T key) {
+        return cache.getIfPresent(key);
+    }
+
+    public void put(T key, Segments segments) {
+        cache.put(key, segments);
     }
 
     private int weigh(T cacheKey, Segments segments) {
@@ -62,16 +71,17 @@ public class SegmentsCache<T> {
     }
 
     @Nullable
-    public static <T> SegmentsCache<T> create(MemorySize maxMemorySize) {
-        return create((int) PAGE_SIZE.defaultValue().getBytes(), maxMemorySize);
+    public static <T> SegmentsCache<T> create(MemorySize maxMemorySize, long maxElementSize) {
+        return create((int) PAGE_SIZE.defaultValue().getBytes(), maxMemorySize, maxElementSize);
     }
 
     @Nullable
-    public static <T> SegmentsCache<T> create(int pageSize, MemorySize maxMemorySize) {
+    public static <T> SegmentsCache<T> create(
+            int pageSize, MemorySize maxMemorySize, long maxElementSize) {
         if (maxMemorySize.getBytes() == 0) {
             return null;
         }
 
-        return new SegmentsCache<>(pageSize, maxMemorySize);
+        return new SegmentsCache<>(pageSize, maxMemorySize, maxElementSize);
     }
 }

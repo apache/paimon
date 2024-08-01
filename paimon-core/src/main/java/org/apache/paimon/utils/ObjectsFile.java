@@ -25,7 +25,6 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.reader.RecordReader;
 
 import javax.annotation.Nullable;
 
@@ -36,7 +35,7 @@ import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 
-import static org.apache.paimon.utils.FileUtils.createFormatReader;
+import static org.apache.paimon.utils.FileUtils.checkExists;
 
 /** A file which contains several {@link T}s, provides read and write. */
 public class ObjectsFile<T> {
@@ -65,7 +64,10 @@ public class ObjectsFile<T> {
         this.compression = compression;
         this.pathFactory = pathFactory;
         this.cache =
-                cache == null ? null : new ObjectsCache<>(cache, serializer, this::createIterator);
+                cache == null
+                        ? null
+                        : new ObjectsCache<>(
+                                cache, serializer, this::fileSize, this::createIterator);
     }
 
     public FileIO fileIO() {
@@ -128,14 +130,7 @@ public class ObjectsFile<T> {
             return cache.read(path, fileSize, loadFilter, readFilter);
         }
 
-        RecordReader<InternalRow> reader =
-                createFormatReader(fileIO, readerFactory, path, fileSize);
-        if (readFilter != Filter.ALWAYS_TRUE) {
-            reader = reader.filter(readFilter);
-        }
-        List<T> result = new ArrayList<>();
-        reader.forEachRemaining(row -> result.add(serializer.fromRow(row)));
-        return result;
+        return readFromIterator(createIterator(path, fileSize), serializer, readFilter);
     }
 
     public String writeWithoutRolling(Collection<T> records) {
@@ -166,13 +161,41 @@ public class ObjectsFile<T> {
 
     private CloseableIterator<InternalRow> createIterator(Path file, @Nullable Long fileSize) {
         try {
-            return createFormatReader(fileIO, readerFactory, file, fileSize).toCloseableIterator();
+            return FileUtils.createFormatReader(fileIO, readerFactory, file, fileSize)
+                    .toCloseableIterator();
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
     }
 
+    private long fileSize(Path file) throws IOException {
+        try {
+            return fileIO.getFileSize(file);
+        } catch (IOException e) {
+            checkExists(fileIO, file);
+            throw e;
+        }
+    }
+
     public void delete(String fileName) {
         fileIO.deleteQuietly(pathFactory.toPath(fileName));
+    }
+
+    public static <V> List<V> readFromIterator(
+            CloseableIterator<InternalRow> inputIterator,
+            ObjectSerializer<V> serializer,
+            Filter<InternalRow> readFilter) {
+        try (CloseableIterator<InternalRow> iterator = inputIterator) {
+            List<V> result = new ArrayList<>();
+            while (iterator.hasNext()) {
+                InternalRow row = iterator.next();
+                if (readFilter.test(row)) {
+                    result.add(serializer.fromRow(row));
+                }
+            }
+            return result;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 }

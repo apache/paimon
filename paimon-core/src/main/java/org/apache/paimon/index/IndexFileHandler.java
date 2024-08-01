@@ -197,26 +197,6 @@ public class IndexFileHandler {
         return result;
     }
 
-    public List<IndexManifestEntry> scanEntries(String indexType, BinaryRow partition, int bucket) {
-        Snapshot snapshot = snapshotManager.latestSnapshot();
-        if (snapshot == null) {
-            return Collections.emptyList();
-        }
-        String indexManifest = snapshot.indexManifest();
-        if (indexManifest == null) {
-            return Collections.emptyList();
-        }
-        List<IndexManifestEntry> result = new ArrayList<>();
-        for (IndexManifestEntry file : indexManifestFile.read(indexManifest)) {
-            if (file.indexFile().indexType().equals(indexType)
-                    && file.partition().equals(partition)
-                    && file.bucket() == bucket) {
-                result.add(file);
-            }
-        }
-        return result;
-    }
-
     public Path filePath(IndexFileMeta file) {
         return pathFactory.toPath(file.fileName());
     }

@@ -105,10 +105,22 @@ public class CatalogOptions {
                     .withDescription(
                             "Controls the duration for which databases and tables in the catalog are cached.");
 
-    public static final ConfigOption<MemorySize> CACHE_MANIFEST_MAX_MEMORY =
-            key("cache.manifest-max-memory")
+    public static final ConfigOption<MemorySize> CACHE_MANIFEST_SMALL_FILE_MEMORY =
+            key("cache.manifest.small-file-memory")
                     .memoryType()
-                    .defaultValue(MemorySize.ofMebiBytes(0))
+                    .defaultValue(MemorySize.ofMebiBytes(128))
+                    .withDescription("Controls the cache memory to cache small manifest files.");
+
+    public static final ConfigOption<MemorySize> CACHE_MANIFEST_SMALL_FILE_THRESHOLD =
+            key("cache.manifest.small-file-threshold")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofKibiBytes(512))
+                    .withDescription("Controls the threshold of small manifest file.");
+
+    public static final ConfigOption<MemorySize> CACHE_MANIFEST_MAX_MEMORY =
+            key("cache.manifest.max-memory")
+                    .memoryType()
+                    .noDefaultValue()
                     .withDescription("Controls the maximum memory to cache manifest content.");
 
     public static final ConfigOption<String> LINEAGE_META =

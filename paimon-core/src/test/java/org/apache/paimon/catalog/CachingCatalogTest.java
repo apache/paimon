@@ -39,6 +39,7 @@ import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.io.FileNotFoundException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -297,10 +298,21 @@ class CachingCatalogTest extends CatalogTestBase {
 
     @Test
     public void testManifestCache() throws Exception {
+        innerTestManifestCache(Long.MAX_VALUE);
+        assertThatThrownBy(() -> innerTestManifestCache(10))
+                .hasRootCauseInstanceOf(FileNotFoundException.class);
+    }
+
+    private void innerTestManifestCache(long manifestCacheThreshold) throws Exception {
         Catalog catalog =
-                new CachingCatalog(this.catalog, Duration.ofSeconds(10), MemorySize.ofMebiBytes(1));
+                new CachingCatalog(
+                        this.catalog,
+                        Duration.ofSeconds(10),
+                        MemorySize.ofMebiBytes(1),
+                        manifestCacheThreshold);
         Identifier tableIdent = new Identifier("db", "tbl");
-        catalog.createTable(new Identifier("db", "tbl"), DEFAULT_TABLE_SCHEMA, false);
+        catalog.dropTable(tableIdent, true);
+        catalog.createTable(tableIdent, DEFAULT_TABLE_SCHEMA, false);
 
         // write
         Table table = catalog.getTable(tableIdent);

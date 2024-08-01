@@ -20,6 +20,7 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -43,10 +44,14 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.apache.paimon.catalog.AbstractCatalog.isSpecifiedSystemTable;
+import static org.apache.paimon.options.CatalogOptions.CACHE_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.CACHE_EXPIRATION_INTERVAL_MS;
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_MAX_MEMORY;
+import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE_MEMORY;
+import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE_THRESHOLD;
 import static org.apache.paimon.table.system.SystemTableLoader.SYSTEM_TABLES;
 
 /** A {@link Catalog} to cache databases and tables and manifests. */
@@ -57,25 +62,37 @@ public class CachingCatalog extends DelegateCatalog {
     protected final Cache<String, Map<String, String>> databaseCache;
     protected final Cache<Identifier, Table> tableCache;
     @Nullable protected final SegmentsCache<Path> manifestCache;
+    protected final long manifestCacheThreshold;
 
     public CachingCatalog(Catalog wrapped) {
         this(
                 wrapped,
                 CACHE_EXPIRATION_INTERVAL_MS.defaultValue(),
-                CACHE_MANIFEST_MAX_MEMORY.defaultValue());
-    }
-
-    public CachingCatalog(
-            Catalog wrapped, Duration expirationInterval, MemorySize manifestMaxMemory) {
-        this(wrapped, expirationInterval, manifestMaxMemory, Ticker.systemTicker());
+                CACHE_MANIFEST_SMALL_FILE_MEMORY.defaultValue(),
+                CACHE_MANIFEST_SMALL_FILE_THRESHOLD.defaultValue().getBytes());
     }
 
     public CachingCatalog(
             Catalog wrapped,
             Duration expirationInterval,
             MemorySize manifestMaxMemory,
+            long manifestCacheThreshold) {
+        this(
+                wrapped,
+                expirationInterval,
+                manifestMaxMemory,
+                manifestCacheThreshold,
+                Ticker.systemTicker());
+    }
+
+    public CachingCatalog(
+            Catalog wrapped,
+            Duration expirationInterval,
+            MemorySize manifestMaxMemory,
+            long manifestCacheThreshold,
             Ticker ticker) {
         super(wrapped);
+        this.manifestCacheThreshold = manifestCacheThreshold;
         if (expirationInterval.isZero() || expirationInterval.isNegative()) {
             throw new IllegalArgumentException(
                     "When cache.expiration-interval is set to negative or 0, the catalog cache should be disabled.");
@@ -96,7 +113,27 @@ public class CachingCatalog extends DelegateCatalog {
                         .expireAfterAccess(expirationInterval)
                         .ticker(ticker)
                         .build();
-        this.manifestCache = SegmentsCache.create(manifestMaxMemory);
+        this.manifestCache = SegmentsCache.create(manifestMaxMemory, manifestCacheThreshold);
+    }
+
+    public static Catalog tryToCreate(Catalog catalog, Options options) {
+        if (!options.get(CACHE_ENABLED)) {
+            return catalog;
+        }
+
+        MemorySize manifestMaxMemory = options.get(CACHE_MANIFEST_SMALL_FILE_MEMORY);
+        long manifestThreshold = options.get(CACHE_MANIFEST_SMALL_FILE_THRESHOLD).getBytes();
+        Optional<MemorySize> maxMemory = options.getOptional(CACHE_MANIFEST_MAX_MEMORY);
+        if (maxMemory.isPresent() && maxMemory.get().compareTo(manifestMaxMemory) > 0) {
+            // cache all manifest files
+            manifestMaxMemory = maxMemory.get();
+            manifestThreshold = Long.MAX_VALUE;
+        }
+        return new CachingCatalog(
+                catalog,
+                options.get(CACHE_EXPIRATION_INTERVAL_MS),
+                manifestMaxMemory,
+                manifestThreshold);
     }
 
     @Override
