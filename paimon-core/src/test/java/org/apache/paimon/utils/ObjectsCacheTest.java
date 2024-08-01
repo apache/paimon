@@ -46,6 +46,7 @@ public class ObjectsCacheTest {
                 new ObjectsCache<>(
                         new SegmentsCache<>(1024, MemorySize.ofKibiBytes(5), Long.MAX_VALUE),
                         new StringSerializer(),
+                        RowType.of(DataTypes.STRING()),
                         k -> null,
                         (k, size) ->
                                 CloseableIterator.adapterForIterator(

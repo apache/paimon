@@ -26,6 +26,7 @@ import org.apache.paimon.data.SimpleCollectingOutputView;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentSource;
+import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
@@ -43,20 +44,21 @@ import static org.apache.paimon.utils.ObjectsFile.readFromIterator;
 public class ObjectsCache<K, V> {
 
     private final SegmentsCache<K> cache;
-    private final ObjectSerializer<V> serializer;
-    private final ThreadLocal<InternalRowSerializer> threadLocalRowSerializer;
+    private final ObjectSerializer<V> projectedSerializer;
+    private final ThreadLocal<InternalRowSerializer> formatSerializer;
     private final FunctionWithIOException<K, Long> fileSizeFunction;
     private final BiFunction<K, Long, CloseableIterator<InternalRow>> reader;
 
     public ObjectsCache(
             SegmentsCache<K> cache,
-            ObjectSerializer<V> serializer,
+            ObjectSerializer<V> projectedSerializer,
+            RowType formatSchema,
             FunctionWithIOException<K, Long> fileSizeFunction,
             BiFunction<K, Long, CloseableIterator<InternalRow>> reader) {
         this.cache = cache;
-        this.serializer = serializer;
-        this.threadLocalRowSerializer =
-                ThreadLocal.withInitial(() -> new InternalRowSerializer(serializer.fieldTypes()));
+        this.projectedSerializer = projectedSerializer;
+        this.formatSerializer =
+                ThreadLocal.withInitial(() -> new InternalRowSerializer(formatSchema));
         this.fileSizeFunction = fileSizeFunction;
         this.reader = reader;
     }
@@ -79,24 +81,25 @@ public class ObjectsCache<K, V> {
                 cache.put(key, segments);
                 return readFromSegments(segments, readFilter);
             } else {
-                return readFromIterator(reader.apply(key, fileSize), serializer, readFilter);
+                return readFromIterator(
+                        reader.apply(key, fileSize), projectedSerializer, readFilter);
             }
         }
     }
 
     private List<V> readFromSegments(Segments segments, Filter<InternalRow> readFilter)
             throws IOException {
-        InternalRowSerializer rowSerializer = threadLocalRowSerializer.get();
+        InternalRowSerializer formatSerializer = this.formatSerializer.get();
         List<V> entries = new ArrayList<>();
         RandomAccessInputView view =
                 new RandomAccessInputView(
                         segments.segments(), cache.pageSize(), segments.limitInLastSegment());
-        BinaryRow binaryRow = new BinaryRow(rowSerializer.getArity());
+        BinaryRow binaryRow = new BinaryRow(formatSerializer.getArity());
         while (true) {
             try {
-                rowSerializer.mapFromPages(binaryRow, view);
+                formatSerializer.mapFromPages(binaryRow, view);
                 if (readFilter.test(binaryRow)) {
-                    entries.add(serializer.fromRow(binaryRow));
+                    entries.add(projectedSerializer.fromRow(binaryRow));
                 }
             } catch (EOFException e) {
                 return entries;
@@ -105,7 +108,7 @@ public class ObjectsCache<K, V> {
     }
 
     private Segments readSegments(K key, @Nullable Long fileSize, Filter<InternalRow> loadFilter) {
-        InternalRowSerializer rowSerializer = threadLocalRowSerializer.get();
+        InternalRowSerializer formatSerializer = this.formatSerializer.get();
         try (CloseableIterator<InternalRow> iterator = reader.apply(key, fileSize)) {
             ArrayList<MemorySegment> segments = new ArrayList<>();
             MemorySegmentSource segmentSource =
@@ -115,7 +118,7 @@ public class ObjectsCache<K, V> {
             while (iterator.hasNext()) {
                 InternalRow row = iterator.next();
                 if (loadFilter.test(row)) {
-                    rowSerializer.serializeToPages(row, output);
+                    formatSerializer.serializeToPages(row, output);
                 }
             }
             return new Segments(segments, output.getCurrentPositionInSegment());

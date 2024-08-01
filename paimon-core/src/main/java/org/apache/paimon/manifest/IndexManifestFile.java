@@ -40,6 +40,7 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
 
     private IndexManifestFile(
             FileIO fileIO,
+            RowType schema,
             FormatReaderFactory readerFactory,
             FormatWriterFactory writerFactory,
             String compression,
@@ -48,6 +49,7 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
         super(
                 fileIO,
                 new IndexManifestEntrySerializer(),
+                schema,
                 readerFactory,
                 writerFactory,
                 compression,
@@ -94,6 +96,7 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
             RowType schema = VersionedObjectSerializer.versionType(IndexManifestEntry.schema());
             return new IndexManifestFile(
                     fileIO,
+                    schema,
                     fileFormat.createReaderFactory(schema),
                     fileFormat.createWriterFactory(schema),
                     compression,

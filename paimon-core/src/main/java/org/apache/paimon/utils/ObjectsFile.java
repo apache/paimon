@@ -25,6 +25,7 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
@@ -52,6 +53,7 @@ public class ObjectsFile<T> {
     public ObjectsFile(
             FileIO fileIO,
             ObjectSerializer<T> serializer,
+            RowType formatType,
             FormatReaderFactory readerFactory,
             FormatWriterFactory writerFactory,
             String compression,
@@ -67,7 +69,11 @@ public class ObjectsFile<T> {
                 cache == null
                         ? null
                         : new ObjectsCache<>(
-                                cache, serializer, this::fileSize, this::createIterator);
+                                cache,
+                                serializer,
+                                formatType,
+                                this::fileSize,
+                                this::createIterator);
     }
 
     public FileIO fileIO() {

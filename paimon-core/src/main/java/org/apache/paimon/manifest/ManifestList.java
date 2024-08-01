@@ -43,12 +43,21 @@ public class ManifestList extends ObjectsFile<ManifestFileMeta> {
     private ManifestList(
             FileIO fileIO,
             ManifestFileMetaSerializer serializer,
+            RowType schema,
             FormatReaderFactory readerFactory,
             FormatWriterFactory writerFactory,
             String compression,
             PathFactory pathFactory,
             @Nullable SegmentsCache<Path> cache) {
-        super(fileIO, serializer, readerFactory, writerFactory, compression, pathFactory, cache);
+        super(
+                fileIO,
+                serializer,
+                schema,
+                readerFactory,
+                writerFactory,
+                compression,
+                pathFactory,
+                cache);
     }
 
     /**
@@ -87,6 +96,7 @@ public class ManifestList extends ObjectsFile<ManifestFileMeta> {
             return new ManifestList(
                     fileIO,
                     new ManifestFileMetaSerializer(),
+                    metaType,
                     fileFormat.createReaderFactory(metaType),
                     fileFormat.createWriterFactory(metaType),
                     compression,

@@ -57,13 +57,22 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             SchemaManager schemaManager,
             RowType partitionType,
             ManifestEntrySerializer serializer,
+            RowType schema,
             FormatReaderFactory readerFactory,
             FormatWriterFactory writerFactory,
             String compression,
             PathFactory pathFactory,
             long suggestedFileSize,
             @Nullable SegmentsCache<Path> cache) {
-        super(fileIO, serializer, readerFactory, writerFactory, compression, pathFactory, cache);
+        super(
+                fileIO,
+                serializer,
+                schema,
+                readerFactory,
+                writerFactory,
+                compression,
+                pathFactory,
+                cache);
         this.schemaManager = schemaManager;
         this.partitionType = partitionType;
         this.writerFactory = writerFactory;
@@ -184,6 +193,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                     schemaManager,
                     partitionType,
                     new ManifestEntrySerializer(),
+                    entryType,
                     fileFormat.createReaderFactory(entryType),
                     fileFormat.createWriterFactory(entryType),
                     compression,
@@ -197,6 +207,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             return new ObjectsFile<>(
                     fileIO,
                     new SimpleFileEntrySerializer(),
+                    entryType,
                     fileFormat.createReaderFactory(entryType),
                     fileFormat.createWriterFactory(entryType),
                     compression,
