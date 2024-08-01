@@ -48,9 +48,9 @@ public interface Catalog extends AutoCloseable {
 
     String DEFAULT_DATABASE = "default";
 
-    String BRANCH_PREFIX = "$branch_";
     String SYSTEM_TABLE_SPLITTER = "$";
     String SYSTEM_DATABASE_NAME = "sys";
+    String SYSTEM_BRANCH_PREFIX = "branch_";
     String COMMENT_PROP = "comment";
     String TABLE_DEFAULT_OPTION_PREFIX = "table-default.";
     String DB_LOCATION_PROP = "location";

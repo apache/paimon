@@ -239,7 +239,7 @@ public abstract class CatalogTestBase {
                                         DEFAULT_TABLE_SCHEMA,
                                         false))
                 .withMessage(
-                        "Cannot 'createTable' for system table 'Identifier{database='test_db', table='$system_table'}', please use data table.");
+                        "Cannot 'createTable' for system table 'Identifier{database='test_db', object='$system_table'}', please use data table.");
 
         // Create table throws DatabaseNotExistException when database does not exist
         assertThatExceptionOfType(Catalog.DatabaseNotExistException.class)
@@ -367,7 +367,7 @@ public abstract class CatalogTestBase {
                                 catalog.dropTable(
                                         Identifier.create("test_db", "$system_table"), false))
                 .withMessage(
-                        "Cannot 'dropTable' for system table 'Identifier{database='test_db', table='$system_table'}', please use data table.");
+                        "Cannot 'dropTable' for system table 'Identifier{database='test_db', object='$system_table'}', please use data table.");
 
         // Drop table throws TableNotExistException when table does not exist and ignoreIfNotExists
         // is false
@@ -402,7 +402,7 @@ public abstract class CatalogTestBase {
                                         toTable,
                                         false))
                 .withMessage(
-                        "Cannot 'renameTable' for system table 'Identifier{database='test_db', table='$system_table'}', please use data table.");
+                        "Cannot 'renameTable' for system table 'Identifier{database='test_db', object='$system_table'}', please use data table.");
 
         assertThatExceptionOfType(IllegalArgumentException.class)
                 .isThrownBy(
@@ -412,7 +412,7 @@ public abstract class CatalogTestBase {
                                         Identifier.create("test_db", "$system_table"),
                                         false))
                 .withMessage(
-                        "Cannot 'renameTable' for system table 'Identifier{database='test_db', table='$system_table'}', please use data table.");
+                        "Cannot 'renameTable' for system table 'Identifier{database='test_db', object='$system_table'}', please use data table.");
 
         // Rename table throws TableNotExistException when table does not exist
         assertThatExceptionOfType(Catalog.TableNotExistException.class)
@@ -466,7 +466,7 @@ public abstract class CatalogTestBase {
                                                 SchemaChange.addColumn("col2", DataTypes.DATE())),
                                         false))
                 .withMessage(
-                        "Cannot 'alterTable' for system table 'Identifier{database='test_db', table='$system_table'}', please use data table.");
+                        "Cannot 'alterTable' for system table 'Identifier{database='test_db', object='$system_table'}', please use data table.");
 
         // Alter table throws TableNotExistException when table does not exist
         assertThatExceptionOfType(Catalog.TableNotExistException.class)

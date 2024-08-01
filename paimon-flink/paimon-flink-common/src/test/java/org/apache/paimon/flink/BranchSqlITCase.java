@@ -32,7 +32,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.fail;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for table with branches using SQL. */
 public class BranchSqlITCase extends CatalogITCaseBase {
@@ -378,13 +378,8 @@ public class BranchSqlITCase extends CatalogITCaseBase {
         sql("ALTER TABLE `t$branch_pk` ADD (v2 INT)");
         sql("ALTER TABLE t SET ( 'scan.fallback-branch' = 'pk' )");
 
-        try {
-            sql("INSERT INTO t VALUES (1, 10, 'apple')");
-            fail("Expecting exceptions");
-        } catch (Exception e) {
-            assertThat(e)
-                    .hasMessageContaining("Branch main and pk does not have the same row type");
-        }
+        assertThatThrownBy(() -> sql("INSERT INTO t VALUES (1, 10, 'apple')"))
+                .hasMessageContaining("Branch main and pk does not have the same row type");
     }
 
     private List<String> collectResult(String sql) throws Exception {

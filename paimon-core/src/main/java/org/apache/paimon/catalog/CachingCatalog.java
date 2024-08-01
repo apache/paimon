@@ -22,6 +22,7 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.system.SystemTableLoader;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
@@ -39,7 +40,6 @@ import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.catalog.AbstractCatalog.isSpecifiedSystemTable;
-import static org.apache.paimon.catalog.AbstractCatalog.tableAndSystemName;
 import static org.apache.paimon.options.CatalogOptions.CACHE_EXPIRATION_INTERVAL_MS;
 import static org.apache.paimon.table.system.SystemTableLoader.SYSTEM_TABLES;
 
@@ -142,18 +142,21 @@ public class CachingCatalog extends DelegateCatalog {
         }
 
         if (isSpecifiedSystemTable(identifier)) {
-            String[] splits = tableAndSystemName(identifier);
-            String tableName = splits[0];
-            String type = splits[1];
-
             Identifier originIdentifier =
-                    Identifier.create(identifier.getDatabaseName(), tableName);
+                    new Identifier(
+                            identifier.getDatabaseName(),
+                            identifier.getTableName(),
+                            identifier.getBranchName(),
+                            null);
             Table originTable = tableCache.getIfPresent(originIdentifier);
             if (originTable == null) {
                 originTable = wrapped.getTable(originIdentifier);
                 tableCache.put(originIdentifier, originTable);
             }
-            table = SystemTableLoader.load(type, (FileStoreTable) originTable);
+            table =
+                    SystemTableLoader.load(
+                            Preconditions.checkNotNull(identifier.getSystemTableName()),
+                            (FileStoreTable) originTable);
             if (table == null) {
                 throw new TableNotExistException(identifier);
             }
