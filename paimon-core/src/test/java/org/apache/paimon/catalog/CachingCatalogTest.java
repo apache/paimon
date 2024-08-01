@@ -21,6 +21,7 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -51,6 +52,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.paimon.data.BinaryString.fromString;
+import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_MAX_MEMORY;
+import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE_MEMORY;
+import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE_THRESHOLD;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -339,5 +343,27 @@ class CachingCatalogTest extends CatalogTestBase {
                 fileIO.deleteDirectoryQuietly(manifestPath);
             }
         }
+    }
+
+    @Test
+    public void testManifestCacheOptions() {
+        Options options = new Options();
+
+        CachingCatalog caching = (CachingCatalog) CachingCatalog.tryToCreate(catalog, options);
+        assertThat(caching.manifestCache.maxMemorySize())
+                .isEqualTo(CACHE_MANIFEST_SMALL_FILE_MEMORY.defaultValue());
+        assertThat(caching.manifestCache.maxElementSize())
+                .isEqualTo(CACHE_MANIFEST_SMALL_FILE_THRESHOLD.defaultValue().getBytes());
+
+        options.set(CACHE_MANIFEST_SMALL_FILE_MEMORY, MemorySize.ofMebiBytes(100));
+        options.set(CACHE_MANIFEST_SMALL_FILE_THRESHOLD, MemorySize.ofBytes(100));
+        caching = (CachingCatalog) CachingCatalog.tryToCreate(catalog, options);
+        assertThat(caching.manifestCache.maxMemorySize()).isEqualTo(MemorySize.ofMebiBytes(100));
+        assertThat(caching.manifestCache.maxElementSize()).isEqualTo(100);
+
+        options.set(CACHE_MANIFEST_MAX_MEMORY, MemorySize.ofMebiBytes(256));
+        caching = (CachingCatalog) CachingCatalog.tryToCreate(catalog, options);
+        assertThat(caching.manifestCache.maxMemorySize()).isEqualTo(MemorySize.ofMebiBytes(256));
+        assertThat(caching.manifestCache.maxElementSize()).isEqualTo(Long.MAX_VALUE);
     }
 }

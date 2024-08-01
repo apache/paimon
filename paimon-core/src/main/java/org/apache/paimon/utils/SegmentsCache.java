@@ -35,6 +35,7 @@ public class SegmentsCache<T> {
 
     private final int pageSize;
     private final Cache<T, Segments> cache;
+    private final MemorySize maxMemorySize;
     private final long maxElementSize;
 
     public SegmentsCache(int pageSize, MemorySize maxMemorySize, long maxElementSize) {
@@ -46,11 +47,16 @@ public class SegmentsCache<T> {
                         .maximumWeight(maxMemorySize.getBytes())
                         .executor(Runnable::run)
                         .build();
+        this.maxMemorySize = maxMemorySize;
         this.maxElementSize = maxElementSize;
     }
 
     public int pageSize() {
         return pageSize;
+    }
+
+    public MemorySize maxMemorySize() {
+        return maxMemorySize;
     }
 
     public long maxElementSize() {

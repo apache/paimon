@@ -62,7 +62,6 @@ public class CachingCatalog extends DelegateCatalog {
     protected final Cache<String, Map<String, String>> databaseCache;
     protected final Cache<Identifier, Table> tableCache;
     @Nullable protected final SegmentsCache<Path> manifestCache;
-    protected final long manifestCacheThreshold;
 
     public CachingCatalog(Catalog wrapped) {
         this(
@@ -92,7 +91,6 @@ public class CachingCatalog extends DelegateCatalog {
             long manifestCacheThreshold,
             Ticker ticker) {
         super(wrapped);
-        this.manifestCacheThreshold = manifestCacheThreshold;
         if (expirationInterval.isZero() || expirationInterval.isNegative()) {
             throw new IllegalArgumentException(
                     "When cache.expiration-interval is set to negative or 0, the catalog cache should be disabled.");
