@@ -20,6 +20,7 @@ package org.apache.paimon.hive;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.branch.TableBranch;
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
@@ -40,6 +41,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -168,11 +170,13 @@ public class HiveCatalog extends AbstractCatalog {
 
     @Override
     public Optional<MetastoreClient.Factory> metastoreClientFactory(Identifier identifier) {
+        Identifier tableIdentifier =
+                new Identifier(identifier.getDatabaseName(), identifier.getTableName());
         try {
             return Optional.of(
                     new HiveMetastoreClient.Factory(
-                            identifier,
-                            getDataTableSchema(identifier),
+                            tableIdentifier,
+                            getDataTableSchema(tableIdentifier),
                             hiveConf,
                             clientClassName,
                             options));
@@ -284,26 +288,6 @@ public class HiveCatalog extends AbstractCatalog {
         }
     }
 
-    @Override
-    public void dropPartition(Identifier identifier, Map<String, String> partitionSpec)
-            throws TableNotExistException {
-        TableSchema tableSchema = getDataTableSchema(identifier);
-        if (!tableSchema.partitionKeys().isEmpty()
-                && new CoreOptions(tableSchema.options()).partitionedTableInMetastore()) {
-
-            try {
-                // Do not close client, it is for HiveCatalog
-                @SuppressWarnings("resource")
-                HiveMetastoreClient metastoreClient =
-                        new HiveMetastoreClient(identifier, tableSchema, clients);
-                metastoreClient.deletePartition(new LinkedHashMap<>(partitionSpec));
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-        }
-        super.dropPartition(identifier, partitionSpec);
-    }
-
     private Map<String, String> convertToProperties(Database database) {
         Map<String, String> properties = new HashMap<>(database.getParameters());
         if (database.getLocationUri() != null) {
@@ -313,6 +297,64 @@ public class HiveCatalog extends AbstractCatalog {
             properties.put(COMMENT_PROP, database.getDescription());
         }
         return properties;
+    }
+
+    @Override
+    public void dropPartition(Identifier identifier, Map<String, String> partitionSpec)
+            throws TableNotExistException {
+        TableSchema tableSchema = getDataTableSchema(identifier);
+        if (!tableSchema.partitionKeys().isEmpty()
+                && new CoreOptions(tableSchema.options()).partitionedTableInMetastore()
+                && !partitionExistsInOtherBranches(identifier, partitionSpec)) {
+            try {
+                // Do not close client, it is for HiveCatalog
+                @SuppressWarnings("resource")
+                HiveMetastoreClient metastoreClient =
+                        new HiveMetastoreClient(
+                                new Identifier(
+                                        identifier.getDatabaseName(), identifier.getTableName()),
+                                tableSchema,
+                                clients);
+                metastoreClient.deletePartition(new LinkedHashMap<>(partitionSpec));
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+        super.dropPartition(identifier, partitionSpec);
+    }
+
+    private boolean partitionExistsInOtherBranches(
+            Identifier identifier, Map<String, String> partitionSpec)
+            throws TableNotExistException {
+        FileStoreTable mainTable =
+                (FileStoreTable)
+                        getTable(
+                                new Identifier(
+                                        identifier.getDatabaseName(), identifier.getTableName()));
+        List<String> branchNames =
+                mainTable.branchManager().branches().stream()
+                        .map(TableBranch::getBranchName)
+                        .collect(Collectors.toList());
+        branchNames.add(DEFAULT_MAIN_BRANCH);
+
+        for (String branchName : branchNames) {
+            if (branchName.equals(identifier.getBranchNameOrDefault())) {
+                continue;
+            }
+
+            FileStoreTable table =
+                    (FileStoreTable)
+                            getTable(
+                                    new Identifier(
+                                            identifier.getDatabaseName(),
+                                            identifier.getTableName(),
+                                            branchName,
+                                            null));
+            if (!table.newScan().withPartitionFilter(partitionSpec).plan().splits().isEmpty()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
