@@ -29,6 +29,7 @@ import org.apache.spark.sql.catalyst.analysis.ResolvedTable
 import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, Expression, NamedExpression}
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.rules.Rule
+import org.apache.spark.sql.catalyst.util.CaseInsensitiveMap
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.types.{ArrayType, DataType, MapType, StructType}
 
@@ -39,11 +40,17 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
   override def apply(plan: LogicalPlan): LogicalPlan = plan.resolveOperatorsDown {
 
     case a @ PaimonV2WriteCommand(table, paimonTable)
-        if !schemaCompatible(
-          a.query.output.toStructType,
-          table.output.toStructType,
-          paimonTable.partitionKeys().asScala) =>
-      val newQuery = resolveQueryColumns(a.query, table.output)
+        if a.isByName && needsSchemaAdjustmentByName(a.query, table.output, paimonTable) =>
+      val newQuery = resolveQueryColumnsByName(a.query, table.output)
+      if (newQuery != a.query) {
+        Compatibility.withNewQuery(a, newQuery)
+      } else {
+        a
+      }
+
+    case a @ PaimonV2WriteCommand(table, paimonTable)
+        if !a.isByName && needsSchemaAdjustmentByPosition(a.query, table.output, paimonTable) =>
+      val newQuery = resolveQueryColumnsByPosition(a.query, table.output)
       if (newQuery != a.query) {
         Compatibility.withNewQuery(a, newQuery)
       } else {
@@ -55,6 +62,61 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
 
     case merge: MergeIntoTable if isPaimonTable(merge.targetTable) && merge.childrenResolved =>
       PaimonMergeIntoResolver(merge, session)
+  }
+
+  private def needsSchemaAdjustmentByName(
+      query: LogicalPlan,
+      targetAttrs: Seq[Attribute],
+      paimonTable: FileStoreTable): Boolean = {
+    val userSpecifiedNames = if (session.sessionState.conf.caseSensitiveAnalysis) {
+      query.output.map(a => (a.name, a)).toMap
+    } else {
+      CaseInsensitiveMap(query.output.map(a => (a.name, a)).toMap)
+    }
+    val specifiedTargetAttrs = targetAttrs.filter(col => userSpecifiedNames.contains(col.name))
+    !schemaCompatible(
+      specifiedTargetAttrs.toStructType,
+      query.output.toStructType,
+      paimonTable.partitionKeys().asScala)
+  }
+
+  private def resolveQueryColumnsByName(
+      query: LogicalPlan,
+      targetAttrs: Seq[Attribute]): LogicalPlan = {
+    val output = query.output
+    val project = targetAttrs.map {
+      attr =>
+        val outputAttr = output
+          .find(t => session.sessionState.conf.resolver(t.name, attr.name))
+          .getOrElse {
+            throw new RuntimeException("xxx")
+          }
+        addCastToColumn(outputAttr, attr)
+    }
+    Project(project, query)
+  }
+
+  private def needsSchemaAdjustmentByPosition(
+      query: LogicalPlan,
+      targetAttrs: Seq[Attribute],
+      paimonTable: FileStoreTable): Boolean = {
+    val output = query.output
+    targetAttrs.map(_.name) != output.map(_.name) ||
+    !schemaCompatible(
+      targetAttrs.toStructType,
+      output.toStructType,
+      paimonTable.partitionKeys().asScala)
+  }
+
+  private def resolveQueryColumnsByPosition(
+      query: LogicalPlan,
+      tableAttributes: Seq[Attribute]): LogicalPlan = {
+    val project = query.output.zipWithIndex.map {
+      case (attr, i) =>
+        val targetAttr = tableAttributes(i)
+        addCastToColumn(attr, targetAttr)
+    }
+    Project(project, query)
   }
 
   private def schemaCompatible(
@@ -83,20 +145,8 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
     }
 
     dataSchema.zip(tableSchema).forall {
-      case (f1, f2) =>
-        f1.name == f2.name && dataTypeCompatible(f1.name, f1.dataType, f2.dataType)
+      case (f1, f2) => dataTypeCompatible(f1.name, f1.dataType, f2.dataType)
     }
-  }
-
-  private def resolveQueryColumns(
-      query: LogicalPlan,
-      tableAttributes: Seq[Attribute]): LogicalPlan = {
-    val project = query.output.zipWithIndex.map {
-      case (attr, i) =>
-        val targetAttr = tableAttributes(i)
-        addCastToColumn(attr, targetAttr)
-    }
-    Project(project, query)
   }
 
   private def addCastToColumn(attr: Attribute, targetAttr: Attribute): NamedExpression = {

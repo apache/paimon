@@ -27,6 +27,57 @@ import java.sql.{Date, Timestamp}
 
 abstract class InsertOverwriteTableTestBase extends PaimonSparkTestBase {
 
+  fileFormats.foreach {
+    fileFormat =>
+      Seq(true, false).foreach {
+        isPartitioned =>
+          test(
+            s"Paimon: insert into/overwrite in ByName mode, file.format: $fileFormat, isPartitioned: $isPartitioned") {
+            withTable("t1", "t2") {
+              val partitionedSQL = if (isPartitioned) {
+                "PARTITIONED BY (col4)"
+              } else {
+                ""
+              }
+              spark.sql(s"""
+                           |CREATE TABLE t1 (col1 STRING, col2 INT, col3 DOUBLE, col4 STRING)
+                           |$partitionedSQL
+                           |TBLPROPERTIES ('file.format' = '$fileFormat')
+                           |""".stripMargin)
+
+              spark.sql(s"""
+                           |CREATE TABLE t2 (col2 INT, col3 DOUBLE, col1 STRING, col4 STRING)
+                           |$partitionedSQL
+                           |TBLPROPERTIES ('file.format' = '$fileFormat')
+                           |""".stripMargin)
+
+              sql(s"""
+                     |INSERT INTO TABLE t1 VALUES
+                     |("Hello", 1, 1.1, "pt1"),
+                     |("Paimon", 3, 3.3, "pt2");
+                     |""".stripMargin)
+
+              sql("INSERT INTO t2 (col1, col2, col3, col4) SELECT * FROM t1")
+              checkAnswer(
+                sql("SELECT * FROM t2 ORDER BY col2"),
+                Row(1, 1.1d, "Hello", "pt1") :: Row(3, 3.3d, "Paimon", "pt2") :: Nil)
+
+              sql(s"""
+                     |INSERT INTO TABLE t1 VALUES ("World", 2, 2.2, "pt1");
+                     |""".stripMargin)
+              sql("INSERT OVERWRITE t2 (col1, col2, col3, col4) SELECT * FROM t1")
+              checkAnswer(
+                sql("SELECT * FROM t2 ORDER BY col2"),
+                Row(1, 1.1d, "Hello", "pt1") :: Row(2, 2.2d, "World", "pt1") :: Row(
+                  3,
+                  3.3d,
+                  "Paimon",
+                  "pt2") :: Nil)
+            }
+          }
+      }
+  }
+
   withPk.foreach {
     hasPk =>
       bucketModes.foreach {
