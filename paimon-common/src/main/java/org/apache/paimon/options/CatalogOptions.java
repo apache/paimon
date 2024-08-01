@@ -114,7 +114,7 @@ public class CatalogOptions {
     public static final ConfigOption<MemorySize> CACHE_MANIFEST_SMALL_FILE_THRESHOLD =
             key("cache.manifest.small-file-threshold")
                     .memoryType()
-                    .defaultValue(MemorySize.ofKibiBytes(512))
+                    .defaultValue(MemorySize.ofMebiBytes(1))
                     .withDescription("Controls the threshold of small manifest file.");
 
     public static final ConfigOption<MemorySize> CACHE_MANIFEST_MAX_MEMORY =
