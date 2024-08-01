@@ -109,10 +109,6 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                         .mapToObj(i -> table.rowType().getFieldNames().get(projection[i]))
                         .collect(Collectors.toList());
 
-        if (partitionLoader != null) {
-            partitionLoader.addJoinKeys(joinKeys);
-        }
-
         this.projectFields =
                 Arrays.stream(projection)
                         .mapToObj(i -> table.rowType().getFieldNames().get(i))
@@ -123,6 +119,10 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             if (!projectFields.contains(field)) {
                 projectFields.add(field);
             }
+        }
+
+        if (partitionLoader != null) {
+            partitionLoader.addPartitionKeysTo(joinKeys, projectFields);
         }
 
         this.predicate = predicate;
