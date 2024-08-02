@@ -33,6 +33,8 @@ import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.Restorable;
 
+import org.apache.arrow.vector.VectorSchemaRoot;
+
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
@@ -103,6 +105,9 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
      * @throws Exception the thrown exception when writing the record
      */
     void write(BinaryRow partition, int bucket, T data) throws Exception;
+
+    void writeDirect(BinaryRow partition, int bucket, VectorSchemaRoot vectorSchemaRoot)
+            throws Exception;
 
     /**
      * Compact data stored in given partition and bucket. Note that compaction process is only

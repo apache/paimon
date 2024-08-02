@@ -45,6 +45,12 @@ under the License.
         </dependency>
 
         <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-vector</artifactId>
+            <version>14.0.0</version>
+        </dependency>
+
+        <dependency>
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-shade-caffeine-2</artifactId>
             <version>${paimon.shade.caffeine.version}-${paimon.shade.version}</version>

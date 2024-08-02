@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.io.SingleFileWriter.AbortExecutor;
 import org.apache.paimon.utils.Preconditions;
 
+import org.apache.arrow.vector.VectorSchemaRoot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -80,6 +81,30 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
 
             currentWriter.write(row);
             recordCount += 1;
+
+            if (rollingFile()) {
+                closeCurrentWriter();
+            }
+        } catch (Throwable e) {
+            LOG.warn(
+                    "Exception occurs when writing file "
+                            + (currentWriter == null ? null : currentWriter.path())
+                            + ". Cleaning up.",
+                    e);
+            abort();
+            throw e;
+        }
+    }
+
+    public void writeDirect(VectorSchemaRoot vectorSchemaRoot) throws IOException {
+        try {
+            // Open the current writer if write the first record or roll over happen before.
+            if (currentWriter == null) {
+                openCurrentWriter();
+            }
+
+            currentWriter.write(vectorSchemaRoot);
+            recordCount += vectorSchemaRoot.getRowCount();
 
             if (rollingFile()) {
                 closeCurrentWriter();

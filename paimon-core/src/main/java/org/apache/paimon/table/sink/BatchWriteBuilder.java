@@ -19,6 +19,7 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 
 import javax.annotation.Nullable;
@@ -71,4 +72,6 @@ public interface BatchWriteBuilder extends WriteBuilder {
     /** Create a {@link TableCommit} to commit {@link CommitMessage}s. */
     @Override
     BatchTableCommit newCommit();
+
+    BatchWriteBuilder withDirectlyWrite(BinaryRow directlyWrite);
 }

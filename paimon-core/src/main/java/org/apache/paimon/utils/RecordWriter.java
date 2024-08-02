@@ -20,6 +20,8 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.io.DataFileMeta;
 
+import org.apache.arrow.vector.VectorSchemaRoot;
+
 import java.util.Collection;
 import java.util.List;
 
@@ -34,6 +36,8 @@ public interface RecordWriter<T> {
 
     /** Add a key-value element to the writer. */
     void write(T record) throws Exception;
+
+    void writeDirect(VectorSchemaRoot vectorSchemaRoot) throws Exception;
 
     /**
      * Compact files related to the writer. Note that compaction process is only submitted and may

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.RowType;
@@ -38,6 +39,7 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
     private final String commitUser;
 
     private Map<String, String> staticPartition;
+    private BinaryRow directlyWrite;
 
     public BatchWriteBuilderImpl(InnerTable table) {
         this.table = table;
@@ -67,7 +69,8 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
 
     @Override
     public BatchTableWrite newWrite() {
-        return table.newWrite(commitUser)
+        return ((TableWriteImpl) table.newWrite(commitUser))
+                .directlyWrite(directlyWrite)
                 .withIgnorePreviousFiles(staticPartition != null)
                 .withExecutionMode(false);
     }
@@ -77,5 +80,11 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
         InnerTableCommit commit = table.newCommit(commitUser).withOverwrite(staticPartition);
         commit.ignoreEmptyCommit(true);
         return commit;
+    }
+
+    @Override
+    public BatchWriteBuilderImpl withDirectlyWrite(BinaryRow directlyWrite) {
+        this.directlyWrite = directlyWrite;
+        return this;
     }
 }

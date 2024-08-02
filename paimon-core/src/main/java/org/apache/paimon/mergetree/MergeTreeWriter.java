@@ -41,6 +41,8 @@ import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.RecordWriter;
 
+import org.apache.arrow.vector.VectorSchemaRoot;
+
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
@@ -171,6 +173,11 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                 throw new RuntimeException("Mem table is too small to hold a single element.");
             }
         }
+    }
+
+    @Override
+    public void writeDirect(VectorSchemaRoot vectorSchemaRoot) throws Exception {
+        throw new RuntimeException("Not supported");
     }
 
     @Override

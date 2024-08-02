@@ -39,6 +39,7 @@ import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
 
+import org.apache.arrow.vector.VectorSchemaRoot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -141,6 +142,13 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         if (container.indexMaintainer != null) {
             container.indexMaintainer.notifyNewRecord(data);
         }
+    }
+
+    @Override
+    public void writeDirect(BinaryRow partition, int bucket, VectorSchemaRoot vectorSchemaRoot)
+            throws Exception {
+        WriterContainer<T> container = getWriterWrapper(partition, bucket);
+        container.writer.writeDirect(vectorSchemaRoot);
     }
 
     @Override

@@ -27,6 +27,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.utils.IOUtils;
 
+import org.apache.arrow.vector.VectorSchemaRoot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -109,6 +110,15 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
             abort();
             throw e;
         }
+    }
+
+    public void write(VectorSchemaRoot vectorSchemaRoot) throws IOException {
+        if (closed) {
+            throw new RuntimeException("Writer has already closed!");
+        }
+
+        writer.write(vectorSchemaRoot);
+        recordCount += vectorSchemaRoot.getRowCount();
     }
 
     @Override

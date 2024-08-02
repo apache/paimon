@@ -19,6 +19,7 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.data.BinaryRow;
 
 import java.util.List;
 
@@ -36,4 +37,6 @@ public interface BatchTableWrite extends TableWrite {
      * @see BatchTableCommit#commit
      */
     List<CommitMessage> prepareCommit() throws Exception;
+
+    public BatchTableWrite directlyWrite(BinaryRow partition);
 }

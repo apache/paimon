@@ -20,6 +20,8 @@ package org.apache.paimon.format;
 
 import org.apache.paimon.data.InternalRow;
 
+import org.apache.arrow.vector.VectorSchemaRoot;
+
 import java.io.IOException;
 
 /** The writer that writes records. */
@@ -46,6 +48,10 @@ public interface FormatWriter {
      *     an exception.
      */
     void flush() throws IOException;
+
+    default void write(VectorSchemaRoot vectorSchemaRoot) throws IOException {
+        throw new RuntimeException("Not supported.");
+    }
 
     /**
      * Finishes the writing. This must flush all internal buffer, finish encoding, and write

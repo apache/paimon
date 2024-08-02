@@ -1113,6 +1113,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether to automatically complete missing tags.");
 
+    public static final ConfigOption<Boolean> WRITE_SKIP_PARTITION =
+            key("write.skip-partition")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to automatically complete missing tags.");
+
     public static final ConfigOption<Duration> SNAPSHOT_WATERMARK_IDLE_TIMEOUT =
             key("snapshot.watermark-idle-timeout")
                     .durationType()
@@ -2033,6 +2039,10 @@ public class CoreOptions implements Serializable {
 
     public boolean metadataIcebergCompatible() {
         return options.get(METADATA_ICEBERG_COMPATIBLE);
+    }
+
+    public boolean skipPartitionWrite() {
+        return options.get(WRITE_SKIP_PARTITION);
     }
 
     /** Specifies the merge engine for table with primary key. */

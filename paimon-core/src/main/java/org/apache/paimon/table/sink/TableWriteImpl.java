@@ -35,6 +35,8 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Restorable;
 
+import org.apache.arrow.vector.VectorSchemaRoot;
+
 import javax.annotation.Nullable;
 
 import java.util.List;
@@ -61,6 +63,8 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     private BucketMode bucketMode;
 
     private final int[] notNullFieldIndex;
+
+    @Nullable BinaryRow directlyPartition;
 
     public TableWriteImpl(
             RowType rowType,
@@ -138,6 +142,13 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     public int getBucket(InternalRow row) {
         keyAndBucketExtractor.setRecord(row);
         return keyAndBucketExtractor.bucket();
+    }
+
+    public void write(VectorSchemaRoot vectorSchemaRoot) throws Exception {
+        if (directlyPartition == null) {
+            throw new RuntimeException("You should set directlyPartition first");
+        }
+        write.writeDirect(directlyPartition, 1, vectorSchemaRoot);
     }
 
     @Override
@@ -244,6 +255,12 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         checkState(!batchCommitted, "BatchTableWrite only support one-time committing.");
         batchCommitted = true;
         return prepareCommit(true, BatchWriteBuilder.COMMIT_IDENTIFIER);
+    }
+
+    @Override
+    public TableWriteImpl<T> directlyWrite(BinaryRow partition) {
+        this.directlyPartition = partition;
+        return this;
     }
 
     @Override
