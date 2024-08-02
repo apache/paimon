@@ -21,6 +21,7 @@ package org.apache.paimon.io;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.fs.AsyncPositionOutputStream;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
@@ -64,7 +65,7 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
         this.converter = converter;
 
         try {
-            out = fileIO.newOutputStream(path, false);
+            out = new AsyncPositionOutputStream(fileIO.newOutputStream(path, false));
             writer = factory.create(out, compression);
         } catch (IOException e) {
             LOG.warn(
