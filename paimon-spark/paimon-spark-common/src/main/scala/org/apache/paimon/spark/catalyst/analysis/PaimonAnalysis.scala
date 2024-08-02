@@ -217,7 +217,7 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
         sourceField.dataType match {
           case s: StructType =>
             val subField = castStructField(parent, i, sourceField.name, targetField)
-            addCastToStructByName(subField, s, nested)
+            addCastToStructByPosition(subField, s, nested)
           case o =>
             throw new RuntimeException(s"Can not support to cast $o to StructType.")
         }
