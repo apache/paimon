@@ -24,6 +24,8 @@ import org.apache.paimon.format.parquet.type.ParquetField;
 import org.apache.paimon.utils.BooleanArrayList;
 import org.apache.paimon.utils.LongArrayList;
 
+import java.util.Arrays;
+
 import static java.lang.String.format;
 
 /** Utils to calculate nested type position. */
@@ -105,12 +107,21 @@ public class NestedPositionUtil {
         for (int i = 0;
                 i < definitionLevels.length;
                 i = getNextCollectionStartIndex(repetitionLevels, collectionRepetitionLevel, i)) {
-            valueCount++;
             if (definitionLevels[i] >= collectionDefinitionLevel - 1) {
                 boolean isNull =
                         isOptionalFieldValueNull(definitionLevels[i], collectionDefinitionLevel);
-                nullCollectionFlags.add(isNull);
-                nullValuesCount += isNull ? 1 : 0;
+                if (isNull) {
+                    nullCollectionFlags.add(true);
+                    nullValuesCount++;
+                    // 1. don't increase offset for null values
+                    // 2. offsets and emptyCollectionFlags are meaningless for null values, but they
+                    // must be set at each index for calculating lengths later
+                    offsets.add(offset);
+                    emptyCollectionFlags.add(false);
+                    continue;
+                }
+
+                nullCollectionFlags.add(false);
                 // definitionLevels[i] > collectionDefinitionLevel  => Collection is defined and not
                 // empty
                 // definitionLevels[i] == collectionDefinitionLevel => Collection is defined but
@@ -119,22 +130,22 @@ public class NestedPositionUtil {
                     emptyCollectionFlags.add(false);
                     offset += getCollectionSize(repetitionLevels, collectionRepetitionLevel, i + 1);
                 } else if (definitionLevels[i] == collectionDefinitionLevel) {
-                    offset++;
+                    // don't increase offset for empty values
                     emptyCollectionFlags.add(true);
                 } else {
-                    offset++;
-                    emptyCollectionFlags.add(false);
+                    throw new IllegalStateException(
+                            String.format(
+                                    "This case should be handled as null value. "
+                                            + "index: %d, definitionLevels: %s, collectionDefinitionLevel: %s.",
+                                    i,
+                                    Arrays.toString(definitionLevels),
+                                    collectionDefinitionLevel));
                 }
                 offsets.add(offset);
-            } else {
-                // when definitionLevels[i] < collectionDefinitionLevel - 1, it means the collection
-                // is
-                // not defined, but we need to regard it as null to avoid getting value wrong.
-                nullCollectionFlags.add(true);
-                nullValuesCount++;
-                offsets.add(++offset);
-                emptyCollectionFlags.add(false);
+                valueCount++;
             }
+            // else when definitionLevels[i] < collectionDefinitionLevel - 1, it means the
+            // collection is not defined, just ignore it
         }
         long[] offsetsArray = offsets.toArray();
         long[] length = calculateLengthByOffsets(emptyCollectionFlags.toArray(), offsetsArray);

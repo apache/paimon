@@ -109,7 +109,7 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
 
     private boolean isFirstRow = true;
 
-    private Object lastValue;
+    private LastValueContainer lastValue = new LastValueContainer();
 
     public NestedPrimitiveColumnReader(
             ColumnDescriptor descriptor,
@@ -168,8 +168,10 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
         // repeated type need two loops to read data.
         while (!eof && index < readNumber) {
             do {
-                valueList.add(lastValue);
-                valueIndex++;
+                if (!lastValue.shouldSkip) {
+                    valueList.add(lastValue.value);
+                    valueIndex++;
+                }
             } while (readValue() && (repetitionLevel != 0));
             index++;
         }
@@ -187,6 +189,23 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
         return new LevelDelegation(repetition, definition);
     }
 
+    /**
+     * Example: {[[0, null], [1], [], null], [], null} => [5, 4, 5, 3, 2, 1, 0]
+     *
+     * <ul>
+     *   <li>definitionLevel == maxDefLevel => not null value
+     *   <li>definitionLevel == maxDefLevel - 1 => null value
+     *   <li>definitionLevel == maxDefLevel - 2 => empty set, skip
+     *   <li>definitionLevel == maxDefLevel - 3 => null set, skip
+     *   <li>definitionLevel == maxDefLevel - 4 => empty outer set, skip
+     *   <li>definitionLevel == maxDefLevel - 5 => null outer set, skip
+     *   <li>... skip
+     * </ul>
+     *
+     * <p>When (definitionLevel <= maxDefLevel - 2) we skip the value because children ColumnVector
+     * for OrcArrayColumnVector and OrcMapColumnVector don't contain empty and null set value. Stay
+     * consistent here.
+     */
     private boolean readValue() throws IOException {
         int left = readPageIfNeed();
         if (left > 0) {
@@ -196,12 +215,14 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
             if (definitionLevel == maxDefLevel) {
                 if (isCurrentPageDictionaryEncoded) {
                     int dictionaryId = dataColumn.readValueDictionaryId();
-                    lastValue = dictionaryDecodeValue(dataType, dictionaryId);
+                    lastValue.setValue(dictionaryDecodeValue(dataType, dictionaryId));
                 } else {
-                    lastValue = readPrimitiveTypedRow(dataType);
+                    lastValue.setValue(readPrimitiveTypedRow(dataType));
                 }
+            } else if (definitionLevel == maxDefLevel - 1) {
+                lastValue.setValue(null);
             } else {
-                lastValue = null;
+                lastValue.skip();
             }
             return true;
         } else {
@@ -639,6 +660,20 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
         @Override
         public int nextInt() {
             return 0;
+        }
+    }
+
+    private static class LastValueContainer {
+        protected boolean shouldSkip;
+        protected Object value;
+
+        protected void setValue(Object value) {
+            this.value = value;
+            this.shouldSkip = false;
+        }
+
+        protected void skip() {
+            this.shouldSkip = true;
         }
     }
 }
