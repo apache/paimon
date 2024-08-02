@@ -23,7 +23,7 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.spark.sql.Row
 import org.junit.jupiter.api.Assertions
 
-import java.sql.Date
+import java.sql.{Date, Timestamp}
 
 class DataFrameWriteTest extends PaimonSparkTestBase {
 
@@ -81,6 +81,54 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
           checkAnswer(
             sql("SELECT * FROM t2 ORDER BY col2"),
             Row(1, 1.1d, "Hello") :: Row(2, 2.2d, "World") :: Row(3, 3.3d, "Paimon") :: Nil)
+        }
+      }
+  }
+
+  fileFormats.foreach {
+    fileFormat =>
+      test(
+        s"Paimon: DataFrameWrite.saveAsTable with complex data type in ByName mode, file.format: $fileFormat") {
+        withTable("t1", "t2") {
+          spark.sql(
+            s"""
+               |CREATE TABLE t1 (a STRING, b INT, c STRUCT<c1:DOUBLE, c2:LONG>, d ARRAY<STRUCT<d1 TIMESTAMP, d2 MAP<STRING, STRING>>>, e ARRAY<INT>)
+               |TBLPROPERTIES ('file.format' = '$fileFormat')
+               |""".stripMargin)
+
+          spark.sql(
+            s"""
+               |CREATE TABLE t2 (b INT, c STRUCT<c2:LONG, c1:DOUBLE>, d ARRAY<STRUCT<d2 MAP<STRING, STRING>, d1 TIMESTAMP>>, e ARRAY<INT>, a STRING)
+               |TBLPROPERTIES ('file.format' = '$fileFormat')
+               |""".stripMargin)
+
+          sql(s"""
+                 |INSERT INTO TABLE t1 VALUES
+                 |("Hello", 1, struct(1.1, 1000), array(struct(timestamp'2024-01-01 00:00:00', map("k1", "v1")), struct(timestamp'2024-08-01 00:00:00', map("k1", "v11"))), array(123, 345)),
+                 |("World", 2, struct(2.2, 2000), array(struct(timestamp'2024-02-01 00:00:00', map("k2", "v2"))), array(234, 456)),
+                 |("Paimon", 3, struct(3.3, 3000), null, array(345, 567));
+                 |""".stripMargin)
+
+          spark.table("t1").write.format("paimon").mode("append").saveAsTable("t2")
+          checkAnswer(
+            sql("SELECT * FROM t2 ORDER BY b"),
+            Row(
+              1,
+              Row(1000L, 1.1d),
+              Array(
+                Row(Map("k1" -> "v1"), Timestamp.valueOf("2024-01-01 00:00:00")),
+                Row(Map("k1" -> "v11"), Timestamp.valueOf("2024-08-01 00:00:00"))),
+              Array(123, 345),
+              "Hello"
+            )
+              :: Row(
+                2,
+                Row(2000L, 2.2d),
+                Array(Row(Map("k2" -> "v2"), Timestamp.valueOf("2024-02-01 00:00:00"))),
+                Array(234, 456),
+                "World")
+              :: Row(3, Row(3000L, 3.3d), null, Array(345, 567), "Paimon") :: Nil
+          )
         }
       }
   }

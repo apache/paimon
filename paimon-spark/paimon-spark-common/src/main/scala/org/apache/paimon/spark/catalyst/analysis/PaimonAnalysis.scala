@@ -26,12 +26,12 @@ import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.analysis.ResolvedTable
-import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, Expression, NamedExpression}
+import org.apache.spark.sql.catalyst.expressions.{Alias, ArrayTransform, Attribute, CreateStruct, Expression, GetArrayItem, GetStructField, LambdaFunction, NamedExpression, NamedLambdaVariable}
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.CaseInsensitiveMap
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
-import org.apache.spark.sql.types.{ArrayType, DataType, MapType, StructType}
+import org.apache.spark.sql.types.{ArrayType, DataType, IntegerType, MapType, StructField, StructType}
 
 import scala.collection.JavaConverters._
 
@@ -92,7 +92,7 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
             throw new RuntimeException(
               s"Cannot find ${attr.name} in data columns: ${output.map(_.name).mkString(", ")}")
           }
-        addCastToColumn(outputAttr, attr)
+        addCastToColumn(outputAttr, attr, isByName = true)
     }
     Project(project, query)
   }
@@ -115,7 +115,7 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
     val project = query.output.zipWithIndex.map {
       case (attr, i) =>
         val targetAttr = tableAttributes(i)
-        addCastToColumn(attr, targetAttr)
+        addCastToColumn(attr, targetAttr, isByName = false)
     }
     Project(project, query)
   }
@@ -150,14 +150,112 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
     }
   }
 
-  private def addCastToColumn(attr: Attribute, targetAttr: Attribute): NamedExpression = {
+  private def addCastToColumn(
+      attr: Attribute,
+      targetAttr: Attribute,
+      isByName: Boolean): NamedExpression = {
     val expr = (attr.dataType, targetAttr.dataType) match {
       case (s, t) if s == t =>
         attr
+      case (s: StructType, t: StructType) if s != t =>
+        if (isByName) {
+          addCastToStructByName(attr, s, t)
+        } else {
+          addCastToStructByPosition(attr, s, t)
+        }
+      case (ArrayType(s: StructType, sNull: Boolean), ArrayType(t: StructType, _: Boolean))
+          if s != t =>
+        val castToStructFunc = if (isByName) {
+          addCastToStructByName _
+        } else {
+          addCastToStructByPosition _
+        }
+        castToArrayStruct(attr, s, t, sNull, castToStructFunc)
       case _ =>
         cast(attr, targetAttr.dataType)
     }
     Alias(expr, targetAttr.name)(explicitMetadata = Option(targetAttr.metadata))
+  }
+
+  private def addCastToStructByName(
+      parent: NamedExpression,
+      source: StructType,
+      target: StructType): NamedExpression = {
+    val fields = target.map {
+      case targetField @ StructField(name, nested: StructType, _, _) =>
+        val sourceIndex = source.fieldIndex(name)
+        val sourceField = source(sourceIndex)
+        sourceField.dataType match {
+          case s: StructType =>
+            val subField = castStructField(parent, sourceIndex, sourceField.name, targetField)
+            addCastToStructByName(subField, s, nested)
+          case o =>
+            throw new RuntimeException(s"Can not support to cast $o to StructType.")
+        }
+      case targetField =>
+        val sourceIndex = source.fieldIndex(targetField.name)
+        val sourceField = source(sourceIndex)
+        castStructField(parent, sourceIndex, sourceField.name, targetField)
+    }
+    Alias(CreateStruct(fields), parent.name)(
+      parent.exprId,
+      parent.qualifier,
+      Option(parent.metadata))
+  }
+
+  private def addCastToStructByPosition(
+      parent: NamedExpression,
+      source: StructType,
+      target: StructType): NamedExpression = {
+    if (source.length != target.length) {
+      throw new RuntimeException("The number of fields in source and target is not same.")
+    }
+
+    val fields = target.zipWithIndex.map {
+      case (targetField @ StructField(_, nested: StructType, _, _), i) =>
+        val sourceField = source(i)
+        sourceField.dataType match {
+          case s: StructType =>
+            val subField = castStructField(parent, i, sourceField.name, targetField)
+            addCastToStructByName(subField, s, nested)
+          case o =>
+            throw new RuntimeException(s"Can not support to cast $o to StructType.")
+        }
+      case (targetField, i) =>
+        val sourceField = source(i)
+        castStructField(parent, i, sourceField.name, targetField)
+    }
+    Alias(CreateStruct(fields), parent.name)(
+      parent.exprId,
+      parent.qualifier,
+      Option(parent.metadata))
+  }
+
+  private def castStructField(
+      parent: NamedExpression,
+      i: Int,
+      sourceFieldName: String,
+      targetField: StructField): NamedExpression = {
+    Alias(
+      cast(GetStructField(parent, i, Option(sourceFieldName)), targetField.dataType),
+      targetField.name
+    )(explicitMetadata = Option(targetField.metadata))
+  }
+  private def castToArrayStruct(
+      parent: NamedExpression,
+      source: StructType,
+      target: StructType,
+      sourceNullable: Boolean,
+      castToStructFunc: (NamedExpression, StructType, StructType) => NamedExpression
+  ): Expression = {
+    val structConverter: (Expression, Expression) => Expression = (_, i) =>
+      castToStructFunc(Alias(GetArrayItem(parent, i), i.toString)(), source, target)
+    val transformLambdaFunc = {
+      val elementVar = NamedLambdaVariable("elementVar", source, sourceNullable)
+      val indexVar = NamedLambdaVariable("indexVar", IntegerType, false)
+      LambdaFunction(structConverter(elementVar, indexVar), Seq(elementVar, indexVar))
+    }
+    ArrayTransform(parent, transformLambdaFunc)
   }
 
   private def cast(expr: Expression, dataType: DataType): Expression = {
