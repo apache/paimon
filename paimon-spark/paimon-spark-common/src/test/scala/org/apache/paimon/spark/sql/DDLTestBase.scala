@@ -446,4 +446,14 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
         }
     }
   }
+
+  test("Paimon DDL: create table with unsupported partitioned by") {
+    val error = intercept[RuntimeException] {
+      sql(s"""
+             |CREATE TABLE T (id STRING, name STRING, pt STRING)
+             |PARTITIONED BY (substr(pt, 1, 2))
+             |""".stripMargin)
+    }.getMessage
+    assert(error.contains("Unsupported partition transform"))
+  }
 }
