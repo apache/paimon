@@ -59,13 +59,17 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
             FormatWriterFactory factory,
             Path path,
             Function<T, InternalRow> converter,
-            String compression) {
+            String compression,
+            boolean asyncWrite) {
         this.fileIO = fileIO;
         this.path = path;
         this.converter = converter;
 
         try {
-            out = new AsyncPositionOutputStream(fileIO.newOutputStream(path, false));
+            out = fileIO.newOutputStream(path, false);
+            if (asyncWrite) {
+                out = new AsyncPositionOutputStream(out);
+            }
             writer = factory.create(out, compression);
         } catch (IOException e) {
             LOG.warn(

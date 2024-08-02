@@ -145,6 +145,9 @@ public class AsyncPositionOutputStream extends PositionOutputStream {
     private void checkException() throws IOException {
         Throwable throwable = exception.get();
         if (throwable != null) {
+            if (throwable instanceof IOException) {
+                throw (IOException) throwable;
+            }
             throw new IOException(throwable);
         }
     }
