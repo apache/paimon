@@ -285,7 +285,7 @@ public class ContinuousFileSplitEnumerator
             return ChannelComputer.select(
                     dataSplit.partition(), dataSplit.bucket(), context.currentParallelism());
         }
-        return dataSplit.bucket() % context.currentParallelism();
+        return ChannelComputer.select(dataSplit.bucket(), context.currentParallelism());
     }
 
     protected SplitAssigner createSplitAssigner(BucketMode bucketMode) {
