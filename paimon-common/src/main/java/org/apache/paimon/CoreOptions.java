@@ -1283,6 +1283,13 @@ public class CoreOptions implements Serializable {
                             "When a batch job queries from a table, if a partition does not exist in the current branch, "
                                     + "the reader will try to get this partition from this fallback branch.");
 
+    public static final ConfigOption<Boolean> ASYNC_FILE_WRITE =
+            key("async-file-write")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to enable asynchronous IO writing when writing files.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -2018,6 +2025,10 @@ public class CoreOptions implements Serializable {
         }
 
         return options.get(LOOKUP_WAIT);
+    }
+
+    public boolean asyncFileWrite() {
+        return options.get(ASYNC_FILE_WRITE);
     }
 
     public boolean metadataIcebergCompatible() {
