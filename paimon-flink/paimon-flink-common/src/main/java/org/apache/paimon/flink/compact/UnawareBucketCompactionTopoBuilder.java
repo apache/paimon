@@ -71,14 +71,14 @@ public class UnawareBucketCompactionTopoBuilder {
 
     public void build() {
         // build source from UnawareSourceFunction
-        DataStreamSource<AppendOnlyCompactionTask> source = buildSource();
+        DataStreamSource<AppendOnlyCompactionTask> source = buildSource(false);
 
         // from source, construct the full flink job
         sinkFromSource(source);
     }
 
     public DataStream<Committable> fetchUncommitted(String commitUser) {
-        DataStreamSource<AppendOnlyCompactionTask> source = buildSource();
+        DataStreamSource<AppendOnlyCompactionTask> source = buildSource(true);
 
         // rebalance input to default or assigned parallelism
         DataStream<AppendOnlyCompactionTask> rebalanced = rebalanceInput(source);
@@ -87,11 +87,11 @@ public class UnawareBucketCompactionTopoBuilder {
                 .doWrite(rebalanced, commitUser, rebalanced.getParallelism());
     }
 
-    private DataStreamSource<AppendOnlyCompactionTask> buildSource() {
+    private DataStreamSource<AppendOnlyCompactionTask> buildSource(boolean emitMaxWatermark) {
         long scanInterval = table.coreOptions().continuousDiscoveryInterval().toMillis();
         BucketUnawareCompactSource source =
                 new BucketUnawareCompactSource(
-                        table, isContinuous, scanInterval, partitionPredicate);
+                        table, isContinuous, scanInterval, partitionPredicate, emitMaxWatermark);
 
         return BucketUnawareCompactSource.buildSource(env, source, isContinuous, tableIdentifier);
     }
