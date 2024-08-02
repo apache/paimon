@@ -19,6 +19,7 @@
 package org.apache.paimon.reader;
 
 import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.IOUtils;
 
 import java.io.IOException;
 
@@ -34,7 +35,8 @@ public class RecordReaderIterator<T> implements CloseableIterator<T> {
         this.reader = reader;
         try {
             this.currentIterator = reader.readBatch();
-        } catch (IOException e) {
+        } catch (Exception e) {
+            IOUtils.closeQuietly(reader);
             throw new RuntimeException(e);
         }
         this.advanced = false;

@@ -67,6 +67,7 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
         super(
                 fileIO,
                 new IcebergManifestEntrySerializer(partitionType),
+                IcebergManifestEntry.schema(partitionType),
                 readerFactory,
                 writerFactory,
                 compression,

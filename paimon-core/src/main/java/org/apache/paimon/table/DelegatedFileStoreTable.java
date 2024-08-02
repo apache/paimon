@@ -35,6 +35,7 @@ import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -95,6 +96,11 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     @Override
     public FileIO fileIO() {
         return wrapped.fileIO();
+    }
+
+    @Override
+    public void setManifestCache(SegmentsCache<Path> manifestCache) {
+        wrapped.setManifestCache(manifestCache);
     }
 
     @Override

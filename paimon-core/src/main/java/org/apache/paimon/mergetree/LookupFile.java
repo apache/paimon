@@ -28,7 +28,6 @@ import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.RemovalCause;
-import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
 
 import javax.annotation.Nullable;
 
@@ -91,7 +90,7 @@ public class LookupFile implements Closeable {
                 .maximumWeight(maxDiskSize.getKibiBytes())
                 .weigher(LookupFile::fileWeigh)
                 .removalListener(LookupFile::removalCallback)
-                .executor(MoreExecutors.directExecutor())
+                .executor(Runnable::run)
                 .build();
     }
 

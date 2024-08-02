@@ -44,8 +44,10 @@ public class ObjectsCacheTest {
         Map<String, List<String>> map = new HashMap<>();
         ObjectsCache<String, String> cache =
                 new ObjectsCache<>(
-                        new SegmentsCache<>(1024, MemorySize.ofKibiBytes(5)),
+                        new SegmentsCache<>(1024, MemorySize.ofKibiBytes(5), Long.MAX_VALUE),
                         new StringSerializer(),
+                        RowType.of(DataTypes.STRING()),
+                        k -> 1L,
                         (k, size) ->
                                 CloseableIterator.adapterForIterator(
                                         map.get(k).stream()

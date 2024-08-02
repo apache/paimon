@@ -47,7 +47,8 @@ public class IndexManifestFileHandlerTest {
                                 fileStore.fileIO(),
                                 fileStore.options().manifestFormat(),
                                 "zstd",
-                                fileStore.pathFactory())
+                                fileStore.pathFactory(),
+                                null)
                         .create();
         IndexManifestFileHandler indexManifestFileHandler =
                 new IndexManifestFileHandler(indexManifestFile, BucketMode.BUCKET_UNAWARE);
@@ -81,7 +82,8 @@ public class IndexManifestFileHandlerTest {
                                 fileStore.fileIO(),
                                 fileStore.options().manifestFormat(),
                                 "zstd",
-                                fileStore.pathFactory())
+                                fileStore.pathFactory(),
+                                null)
                         .create();
         IndexManifestFileHandler indexManifestFileHandler =
                 new IndexManifestFileHandler(indexManifestFile, BucketMode.HASH_FIXED);

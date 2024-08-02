@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.DelegateCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
@@ -47,6 +48,19 @@ public class PrivilegedCatalog extends DelegateCatalog {
     public PrivilegedCatalog(Catalog wrapped, PrivilegeManager privilegeManager) {
         super(wrapped);
         this.privilegeManager = privilegeManager;
+    }
+
+    public static Catalog tryToCreate(Catalog catalog, Options options) {
+        PrivilegeManager privilegeManager =
+                new FileBasedPrivilegeManager(
+                        catalog.warehouse(),
+                        catalog.fileIO(),
+                        options.get(PrivilegedCatalog.USER),
+                        options.get(PrivilegedCatalog.PASSWORD));
+        if (privilegeManager.privilegeEnabled()) {
+            catalog = new PrivilegedCatalog(catalog, privilegeManager);
+        }
+        return catalog;
     }
 
     public PrivilegeManager privilegeManager() {

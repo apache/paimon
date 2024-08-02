@@ -18,11 +18,15 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.SegmentsCache;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
@@ -34,13 +38,20 @@ import org.checkerframework.checker.nullness.qual.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.apache.paimon.catalog.AbstractCatalog.isSpecifiedSystemTable;
+import static org.apache.paimon.options.CatalogOptions.CACHE_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.CACHE_EXPIRATION_INTERVAL_MS;
+import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_MAX_MEMORY;
+import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE_MEMORY;
+import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE_THRESHOLD;
 import static org.apache.paimon.table.system.SystemTableLoader.SYSTEM_TABLES;
 
 /** A {@link Catalog} to cache databases and tables and manifests. */
@@ -50,16 +61,35 @@ public class CachingCatalog extends DelegateCatalog {
 
     protected final Cache<String, Map<String, String>> databaseCache;
     protected final Cache<Identifier, Table> tableCache;
+    @Nullable protected final SegmentsCache<Path> manifestCache;
 
     public CachingCatalog(Catalog wrapped) {
-        this(wrapped, CACHE_EXPIRATION_INTERVAL_MS.defaultValue());
+        this(
+                wrapped,
+                CACHE_EXPIRATION_INTERVAL_MS.defaultValue(),
+                CACHE_MANIFEST_SMALL_FILE_MEMORY.defaultValue(),
+                CACHE_MANIFEST_SMALL_FILE_THRESHOLD.defaultValue().getBytes());
     }
 
-    public CachingCatalog(Catalog wrapped, Duration expirationInterval) {
-        this(wrapped, expirationInterval, Ticker.systemTicker());
+    public CachingCatalog(
+            Catalog wrapped,
+            Duration expirationInterval,
+            MemorySize manifestMaxMemory,
+            long manifestCacheThreshold) {
+        this(
+                wrapped,
+                expirationInterval,
+                manifestMaxMemory,
+                manifestCacheThreshold,
+                Ticker.systemTicker());
     }
 
-    public CachingCatalog(Catalog wrapped, Duration expirationInterval, Ticker ticker) {
+    public CachingCatalog(
+            Catalog wrapped,
+            Duration expirationInterval,
+            MemorySize manifestMaxMemory,
+            long manifestCacheThreshold,
+            Ticker ticker) {
         super(wrapped);
         if (expirationInterval.isZero() || expirationInterval.isNegative()) {
             throw new IllegalArgumentException(
@@ -81,6 +111,27 @@ public class CachingCatalog extends DelegateCatalog {
                         .expireAfterAccess(expirationInterval)
                         .ticker(ticker)
                         .build();
+        this.manifestCache = SegmentsCache.create(manifestMaxMemory, manifestCacheThreshold);
+    }
+
+    public static Catalog tryToCreate(Catalog catalog, Options options) {
+        if (!options.get(CACHE_ENABLED)) {
+            return catalog;
+        }
+
+        MemorySize manifestMaxMemory = options.get(CACHE_MANIFEST_SMALL_FILE_MEMORY);
+        long manifestThreshold = options.get(CACHE_MANIFEST_SMALL_FILE_THRESHOLD).getBytes();
+        Optional<MemorySize> maxMemory = options.getOptional(CACHE_MANIFEST_MAX_MEMORY);
+        if (maxMemory.isPresent() && maxMemory.get().compareTo(manifestMaxMemory) > 0) {
+            // cache all manifest files
+            manifestMaxMemory = maxMemory.get();
+            manifestThreshold = Long.MAX_VALUE;
+        }
+        return new CachingCatalog(
+                catalog,
+                options.get(CACHE_EXPIRATION_INTERVAL_MS),
+                manifestMaxMemory,
+                manifestThreshold);
     }
 
     @Override
@@ -151,7 +202,7 @@ public class CachingCatalog extends DelegateCatalog {
             Table originTable = tableCache.getIfPresent(originIdentifier);
             if (originTable == null) {
                 originTable = wrapped.getTable(originIdentifier);
-                tableCache.put(originIdentifier, originTable);
+                putTableCache(originIdentifier, originTable);
             }
             table =
                     SystemTableLoader.load(
@@ -160,13 +211,20 @@ public class CachingCatalog extends DelegateCatalog {
             if (table == null) {
                 throw new TableNotExistException(identifier);
             }
-            tableCache.put(identifier, table);
+            putTableCache(identifier, table);
             return table;
         }
 
         table = wrapped.getTable(identifier);
-        tableCache.put(identifier, table);
+        putTableCache(identifier, table);
         return table;
+    }
+
+    private void putTableCache(Identifier identifier, Table table) {
+        if (manifestCache != null && table instanceof FileStoreTable) {
+            ((FileStoreTable) table).setManifestCache(manifestCache);
+        }
+        tableCache.put(identifier, table);
     }
 
     private class TableInvalidatingRemovalListener implements RemovalListener<Identifier, Table> {

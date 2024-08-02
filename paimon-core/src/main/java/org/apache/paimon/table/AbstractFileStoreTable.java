@@ -58,6 +58,7 @@ import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanne
 import org.apache.paimon.table.source.snapshot.StaticFromWatermarkStartingScanner;
 import org.apache.paimon.tag.TagPreview;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -106,6 +107,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         }
         this.tableSchema = tableSchema;
         this.catalogEnvironment = catalogEnvironment;
+    }
+
+    @Override
+    public void setManifestCache(SegmentsCache<Path> manifestCache) {
+        store().setManifestCache(manifestCache);
     }
 
     @Override
