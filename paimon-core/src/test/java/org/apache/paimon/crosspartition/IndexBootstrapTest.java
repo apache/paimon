@@ -27,10 +27,12 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 
 import org.junit.jupiter.api.Test;
@@ -43,6 +45,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.function.Consumer;
 
+import static org.apache.paimon.crosspartition.IndexBootstrap.BUCKET_FIELD;
 import static org.apache.paimon.crosspartition.IndexBootstrap.filterSplit;
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
@@ -53,20 +56,7 @@ public class IndexBootstrapTest extends TableTestBase {
 
     @Test
     public void testBoostrap() throws Exception {
-        Identifier identifier = identifier("T");
-        Options options = new Options();
-        options.set(CoreOptions.BUCKET, -1);
-        Schema schema =
-                Schema.newBuilder()
-                        .column("pt", DataTypes.INT())
-                        .column("col", DataTypes.INT())
-                        .column("pk", DataTypes.INT())
-                        .primaryKey("pk")
-                        .partitionKeys("pt")
-                        .options(options.toMap())
-                        .build();
-        catalog.createTable(identifier, schema, true);
-        Table table = catalog.getTable(identifier);
+        Table table = createTable();
 
         write(
                 table,
@@ -104,6 +94,31 @@ public class IndexBootstrapTest extends TableTestBase {
         // here, (this is good, beneficial for query speed) but TableTestBase.after will check leak
         // streams. So sleep here to avoid unstable.
         Thread.sleep(1000);
+    }
+
+    private Table createTable() throws Exception {
+        Identifier identifier = identifier("T");
+        Options options = new Options();
+        options.set(CoreOptions.BUCKET, -1);
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pt", DataTypes.INT())
+                        .column("col", DataTypes.INT())
+                        .column("pk", DataTypes.INT())
+                        .primaryKey("pk")
+                        .partitionKeys("pt")
+                        .options(options.toMap())
+                        .build();
+        catalog.createTable(identifier, schema, true);
+        return catalog.getTable(identifier);
+    }
+
+    @Test
+    public void testBootstrapType() throws Exception {
+        FileStoreTable table = (FileStoreTable) createTable();
+        RowType indexRowType = IndexBootstrap.bootstrapType(table.schema());
+        assertThat(indexRowType.getFieldIndex(BUCKET_FIELD))
+                .isEqualTo(RowType.currentHighestFieldId(indexRowType.getFields()));
     }
 
     @Test
