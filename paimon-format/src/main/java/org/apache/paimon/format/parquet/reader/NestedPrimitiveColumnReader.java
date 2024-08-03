@@ -73,12 +73,13 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
     private final ColumnDescriptor descriptor;
     private final Type type;
     private final DataType dataType;
+    private final boolean parentIsRowType;
     /** The dictionary, if this column has dictionary encoding. */
     private final ParquetDataColumnReader dictionary;
     /** Maximum definition level for this column. */
     private final int maxDefLevel;
 
-    private boolean isUtcTimestamp;
+    private final boolean isUtcTimestamp;
 
     /** Total number of values read. */
     private long valuesRead;
@@ -109,14 +110,15 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
 
     private boolean isFirstRow = true;
 
-    private LastValueContainer lastValue = new LastValueContainer();
+    private final LastValueContainer lastValue = new LastValueContainer();
 
     public NestedPrimitiveColumnReader(
             ColumnDescriptor descriptor,
             PageReader pageReader,
             boolean isUtcTimestamp,
             Type parquetType,
-            DataType dataType)
+            DataType dataType,
+            boolean parentIsRowType)
             throws IOException {
         this.descriptor = descriptor;
         this.type = parquetType;
@@ -124,6 +126,7 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
         this.maxDefLevel = descriptor.getMaxDefinitionLevel();
         this.isUtcTimestamp = isUtcTimestamp;
         this.dataType = dataType;
+        this.parentIsRowType = parentIsRowType;
 
         DictionaryPage dictionaryPage = pageReader.readDictionaryPage();
         if (dictionaryPage != null) {
@@ -190,7 +193,7 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
     }
 
     /**
-     * Example: {[[0, null], [1], [], null], [], null} => [5, 4, 5, 3, 2, 1, 0]
+     * An ARRAY[ARRAY[INT]] Example: {[[0, null], [1], [], null], [], null} => [5, 4, 5, 3, 2, 1, 0]
      *
      * <ul>
      *   <li>definitionLevel == maxDefLevel => not null value
@@ -205,6 +208,9 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
      * <p>When (definitionLevel <= maxDefLevel - 2) we skip the value because children ColumnVector
      * for OrcArrayColumnVector and OrcMapColumnVector don't contain empty and null set value. Stay
      * consistent here.
+     *
+     * <p>But notice that children of RowColumnVector still get null value when entire outer row is
+     * null, so when {@code parentIsRowType} is true the null value is still stored.
      */
     private boolean readValue() throws IOException {
         int left = readPageIfNeed();
@@ -222,7 +228,11 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
             } else if (definitionLevel == maxDefLevel - 1) {
                 lastValue.setValue(null);
             } else {
-                lastValue.skip();
+                if (parentIsRowType) {
+                    lastValue.setValue(null);
+                } else {
+                    lastValue.skip();
+                }
             }
             return true;
         } else {

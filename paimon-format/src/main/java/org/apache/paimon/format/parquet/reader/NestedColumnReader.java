@@ -86,11 +86,15 @@ public class NestedColumnReader implements ColumnReader<WritableColumnVector> {
 
     @Override
     public void readToVector(int readNumber, WritableColumnVector vector) throws IOException {
-        readData(field, readNumber, vector, false);
+        readData(field, readNumber, vector, false, false);
     }
 
     private Pair<LevelDelegation, WritableColumnVector> readData(
-            ParquetField field, int readNumber, ColumnVector vector, boolean inside)
+            ParquetField field,
+            int readNumber,
+            ColumnVector vector,
+            boolean inside,
+            boolean parentIsRowType)
             throws IOException {
         if (field.getType() instanceof RowType) {
             return readRow((ParquetGroupField) field, readNumber, vector, inside);
@@ -99,7 +103,8 @@ public class NestedColumnReader implements ColumnReader<WritableColumnVector> {
         } else if (field.getType() instanceof ArrayType) {
             return readArray((ParquetGroupField) field, readNumber, vector, inside);
         } else {
-            return readPrimitive((ParquetPrimitiveField) field, readNumber, vector);
+            return readPrimitive(
+                    (ParquetPrimitiveField) field, readNumber, vector, parentIsRowType);
         }
     }
 
@@ -114,7 +119,7 @@ public class NestedColumnReader implements ColumnReader<WritableColumnVector> {
                 new WritableColumnVector[childrenVectors.length];
         for (int i = 0; i < children.size(); i++) {
             Pair<LevelDelegation, WritableColumnVector> tuple =
-                    readData(children.get(i), readNumber, childrenVectors[i], true);
+                    readData(children.get(i), readNumber, childrenVectors[i], true, true);
             levelDelegation = tuple.getLeft();
             finalChildrenVectors[i] = tuple.getRight();
         }
@@ -139,7 +144,7 @@ public class NestedColumnReader implements ColumnReader<WritableColumnVector> {
         }
 
         if (rowPosition.getIsNull() != null) {
-            setFieldNullFalg(rowPosition.getIsNull(), heapRowVector);
+            setFieldNullFlag(rowPosition.getIsNull(), heapRowVector);
         }
         return Pair.of(levelDelegation, heapRowVector);
     }
@@ -155,9 +160,10 @@ public class NestedColumnReader implements ColumnReader<WritableColumnVector> {
                 "Maps must have two type parameters, found %s",
                 children.size());
         Pair<LevelDelegation, WritableColumnVector> keyTuple =
-                readData(children.get(0), readNumber, mapVector.getKeyColumnVector(), true);
+                readData(children.get(0), readNumber, mapVector.getKeyColumnVector(), true, false);
         Pair<LevelDelegation, WritableColumnVector> valueTuple =
-                readData(children.get(1), readNumber, mapVector.getValueColumnVector(), true);
+                readData(
+                        children.get(1), readNumber, mapVector.getValueColumnVector(), true, false);
 
         LevelDelegation levelDelegation = keyTuple.getLeft();
 
@@ -181,7 +187,7 @@ public class NestedColumnReader implements ColumnReader<WritableColumnVector> {
         }
 
         if (collectionPosition.getIsNull() != null) {
-            setFieldNullFalg(collectionPosition.getIsNull(), mapVector);
+            setFieldNullFlag(collectionPosition.getIsNull(), mapVector);
         }
 
         mapVector.setLengths(collectionPosition.getLength());
@@ -201,7 +207,7 @@ public class NestedColumnReader implements ColumnReader<WritableColumnVector> {
                 "Arrays must have a single type parameter, found %s",
                 children.size());
         Pair<LevelDelegation, WritableColumnVector> tuple =
-                readData(children.get(0), readNumber, arrayVector.getChild(), true);
+                readData(children.get(0), readNumber, arrayVector.getChild(), true, false);
 
         LevelDelegation levelDelegation = tuple.getLeft();
         CollectionPosition collectionPosition =
@@ -219,7 +225,7 @@ public class NestedColumnReader implements ColumnReader<WritableColumnVector> {
         }
 
         if (collectionPosition.getIsNull() != null) {
-            setFieldNullFalg(collectionPosition.getIsNull(), arrayVector);
+            setFieldNullFlag(collectionPosition.getIsNull(), arrayVector);
         }
         arrayVector.setLengths(collectionPosition.getLength());
         arrayVector.setOffsets(collectionPosition.getOffsets());
@@ -227,7 +233,11 @@ public class NestedColumnReader implements ColumnReader<WritableColumnVector> {
     }
 
     private Pair<LevelDelegation, WritableColumnVector> readPrimitive(
-            ParquetPrimitiveField field, int readNumber, ColumnVector vector) throws IOException {
+            ParquetPrimitiveField field,
+            int readNumber,
+            ColumnVector vector,
+            boolean parentIsRowType)
+            throws IOException {
         ColumnDescriptor descriptor = field.getDescriptor();
         NestedPrimitiveColumnReader reader = columnReaders.get(descriptor);
         if (reader == null) {
@@ -237,7 +247,8 @@ public class NestedColumnReader implements ColumnReader<WritableColumnVector> {
                             pages.getPageReader(descriptor),
                             isUtcTimestamp,
                             descriptor.getPrimitiveType(),
-                            field.getType());
+                            field.getType(),
+                            parentIsRowType);
             columnReaders.put(descriptor, reader);
         }
         WritableColumnVector writableColumnVector =
@@ -245,7 +256,7 @@ public class NestedColumnReader implements ColumnReader<WritableColumnVector> {
         return Pair.of(reader.getLevelDelegation(), writableColumnVector);
     }
 
-    private static void setFieldNullFalg(boolean[] nullFlags, AbstractHeapVector vector) {
+    private static void setFieldNullFlag(boolean[] nullFlags, AbstractHeapVector vector) {
         for (int index = 0; index < vector.getLen() && index < nullFlags.length; index++) {
             if (nullFlags[index]) {
                 vector.setNullAt(index);

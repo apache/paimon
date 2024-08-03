@@ -108,6 +108,8 @@ public class NestedPositionUtil {
                 i < definitionLevels.length;
                 i = getNextCollectionStartIndex(repetitionLevels, collectionRepetitionLevel, i)) {
             if (definitionLevels[i] >= collectionDefinitionLevel - 1) {
+                valueCount++;
+
                 boolean isNull =
                         isOptionalFieldValueNull(definitionLevels[i], collectionDefinitionLevel);
                 if (isNull) {
@@ -142,7 +144,6 @@ public class NestedPositionUtil {
                                     collectionDefinitionLevel));
                 }
                 offsets.add(offset);
-                valueCount++;
             }
             // else when definitionLevels[i] < collectionDefinitionLevel - 1, it means the
             // collection is not defined, just ignore it

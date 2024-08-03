@@ -34,6 +34,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BooleanType;
@@ -454,9 +455,7 @@ public class ParquetReadWriteTest {
                 format.createReader(
                         new FormatReaderContext(
                                 new LocalFileIO(), path, new LocalFileIO().getFileSize(path)));
-        List<InternalRow> results = new ArrayList<>(1283);
-        reader.forEachRemaining(results::add);
-        compareNestedRow(rows, results);
+        compareNestedRow(rows, new RecordReaderIterator<>(reader));
     }
 
     @Test
@@ -525,41 +524,9 @@ public class ParquetReadWriteTest {
                     }
                     Integer v = expected.get(cnt.get());
                     if (v == null) {
-                        assertThat(row.isNullAt(0)).isTrue();
-                        assertThat(row.isNullAt(1)).isTrue();
-                        assertThat(row.isNullAt(2)).isTrue();
-                        assertThat(row.isNullAt(3)).isTrue();
-                        assertThat(row.isNullAt(4)).isTrue();
-                        assertThat(row.isNullAt(5)).isTrue();
-                        assertThat(row.isNullAt(6)).isTrue();
-                        assertThat(row.isNullAt(7)).isTrue();
-                        assertThat(row.isNullAt(8)).isTrue();
-                        assertThat(row.isNullAt(9)).isTrue();
-                        assertThat(row.isNullAt(10)).isTrue();
-                        assertThat(row.isNullAt(11)).isTrue();
-                        assertThat(row.isNullAt(12)).isTrue();
-                        assertThat(row.isNullAt(13)).isTrue();
-                        assertThat(row.isNullAt(14)).isTrue();
-                        assertThat(row.isNullAt(15)).isTrue();
-                        assertThat(row.isNullAt(16)).isTrue();
-                        assertThat(row.isNullAt(17)).isTrue();
-                        assertThat(row.isNullAt(18)).isTrue();
-                        assertThat(row.isNullAt(19)).isTrue();
-                        assertThat(row.isNullAt(20)).isTrue();
-                        assertThat(row.isNullAt(21)).isTrue();
-                        assertThat(row.isNullAt(22)).isTrue();
-                        assertThat(row.isNullAt(23)).isTrue();
-                        assertThat(row.isNullAt(24)).isTrue();
-                        assertThat(row.isNullAt(25)).isTrue();
-                        assertThat(row.isNullAt(26)).isTrue();
-                        assertThat(row.isNullAt(27)).isTrue();
-                        assertThat(row.isNullAt(28)).isTrue();
-                        assertThat(row.isNullAt(29)).isTrue();
-                        assertThat(row.isNullAt(30)).isTrue();
-                        assertThat(row.isNullAt(31)).isTrue();
-                        assertThat(row.isNullAt(32)).isTrue();
-                        assertThat(row.isNullAt(33)).isTrue();
-                        assertThat(row.isNullAt(34)).isTrue();
+                        for (int i = 0; i < 35; i++) {
+                            assertThat(row.isNullAt(i)).isTrue();
+                        }
                     } else {
                         assertThat(row.getString(0)).hasToString("" + v);
                         assertThat(row.getBoolean(1)).isEqualTo(v % 2 == 0);
@@ -826,7 +793,6 @@ public class ParquetReadWriteTest {
                 row1.add(0, i);
                 Group row2 = rowList.addGroup(0);
                 row2.add(0, i + 1);
-                f4.addGroup(0);
 
                 // add ROW<`f0` ARRAY<ROW<`b` ARRAY<ARRAY<INT>>, `c` INT>>, `f1` INT>>
                 Group f5 = row.addGroup("f5");
@@ -835,7 +801,6 @@ public class ParquetReadWriteTest {
                 Group insideArray = insideRow.addGroup(0);
                 createParquetDoubleNestedArray(insideArray, i);
                 insideRow.add(1, i);
-                arrayRow.addGroup(0);
                 f5.add(1, i);
                 writer.write(row);
             }
@@ -873,12 +838,12 @@ public class ParquetReadWriteTest {
         }
     }
 
-    private void compareNestedRow(List<InternalRow> rows, List<InternalRow> results) {
-        Assertions.assertEquals(rows.size(), results.size());
+    private void compareNestedRow(
+            List<InternalRow> rows, RecordReaderIterator<InternalRow> iterator) throws Exception {
+        for (InternalRow origin : rows) {
+            assertThat(iterator.hasNext()).isTrue();
+            InternalRow result = iterator.next();
 
-        for (InternalRow result : results) {
-            int index = result.getInt(0);
-            InternalRow origin = rows.get(index);
             Assertions.assertEquals(origin.getInt(0), result.getInt(0));
 
             // int[]
@@ -967,6 +932,8 @@ public class ParquetReadWriteTest {
                     result.getRow(5, 2).getArray(0).getRow(0, 2).getInt(1));
             Assertions.assertEquals(origin.getRow(5, 2).getInt(1), result.getRow(5, 2).getInt(1));
         }
+        assertThat(iterator.hasNext()).isFalse();
+        iterator.close();
     }
 
     private void fillWithMap(Map<String, String> map, InternalMap internalMap, int index) {
