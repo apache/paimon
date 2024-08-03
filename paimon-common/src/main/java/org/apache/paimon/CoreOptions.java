@@ -1286,7 +1286,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Boolean> ASYNC_FILE_WRITE =
             key("async-file-write")
                     .booleanType()
-                    .defaultValue(false)
+                    .defaultValue(true)
                     .withDescription(
                             "Whether to enable asynchronous IO writing when writing files.");
 
