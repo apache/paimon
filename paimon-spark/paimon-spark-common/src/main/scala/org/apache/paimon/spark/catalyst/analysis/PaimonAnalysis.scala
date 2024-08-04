@@ -21,7 +21,7 @@ package org.apache.paimon.spark.catalyst.analysis
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation.isPaimonTable
-import org.apache.paimon.spark.commands.{PaimonAnalyzeTableColumnCommand, PaimonDynamicPartitionOverwriteCommand, PaimonTruncateTableCommand}
+import org.apache.paimon.spark.commands.{PaimonAnalyzeTableColumnCommand, PaimonDynamicPartitionOverwriteCommand, PaimonShowColumnsCommand, PaimonTruncateTableCommand}
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.SparkSession
@@ -55,6 +55,9 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
 
     case merge: MergeIntoTable if isPaimonTable(merge.targetTable) && merge.childrenResolved =>
       PaimonMergeIntoResolver(merge, session)
+
+    case s @ ShowColumns(PaimonRelation(table), _, _) if s.resolved =>
+      PaimonShowColumnsCommand(table)
   }
 
   private def schemaCompatible(
