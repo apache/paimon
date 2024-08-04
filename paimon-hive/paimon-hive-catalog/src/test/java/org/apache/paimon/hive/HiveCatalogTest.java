@@ -18,9 +18,11 @@
 
 package org.apache.paimon.hive;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.client.ClientPool;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -29,6 +31,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.CommonTestUtils;
 import org.apache.paimon.utils.HadoopUtils;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import org.apache.hadoop.hive.conf.HiveConf;
@@ -37,6 +40,7 @@ import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.thrift.TException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.lang.reflect.Field;
 import java.util.Arrays;
@@ -267,5 +271,37 @@ public class HiveCatalogTest extends CatalogTestBase {
         } catch (Exception e) {
             fail("Test failed due to exception: " + e.getMessage());
         }
+    }
+
+    @Test
+    public void testCreateExternalTableWithLocation(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        HiveConf hiveConf = new HiveConf();
+        String jdoConnectionURL = "jdbc:derby:memory:" + UUID.randomUUID();
+        hiveConf.setVar(METASTORECONNECTURLKEY, jdoConnectionURL + ";create=true");
+        hiveConf.set(CatalogOptions.TABLE_TYPE.key(), "external");
+        String metastoreClientClass = "org.apache.hadoop.hive.metastore.HiveMetaStoreClient";
+        HiveCatalog externalWarehouseCatalog =
+                new HiveCatalog(fileIO, hiveConf, metastoreClientClass, warehouse);
+
+        String externalTablePath = tempDir.toString();
+
+        Schema schema =
+                new Schema(
+                        Lists.newArrayList(new DataField(0, "foo", DataTypes.INT())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        ImmutableMap.of("path", externalTablePath),
+                        "");
+
+        Identifier identifier = Identifier.create("default", "my_table");
+        externalWarehouseCatalog.createTable(identifier, schema, true);
+
+        org.apache.paimon.table.Table table = externalWarehouseCatalog.getTable(identifier);
+        assertThat(table.options())
+                .extracting(CoreOptions.PATH.key())
+                .isEqualTo("file:" + externalTablePath);
+
+        externalWarehouseCatalog.close();
     }
 }

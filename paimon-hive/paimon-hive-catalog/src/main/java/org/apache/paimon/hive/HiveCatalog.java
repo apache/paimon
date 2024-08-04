@@ -78,6 +78,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
@@ -493,7 +494,18 @@ public class HiveCatalog extends AbstractCatalog {
         // if changes on Hive fails there is no harm to perform the same changes to files again
         TableSchema tableSchema;
         try {
-            tableSchema = schemaManager(identifier).createTable(schema, usingExternalTable());
+            Path tableRoot;
+            if (schema.options().containsKey(CoreOptions.PATH.key())) {
+                checkArgument(
+                        Objects.equals(createTableType(), TableType.EXTERNAL),
+                        "The HiveCatalog only supports specifying location when creating an external table");
+                tableRoot = new Path(schema.options().get(CoreOptions.PATH.key()));
+            } else {
+                tableRoot = getTableLocation(identifier);
+            }
+
+            tableSchema =
+                    schemaManager(identifier, tableRoot).createTable(schema, usingExternalTable());
         } catch (Exception e) {
             throw new RuntimeException(
                     "Failed to commit changes of table "
@@ -707,10 +719,7 @@ public class HiveCatalog extends AbstractCatalog {
 
     private Table newHmsTable(Identifier identifier, Map<String, String> tableParameters) {
         long currentTimeMillis = System.currentTimeMillis();
-        TableType tableType =
-                OptionsUtils.convertToEnum(
-                        hiveConf.get(TABLE_TYPE.key(), TableType.MANAGED.toString()),
-                        TableType.class);
+        TableType tableType = createTableType();
         Table table =
                 new Table(
                         identifier.getTableName(),
@@ -733,6 +742,11 @@ public class HiveCatalog extends AbstractCatalog {
             table.getParameters().put("EXTERNAL", "TRUE");
         }
         return table;
+    }
+
+    private TableType createTableType() {
+        return OptionsUtils.convertToEnum(
+                hiveConf.get(TABLE_TYPE.key(), TableType.MANAGED.toString()), TableType.class);
     }
 
     private void updateHmsTable(Table table, Identifier identifier, TableSchema schema) {
@@ -792,7 +806,11 @@ public class HiveCatalog extends AbstractCatalog {
         }
 
         // update location
-        locationHelper.specifyTableLocation(table, getTableLocation(identifier).toString());
+        String location =
+                schema.options().containsKey(CoreOptions.PATH.key())
+                        ? schema.options().get(CoreOptions.PATH.key())
+                        : getTableLocation(identifier).toString();
+        locationHelper.specifyTableLocation(table, location);
     }
 
     private void updateHmsTablePars(Table table, TableSchema schema) {
@@ -816,6 +834,10 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     private SchemaManager schemaManager(Identifier identifier) {
+        return schemaManager(identifier, getTableLocation(identifier));
+    }
+
+    private SchemaManager schemaManager(Identifier identifier, Path path) {
         return new SchemaManager(
                         fileIO, getTableLocation(identifier), identifier.getBranchNameOrDefault())
                 .withLock(lock(identifier));

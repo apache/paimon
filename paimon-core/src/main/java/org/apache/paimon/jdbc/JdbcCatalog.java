@@ -18,6 +18,7 @@
 
 package org.apache.paimon.jdbc;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.CatalogLockContext;
@@ -57,6 +58,7 @@ import static org.apache.paimon.jdbc.JdbcCatalogLock.checkMaxSleep;
 import static org.apache.paimon.jdbc.JdbcUtils.execute;
 import static org.apache.paimon.jdbc.JdbcUtils.insertProperties;
 import static org.apache.paimon.jdbc.JdbcUtils.updateTable;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /* This file is based on source code from the Iceberg Project (http://iceberg.apache.org/), licensed by the Apache
  * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
@@ -235,6 +237,9 @@ public class JdbcCatalog extends AbstractCatalog {
 
     @Override
     protected void createTableImpl(Identifier identifier, Schema schema) {
+        checkArgument(
+                !schema.options().containsKey(CoreOptions.PATH.key()),
+                "The FileSystemCatalog does not support specifying location when creating a table.");
         try {
             // create table file
             getSchemaManager(identifier).createTable(schema);
