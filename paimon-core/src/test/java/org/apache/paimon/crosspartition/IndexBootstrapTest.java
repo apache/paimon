@@ -117,8 +117,9 @@ public class IndexBootstrapTest extends TableTestBase {
     public void testBootstrapType() throws Exception {
         FileStoreTable table = (FileStoreTable) createTable();
         RowType indexRowType = IndexBootstrap.bootstrapType(table.schema());
+        assertThat(indexRowType.getFieldNames()).contains(BUCKET_FIELD);
         assertThat(indexRowType.getFieldIndex(BUCKET_FIELD))
-                .isEqualTo(RowType.currentHighestFieldId(indexRowType.getFields()));
+                .isEqualTo(2); // the last field is bucket, which is not in table schema
     }
 
     @Test
