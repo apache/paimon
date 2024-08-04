@@ -151,6 +151,10 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         write.writeDirect(directlyPartition, 1, vectorSchemaRoot);
     }
 
+    public void write(BinaryRow partition, VectorSchemaRoot vectorSchemaRoot) throws Exception {
+        write.writeDirect(partition, 1, vectorSchemaRoot);
+    }
+
     @Override
     public void write(InternalRow row) throws Exception {
         writeAndReturn(row);
