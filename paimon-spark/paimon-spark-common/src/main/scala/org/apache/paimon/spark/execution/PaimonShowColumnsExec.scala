@@ -28,7 +28,7 @@ case class PaimonShowColumnsExec(output: Seq[Attribute], v2Table: SparkTable)
   extends PaimonLeafV2CommandExec {
 
   override protected def run(): Seq[InternalRow] = {
-    v2Table.columns().map(f => InternalRow.fromSeq(Seq(f.name()))).toSeq
+    v2Table.schema.map(sc => InternalRow.fromSeq(Seq(sc.name))).toSeq
   }
 
 }
