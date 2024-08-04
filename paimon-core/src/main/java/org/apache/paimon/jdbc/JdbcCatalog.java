@@ -239,7 +239,7 @@ public class JdbcCatalog extends AbstractCatalog {
     protected void createTableImpl(Identifier identifier, Schema schema) {
         checkArgument(
                 !schema.options().containsKey(CoreOptions.PATH.key()),
-                "The FileSystemCatalog does not support specifying location when creating a table.");
+                "The JdbcCatalog does not support specifying location when creating a table.");
         try {
             // create table file
             getSchemaManager(identifier).createTable(schema);
