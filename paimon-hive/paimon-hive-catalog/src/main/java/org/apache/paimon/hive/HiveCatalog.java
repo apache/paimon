@@ -20,7 +20,6 @@ package org.apache.paimon.hive;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.branch.TableBranch;
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
@@ -331,10 +330,7 @@ public class HiveCatalog extends AbstractCatalog {
                         getTable(
                                 new Identifier(
                                         identifier.getDatabaseName(), identifier.getTableName()));
-        List<String> branchNames =
-                mainTable.branchManager().branches().stream()
-                        .map(TableBranch::getBranchName)
-                        .collect(Collectors.toList());
+        List<String> branchNames = new ArrayList<>(mainTable.branchManager().branches());
         branchNames.add(DEFAULT_MAIN_BRANCH);
 
         for (String branchName : branchNames) {

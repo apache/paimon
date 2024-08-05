@@ -18,8 +18,6 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.paimon.branch.TableBranch;
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -137,8 +135,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testCreateBranchFromSnapshot() throws Catalog.TableNotExistException {
-
+    public void testCreateBranchFromSnapshot() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " pt INT"
@@ -158,12 +155,8 @@ public class BranchSqlITCase extends CatalogITCaseBase {
         sql("CALL sys.create_branch('default.T', 'test', 1)");
         sql("CALL sys.create_branch('default.T', 'test2', 2)");
 
-        FileStoreTable table = paimonTable("T");
-
-        assertThat(
-                        table.branchManager().branches().stream()
-                                .map(TableBranch::getCreatedFromSnapshot))
-                .containsExactlyInAnyOrder(1L, 2L);
+        assertThat(collectResult("SELECT created_from_snapshot FROM `T$branches`"))
+                .containsExactlyInAnyOrder("+I[1]", "+I[2]");
 
         assertThat(paimonTable("T$branch_test").snapshotManager().snapshotExists(1))
                 .isEqualTo(true);
@@ -223,25 +216,17 @@ public class BranchSqlITCase extends CatalogITCaseBase {
         sql("CALL sys.create_branch('default.T', 'test', 1)");
         sql("CALL sys.create_branch('default.T', 'test2', 2)");
 
-        FileStoreTable table = paimonTable("T");
-
-        assertThat(
-                        table.branchManager().branches().stream()
-                                .map(TableBranch::getCreatedFromSnapshot))
-                .containsExactlyInAnyOrder(1L, 2L);
-
-        assertThat(table.branchManager().branches().stream().map(TableBranch::getBranchName))
-                .containsExactlyInAnyOrder("test", "test2");
+        assertThat(collectResult("SELECT branch_name, created_from_snapshot FROM `T$branches`"))
+                .containsExactlyInAnyOrder("+I[test, 1]", "+I[test2, 2]");
 
         sql("CALL sys.delete_branch('default.T', 'test')");
 
-        assertThat(table.branchManager().branches().stream().map(TableBranch::getBranchName))
-                .containsExactlyInAnyOrder("test2");
+        assertThat(collectResult("SELECT branch_name, created_from_snapshot FROM `T$branches`"))
+                .containsExactlyInAnyOrder("+I[test2, 2]");
     }
 
     @Test
-    public void testBranchManagerGetBranchSnapshotsList()
-            throws Catalog.TableNotExistException, IOException {
+    public void testBranchManagerGetBranchSnapshotsList() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " pt INT"
@@ -263,10 +248,8 @@ public class BranchSqlITCase extends CatalogITCaseBase {
         sql("CALL sys.create_branch('default.T', 'test2', 2)");
         sql("CALL sys.create_branch('default.T', 'test3', 3)");
 
-        assertThat(
-                        table.branchManager().branches().stream()
-                                .map(TableBranch::getCreatedFromSnapshot))
-                .containsExactlyInAnyOrder(1L, 2L, 3L);
+        assertThat(collectResult("SELECT created_from_snapshot FROM `T$branches`"))
+                .containsExactlyInAnyOrder("+I[1]", "+I[2]", "+I[3]");
     }
 
     @Test
@@ -370,7 +353,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testDifferentRowTypes() throws Exception {
+    public void testDifferentRowTypes() {
         sql(
                 "CREATE TABLE t ( pt INT NOT NULL, k INT NOT NULL, v STRING ) PARTITIONED BY (pt) WITH ( 'bucket' = '-1' )");
         sql("CALL sys.create_branch('default.t', 'pk')");
