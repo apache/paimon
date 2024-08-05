@@ -19,6 +19,7 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -132,6 +133,11 @@ public class DelegateCatalog implements Catalog {
     @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {
         return wrapped.getTable(identifier);
+    }
+
+    @Override
+    public Path getDataTableLocation(Identifier identifier) {
+        return wrapped.getDataTableLocation(identifier);
     }
 
     @Override
