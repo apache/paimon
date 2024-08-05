@@ -47,7 +47,6 @@ public class IcebergConversions {
     public static ByteBuffer toByteBuffer(DataType type, Object value) {
         int precision;
         Timestamp timestamp;
-        long timestampValue = 0;
         switch (type.getTypeRoot()) {
             case BOOLEAN:
                 return ByteBuffer.allocate(1).put(0, (Boolean) value ? (byte) 0x01 : (byte) 0x00);
@@ -81,34 +80,31 @@ public class IcebergConversions {
                 Decimal decimal = (Decimal) value;
                 return ByteBuffer.wrap((decimal.toUnscaledBytes()));
             case TIMESTAMP_WITHOUT_TIME_ZONE:
-                final TimestampType timestampType = (TimestampType) type;
+                TimestampType timestampType = (TimestampType) type;
                 precision = timestampType.getPrecision();
                 timestamp = (Timestamp) value;
-                if (precision <= 6) {
-                    timestampValue = timestamp.getMillisecond();
-                } else if (precision > 6) {
-                    timestampValue = timestamp.getNanoOfMillisecond();
-                }
-                return ByteBuffer.allocate(8)
-                        .order(ByteOrder.LITTLE_ENDIAN)
-                        .putLong(timestampValue);
+                return convertTimestampWithPrecisionToBuffer(timestamp, precision);
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                final LocalZonedTimestampType localTimestampType = (LocalZonedTimestampType) type;
+                LocalZonedTimestampType localTimestampType = (LocalZonedTimestampType) type;
                 precision = localTimestampType.getPrecision();
                 timestamp = (Timestamp) value;
-                if (precision <= 6) {
-                    timestampValue = timestamp.getMillisecond();
-                } else if (precision > 6) {
-                    timestampValue = timestamp.getNanoOfMillisecond();
-                }
-                return ByteBuffer.allocate(8)
-                        .order(ByteOrder.LITTLE_ENDIAN)
-                        .putLong(timestampValue);
+                return convertTimestampWithPrecisionToBuffer(timestamp, precision);
             case TIME_WITHOUT_TIME_ZONE:
                 Long time = ((Integer) value).longValue();
                 return ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putLong(0, time);
             default:
                 throw new UnsupportedOperationException("Cannot serialize type: " + type);
         }
+    }
+
+    private static ByteBuffer convertTimestampWithPrecisionToBuffer(
+            Timestamp timestamp, int precision) {
+        long timestampValue;
+        if (precision <= 6) {
+            timestampValue = timestamp.getMillisecond();
+        } else {
+            timestampValue = timestamp.getNanoOfMillisecond();
+        }
+        return ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putLong(timestampValue);
     }
 }
