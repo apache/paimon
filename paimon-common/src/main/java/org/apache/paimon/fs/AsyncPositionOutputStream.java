@@ -19,6 +19,7 @@
 package org.apache.paimon.fs;
 
 import java.io.IOException;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -34,6 +35,7 @@ public class AsyncPositionOutputStream extends PositionOutputStream {
 
     public static final ExecutorService EXECUTOR_SERVICE =
             Executors.newCachedThreadPool(newDaemonThreadFactory("AsyncOutputStream"));
+    public static final int AWAIT_TIMEOUT_SECONDS = 10;
 
     private final PositionOutputStream out;
     private final LinkedBlockingQueue<AsyncEvent> eventQueue;
@@ -64,7 +66,7 @@ public class AsyncPositionOutputStream extends PositionOutputStream {
     private void doWork() throws InterruptedException, IOException {
         try {
             while (!isClosed) {
-                AsyncEvent event = eventQueue.poll(1, TimeUnit.SECONDS);
+                AsyncEvent event = eventQueue.poll(AWAIT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
                 if (event == null) {
                     continue;
                 }
@@ -77,6 +79,7 @@ public class AsyncPositionOutputStream extends PositionOutputStream {
                 }
                 if (event instanceof FlushEvent) {
                     out.flush();
+                    ((FlushEvent) event).latch.countDown();
                 }
             }
         } finally {
@@ -114,7 +117,19 @@ public class AsyncPositionOutputStream extends PositionOutputStream {
     @Override
     public void flush() throws IOException {
         checkException();
-        putEvent(new FlushEvent());
+        FlushEvent event = new FlushEvent();
+        putEvent(event);
+        while (true) {
+            try {
+                boolean await = event.latch.await(AWAIT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                if (await) {
+                    return;
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(e);
+            }
+        }
     }
 
     @Override
@@ -165,7 +180,9 @@ public class AsyncPositionOutputStream extends PositionOutputStream {
         }
     }
 
-    private static class FlushEvent implements AsyncEvent {}
+    private static class FlushEvent implements AsyncEvent {
+        private final CountDownLatch latch = new CountDownLatch(1);
+    }
 
     private static class EndEvent implements AsyncEvent {}
 }
