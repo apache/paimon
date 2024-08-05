@@ -50,6 +50,7 @@ public class ExpirePartitionsProcedure extends BaseProcedure {
                 ProcedureParameter.required("table", StringType),
                 ProcedureParameter.required("expiration_time", StringType),
                 ProcedureParameter.optional("timestamp_formatter", StringType),
+                ProcedureParameter.optional("timestamp_pattern", StringType),
                 ProcedureParameter.optional("expire_strategy", StringType)
             };
 
@@ -78,7 +79,8 @@ public class ExpirePartitionsProcedure extends BaseProcedure {
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
         String expirationTime = args.getString(1);
         String timestampFormatter = args.isNullAt(2) ? null : args.getString(2);
-        String expireStrategy = args.isNullAt(3) ? null : args.getString(3);
+        String timestampPattern = args.isNullAt(3) ? null : args.getString(3);
+        String expireStrategy = args.isNullAt(4) ? null : args.getString(4);
         return modifyPaimonTable(
                 tableIdent,
                 table -> {
@@ -87,6 +89,7 @@ public class ExpirePartitionsProcedure extends BaseProcedure {
                     Map<String, String> map = new HashMap<>();
                     map.put(CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(), expireStrategy);
                     map.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), timestampFormatter);
+                    map.put(CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), timestampPattern);
 
                     PartitionExpire partitionExpire =
                             new PartitionExpire(
