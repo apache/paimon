@@ -19,17 +19,15 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.spark.SparkTable
-import org.apache.paimon.spark.leafnode.{PaimonLeafCommand, PaimonLeafRunnableCommand}
+import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.{Row, SparkSession}
-import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, GenericRow}
-import org.apache.spark.sql.types.{BinaryType, Metadata, StringType}
+import org.apache.spark.sql.types.{Metadata, StringType}
 import org.apache.spark.unsafe.types.UTF8String
 
 case class PaimonShowColumnsCommand(v2Table: SparkTable)
-//  extends PaimonLeafCommand
   extends PaimonLeafRunnableCommand
   with WithFileStoreTable {
   override def table: FileStoreTable = v2Table.getTable.asInstanceOf[FileStoreTable]
