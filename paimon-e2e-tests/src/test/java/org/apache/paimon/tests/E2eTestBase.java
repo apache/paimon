@@ -22,9 +22,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.testcontainers.containers.ComposeContainer;
 import org.testcontainers.containers.Container;
 import org.testcontainers.containers.ContainerState;
-import org.testcontainers.containers.DockerComposeContainer;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.output.OutputFrame;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
@@ -82,7 +82,7 @@ public abstract class E2eTestBase {
     private final List<String> currentResults = new ArrayList<>();
 
     protected Network network;
-    protected DockerComposeContainer<?> environment;
+    protected ComposeContainer environment;
     protected ContainerState jobManager;
 
     @BeforeEach
@@ -94,7 +94,7 @@ public abstract class E2eTestBase {
         network = Network.newNetwork();
         LOG.info("Network {} created", network.getId());
         environment =
-                new DockerComposeContainer<>(
+                new ComposeContainer(
                                 new File(
                                         E2eTestBase.class
                                                 .getClassLoader()
