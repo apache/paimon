@@ -310,12 +310,6 @@ public class CoreOptions implements Serializable {
                             "Max split size should be cached for one task while scanning. "
                                     + "If splits size cached in enumerator are greater than tasks size multiply by this value, scanner will pause scanning.");
 
-    public static final ConfigOption<Boolean> SCAN_SHUFFLE_BY_PARTITION =
-            key("scan.shuffle-by-partition")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription("Whether shuffle by partition and bucket.");
-
     @Immutable
     public static final ConfigOption<MergeEngine> MERGE_ENGINE =
             key("merge-engine")
@@ -1599,10 +1593,6 @@ public class CoreOptions implements Serializable {
 
     public int scanSplitMaxPerTask() {
         return options.get(SCAN_MAX_SPLITS_PER_TASK);
-    }
-
-    public boolean scanShuffleByPartition() {
-        return options.get(SCAN_SHUFFLE_BY_PARTITION);
     }
 
     public int localSortMaxNumFileHandles() {

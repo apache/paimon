@@ -76,13 +76,13 @@ public class ContinuousFileSplitEnumerator
 
     private final int splitMaxNum;
 
+    private final boolean shuffleByPartition;
+
     @Nullable protected Long nextSnapshotId;
 
     protected boolean finished = false;
 
     private boolean stopTriggerScan = false;
-
-    private boolean shuffleByPartition = false;
 
     public ContinuousFileSplitEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,

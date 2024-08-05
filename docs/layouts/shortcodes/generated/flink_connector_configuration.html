@@ -129,6 +129,12 @@ under the License.
             <td>Whether to force the removal of the normalize node when streaming read. Note: This is dangerous and is likely to cause data errors if downstream is used to calculate aggregation and the input is not complete changelog.</td>
         </tr>
         <tr>
+            <td><h5>streaming-read.shuffle-by-partition</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether shuffle by partition and bucket when streaming read. </td>
+        </tr>
+        <tr>
             <td><h5>scan.split-enumerator.batch-size</h5></td>
             <td style="word-wrap: break-word;">10</td>
             <td>Integer</td>
