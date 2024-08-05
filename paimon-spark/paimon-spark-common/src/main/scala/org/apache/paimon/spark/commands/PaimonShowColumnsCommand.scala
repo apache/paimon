@@ -23,15 +23,21 @@ import org.apache.paimon.spark.leafnode.{PaimonLeafCommand, PaimonLeafRunnableCo
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.{Row, SparkSession}
-import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference}
+import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, GenericRow}
 import org.apache.spark.sql.types.{BinaryType, Metadata, StringType}
+import org.apache.spark.unsafe.types.UTF8String
 
 case class PaimonShowColumnsCommand(v2Table: SparkTable)
-  extends PaimonLeafCommand
+//  extends PaimonLeafCommand
+  extends PaimonLeafRunnableCommand
   with WithFileStoreTable {
   override def table: FileStoreTable = v2Table.getTable.asInstanceOf[FileStoreTable]
 
   override lazy val output: Seq[Attribute] = Seq(
     AttributeReference("column", StringType, true, Metadata.empty)())
 
+  override def run(sparkSession: SparkSession): Seq[Row] = {
+    v2Table.schema.map(sc => new GenericRow(Array[Any](UTF8String.fromString(sc.name)))).toSeq
+  }
 }

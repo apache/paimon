@@ -21,7 +21,6 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.Row
-import org.junit.jupiter.api.Assertions.assertDoesNotThrow
 
 abstract class PaimonShowColumnsTestBase extends PaimonSparkTestBase {
 
@@ -37,11 +36,6 @@ abstract class PaimonShowColumnsTestBase extends PaimonSparkTestBase {
          |INSERT INTO T SELECT '1', 'aa', 12, 22
          |""".stripMargin
     )
-
-    assertDoesNotThrow(
-      () => {
-        spark.sql("SHOW COLUMNS FROM T")
-      })
 
     checkAnswer(
       spark.sql("SHOW COLUMNS FROM T"),

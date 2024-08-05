@@ -19,7 +19,6 @@
 package org.apache.paimon.spark.execution
 
 import org.apache.paimon.spark.catalyst.plans.logical.PaimonCallCommand
-import org.apache.paimon.spark.commands.PaimonShowColumnsCommand
 
 import org.apache.spark.sql.{SparkSession, Strategy}
 import org.apache.spark.sql.catalyst.InternalRow
@@ -39,8 +38,6 @@ case class PaimonStrategy(spark: SparkSession) extends Strategy with PredicateHe
       val input = buildInternalRow(args)
       PaimonCallExec(c.output, procedure, input) :: Nil
 
-    case s @ PaimonShowColumnsCommand(table) =>
-      PaimonShowColumnsExec(s.output, table) :: Nil
     case _ => Nil
   }
 
