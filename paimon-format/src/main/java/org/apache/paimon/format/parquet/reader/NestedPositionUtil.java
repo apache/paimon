@@ -19,7 +19,6 @@
 package org.apache.paimon.format.parquet.reader;
 
 import org.apache.paimon.format.parquet.position.CollectionPosition;
-import org.apache.paimon.format.parquet.position.RowPosition;
 import org.apache.paimon.format.parquet.type.ParquetField;
 import org.apache.paimon.utils.BooleanArrayList;
 import org.apache.paimon.utils.LongArrayList;
@@ -28,50 +27,6 @@ import static java.lang.String.format;
 
 /** Utils to calculate nested type position. */
 public class NestedPositionUtil {
-
-    /**
-     * Calculate row offsets according to column's max repetition level, definition level, value's
-     * repetition level and definition level. Each row has three situation:
-     * <li>Row is not defined,because it's optional parent fields is null, this is decided by its
-     *     parent's repetition level
-     * <li>Row is null
-     * <li>Row is defined and not empty.
-     *
-     * @param field field that contains the row column message include max repetition level and
-     *     definition level.
-     * @param fieldRepetitionLevels int array with each value's repetition level.
-     * @param fieldDefinitionLevels int array with each value's definition level.
-     * @return {@link RowPosition} contains collections row count and isNull array.
-     */
-    public static RowPosition calculateRowOffsets(
-            ParquetField field, int[] fieldDefinitionLevels, int[] fieldRepetitionLevels) {
-        int rowDefinitionLevel = field.getDefinitionLevel();
-        int rowRepetitionLevel = field.getRepetitionLevel();
-        int nullValuesCount = 0;
-        BooleanArrayList nullRowFlags = new BooleanArrayList(0);
-        for (int i = 0; i < fieldDefinitionLevels.length; i++) {
-            if (fieldRepetitionLevels[i] > rowRepetitionLevel) {
-                throw new IllegalStateException(
-                        format(
-                                "In parquet's row type field repetition level should not larger than row's repetition level. "
-                                        + "Row repetition level is %s, row field repetition level is %s.",
-                                rowRepetitionLevel, fieldRepetitionLevels[i]));
-            }
-
-            if (fieldDefinitionLevels[i] >= rowDefinitionLevel) {
-                // current row is defined and not empty
-                nullRowFlags.add(false);
-            } else {
-                // current row is null
-                nullRowFlags.add(true);
-                nullValuesCount++;
-            }
-        }
-        if (nullValuesCount == 0) {
-            return new RowPosition(null, fieldDefinitionLevels.length);
-        }
-        return new RowPosition(nullRowFlags.toArray(), nullRowFlags.size());
-    }
 
     /**
      * Calculate the collection's offsets according to column's max repetition level, definition
@@ -92,7 +47,10 @@ public class NestedPositionUtil {
      *     array.
      */
     public static CollectionPosition calculateCollectionOffsets(
-            ParquetField field, int[] definitionLevels, int[] repetitionLevels) {
+            ParquetField field,
+            int[] definitionLevels,
+            int[] repetitionLevels,
+            boolean readRowField) {
         int collectionDefinitionLevel = field.getDefinitionLevel();
         int collectionRepetitionLevel = field.getRepetitionLevel() + 1;
         int offset = 0;
@@ -110,7 +68,8 @@ public class NestedPositionUtil {
                 // empty
                 // definitionLevels[i] == collectionDefinitionLevel => Collection is defined but
                 // empty
-                // definitionLevels[i] == maxDefinitionLevel - 1 => Collection is defined but null
+                // definitionLevels[i] == collectionDefinitionLevel - 1 => Collection is defined but
+                // null
                 if (definitionLevels[i] > collectionDefinitionLevel) {
                     nullCollectionFlags.add(false);
                     emptyCollectionFlags.add(false);
@@ -127,6 +86,14 @@ public class NestedPositionUtil {
                     // must be set at each index for calculating lengths later
                     emptyCollectionFlags.add(false);
                 }
+                offsets.add(offset);
+                valueCount++;
+            } else if (definitionLevels[i] == collectionDefinitionLevel - 2 && readRowField) {
+                // row field should store null value
+                nullCollectionFlags.add(true);
+                nullValuesCount++;
+                emptyCollectionFlags.add(false);
+
                 offsets.add(offset);
                 valueCount++;
             }

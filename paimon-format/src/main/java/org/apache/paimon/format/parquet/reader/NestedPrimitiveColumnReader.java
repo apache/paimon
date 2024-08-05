@@ -73,7 +73,8 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
     private final ColumnDescriptor descriptor;
     private final Type type;
     private final DataType dataType;
-    private final boolean parentIsRowType;
+    private final boolean readRowField;
+    private final boolean readMapKey;
     /** The dictionary, if this column has dictionary encoding. */
     private final ParquetDataColumnReader dictionary;
     /** Maximum definition level for this column. */
@@ -118,7 +119,8 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
             boolean isUtcTimestamp,
             Type parquetType,
             DataType dataType,
-            boolean parentIsRowType)
+            boolean readRowField,
+            boolean readMapKey)
             throws IOException {
         this.descriptor = descriptor;
         this.type = parquetType;
@@ -126,7 +128,8 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
         this.maxDefLevel = descriptor.getMaxDefinitionLevel();
         this.isUtcTimestamp = isUtcTimestamp;
         this.dataType = dataType;
-        this.parentIsRowType = parentIsRowType;
+        this.readRowField = readRowField;
+        this.readMapKey = readMapKey;
 
         DictionaryPage dictionaryPage = pageReader.readDictionaryPage();
         if (dictionaryPage != null) {
@@ -206,11 +209,12 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
      * </ul>
      *
      * <p>When (definitionLevel <= maxDefLevel - 2) we skip the value because children ColumnVector
-     * for OrcArrayColumnVector and OrcMapColumnVector don't contain empty and null set value. Stay
-     * consistent here.
+     * for OrcArrayColumnVector don't contain empty and null set value. Stay consistent here.
      *
-     * <p>But notice that children of RowColumnVector still get null value when entire outer row is
-     * null, so when {@code parentIsRowType} is true the null value is still stored.
+     * <p>For MAP, the value vector is the same as ARRAY. But the key vector isn't nullable, so just
+     * read value when definitionLevel == maxDefLevel.
+     *
+     * <p>For ROW, RowColumnVector still get null value when definitionLevel == maxDefLevel - 2.
      */
     private boolean readValue() throws IOException {
         int left = readPageIfNeed();
@@ -225,13 +229,19 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
                 } else {
                     lastValue.setValue(readPrimitiveTypedRow(dataType));
                 }
-            } else if (definitionLevel == maxDefLevel - 1) {
-                lastValue.setValue(null);
             } else {
-                if (parentIsRowType) {
-                    lastValue.setValue(null);
-                } else {
+                if (readMapKey) {
                     lastValue.skip();
+                } else {
+                    if (definitionLevel == maxDefLevel - 1) {
+                        // null value inner set
+                        lastValue.setValue(null);
+                    } else if (definitionLevel == maxDefLevel - 2 && readRowField) {
+                        lastValue.setValue(null);
+                    } else {
+                        // current set is empty or null
+                        lastValue.skip();
+                    }
                 }
             }
             return true;
