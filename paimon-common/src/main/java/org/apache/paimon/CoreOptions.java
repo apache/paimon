@@ -454,6 +454,17 @@ public class CoreOptions implements Serializable {
                                             text("append table: the default value is 256 MB."))
                                     .build());
 
+    @Immutable
+    public static final ConfigOption<CompactionStrategy> PREFER_COMPACTION_STRATEGY =
+            key("prefer-compaction-strategy")
+                    .enumType(CompactionStrategy.class)
+                    .defaultValue(CompactionStrategy.UNIVERSAL)
+                    .withDescription(
+                            "By default, universal compaction strategy is used. Note: This is just a suggestion "
+                                    + "for paimon to use this compaction strategy. Paimon will automatically decide "
+                                    + "which compaction strategy to use. For example, when 'changelog-producer' is set "
+                                    + "to 'lookup', paimon will automatically use the lookup compaction strategy.");
+
     public static final ConfigOption<Integer> NUM_SORTED_RUNS_COMPACTION_TRIGGER =
             key("num-sorted-run.compaction-trigger")
                     .intType()
@@ -1691,7 +1702,8 @@ public class CoreOptions implements Serializable {
         return LookupStrategy.from(
                 mergeEngine().equals(MergeEngine.FIRST_ROW),
                 changelogProducer().equals(ChangelogProducer.LOOKUP),
-                deletionVectorsEnabled());
+                deletionVectorsEnabled(),
+                preferCompactionStrategy().equals(CompactionStrategy.LOOKUP));
     }
 
     public boolean changelogRowDeduplicate() {
@@ -2022,6 +2034,10 @@ public class CoreOptions implements Serializable {
 
     public boolean metadataIcebergCompatible() {
         return options.get(METADATA_ICEBERG_COMPATIBLE);
+    }
+
+    public CompactionStrategy preferCompactionStrategy() {
+        return options.get(PREFER_COMPACTION_STRATEGY);
     }
 
     /** Specifies the merge engine for table with primary key. */
@@ -2618,6 +2634,36 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         LookupLocalFileType(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** The compaction strategy of the LSM tree. */
+    public enum CompactionStrategy implements DescribedEnum {
+        UNIVERSAL(
+                "universal",
+                "Universal compaction strategy, mainly triggered by the number of sorted runs, space amplification, etc."),
+
+        LOOKUP(
+                "lookup",
+                "When the L0 file is generated, compaction will be triggered as soon as possible.");
+
+        private final String value;
+
+        private final String description;
+
+        CompactionStrategy(String value, String description) {
             this.value = value;
             this.description = description;
         }

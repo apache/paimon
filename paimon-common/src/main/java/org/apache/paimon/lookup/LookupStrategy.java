@@ -29,15 +29,22 @@ public class LookupStrategy {
 
     public final boolean deletionVector;
 
-    private LookupStrategy(boolean isFirstRow, boolean produceChangelog, boolean deletionVector) {
+    private LookupStrategy(
+            boolean isFirstRow,
+            boolean produceChangelog,
+            boolean deletionVector,
+            boolean preferLookup) {
         this.isFirstRow = isFirstRow;
         this.produceChangelog = produceChangelog;
         this.deletionVector = deletionVector;
-        this.needLookup = produceChangelog || deletionVector || isFirstRow;
+        this.needLookup = produceChangelog || deletionVector || isFirstRow || preferLookup;
     }
 
     public static LookupStrategy from(
-            boolean isFirstRow, boolean produceChangelog, boolean deletionVector) {
-        return new LookupStrategy(isFirstRow, produceChangelog, deletionVector);
+            boolean isFirstRow,
+            boolean produceChangelog,
+            boolean deletionVector,
+            boolean preferLookup) {
+        return new LookupStrategy(isFirstRow, produceChangelog, deletionVector, preferLookup);
     }
 }
