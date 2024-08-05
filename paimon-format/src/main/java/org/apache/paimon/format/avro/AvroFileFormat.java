@@ -123,8 +123,8 @@ public class AvroFileFormat extends FileFormat {
                                 DataFileWriter<InternalRow> dataFileWriter =
                                         new DataFileWriter<>(datumWriter);
                                 dataFileWriter.setCodec(createCodecFactory(compression));
-                                dataFileWriter.create(schema, out);
                                 dataFileWriter.setFlushOnEveryBlock(false);
+                                dataFileWriter.create(schema, out);
                                 return dataFileWriter;
                             });
         }
