@@ -436,7 +436,7 @@ class ExpirePartitionsProcedureTest extends PaimonSparkTestBase with StreamTest 
               spark.sql(
                 "CALL paimon.sys.expire_partitions(table => 'test.T', expiration_time => '1 d'" +
                   ", timestamp_formatter => 'yyyy-MM-dd', timestamp_pattern => '$pt')"),
-            Row("No expired partitions.") :: Nil
+              Row("No expired partitions.") :: Nil
             )
 
             // snapshot-1
