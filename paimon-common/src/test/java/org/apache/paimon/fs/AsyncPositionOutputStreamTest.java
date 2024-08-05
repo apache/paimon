@@ -68,6 +68,15 @@ class AsyncPositionOutputStreamTest {
         out.write(new byte[] {5, 6, 7});
         out.flush();
         assertThat(byteOut.getPos()).isEqualTo(6);
+
+        out.write(new byte[] {8, 9});
+
+        // test repeat flush
+        out.flush();
+        out.flush();
+        assertThat(byteOut.getPos()).isEqualTo(8);
+
+        assertThat(out.getBufferQueue().size()).isEqualTo(1);
     }
 
     @Test
@@ -76,13 +85,13 @@ class AsyncPositionOutputStreamTest {
         ByteArrayPositionOutputStream byteOut =
                 new ByteArrayPositionOutputStream() {
                     @Override
-                    public void write(byte[] b) throws IOException {
+                    public void write(byte[] b, int off, int len) {
                         try {
                             Thread.sleep(100);
                         } catch (InterruptedException e) {
                             throw new RuntimeException(e);
                         }
-                        throw new IOException(msg);
+                        throw new RuntimeException(msg);
                     }
                 };
         AsyncPositionOutputStream out = new AsyncPositionOutputStream(byteOut);
@@ -117,14 +126,14 @@ class AsyncPositionOutputStreamTest {
         ByteArrayPositionOutputStream out =
                 new ByteArrayPositionOutputStream() {
                     @Override
-                    public void write(byte[] b) throws IOException {
-                        throw new IOException(msg);
+                    public void write(byte[] b, int off, int len) {
+                        throw new RuntimeException(msg);
                     }
                 };
 
         AsyncPositionOutputStream asyncOut = new AsyncPositionOutputStream(out);
         asyncOut.write(new byte[] {1, 2, 3});
-        assertThatThrownBy(asyncOut::close).hasMessage(msg);
+        assertThatThrownBy(asyncOut::close).hasMessageContaining(msg);
         assertThat(out.closed).isTrue();
     }
 

@@ -18,6 +18,9 @@
 
 package org.apache.paimon.fs;
 
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.utils.FixLenByteArrayOutputStream;
+
 import java.io.IOException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -35,9 +38,13 @@ public class AsyncPositionOutputStream extends PositionOutputStream {
 
     public static final ExecutorService EXECUTOR_SERVICE =
             Executors.newCachedThreadPool(newDaemonThreadFactory("AsyncOutputStream"));
+
     public static final int AWAIT_TIMEOUT_SECONDS = 10;
+    public static final int BUFFER_SIZE = 1024 * 32;
 
     private final PositionOutputStream out;
+    private final FixLenByteArrayOutputStream buffer;
+    private final LinkedBlockingQueue<byte[]> bufferQueue;
     private final LinkedBlockingQueue<AsyncEvent> eventQueue;
     private final AtomicReference<Throwable> exception;
     private final Future<?> future;
@@ -46,10 +53,18 @@ public class AsyncPositionOutputStream extends PositionOutputStream {
 
     public AsyncPositionOutputStream(PositionOutputStream out) {
         this.out = out;
+        this.bufferQueue = new LinkedBlockingQueue<>();
         this.eventQueue = new LinkedBlockingQueue<>();
         this.exception = new AtomicReference<>();
         this.position = 0;
         this.future = EXECUTOR_SERVICE.submit(this::execute);
+        this.buffer = new FixLenByteArrayOutputStream();
+        this.buffer.setBuffer(new byte[BUFFER_SIZE]);
+    }
+
+    @VisibleForTesting
+    LinkedBlockingQueue<byte[]> getBufferQueue() {
+        return bufferQueue;
     }
 
     private void execute() {
@@ -73,7 +88,8 @@ public class AsyncPositionOutputStream extends PositionOutputStream {
                 }
                 if (event instanceof DataEvent) {
                     DataEvent dataEvent = (DataEvent) event;
-                    out.write(dataEvent.data);
+                    out.write(dataEvent.data, dataEvent.offset, dataEvent.length);
+                    bufferQueue.add(dataEvent.data);
                 }
                 if (event instanceof FlushEvent) {
                     out.flush();
@@ -91,30 +107,52 @@ public class AsyncPositionOutputStream extends PositionOutputStream {
         return position;
     }
 
+    private void flushBuffer() {
+        if (buffer.getCount() == 0) {
+            return;
+        }
+        putEvent(new DataEvent(buffer.getBuffer(), 0, buffer.getCount()));
+        byte[] byteArray = bufferQueue.poll();
+        if (byteArray == null) {
+            byteArray = new byte[BUFFER_SIZE];
+        }
+        buffer.setBuffer(byteArray);
+        buffer.setCount(0);
+    }
+
     @Override
     public void write(int b) throws IOException {
         checkException();
         position++;
-        putEvent(new DataEvent(new byte[] {(byte) b}, 0, 1));
+        while (buffer.write((byte) b) != 1) {
+            flushBuffer();
+        }
     }
 
     @Override
     public void write(byte[] b) throws IOException {
-        checkException();
-        position += b.length;
-        putEvent(new DataEvent(b, 0, b.length));
+        write(b, 0, b.length);
     }
 
     @Override
     public void write(byte[] b, int off, int len) throws IOException {
         checkException();
         position += len;
-        putEvent(new DataEvent(b, off, len));
+        while (true) {
+            int written = buffer.write(b, off, len);
+            off += written;
+            len -= written;
+            if (len == 0) {
+                return;
+            }
+            flushBuffer();
+        }
     }
 
     @Override
     public void flush() throws IOException {
         checkException();
+        flushBuffer();
         FlushEvent event = new FlushEvent();
         putEvent(event);
         while (true) {
@@ -134,6 +172,7 @@ public class AsyncPositionOutputStream extends PositionOutputStream {
     @Override
     public void close() throws IOException {
         checkException();
+        flushBuffer();
         putEvent(new EndEvent());
         try {
             this.future.get();
@@ -160,6 +199,9 @@ public class AsyncPositionOutputStream extends PositionOutputStream {
             if (throwable instanceof IOException) {
                 throw (IOException) throwable;
             }
+            if (throwable instanceof RuntimeException) {
+                throw (RuntimeException) throwable;
+            }
             throw new IOException(throwable);
         }
     }
@@ -169,11 +211,13 @@ public class AsyncPositionOutputStream extends PositionOutputStream {
     private static class DataEvent implements AsyncEvent {
 
         private final byte[] data;
+        private final int offset;
+        private final int length;
 
-        public DataEvent(byte[] input, int offset, int length) {
-            byte[] data = new byte[length];
-            System.arraycopy(input, offset, data, 0, length);
+        public DataEvent(byte[] data, int offset, int length) {
             this.data = data;
+            this.offset = offset;
+            this.length = length;
         }
     }
 
