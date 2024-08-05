@@ -34,8 +34,8 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
 
-import com.ververica.cdc.connectors.mysql.source.MySqlSource;
-import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
+import org.apache.flink.cdc.connectors.mysql.source.MySqlSource;
+import org.apache.flink.cdc.connectors.mysql.source.config.MySqlSourceOptions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

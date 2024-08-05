@@ -27,12 +27,12 @@ import org.apache.paimon.flink.action.cdc.serialization.CdcDebeziumDeserializati
 import org.apache.paimon.options.OptionsUtils;
 import org.apache.paimon.schema.Schema;
 
-import com.ververica.cdc.connectors.base.options.StartupOptions;
-import com.ververica.cdc.connectors.base.source.jdbc.JdbcIncrementalSource;
-import com.ververica.cdc.connectors.postgres.source.PostgresSourceBuilder;
-import com.ververica.cdc.connectors.postgres.source.PostgresSourceBuilder.PostgresIncrementalSource;
-import com.ververica.cdc.connectors.postgres.source.config.PostgresSourceOptions;
-import com.ververica.cdc.debezium.table.DebeziumOptions;
+import org.apache.flink.cdc.connectors.base.options.StartupOptions;
+import org.apache.flink.cdc.connectors.base.source.jdbc.JdbcIncrementalSource;
+import org.apache.flink.cdc.connectors.postgres.source.PostgresSourceBuilder;
+import org.apache.flink.cdc.connectors.postgres.source.PostgresSourceBuilder.PostgresIncrementalSource;
+import org.apache.flink.cdc.connectors.postgres.source.config.PostgresSourceOptions;
+import org.apache.flink.cdc.debezium.table.DebeziumOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.kafka.connect.json.JsonConverterConfig;
 

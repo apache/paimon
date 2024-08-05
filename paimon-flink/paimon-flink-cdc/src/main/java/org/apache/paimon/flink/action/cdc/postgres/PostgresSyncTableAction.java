@@ -27,8 +27,8 @@ import org.apache.paimon.flink.action.cdc.schema.JdbcSchemasInfo;
 import org.apache.paimon.flink.action.cdc.schema.JdbcTableInfo;
 import org.apache.paimon.schema.Schema;
 
-import com.ververica.cdc.connectors.base.source.jdbc.JdbcIncrementalSource;
-import com.ververica.cdc.connectors.postgres.source.config.PostgresSourceOptions;
+import org.apache.flink.cdc.connectors.base.source.jdbc.JdbcIncrementalSource;
+import org.apache.flink.cdc.connectors.postgres.source.config.PostgresSourceOptions;
 
 import java.util.ArrayList;
 import java.util.HashSet;

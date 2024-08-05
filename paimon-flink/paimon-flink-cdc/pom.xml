@@ -35,8 +35,8 @@ under the License.
 
     <properties>
         <flink.version>1.17.2</flink.version>
-        <flink.cdc.version>2.4.2</flink.cdc.version>
-        <flink.mongodb.cdc.version>2.4.1</flink.mongodb.cdc.version>
+        <flink.cdc.version>3.1.1</flink.cdc.version>
+        <flink.mongodb.cdc.version>3.1.1</flink.mongodb.cdc.version>
         <avro.version>1.11.1</avro.version>
         <geometry.version>2.2.0</geometry.version>
         <json-path.version>2.9.0</json-path.version>
@@ -76,14 +76,14 @@ under the License.
         <!-- CDC dependencies -->
 
         <dependency>
-            <groupId>com.ververica</groupId>
+            <groupId>org.apache.flink</groupId>
             <artifactId>flink-connector-postgres-cdc</artifactId>
             <version>${flink.cdc.version}</version>
             <scope>provided</scope>
         </dependency>
 
         <dependency>
-            <groupId>com.ververica</groupId>
+            <groupId>org.apache.flink</groupId>
             <artifactId>flink-connector-mysql-cdc</artifactId>
             <version>${flink.cdc.version}</version>
             <scope>provided</scope>
@@ -105,7 +105,7 @@ under the License.
 
 
         <dependency>
-            <groupId>com.ververica</groupId>
+            <groupId>org.apache.flink</groupId>
             <artifactId>flink-connector-mongodb-cdc</artifactId>
             <version>${flink.mongodb.cdc.version}</version>
             <scope>provided</scope>
@@ -282,7 +282,7 @@ under the License.
                                 <!-- Same as flink-sql-connector-kafka. -->
                                 <relocation>
                                     <pattern>org.apache.kafka.connect</pattern>
-                                    <shadedPattern>com.ververica.cdc.connectors.shaded.org.apache.kafka.connect</shadedPattern>
+                                    <shadedPattern>org.apache.flink.cdc.connectors.shaded.org.apache.kafka.connect</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>org.apache.kafka</pattern>

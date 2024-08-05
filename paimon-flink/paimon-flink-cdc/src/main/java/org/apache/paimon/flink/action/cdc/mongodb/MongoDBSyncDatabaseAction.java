@@ -23,8 +23,8 @@ import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.SyncDatabaseActionBase;
 import org.apache.paimon.flink.action.cdc.SyncJobHandler;
 
-import com.ververica.cdc.connectors.mongodb.source.MongoDBSource;
-import com.ververica.cdc.connectors.mongodb.source.config.MongoDBSourceOptions;
+import org.apache.flink.cdc.connectors.mongodb.source.MongoDBSource;
+import org.apache.flink.cdc.connectors.mongodb.source.config.MongoDBSourceOptions;
 
 import java.util.Collections;
 import java.util.Map;
