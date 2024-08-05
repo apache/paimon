@@ -125,6 +125,7 @@ public class AsyncPositionOutputStream extends PositionOutputStream {
                 if (await) {
                     return;
                 }
+                checkException();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new RuntimeException(e);

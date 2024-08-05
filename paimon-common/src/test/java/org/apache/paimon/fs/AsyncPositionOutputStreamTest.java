@@ -71,6 +71,26 @@ class AsyncPositionOutputStreamTest {
     }
 
     @Test
+    public void testFlushWithException() throws IOException {
+        String msg = "your exception!";
+        ByteArrayPositionOutputStream byteOut =
+                new ByteArrayPositionOutputStream() {
+                    @Override
+                    public void write(byte[] b) throws IOException {
+                        try {
+                            Thread.sleep(100);
+                        } catch (InterruptedException e) {
+                            throw new RuntimeException(e);
+                        }
+                        throw new IOException(msg);
+                    }
+                };
+        AsyncPositionOutputStream out = new AsyncPositionOutputStream(byteOut);
+        out.write(new byte[] {5, 6, 7});
+        assertThatThrownBy(out::flush).hasMessage(msg);
+    }
+
+    @Test
     public void testClose() throws IOException {
         ByteArrayPositionOutputStream byteOut =
                 new ByteArrayPositionOutputStream() {
