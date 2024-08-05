@@ -487,6 +487,16 @@ public abstract class HiveCatalogITCaseBase {
 
     @Test
     public void testDropPartitionFromBranch() throws Exception {
+        testDropPartitionFromBranchImpl();
+    }
+
+    @Test
+    @LocationInProperties
+    public void testDropPartitionFromBranchLocationInProperties() throws Exception {
+        testDropPartitionFromBranchImpl();
+    }
+
+    private void testDropPartitionFromBranchImpl() throws Exception {
         tEnv.executeSql(
                         "CREATE TABLE t ( pt INT, v STRING ) PARTITIONED BY (pt) "
                                 + "WITH ( 'file.format' = 'avro', 'metastore.partitioned-table' = 'true' )")
