@@ -183,7 +183,7 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public Path getDataTableLocation(Identifier identifier) {
+    public Path getTableLocation(Identifier identifier) {
         try {
             String databaseName = identifier.getDatabaseName();
             String tableName = identifier.getTableName();
@@ -209,7 +209,7 @@ public class HiveCatalog extends AbstractCatalog {
                                 }
                                 return Optional.empty();
                             });
-            return tablePath.orElse(super.getDataTableLocation(identifier));
+            return tablePath.orElse(super.getTableLocation(identifier));
         } catch (TException e) {
             throw new RuntimeException("Can not get table " + identifier + " from metastore.", e);
         } catch (InterruptedException e) {
@@ -379,8 +379,7 @@ public class HiveCatalog extends AbstractCatalog {
 
         return isPaimonTable(table)
                 && tableSchemaInFileSystem(
-                                getDataTableLocation(identifier),
-                                identifier.getBranchNameOrDefault())
+                                getTableLocation(identifier), identifier.getBranchNameOrDefault())
                         .isPresent();
     }
 
@@ -398,7 +397,7 @@ public class HiveCatalog extends AbstractCatalog {
         }
 
         return tableSchemaInFileSystem(
-                        getDataTableLocation(identifier), identifier.getBranchNameOrDefault())
+                        getTableLocation(identifier), identifier.getBranchNameOrDefault())
                 .orElseThrow(() -> new TableNotExistException(identifier));
     }
 
@@ -431,7 +430,7 @@ public class HiveCatalog extends AbstractCatalog {
             // Deletes table directory to avoid schema in filesystem exists after dropping hive
             // table successfully to keep the table consistency between which in filesystem and
             // which in Hive metastore.
-            Path path = getDataTableLocation(identifier);
+            Path path = getTableLocation(identifier);
             try {
                 if (fileIO.exists(path)) {
                     fileIO.deleteDirectoryQuietly(path);
@@ -466,7 +465,7 @@ public class HiveCatalog extends AbstractCatalog {
         try {
             clients.execute(client -> client.createTable(createHiveTable(identifier, tableSchema)));
         } catch (Exception e) {
-            Path path = getDataTableLocation(identifier);
+            Path path = getTableLocation(identifier);
             try {
                 fileIO.deleteDirectoryQuietly(path);
             } catch (Exception ee) {
@@ -495,11 +494,11 @@ public class HiveCatalog extends AbstractCatalog {
             table.setTableName(toTable.getTableName());
             clients.execute(client -> client.alter_table(fromDB, fromTableName, table));
 
-            Path fromPath = getDataTableLocation(fromTable);
+            Path fromPath = getTableLocation(fromTable);
             if (!new SchemaManager(fileIO, fromPath).listAllIds().isEmpty()) {
                 // Rename the file system's table directory. Maintain consistency between tables in
                 // the file system and tables in the Hive Metastore.
-                Path toPath = getDataTableLocation(toTable);
+                Path toPath = getTableLocation(toTable);
                 try {
                     fileIO.rename(fromPath, toPath);
                 } catch (IOException e) {
@@ -616,8 +615,7 @@ public class HiveCatalog extends AbstractCatalog {
 
         TableSchema tableSchema =
                 tableSchemaInFileSystem(
-                                getDataTableLocation(identifier),
-                                identifier.getBranchNameOrDefault())
+                                getTableLocation(identifier), identifier.getBranchNameOrDefault())
                         .orElseThrow(() -> new TableNotExistException(identifier));
         Table newTable = createHiveTable(identifier, tableSchema);
         try {
@@ -754,7 +752,7 @@ public class HiveCatalog extends AbstractCatalog {
         }
 
         // update location
-        locationHelper.specifyTableLocation(table, getDataTableLocation(identifier).toString());
+        locationHelper.specifyTableLocation(table, getTableLocation(identifier).toString());
     }
 
     private void updateHmsTablePars(Table table, TableSchema schema) {
@@ -779,9 +777,7 @@ public class HiveCatalog extends AbstractCatalog {
 
     private SchemaManager schemaManager(Identifier identifier) {
         return new SchemaManager(
-                        fileIO,
-                        getDataTableLocation(identifier),
-                        identifier.getBranchNameOrDefault())
+                        fileIO, getTableLocation(identifier), identifier.getBranchNameOrDefault())
                 .withLock(lock(identifier));
     }
 

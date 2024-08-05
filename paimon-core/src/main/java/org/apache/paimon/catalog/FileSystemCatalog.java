@@ -99,19 +99,19 @@ public class FileSystemCatalog extends AbstractCatalog {
         }
 
         return tableExistsInFileSystem(
-                getDataTableLocation(identifier), identifier.getBranchNameOrDefault());
+                getTableLocation(identifier), identifier.getBranchNameOrDefault());
     }
 
     @Override
     public TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
         return tableSchemaInFileSystem(
-                        getDataTableLocation(identifier), identifier.getBranchNameOrDefault())
+                        getTableLocation(identifier), identifier.getBranchNameOrDefault())
                 .orElseThrow(() -> new TableNotExistException(identifier));
     }
 
     @Override
     protected void dropTableImpl(Identifier identifier) {
-        Path path = getDataTableLocation(identifier);
+        Path path = getTableLocation(identifier);
         uncheck(() -> fileIO.delete(path, true));
     }
 
@@ -121,7 +121,7 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     private SchemaManager schemaManager(Identifier identifier) {
-        Path path = getDataTableLocation(identifier);
+        Path path = getTableLocation(identifier);
         CatalogLock catalogLock =
                 lockFactory().map(fac -> fac.createLock(assertGetLockContext())).orElse(null);
         return new SchemaManager(fileIO, path, identifier.getBranchNameOrDefault())
@@ -135,8 +135,8 @@ public class FileSystemCatalog extends AbstractCatalog {
 
     @Override
     public void renameTableImpl(Identifier fromTable, Identifier toTable) {
-        Path fromPath = getDataTableLocation(fromTable);
-        Path toPath = getDataTableLocation(toTable);
+        Path fromPath = getTableLocation(fromTable);
+        Path toPath = getTableLocation(toTable);
         uncheck(() -> fileIO.rename(fromPath, toPath));
     }
 

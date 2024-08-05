@@ -121,7 +121,7 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
 
     protected void foreachIndexReader(Consumer<FileIndexReader> consumer)
             throws Catalog.TableNotExistException {
-        Path tableRoot = fileSystemCatalog.getDataTableLocation(Identifier.create("db", "T"));
+        Path tableRoot = fileSystemCatalog.getTableLocation(Identifier.create("db", "T"));
         SchemaManager schemaManager = new SchemaManager(fileIO, tableRoot);
         FileStorePathFactory pathFactory =
                 new FileStorePathFactory(

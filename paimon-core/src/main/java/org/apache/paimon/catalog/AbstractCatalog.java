@@ -19,7 +19,6 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
@@ -346,7 +345,7 @@ public abstract class AbstractCatalog implements Catalog {
         TableSchema tableSchema = getDataTableSchema(identifier);
         return FileStoreTableFactory.create(
                 fileIO,
-                getDataTableLocation(identifier),
+                getTableLocation(identifier),
                 tableSchema,
                 new CatalogEnvironment(
                         identifier,
@@ -374,7 +373,7 @@ public abstract class AbstractCatalog implements Catalog {
                 Map<String, Path> tableMap =
                         allPaths.computeIfAbsent(database, d -> new HashMap<>());
                 for (String table : listTables(database)) {
-                    tableMap.put(table, getDataTableLocation(Identifier.create(database, table)));
+                    tableMap.put(table, getTableLocation(Identifier.create(database, table)));
                 }
             }
             return allPaths;
@@ -386,8 +385,8 @@ public abstract class AbstractCatalog implements Catalog {
     protected abstract TableSchema getDataTableSchema(Identifier identifier)
             throws TableNotExistException;
 
-    @VisibleForTesting
-    public Path getDataTableLocation(Identifier identifier) {
+    @Override
+    public Path getTableLocation(Identifier identifier) {
         return new Path(newDatabasePath(identifier.getDatabaseName()), identifier.getTableName());
     }
 

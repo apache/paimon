@@ -67,10 +67,10 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
         FileIO sourceTableFileIO = sourceCatalog.fileIO();
         FileIO targetTableFileIO = targetCatalog.fileIO();
         Path sourceTableRootPath =
-                sourceCatalog.getDataTableLocation(
+                sourceCatalog.getTableLocation(
                         Identifier.fromString(cloneFileInfo.getSourceIdentifier()));
         Path targetTableRootPath =
-                targetCatalog.getDataTableLocation(
+                targetCatalog.getTableLocation(
                         Identifier.fromString(cloneFileInfo.getTargetIdentifier()));
 
         String filePathExcludeTableRoot = cloneFileInfo.getFilePathExcludeTableRoot();

@@ -136,8 +136,8 @@ public class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public Path getDataTableLocation(Identifier identifier) {
-        return wrapped.getDataTableLocation(identifier);
+    public Path getTableLocation(Identifier identifier) {
+        return wrapped.getTableLocation(identifier);
     }
 
     @Override

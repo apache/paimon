@@ -220,7 +220,7 @@ public class JdbcCatalog extends AbstractCatalog {
                 LOG.info("Skipping drop, table does not exist: {}", identifier);
                 return;
             }
-            Path path = getDataTableLocation(identifier);
+            Path path = getTableLocation(identifier);
             try {
                 if (fileIO.exists(path)) {
                     fileIO.deleteDirectoryQuietly(path);
@@ -239,7 +239,7 @@ public class JdbcCatalog extends AbstractCatalog {
             // create table file
             getSchemaManager(identifier).createTable(schema);
             // Update schema metadata
-            Path path = getDataTableLocation(identifier);
+            Path path = getTableLocation(identifier);
             int insertRecord =
                     connections.run(
                             conn -> {
@@ -276,11 +276,11 @@ public class JdbcCatalog extends AbstractCatalog {
             // update table metadata info
             updateTable(connections, catalogKey, fromTable, toTable);
 
-            Path fromPath = getDataTableLocation(fromTable);
+            Path fromPath = getTableLocation(fromTable);
             if (!new SchemaManager(fileIO, fromPath).listAllIds().isEmpty()) {
                 // Rename the file system's table directory. Maintain consistency between tables in
                 // the file system and tables in the Hive Metastore.
-                Path toPath = getDataTableLocation(toTable);
+                Path toPath = getTableLocation(toTable);
                 try {
                     fileIO.rename(fromPath, toPath);
                 } catch (IOException e) {
@@ -311,7 +311,7 @@ public class JdbcCatalog extends AbstractCatalog {
                 connections, catalogKey, identifier.getDatabaseName(), identifier.getTableName())) {
             throw new TableNotExistException(identifier);
         }
-        Path tableLocation = getDataTableLocation(identifier);
+        Path tableLocation = getTableLocation(identifier);
         return new SchemaManager(fileIO, tableLocation)
                 .latest()
                 .orElseThrow(
@@ -354,8 +354,7 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     private SchemaManager getSchemaManager(Identifier identifier) {
-        return new SchemaManager(fileIO, getDataTableLocation(identifier))
-                .withLock(lock(identifier));
+        return new SchemaManager(fileIO, getTableLocation(identifier)).withLock(lock(identifier));
     }
 
     private Map<String, String> fetchProperties(String databaseName) {

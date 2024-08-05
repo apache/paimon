@@ -161,6 +161,14 @@ public interface Catalog extends AutoCloseable {
     Table getTable(Identifier identifier) throws TableNotExistException;
 
     /**
+     * Get the table location in this catalog. If the table exists, return the location of the
+     * table; If the table does not exist, construct the location for table.
+     *
+     * @return the table location
+     */
+    Path getTableLocation(Identifier identifier);
+
+    /**
      * Get names of all tables under this database. An empty list is returned if none exists.
      *
      * <p>NOTE: System tables will not be listed.
@@ -169,13 +177,6 @@ public interface Catalog extends AutoCloseable {
      * @throws DatabaseNotExistException if the database does not exist
      */
     List<String> listTables(String databaseName) throws DatabaseNotExistException;
-
-    /**
-     * Get the table location in this catalog.
-     *
-     * @return the table location
-     */
-    Path getDataTableLocation(Identifier identifier);
 
     /**
      * Check if a table exists in this catalog.
