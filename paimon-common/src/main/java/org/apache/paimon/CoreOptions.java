@@ -410,7 +410,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Integer> WRITE_MAX_WRITERS_TO_SPILL =
             key("write-max-writers-to-spill")
                     .intType()
-                    .defaultValue(5)
+                    .defaultValue(10)
                     .withDescription(
                             "When in batch append inserting, if the writer number is greater than this option, we open the buffer cache and spill function to avoid out-of-memory. ");
 

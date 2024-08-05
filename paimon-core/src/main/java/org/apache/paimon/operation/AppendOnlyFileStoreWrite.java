@@ -47,6 +47,9 @@ import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.StatsCollectorFactories;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import java.io.IOException;
@@ -57,6 +60,8 @@ import java.util.concurrent.ExecutorService;
 
 /** {@link FileStoreWrite} for {@link AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> {
+
+    private static final Logger LOG = LoggerFactory.getLogger(AppendOnlyFileStoreWrite.class);
 
     private final FileIO fileIO;
     private final RawFileSplitRead read;
@@ -228,6 +233,9 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
             return;
         }
         forceBufferSpill = true;
+        LOG.info(
+                "Force buffer spill for append-only file store write, writer number is: {}",
+                writers.size());
         for (Map<Integer, WriterContainer<InternalRow>> bucketWriters : writers.values()) {
             for (WriterContainer<InternalRow> writerContainer : bucketWriters.values()) {
                 ((AppendOnlyWriter) writerContainer.writer).toBufferedWriter();
