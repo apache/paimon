@@ -61,11 +61,16 @@ public class LookupWriterBenchmark extends AbstractLookupBenchmark {
     }
 
     @TestTemplate
-    void testLookupWriter() {
-        writeLookupDataBenchmark(generateSequenceInputs(0, recordCount));
+    void testLookupWriterSameValue() {
+        writeLookupDataBenchmark(generateSequenceInputs(0, recordCount), true);
     }
 
-    public void writeLookupDataBenchmark(byte[][] inputs) {
+    @TestTemplate
+    void testLookupWriterDiffValue() {
+        writeLookupDataBenchmark(generateSequenceInputs(0, recordCount), false);
+    }
+
+    private void writeLookupDataBenchmark(byte[][] inputs, boolean sameValue) {
         Benchmark benchmark =
                 new Benchmark("writer-" + inputs.length, inputs.length)
                         .setNumWarmupIters(1)
@@ -84,7 +89,7 @@ public class LookupWriterBenchmark extends AbstractLookupBenchmark {
                         5,
                         () -> {
                             try {
-                                writeData(options, inputs, valueLength);
+                                writeData(options, inputs, valueLength, sameValue);
                             } catch (IOException e) {
                                 throw new RuntimeException(e);
                             }
@@ -95,10 +100,12 @@ public class LookupWriterBenchmark extends AbstractLookupBenchmark {
         benchmark.run();
     }
 
-    private void writeData(CoreOptions options, byte[][] inputs, int valueLength)
+    private void writeData(CoreOptions options, byte[][] inputs, int valueLength, boolean sameValue)
             throws IOException {
-        byte[] value = new byte[valueLength];
-        Arrays.fill(value, (byte) 1);
+        byte[] value1 = new byte[valueLength];
+        byte[] value2 = new byte[valueLength];
+        Arrays.fill(value1, (byte) 1);
+        Arrays.fill(value2, (byte) 2);
         LookupStoreFactory factory =
                 LookupStoreFactory.create(
                         options,
@@ -108,8 +115,16 @@ public class LookupWriterBenchmark extends AbstractLookupBenchmark {
 
         File file = new File(tempDir.toFile(), UUID.randomUUID().toString());
         LookupStoreWriter writer = factory.createWriter(file, null);
+        boolean first = true;
         for (byte[] input : inputs) {
-            writer.put(input, value);
+            if (first) {
+                writer.put(input, value1);
+            } else {
+                writer.put(input, value2);
+            }
+            if (!sameValue) {
+                first = !first;
+            }
         }
         writer.close();
     }
