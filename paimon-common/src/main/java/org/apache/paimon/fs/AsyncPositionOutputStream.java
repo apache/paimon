@@ -42,14 +42,12 @@ public class AsyncPositionOutputStream extends PositionOutputStream {
     private final AtomicReference<Throwable> exception;
     private final Future<?> future;
 
-    private volatile boolean isClosed;
     private long position;
 
     public AsyncPositionOutputStream(PositionOutputStream out) {
         this.out = out;
         this.eventQueue = new LinkedBlockingQueue<>();
         this.exception = new AtomicReference<>();
-        this.isClosed = false;
         this.position = 0;
         this.future = EXECUTOR_SERVICE.submit(this::execute);
     }
@@ -65,7 +63,7 @@ public class AsyncPositionOutputStream extends PositionOutputStream {
 
     private void doWork() throws InterruptedException, IOException {
         try {
-            while (!isClosed) {
+            while (true) {
                 AsyncEvent event = eventQueue.poll(AWAIT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
                 if (event == null) {
                     continue;
@@ -144,8 +142,6 @@ public class AsyncPositionOutputStream extends PositionOutputStream {
             throw new RuntimeException(e);
         } catch (ExecutionException e) {
             throw new RuntimeException(e);
-        } finally {
-            isClosed = true;
         }
     }
 
