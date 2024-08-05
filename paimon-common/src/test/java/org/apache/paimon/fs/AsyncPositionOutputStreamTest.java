@@ -22,11 +22,47 @@ import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class AsyncPositionOutputStreamTest {
+
+    @Test
+    public void testHugeWriteByteArray() throws IOException {
+        ByteArrayPositionOutputStream result = new ByteArrayPositionOutputStream();
+        AsyncPositionOutputStream out = new AsyncPositionOutputStream(result);
+        int len = 10 * 1024;
+        ByteArrayOutputStream expected = new ByteArrayOutputStream(len);
+        ThreadLocalRandom rnd = ThreadLocalRandom.current();
+        for (int i = 0; i < len; i++) {
+            byte[] bytes = new byte[rnd.nextInt(20)];
+            rnd.nextBytes(bytes);
+            expected.write(bytes);
+            out.write(bytes);
+        }
+        out.close();
+
+        assertThat(result.out.toByteArray()).isEqualTo(expected.toByteArray());
+    }
+
+    @Test
+    public void testHugeWriteByte() throws IOException {
+        ByteArrayPositionOutputStream result = new ByteArrayPositionOutputStream();
+        AsyncPositionOutputStream out = new AsyncPositionOutputStream(result);
+        int len = 32 * 1024 + 20;
+        ByteArrayOutputStream expected = new ByteArrayOutputStream(len);
+        ThreadLocalRandom rnd = ThreadLocalRandom.current();
+        for (int i = 0; i < len; i++) {
+            int b = rnd.nextInt();
+            expected.write(b);
+            out.write(b);
+        }
+        out.close();
+
+        assertThat(result.out.toByteArray()).isEqualTo(expected.toByteArray());
+    }
 
     @Test
     public void testNormal() throws IOException {
