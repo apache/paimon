@@ -44,9 +44,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+
+import static org.apache.paimon.CoreOptions.WRITE_MAX_WRITERS_TO_SPILL;
 
 /** Tests for {@link AppendOnlyFileStoreWrite}. */
 public class AppendOnlyFileStoreWriteTest {
@@ -58,6 +61,7 @@ public class AppendOnlyFileStoreWriteTest {
     @Test
     public void testWritesInBatch() throws Exception {
         FileStoreTable table = createFileStoreTable();
+        table = table.copy(Collections.singletonMap(WRITE_MAX_WRITERS_TO_SPILL.key(), "5"));
 
         AppendOnlyFileStoreWrite write = (AppendOnlyFileStoreWrite) table.store().newWrite("ss");
         write.withIOManager(IOManager.create(tempDir.toString()));
