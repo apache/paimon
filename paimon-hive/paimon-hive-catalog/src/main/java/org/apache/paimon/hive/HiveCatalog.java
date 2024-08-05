@@ -346,7 +346,7 @@ public class HiveCatalog extends AbstractCatalog {
                                             identifier.getTableName(),
                                             branchName,
                                             null));
-            if (!table.newScan().withPartitionFilter(partitionSpec).plan().splits().isEmpty()) {
+            if (!table.newScan().withPartitionFilter(partitionSpec).listPartitions().isEmpty()) {
                 return true;
             }
         }
