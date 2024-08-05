@@ -39,8 +39,8 @@ case class PaimonStrategy(spark: SparkSession) extends Strategy with PredicateHe
       val input = buildInternalRow(args)
       PaimonCallExec(c.output, procedure, input) :: Nil
 
-    case c @ PaimonShowColumnsCommand(table) =>
-      PaimonShowColumnsExec(c.output, table) :: Nil
+    case s @ PaimonShowColumnsCommand(table) =>
+      PaimonShowColumnsExec(s.output, table) :: Nil
     case _ => Nil
   }
 

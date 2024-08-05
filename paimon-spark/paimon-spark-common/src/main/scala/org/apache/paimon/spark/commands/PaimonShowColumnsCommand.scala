@@ -19,18 +19,19 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.spark.SparkTable
-import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
+import org.apache.paimon.spark.leafnode.{PaimonLeafCommand, PaimonLeafRunnableCommand}
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.{Row, SparkSession}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference}
+import org.apache.spark.sql.types.{BinaryType, Metadata, StringType}
 
 case class PaimonShowColumnsCommand(v2Table: SparkTable)
-  extends PaimonLeafRunnableCommand
+  extends PaimonLeafCommand
   with WithFileStoreTable {
   override def table: FileStoreTable = v2Table.getTable.asInstanceOf[FileStoreTable]
 
-  override def run(sparkSession: SparkSession): Seq[Row] = {
-    Seq.empty[Row]
-  }
+  override lazy val output: Seq[Attribute] = Seq(
+    AttributeReference("column", StringType, true, Metadata.empty)())
 
 }

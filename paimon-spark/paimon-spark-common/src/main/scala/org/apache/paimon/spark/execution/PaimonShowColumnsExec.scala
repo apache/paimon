@@ -23,12 +23,13 @@ import org.apache.paimon.spark.leafnode.PaimonLeafV2CommandExec
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.Attribute
+import org.apache.spark.unsafe.types.UTF8String
 
 case class PaimonShowColumnsExec(output: Seq[Attribute], v2Table: SparkTable)
   extends PaimonLeafV2CommandExec {
 
   override protected def run(): Seq[InternalRow] = {
-    v2Table.schema.map(sc => InternalRow.fromSeq(Seq(sc.name))).toSeq
+    v2Table.schema.map(sc => InternalRow.fromSeq(Seq(UTF8String.fromString(sc.name)))).toSeq
   }
 
 }

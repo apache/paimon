@@ -20,9 +20,10 @@ package org.apache.paimon.spark.sql
 
 import org.apache.paimon.spark.PaimonSparkTestBase
 
+import org.apache.spark.sql.Row
 import org.junit.jupiter.api.Assertions.assertDoesNotThrow
 
-class PaimonShowColumnsTestBase extends PaimonSparkTestBase {
+abstract class PaimonShowColumnsTestBase extends PaimonSparkTestBase {
 
   test("Show columns from Paimon test") {
     spark.sql(s"""
@@ -41,6 +42,10 @@ class PaimonShowColumnsTestBase extends PaimonSparkTestBase {
       () => {
         spark.sql("SHOW COLUMNS FROM T")
       })
+
+    checkAnswer(
+      spark.sql("SHOW COLUMNS FROM T"),
+      Row("id") :: Row("name") :: Row("i") :: Row("l") :: Nil)
 
   }
 
