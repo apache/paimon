@@ -98,7 +98,7 @@ public class PartitionExpire {
             Object[] array = strategy.convertPartition(partition.partition());
             Map<String, String> partString = strategy.toPartitionString(array);
             expired.add(partString);
-            LOG.info("Expire Partition: {}", partition);
+            LOG.info("Expire Partition: {}", partString);
         }
         if (!expired.isEmpty()) {
             if (metastoreClient != null) {
