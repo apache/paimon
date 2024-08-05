@@ -174,23 +174,23 @@ public class GlobalDynamicBucketTableITCase extends CatalogITCaseBase {
     @Test
     public void testBootstrapType() throws Exception {
         Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(path)));
-        FileStoreTable T = (FileStoreTable) catalog.getTable(Identifier.create("default", "T"));
-        FileStoreTable partial_update_t =
+        FileStoreTable t = (FileStoreTable) catalog.getTable(Identifier.create("default", "T"));
+        FileStoreTable partialUpdateT =
                 (FileStoreTable) catalog.getTable(Identifier.create("default", "partial_update_t"));
-        FileStoreTable first_row_t =
+        FileStoreTable firstRowT =
                 (FileStoreTable) catalog.getTable(Identifier.create("default", "first_row_t"));
-        assertThat(IndexBootstrap.bootstrapType(T.schema()).getFieldNames()).contains(BUCKET_FIELD);
-        assertThat(IndexBootstrap.bootstrapType(partial_update_t.schema()).getFieldNames())
+        assertThat(IndexBootstrap.bootstrapType(t.schema()).getFieldNames()).contains(BUCKET_FIELD);
+        assertThat(IndexBootstrap.bootstrapType(partialUpdateT.schema()).getFieldNames())
                 .contains(BUCKET_FIELD);
-        assertThat(IndexBootstrap.bootstrapType(first_row_t.schema()).getFieldNames())
+        assertThat(IndexBootstrap.bootstrapType(firstRowT.schema()).getFieldNames())
                 .contains(BUCKET_FIELD);
-        assertThat(IndexBootstrap.bootstrapType(T.schema()).getFieldIndex(BUCKET_FIELD))
+        assertThat(IndexBootstrap.bootstrapType(t.schema()).getFieldIndex(BUCKET_FIELD))
                 .isEqualTo(2);
         assertThat(
-                        IndexBootstrap.bootstrapType(partial_update_t.schema())
+                        IndexBootstrap.bootstrapType(partialUpdateT.schema())
                                 .getFieldIndex(BUCKET_FIELD))
                 .isEqualTo(2);
-        assertThat(IndexBootstrap.bootstrapType(first_row_t.schema()).getFieldIndex(BUCKET_FIELD))
+        assertThat(IndexBootstrap.bootstrapType(firstRowT.schema()).getFieldIndex(BUCKET_FIELD))
                 .isEqualTo(2);
     }
 }
