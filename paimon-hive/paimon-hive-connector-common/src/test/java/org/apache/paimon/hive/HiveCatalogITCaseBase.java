@@ -486,10 +486,57 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
+    public void testDropPartitionFromBranch() throws Exception {
+        testDropPartitionFromBranchImpl();
+    }
+
+    @Test
+    @LocationInProperties
+    public void testDropPartitionFromBranchLocationInProperties() throws Exception {
+        testDropPartitionFromBranchImpl();
+    }
+
+    private void testDropPartitionFromBranchImpl() throws Exception {
+        tEnv.executeSql(
+                        "CREATE TABLE t ( pt INT, v STRING ) PARTITIONED BY (pt) "
+                                + "WITH ( 'file.format' = 'avro', 'metastore.partitioned-table' = 'true' )")
+                .await();
+        tEnv.executeSql("CALL sys.create_branch('test_db.t', 'test')").await();
+
+        tEnv.executeSql("INSERT INTO t VALUES (1, 'apple'), (2, 'banana'), (4, 'mango')").await();
+        tEnv.executeSql("INSERT INTO `t$branch_test` VALUES (1, 'cat'), (3, 'dog'), (4, 'lion')")
+                .await();
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
+                .containsExactlyInAnyOrder("pt=1", "pt=2", "pt=3", "pt=4");
+
+        tEnv.executeSql("ALTER TABLE `t$branch_test` DROP PARTITION (pt = 1)");
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
+                .containsExactlyInAnyOrder("pt=1", "pt=2", "pt=3", "pt=4");
+
+        tEnv.executeSql("ALTER TABLE `t$branch_test` DROP PARTITION (pt = 3)");
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
+                .containsExactlyInAnyOrder("pt=1", "pt=2", "pt=4");
+
+        tEnv.executeSql("ALTER TABLE t DROP PARTITION (pt = 1)");
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
+                .containsExactlyInAnyOrder("pt=2", "pt=4");
+
+        tEnv.executeSql("ALTER TABLE t DROP PARTITION (pt = 4)");
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
+                .containsExactlyInAnyOrder("pt=2", "pt=4");
+
+        tEnv.executeSql("ALTER TABLE `t$branch_test` DROP PARTITION (pt = 4)");
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t")).containsExactlyInAnyOrder("pt=2");
+
+        tEnv.executeSql("ALTER TABLE t DROP PARTITION (pt = 2)");
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t")).isEmpty();
+    }
+
+    @Test
     public void testFallbackBranchRead() throws Exception {
         tEnv.executeSql(
                         "CREATE TABLE t ( pt INT, a INT, b STRING ) PARTITIONED BY (pt) "
-                                + "WITH ( 'file.format' = 'avro' )")
+                                + "WITH ( 'file.format' = 'avro', 'metastore.partitioned-table' = 'true' )")
                 .await();
         tEnv.executeSql("CALL sys.create_branch('test_db.t', 'test')").await();
         tEnv.executeSql(
@@ -510,9 +557,11 @@ public abstract class HiveCatalogITCaseBase {
                         Row.of(1, 20, "banana"),
                         Row.of(2, 10, "lion"),
                         Row.of(2, 20, "wolf"));
-        assertThat(hiveShell.executeQuery("SELECT * FROM t"))
+        assertThat(hiveShell.executeQuery("SELECT pt, a, b FROM t"))
                 .containsExactlyInAnyOrder(
                         "1\t10\tapple", "1\t20\tbanana", "2\t10\tlion", "2\t20\twolf");
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
+                .containsExactlyInAnyOrder("pt=1", "pt=2");
     }
 
     /**
