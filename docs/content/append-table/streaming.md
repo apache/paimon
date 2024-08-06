@@ -115,7 +115,7 @@ control the strategy of compaction:
         </tr>
         <tr>
             <td><h5>compaction.max.file-num</h5></td>
-            <td style="word-wrap: break-word;">50</td>
+            <td style="word-wrap: break-word;">5</td>
             <td>Integer</td>
             <td>For file set [f_0,...,f_N], the maximum file number to trigger a compaction for append table, even if sum(size(f_i)) &lt; targetFileSize. This value avoids pending too much small files, which slows down the performance.</td>
         </tr>
