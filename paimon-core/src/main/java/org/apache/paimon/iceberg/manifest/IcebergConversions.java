@@ -79,13 +79,17 @@ public class IcebergConversions {
                 return ByteBuffer.wrap((decimal.toUnscaledBytes()));
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 TimestampType timestampType = (TimestampType) type;
-                return convertTimestampWithPrecisionToBuffer((Timestamp) value, timestampType.getPrecision());
+                return convertTimestampWithPrecisionToBuffer(
+                        (Timestamp) value, timestampType.getPrecision());
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 LocalZonedTimestampType localTimestampType = (LocalZonedTimestampType) type;
-                return convertTimestampWithPrecisionToBuffer((Timestamp) value, localTimestampType.getPrecision());
+                return convertTimestampWithPrecisionToBuffer(
+                        (Timestamp) value, localTimestampType.getPrecision());
             case TIME_WITHOUT_TIME_ZONE:
-                Long time = ((Integer) value).longValue();
-                return ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putLong(0, time);
+                long microsecondsFromMidnight = (Integer) value / 1_000;
+                return ByteBuffer.allocate(8)
+                        .order(ByteOrder.LITTLE_ENDIAN)
+                        .putLong(0, microsecondsFromMidnight);
             default:
                 throw new UnsupportedOperationException("Cannot serialize type: " + type);
         }
@@ -94,10 +98,12 @@ public class IcebergConversions {
     private static ByteBuffer convertTimestampWithPrecisionToBuffer(
             Timestamp timestamp, int precision) {
         long timestampValue;
+        long secondsSinceEpoch = timestamp.toInstant().getEpochSecond();
         if (precision <= 6) {
-            timestampValue = timestamp.getMillisecond();
+            timestampValue =
+                    secondsSinceEpoch * 1_000_000 + timestamp.getNanoOfMillisecond() / 1_000;
         } else {
-            timestampValue = timestamp.getNanoOfMillisecond();
+            timestampValue = secondsSinceEpoch * 1_000_000_000 + timestamp.getNanoOfMillisecond();
         }
         return ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putLong(timestampValue);
     }
