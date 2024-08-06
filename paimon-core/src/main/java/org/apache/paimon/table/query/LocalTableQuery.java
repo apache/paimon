@@ -34,12 +34,15 @@ import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.LookupStoreFactory;
 import org.apache.paimon.mergetree.Levels;
+import org.apache.paimon.mergetree.LookupFile;
 import org.apache.paimon.mergetree.LookupLevels;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.KeyComparatorSupplier;
 import org.apache.paimon.utils.Preconditions;
+
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 
 import javax.annotation.Nullable;
 
@@ -52,6 +55,7 @@ import java.util.function.Supplier;
 
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 import static org.apache.paimon.lookup.LookupStoreFactory.bfGenerator;
+import static org.apache.paimon.mergetree.LookupFile.localFilePrefix;
 
 /** Implementation for {@link TableQuery} for caching data and file in local. */
 public class LocalTableQuery implements TableQuery {
@@ -70,6 +74,10 @@ public class LocalTableQuery implements TableQuery {
 
     private IOManager ioManager;
 
+    @Nullable private Cache<String, LookupFile> lookupFileCache;
+
+    private final RowType partitionType;
+
     public LocalTableQuery(FileStoreTable table) {
         this.options = table.coreOptions();
         this.tableView = new HashMap<>();
@@ -81,6 +89,7 @@ public class LocalTableQuery implements TableQuery {
         KeyValueFileStore store = (KeyValueFileStore) tableStore;
 
         this.readerFactoryBuilder = store.newReaderFactoryBuilder();
+        this.partitionType = table.schema().logicalPartitionType();
         RowType keyType = readerFactoryBuilder.keyType();
         this.keyComparatorSupplier = new KeyComparatorSupplier(readerFactoryBuilder.keyType());
         this.lookupStoreFactory =
@@ -130,6 +139,13 @@ public class LocalTableQuery implements TableQuery {
         KeyValueFileReaderFactory factory =
                 readerFactoryBuilder.build(partition, bucket, DeletionVector.emptyFactory());
         Options options = this.options.toConfiguration();
+        if (lookupFileCache == null) {
+            lookupFileCache =
+                    LookupFile.createCache(
+                            options.get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
+                            options.get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE));
+        }
+
         LookupLevels<KeyValue> lookupLevels =
                 new LookupLevels<>(
                         levels,
@@ -143,14 +159,15 @@ public class LocalTableQuery implements TableQuery {
                                         file.fileName(),
                                         file.fileSize(),
                                         file.level()),
-                        () ->
+                        file ->
                                 Preconditions.checkNotNull(ioManager, "IOManager is required.")
-                                        .createChannel()
+                                        .createChannel(
+                                                localFilePrefix(
+                                                        partitionType, partition, bucket, file))
                                         .getPathFile(),
                         lookupStoreFactory,
-                        options.get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
-                        options.get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE),
-                        bfGenerator(options));
+                        bfGenerator(options),
+                        lookupFileCache);
 
         tableView.computeIfAbsent(partition, k -> new HashMap<>()).put(bucket, lookupLevels);
     }
@@ -201,6 +218,9 @@ public class LocalTableQuery implements TableQuery {
                     buckets.getValue().entrySet()) {
                 bucket.getValue().close();
             }
+        }
+        if (lookupFileCache != null) {
+            lookupFileCache.invalidateAll();
         }
         tableView.clear();
     }

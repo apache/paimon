@@ -78,6 +78,11 @@ public class IOManagerImpl implements IOManager {
     }
 
     @Override
+    public ID createChannel(String prefix) {
+        return fileChannelManager.createChannel(prefix);
+    }
+
+    @Override
     public String[] tempDirs() {
         return tempDirs;
     }

@@ -70,6 +70,8 @@ public class TestChangelogDataReadWrite {
             new RowType(singletonList(new DataField(0, "k", new BigIntType())));
     private static final RowType VALUE_TYPE =
             new RowType(singletonList(new DataField(0, "v", new BigIntType())));
+    private static final RowType PARTITION_TYPE =
+            new RowType(singletonList(new DataField(0, "p", new IntType())));
     private static final Comparator<InternalRow> COMPARATOR =
             Comparator.comparingLong(o -> o.getLong(0));
     private static final RecordEqualiser EQUALISER =
@@ -171,6 +173,7 @@ public class TestChangelogDataReadWrite {
                                 schemaManager,
                                 schemaManager.schema(0),
                                 commitUser,
+                                PARTITION_TYPE,
                                 KEY_TYPE,
                                 VALUE_TYPE,
                                 () -> COMPARATOR,

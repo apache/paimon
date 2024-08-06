@@ -20,16 +20,22 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
 
 import java.io.Serializable;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
+
+import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * This interface is responsible for reading and writing metadata such as database/table from a
@@ -43,10 +49,13 @@ public interface Catalog extends AutoCloseable {
 
     String DEFAULT_DATABASE = "default";
 
-    String BRANCH_PREFIX = "$branch_";
     String SYSTEM_TABLE_SPLITTER = "$";
     String SYSTEM_DATABASE_NAME = "sys";
+    String SYSTEM_BRANCH_PREFIX = "branch_";
     String COMMENT_PROP = "comment";
+    String TABLE_DEFAULT_OPTION_PREFIX = "table-default.";
+    String DB_LOCATION_PROP = "location";
+    String DB_SUFFIX = ".db";
 
     /** Warehouse root path containing all database directories in this catalog. */
     String warehouse();
@@ -85,7 +94,14 @@ public interface Catalog extends AutoCloseable {
      * @param databaseName Name of the database
      * @return true if the given database exists in the catalog false otherwise
      */
-    boolean databaseExists(String databaseName);
+    default boolean databaseExists(String databaseName) {
+        try {
+            loadDatabaseProperties(databaseName);
+            return true;
+        } catch (DatabaseNotExistException e) {
+            return false;
+        }
+    }
 
     /**
      * Create a database, see {@link Catalog#createDatabase(String name, boolean ignoreIfExists, Map
@@ -143,6 +159,14 @@ public interface Catalog extends AutoCloseable {
      * @throws TableNotExistException if the target does not exist
      */
     Table getTable(Identifier identifier) throws TableNotExistException;
+
+    /**
+     * Get the table location in this catalog. If the table exists, return the location of the
+     * table; If the table does not exist, construct the location for table.
+     *
+     * @return the table location
+     */
+    Path getTableLocation(Identifier identifier);
 
     /**
      * Get names of all tables under this database. An empty list is returned if none exists.
@@ -229,6 +253,16 @@ public interface Catalog extends AutoCloseable {
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException;
 
     /**
+     * Invalidate cached table metadata for an {@link Identifier identifier}.
+     *
+     * <p>If the table is already loaded or cached, drop cached data. If the table does not exist or
+     * is not cached, do nothing. Calling this method should not query remote services.
+     *
+     * @param identifier a table identifier
+     */
+    default void invalidateTable(Identifier identifier) {}
+
+    /**
      * Drop the partition of the specify table.
      *
      * @param identifier path of the table to drop partition
@@ -255,10 +289,8 @@ public interface Catalog extends AutoCloseable {
         alterTable(identifier, Collections.singletonList(change), ignoreIfNotExists);
     }
 
-    /** Return a boolean that indicates whether this catalog is case-sensitive. */
-    default boolean caseSensitive() {
-        return true;
-    }
+    /** Return a boolean that indicates whether this catalog allow upper case. */
+    boolean allowUpperCase();
 
     default void repairCatalog() {
         throw new UnsupportedOperationException();
@@ -270,6 +302,29 @@ public interface Catalog extends AutoCloseable {
 
     default void repairTable(Identifier identifier) throws TableNotExistException {
         throw new UnsupportedOperationException();
+    }
+
+    static Map<String, String> tableDefaultOptions(Map<String, String> options) {
+        return convertToPropertiesPrefixKey(options, TABLE_DEFAULT_OPTION_PREFIX);
+    }
+
+    /** Validate database, table and field names must be lowercase when not case-sensitive. */
+    static void validateCaseInsensitive(boolean caseSensitive, String type, String... names) {
+        validateCaseInsensitive(caseSensitive, type, Arrays.asList(names));
+    }
+
+    /** Validate database, table and field names must be lowercase when not case-sensitive. */
+    static void validateCaseInsensitive(boolean caseSensitive, String type, List<String> names) {
+        if (caseSensitive) {
+            return;
+        }
+        List<String> illegalNames =
+                names.stream().filter(f -> !f.equals(f.toLowerCase())).collect(Collectors.toList());
+        checkArgument(
+                illegalNames.isEmpty(),
+                String.format(
+                        "%s name %s cannot contain upper case in the catalog.",
+                        type, illegalNames));
     }
 
     /** Exception for trying to drop on a database that is not empty. */

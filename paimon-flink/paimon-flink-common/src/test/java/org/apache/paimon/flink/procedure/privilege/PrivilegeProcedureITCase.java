@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.procedure.privilege;
 
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.privilege.FileBasedPrivilegeManager;
@@ -85,7 +84,6 @@ public class PrivilegeProcedureITCase extends AbstractTestBase {
         Catalog paimonCatalog = ((FlinkCatalog) catalog).catalog();
         assertThat(paimonCatalog).isInstanceOf(PrivilegedCatalog.class);
         PrivilegedCatalog privilegedCatalog = (PrivilegedCatalog) paimonCatalog;
-        assertThat(privilegedCatalog.wrapped()).isInstanceOf(FileSystemCatalog.class);
         assertThat(privilegedCatalog.privilegeManager())
                 .isInstanceOf(FileBasedPrivilegeManager.class);
         assertThat(privilegedCatalog.privilegeManager().privilegeEnabled()).isTrue();

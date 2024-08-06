@@ -161,18 +161,18 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
     @Override
     public Optional<Long> executeDeletion() {
         FileStoreTable fileStoreTable = (FileStoreTable) table;
-        FileStoreCommit commit =
+        try (FileStoreCommit commit =
                 fileStoreTable
                         .store()
                         .newCommit(
-                                createCommitUser(fileStoreTable.coreOptions().toConfiguration()));
-        long identifier = BatchWriteBuilder.COMMIT_IDENTIFIER;
-        if (deletePredicate == null) {
-            commit.truncateTable(identifier);
-            return Optional.empty();
-        } else {
-            checkArgument(deleteIsDropPartition());
-            commit.dropPartitions(Collections.singletonList(deletePartitions()), identifier);
+                                createCommitUser(fileStoreTable.coreOptions().toConfiguration()))) {
+            long identifier = BatchWriteBuilder.COMMIT_IDENTIFIER;
+            if (deletePredicate == null) {
+                commit.truncateTable(identifier);
+            } else {
+                checkArgument(deleteIsDropPartition());
+                commit.dropPartitions(Collections.singletonList(deletePartitions()), identifier);
+            }
             return Optional.empty();
         }
     }

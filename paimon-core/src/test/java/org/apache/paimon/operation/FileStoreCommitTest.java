@@ -71,7 +71,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Predicate;
@@ -182,7 +181,9 @@ public class FileStoreCommitTest {
         Path firstSnapshotPath = snapshotManager.snapshotPath(Snapshot.FIRST_SNAPSHOT_ID);
         LocalFileIO.create().deleteQuietly(firstSnapshotPath);
         // this test succeeds if this call does not fail
-        store.newCommit(UUID.randomUUID().toString()).filterCommitted(Collections.singleton(999L));
+        try (FileStoreCommit commit = store.newCommit(UUID.randomUUID().toString())) {
+            commit.filterCommitted(Collections.singletonList(new ManifestCommittable(999L)));
+        }
     }
 
     @Test
@@ -201,8 +202,15 @@ public class FileStoreCommitTest {
         }
 
         // all commit identifiers should be filtered out
-        Set<Long> remaining = store.newCommit(user).filterCommitted(commitIdentifiers);
-        assertThat(remaining).isEmpty();
+        try (FileStoreCommit commit = store.newCommit(user)) {
+            assertThat(
+                            commit.filterCommitted(
+                                    commitIdentifiers.stream()
+                                            .sorted()
+                                            .map(ManifestCommittable::new)
+                                            .collect(Collectors.toList())))
+                    .isEmpty();
+        }
     }
 
     protected void testRandomConcurrentNoConflict(
@@ -850,6 +858,8 @@ public class FileStoreCommitTest {
         readStats = statsFileHandler.readStats();
         assertThat(readStats).isPresent();
         assertThat(readStats.get()).isEqualTo(fakeStats);
+
+        fileStoreCommit.close();
     }
 
     @Test

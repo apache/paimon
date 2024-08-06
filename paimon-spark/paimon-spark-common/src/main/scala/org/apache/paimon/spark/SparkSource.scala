@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.CatalogContext
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.commands.WriteIntoPaimonTable
 import org.apache.paimon.spark.sources.PaimonSink
+import org.apache.paimon.spark.util.OptionUtils.mergeSQLConf
 import org.apache.paimon.table.{DataTable, FileStoreTable, FileStoreTableFactory}
 import org.apache.paimon.table.system.AuditLogTable
 
@@ -64,7 +65,7 @@ class SparkSource
       schema: StructType,
       partitioning: Array[Transform],
       properties: JMap[String, String]): Table = {
-    new SparkTable(loadTable(properties))
+    SparkTable(loadTable(properties))
   }
 
   override def createRelation(
@@ -80,7 +81,7 @@ class SparkSource
 
   private def loadTable(options: JMap[String, String]): DataTable = {
     val catalogContext = CatalogContext.create(
-      Options.fromMap(options),
+      Options.fromMap(mergeSQLConf(options)),
       SparkSession.active.sessionState.newHadoopConf())
     val table = FileStoreTableFactory.create(catalogContext)
     if (Options.fromMap(options).get(SparkConnectorOptions.READ_CHANGELOG)) {

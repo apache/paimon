@@ -440,8 +440,7 @@ public class Snapshot {
 
     public static Snapshot fromPath(FileIO fileIO, Path path) {
         try {
-            String json = fileIO.readFileUtf8(path);
-            return Snapshot.fromJson(json);
+            return fromPathThrowsException(fileIO, path);
         } catch (IOException e) {
             throw new RuntimeException("Fails to read snapshot from path " + path, e);
         }
@@ -450,11 +449,14 @@ public class Snapshot {
     @Nullable
     public static Snapshot safelyFromPath(FileIO fileIO, Path path) throws IOException {
         try {
-            String json = fileIO.readFileUtf8(path);
-            return Snapshot.fromJson(json);
+            return fromPathThrowsException(fileIO, path);
         } catch (FileNotFoundException e) {
             return null;
         }
+    }
+
+    private static Snapshot fromPathThrowsException(FileIO fileIO, Path path) throws IOException {
+        return Snapshot.fromJson(fileIO.readFileUtf8(path));
     }
 
     @Override

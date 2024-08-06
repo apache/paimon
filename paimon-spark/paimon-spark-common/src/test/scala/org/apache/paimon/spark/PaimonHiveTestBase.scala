@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.Snapshot
 import org.apache.paimon.hive.TestHiveMetastore
 
 import org.apache.hadoop.conf.Configuration

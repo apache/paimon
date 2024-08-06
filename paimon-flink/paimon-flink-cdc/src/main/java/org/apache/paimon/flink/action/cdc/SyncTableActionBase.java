@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.action.cdc;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.catalog.AbstractCatalog;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
@@ -107,15 +107,15 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
                 tableConfig,
                 retrievedSchema,
                 metadataConverters,
-                caseSensitive,
+                allowUpperCase,
                 true,
                 true);
     }
 
     @Override
     protected void validateCaseSensitivity() {
-        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Database", database);
-        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Table", table);
+        Catalog.validateCaseInsensitive(allowUpperCase, "Database", database);
+        Catalog.validateCaseInsensitive(allowUpperCase, "Table", table);
     }
 
     @Override
@@ -142,7 +142,7 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
                         buildComputedColumns(
                                 computedColumnArgs,
                                 fileStoreTable.schema().fields(),
-                                caseSensitive);
+                                allowUpperCase);
                 // check partition keys and primary keys in case that user specified them
                 checkConstraints();
             }
@@ -162,7 +162,7 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
 
     @Override
     protected EventParser.Factory<RichCdcMultiplexRecord> buildEventParserFactory() {
-        boolean caseSensitive = this.caseSensitive;
+        boolean caseSensitive = this.allowUpperCase;
         return () -> new RichCdcMultiplexRecordEventParser(caseSensitive);
     }
 

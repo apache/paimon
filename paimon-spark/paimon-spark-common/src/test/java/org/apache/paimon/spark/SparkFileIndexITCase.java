@@ -59,6 +59,7 @@ import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.options.CatalogOptions.CACHE_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -88,6 +89,7 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
 
         Options options = new Options();
         options.set(WAREHOUSE, spark.conf().get("spark.sql.catalog.paimon.warehouse"));
+        options.set(CACHE_ENABLED, false);
         fileSystemCatalog =
                 (FileSystemCatalog) CatalogFactory.createCatalog(CatalogContext.create(options));
     }
@@ -119,7 +121,7 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
 
     protected void foreachIndexReader(Consumer<FileIndexReader> consumer)
             throws Catalog.TableNotExistException {
-        Path tableRoot = fileSystemCatalog.getDataTableLocation(Identifier.create("db", "T"));
+        Path tableRoot = fileSystemCatalog.getTableLocation(Identifier.create("db", "T"));
         SchemaManager schemaManager = new SchemaManager(fileIO, tableRoot);
         FileStorePathFactory pathFactory =
                 new FileStorePathFactory(

@@ -45,6 +45,7 @@ public class CastExecutors {
                 .addRule(NumericPrimitiveToDecimalCastRule.INSTANCE)
                 .addRule(DecimalToNumericPrimitiveCastRule.INSTANCE)
                 .addRule(NumericPrimitiveCastRule.INSTANCE)
+                .addRule(NumericPrimitiveToTimestamp.INSTANCE)
                 // Boolean <-> numeric rules
                 .addRule(BooleanToNumericCastRule.INSTANCE)
                 .addRule(NumericToBooleanCastRule.INSTANCE)

@@ -116,7 +116,11 @@ public class BitmapFileIndex implements FileIndexer {
                 // 2.build bitmap file index meta
                 LinkedHashMap<Object, Integer> bitmapOffsets = new LinkedHashMap<>();
                 LinkedList<byte[]> serializeBitmaps = new LinkedList<>();
-                int[] offsetRef = {nullBitmap.isEmpty() ? 0 : nullBitmapBytes.length};
+                int[] offsetRef = {
+                    nullBitmap.isEmpty() || nullBitmap.getCardinality() == 1
+                            ? 0
+                            : nullBitmapBytes.length
+                };
                 id2bitmap.forEach(
                         (k, v) -> {
                             if (v.getCardinality() == 1) {

@@ -23,6 +23,7 @@ import org.apache.paimon.schema.Schema
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.types.DataTypes
 
+import org.apache.spark.SparkException
 import org.apache.spark.sql.Row
 import org.junit.jupiter.api.Assertions
 
@@ -33,24 +34,16 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
 
   import testImplicits._
 
-  test("Paimon DDL: create table with not null") {
+  test("Paimon DDL: create append table with not null") {
     withTable("T") {
-      sql("""
-            |CREATE TABLE T (id INT NOT NULL, name STRING)
-            |""".stripMargin)
+      sql("CREATE TABLE T (id INT NOT NULL, name STRING)")
 
-      val exception = intercept[RuntimeException] {
-        sql("""
-              |INSERT INTO T VALUES (1, "a"), (2, "b"), (null, "c")
-              |""".stripMargin)
+      val e1 = intercept[SparkException] {
+        sql("""INSERT INTO T VALUES (1, "a"), (2, "b"), (null, "c")""")
       }
-      Assertions.assertTrue(
-        exception.getMessage().contains("Cannot write nullable values to non-null column"))
+      Assertions.assertTrue(e1.getMessage().contains("Cannot write null to non-null column"))
 
-      sql("""
-            |INSERT INTO T VALUES (1, "a"), (2, "b"), (3, null)
-            |""".stripMargin)
-
+      sql("""INSERT INTO T VALUES (1, "a"), (2, "b"), (3, null)""")
       checkAnswer(
         sql("SELECT * FROM T ORDER BY id"),
         Seq((1, "a"), (2, "b"), (3, null)).toDF()
@@ -60,6 +53,51 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
       Assertions.assertEquals(schema.size, 2)
       Assertions.assertFalse(schema("id").nullable)
       Assertions.assertTrue(schema("name").nullable)
+    }
+  }
+  test("Paimon DDL: create primary-key table with not null") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, name STRING, pt STRING)
+            |TBLPROPERTIES ('primary-key' = 'id,pt')
+            |""".stripMargin)
+
+      val e1 = intercept[SparkException] {
+        sql("""INSERT INTO T VALUES (1, "a", "pt1"), (2, "b", null)""")
+      }
+      Assertions.assertTrue(e1.getMessage().contains("Cannot write null to non-null column"))
+
+      val e2 = intercept[SparkException] {
+        sql("""INSERT INTO T VALUES (1, "a", "pt1"), (null, "b", "pt2")""")
+      }
+      Assertions.assertTrue(e2.getMessage().contains("Cannot write null to non-null column"))
+
+      sql("""INSERT INTO T VALUES (1, "a", "pt1"), (2, "b", "pt1"), (3, null, "pt2")""")
+      checkAnswer(
+        sql("SELECT * FROM T ORDER BY id"),
+        Seq((1, "a", "pt1"), (2, "b", "pt1"), (3, null, "pt2")).toDF()
+      )
+
+      val schema = spark.table("T").schema
+      Assertions.assertEquals(schema.size, 3)
+      Assertions.assertFalse(schema("id").nullable)
+      Assertions.assertTrue(schema("name").nullable)
+      Assertions.assertFalse(schema("pt").nullable)
+    }
+  }
+
+  test("Paimon DDL: write nullable expression to non-null column") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT NOT NULL, ts TIMESTAMP NOT NULL)
+            |""".stripMargin)
+
+      sql("INSERT INTO T SELECT 1, TO_TIMESTAMP('2024-07-01 16:00:00')")
+
+      checkAnswer(
+        sql("SELECT * FROM T ORDER BY id"),
+        Row(1, Timestamp.valueOf("2024-07-01 16:00:00")) :: Nil
+      )
     }
   }
 
@@ -407,5 +445,15 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
           }
         }
     }
+  }
+
+  test("Paimon DDL: create table with unsupported partitioned by") {
+    val error = intercept[RuntimeException] {
+      sql(s"""
+             |CREATE TABLE T (id STRING, name STRING, pt STRING)
+             |PARTITIONED BY (substr(pt, 1, 2))
+             |""".stripMargin)
+    }.getMessage
+    assert(error.contains("Unsupported partition transform"))
   }
 }

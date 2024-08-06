@@ -172,11 +172,10 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         assertThatThrownBy(() -> sql("CREATE TABLE T$snapshots (a INT, b INT)"))
                 .hasRootCauseMessage(
                         "Cannot 'createTable' for system table "
-                                + "'Identifier{database='default', table='T$snapshots'}', please use data table.");
+                                + "'Identifier{database='default', object='T$snapshots'}', please use data table.");
         assertThatThrownBy(() -> sql("CREATE TABLE T$aa$bb (a INT, b INT)"))
                 .hasRootCauseMessage(
-                        "Cannot 'createTable' for system table "
-                                + "'Identifier{database='default', table='T$aa$bb'}', please use data table.");
+                        "System table can only contain one '$' separator, but this is: T$aa$bb");
     }
 
     @Test

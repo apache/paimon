@@ -37,18 +37,18 @@ public class CatalogUtils {
     }
 
     public static String database(Path path) {
-        return SchemaManager.fromPath(path.toString(), false).getDatabaseName();
+        return SchemaManager.identifierFromPath(path.toString(), false).getDatabaseName();
     }
 
     public static String database(String path) {
-        return SchemaManager.fromPath(path, false).getDatabaseName();
+        return SchemaManager.identifierFromPath(path, false).getDatabaseName();
     }
 
     public static String table(Path path) {
-        return SchemaManager.fromPath(path.toString(), false).getObjectName();
+        return SchemaManager.identifierFromPath(path.toString(), false).getObjectName();
     }
 
     public static String table(String path) {
-        return SchemaManager.fromPath(path, false).getObjectName();
+        return SchemaManager.identifierFromPath(path, false).getObjectName();
     }
 }

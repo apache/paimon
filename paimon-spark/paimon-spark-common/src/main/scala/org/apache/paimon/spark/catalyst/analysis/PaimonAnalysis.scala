@@ -21,16 +21,17 @@ package org.apache.paimon.spark.catalyst.analysis
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation.isPaimonTable
-import org.apache.paimon.spark.commands.{PaimonAnalyzeTableColumnCommand, PaimonDynamicPartitionOverwriteCommand, PaimonTruncateTableCommand}
+import org.apache.paimon.spark.commands.{PaimonAnalyzeTableColumnCommand, PaimonDynamicPartitionOverwriteCommand, PaimonShowColumnsCommand, PaimonTruncateTableCommand}
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.analysis.ResolvedTable
-import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, Cast, Expression, NamedExpression}
+import org.apache.spark.sql.catalyst.expressions.{Alias, ArrayTransform, Attribute, CreateStruct, Expression, GetArrayItem, GetStructField, LambdaFunction, NamedExpression, NamedLambdaVariable}
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.rules.Rule
+import org.apache.spark.sql.catalyst.util.CaseInsensitiveMap
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
-import org.apache.spark.sql.types.{ArrayType, DataType, MapType, StructField, StructType}
+import org.apache.spark.sql.types.{ArrayType, DataType, IntegerType, MapType, StructField, StructType}
 
 import scala.collection.JavaConverters._
 
@@ -39,11 +40,17 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
   override def apply(plan: LogicalPlan): LogicalPlan = plan.resolveOperatorsDown {
 
     case a @ PaimonV2WriteCommand(table, paimonTable)
-        if !schemaCompatible(
-          a.query.output.toStructType,
-          table.output.toStructType,
-          paimonTable.partitionKeys().asScala) =>
-      val newQuery = resolveQueryColumns(a.query, table.output)
+        if a.isByName && needsSchemaAdjustmentByName(a.query, table.output, paimonTable) =>
+      val newQuery = resolveQueryColumnsByName(a.query, table.output)
+      if (newQuery != a.query) {
+        Compatibility.withNewQuery(a, newQuery)
+      } else {
+        a
+      }
+
+    case a @ PaimonV2WriteCommand(table, paimonTable)
+        if !a.isByName && needsSchemaAdjustmentByPosition(a.query, table.output, paimonTable) =>
+      val newQuery = resolveQueryColumnsByPosition(a.query, table.output)
       if (newQuery != a.query) {
         Compatibility.withNewQuery(a, newQuery)
       } else {
@@ -55,11 +62,70 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
 
     case merge: MergeIntoTable if isPaimonTable(merge.targetTable) && merge.childrenResolved =>
       PaimonMergeIntoResolver(merge, session)
+
+    case s @ ShowColumns(PaimonRelation(table), _, _) if s.resolved =>
+      PaimonShowColumnsCommand(table)
+  }
+
+  private def needsSchemaAdjustmentByName(
+      query: LogicalPlan,
+      targetAttrs: Seq[Attribute],
+      paimonTable: FileStoreTable): Boolean = {
+    val userSpecifiedNames = if (session.sessionState.conf.caseSensitiveAnalysis) {
+      query.output.map(a => (a.name, a)).toMap
+    } else {
+      CaseInsensitiveMap(query.output.map(a => (a.name, a)).toMap)
+    }
+    val specifiedTargetAttrs = targetAttrs.filter(col => userSpecifiedNames.contains(col.name))
+    !schemaCompatible(
+      specifiedTargetAttrs.toStructType,
+      query.output.toStructType,
+      paimonTable.partitionKeys().asScala)
+  }
+
+  private def resolveQueryColumnsByName(
+      query: LogicalPlan,
+      targetAttrs: Seq[Attribute]): LogicalPlan = {
+    val output = query.output
+    val project = targetAttrs.map {
+      attr =>
+        val outputAttr = output
+          .find(t => session.sessionState.conf.resolver(t.name, attr.name))
+          .getOrElse {
+            throw new RuntimeException(
+              s"Cannot find ${attr.name} in data columns: ${output.map(_.name).mkString(", ")}")
+          }
+        addCastToColumn(outputAttr, attr, isByName = true)
+    }
+    Project(project, query)
+  }
+
+  private def needsSchemaAdjustmentByPosition(
+      query: LogicalPlan,
+      targetAttrs: Seq[Attribute],
+      paimonTable: FileStoreTable): Boolean = {
+    val output = query.output
+    targetAttrs.map(_.name) != output.map(_.name) ||
+    !schemaCompatible(
+      targetAttrs.toStructType,
+      output.toStructType,
+      paimonTable.partitionKeys().asScala)
+  }
+
+  private def resolveQueryColumnsByPosition(
+      query: LogicalPlan,
+      tableAttributes: Seq[Attribute]): LogicalPlan = {
+    val project = query.output.zipWithIndex.map {
+      case (attr, i) =>
+        val targetAttr = tableAttributes(i)
+        addCastToColumn(attr, targetAttr, isByName = false)
+    }
+    Project(project, query)
   }
 
   private def schemaCompatible(
-      tableSchema: StructType,
       dataSchema: StructType,
+      tableSchema: StructType,
       partitionCols: Seq[String],
       parent: Array[String] = Array.empty): Boolean = {
 
@@ -82,49 +148,123 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
       }
     }
 
-    tableSchema.zip(dataSchema).forall {
-      case (f1, f2) =>
-        checkNullability(f1, f2, partitionCols, parent)
-        f1.name == f2.name && dataTypeCompatible(f1.name, f1.dataType, f2.dataType)
+    dataSchema.zip(tableSchema).forall {
+      case (f1, f2) => dataTypeCompatible(f1.name, f1.dataType, f2.dataType)
     }
   }
 
-  private def resolveQueryColumns(
-      query: LogicalPlan,
-      tableAttributes: Seq[Attribute]): LogicalPlan = {
-    val project = query.output.zipWithIndex.map {
-      case (attr, i) =>
-        val targetAttr = tableAttributes(i)
-        addCastToColumn(attr, targetAttr)
-    }
-    Project(project, query)
-  }
-
-  private def addCastToColumn(attr: Attribute, targetAttr: Attribute): NamedExpression = {
+  private def addCastToColumn(
+      attr: Attribute,
+      targetAttr: Attribute,
+      isByName: Boolean): NamedExpression = {
     val expr = (attr.dataType, targetAttr.dataType) match {
       case (s, t) if s == t =>
         attr
+      case (s: StructType, t: StructType) if s != t =>
+        if (isByName) {
+          addCastToStructByName(attr, s, t)
+        } else {
+          addCastToStructByPosition(attr, s, t)
+        }
+      case (ArrayType(s: StructType, sNull: Boolean), ArrayType(t: StructType, _: Boolean))
+          if s != t =>
+        val castToStructFunc = if (isByName) {
+          addCastToStructByName _
+        } else {
+          addCastToStructByPosition _
+        }
+        castToArrayStruct(attr, s, t, sNull, castToStructFunc)
       case _ =>
         cast(attr, targetAttr.dataType)
     }
     Alias(expr, targetAttr.name)(explicitMetadata = Option(targetAttr.metadata))
   }
 
+  private def addCastToStructByName(
+      parent: NamedExpression,
+      source: StructType,
+      target: StructType): NamedExpression = {
+    val fields = target.map {
+      case targetField @ StructField(name, nested: StructType, _, _) =>
+        val sourceIndex = source.fieldIndex(name)
+        val sourceField = source(sourceIndex)
+        sourceField.dataType match {
+          case s: StructType =>
+            val subField = castStructField(parent, sourceIndex, sourceField.name, targetField)
+            addCastToStructByName(subField, s, nested)
+          case o =>
+            throw new RuntimeException(s"Can not support to cast $o to StructType.")
+        }
+      case targetField =>
+        val sourceIndex = source.fieldIndex(targetField.name)
+        val sourceField = source(sourceIndex)
+        castStructField(parent, sourceIndex, sourceField.name, targetField)
+    }
+    Alias(CreateStruct(fields), parent.name)(
+      parent.exprId,
+      parent.qualifier,
+      Option(parent.metadata))
+  }
+
+  private def addCastToStructByPosition(
+      parent: NamedExpression,
+      source: StructType,
+      target: StructType): NamedExpression = {
+    if (source.length != target.length) {
+      throw new RuntimeException("The number of fields in source and target is not same.")
+    }
+
+    val fields = target.zipWithIndex.map {
+      case (targetField @ StructField(_, nested: StructType, _, _), i) =>
+        val sourceField = source(i)
+        sourceField.dataType match {
+          case s: StructType =>
+            val subField = castStructField(parent, i, sourceField.name, targetField)
+            addCastToStructByPosition(subField, s, nested)
+          case o =>
+            throw new RuntimeException(s"Can not support to cast $o to StructType.")
+        }
+      case (targetField, i) =>
+        val sourceField = source(i)
+        castStructField(parent, i, sourceField.name, targetField)
+    }
+    Alias(CreateStruct(fields), parent.name)(
+      parent.exprId,
+      parent.qualifier,
+      Option(parent.metadata))
+  }
+
+  private def castStructField(
+      parent: NamedExpression,
+      i: Int,
+      sourceFieldName: String,
+      targetField: StructField): NamedExpression = {
+    Alias(
+      cast(GetStructField(parent, i, Option(sourceFieldName)), targetField.dataType),
+      targetField.name
+    )(explicitMetadata = Option(targetField.metadata))
+  }
+  private def castToArrayStruct(
+      parent: NamedExpression,
+      source: StructType,
+      target: StructType,
+      sourceNullable: Boolean,
+      castToStructFunc: (NamedExpression, StructType, StructType) => NamedExpression
+  ): Expression = {
+    val structConverter: (Expression, Expression) => Expression = (_, i) =>
+      castToStructFunc(Alias(GetArrayItem(parent, i), i.toString)(), source, target)
+    val transformLambdaFunc = {
+      val elementVar = NamedLambdaVariable("elementVar", source, sourceNullable)
+      val indexVar = NamedLambdaVariable("indexVar", IntegerType, false)
+      LambdaFunction(structConverter(elementVar, indexVar), Seq(elementVar, indexVar))
+    }
+    ArrayTransform(parent, transformLambdaFunc)
+  }
+
   private def cast(expr: Expression, dataType: DataType): Expression = {
     val cast = Compatibility.cast(expr, dataType, Option(conf.sessionLocalTimeZone))
     cast.setTagValue(Compatibility.castByTableInsertionTag, ())
     cast
-  }
-
-  private def checkNullability(
-      input: StructField,
-      expected: StructField,
-      partitionCols: Seq[String],
-      parent: Array[String] = Array.empty): Unit = {
-    val fullColumnName = (parent ++ Array(input.name)).mkString(".")
-    if (!partitionCols.contains(fullColumnName) && input.nullable && !expected.nullable) {
-      throw new RuntimeException("Cannot write nullable values to non-null column")
-    }
   }
 }
 

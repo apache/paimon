@@ -58,6 +58,7 @@ import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanne
 import org.apache.paimon.table.source.snapshot.StaticFromWatermarkStartingScanner;
 import org.apache.paimon.tag.TagPreview;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -109,6 +110,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public void setManifestCache(SegmentsCache<Path> manifestCache) {
+        store().setManifestCache(manifestCache);
+    }
+
+    @Override
     public OptionalLong latestSnapshotId() {
         Long snapshot = store().snapshotManager().latestSnapshotId();
         return snapshot == null ? OptionalLong.empty() : OptionalLong.of(snapshot);
@@ -116,16 +122,22 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public String name() {
-        Identifier identifier = catalogEnvironment.identifier();
-        return identifier == null ? location().getName() : identifier.getObjectName();
+        return identifier().getObjectName();
     }
 
     @Override
     public String fullName() {
+        return identifier().getFullName();
+    }
+
+    public Identifier identifier() {
         Identifier identifier = catalogEnvironment.identifier();
         return identifier == null
-                ? SchemaManager.fromPath(location().toUri().toString(), true).getFullName()
-                : identifier.getFullName();
+                ? SchemaManager.identifierFromPath(
+                        location().toUri().toString(),
+                        true,
+                        options().get(CoreOptions.BRANCH.key()))
+                : identifier;
     }
 
     @Override
@@ -367,8 +379,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         }
 
         return new TableCommitImpl(
-                store().newCommit(commitUser),
-                createCommitCallbacks(commitUser),
+                store().newCommit(commitUser, createCommitCallbacks(commitUser)),
                 snapshotExpire,
                 options.writeOnly() ? null : store().newPartitionExpire(commitUser),
                 options.writeOnly() ? null : store().newTagCreationManager(),
@@ -389,7 +400,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
         if (options.partitionedTableInMetastore()
                 && metastoreClientFactory != null
-                && tableSchema.partitionKeys().size() > 0) {
+                && !tableSchema.partitionKeys().isEmpty()) {
             callbacks.add(new AddPartitionCommitCallback(metastoreClientFactory.create()));
         }
 

@@ -655,8 +655,9 @@ public class RowCompactedSerializer implements Serializer<InternalRow> {
         private final FieldReader[] fieldReaders;
 
         public SliceComparator(RowType rowType) {
-            this.reader1 = new RowReader(rowType.getFieldCount());
-            this.reader2 = new RowReader(rowType.getFieldCount());
+            int bitSetInBytes = calculateBitSetInBytes(rowType.getFieldCount());
+            this.reader1 = new RowReader(bitSetInBytes);
+            this.reader2 = new RowReader(bitSetInBytes);
             this.fieldReaders = new FieldReader[rowType.getFieldCount()];
             for (int i = 0; i < rowType.getFieldCount(); i++) {
                 fieldReaders[i] = createFieldReader(rowType.getTypeAt(i));

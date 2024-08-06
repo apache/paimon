@@ -23,11 +23,14 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 
+import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.table.catalog.Catalog;
 import org.apache.flink.table.factories.CatalogFactory;
 import org.apache.flink.table.factories.FactoryUtil;
 
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
@@ -56,9 +59,29 @@ public class FlinkGenericCatalogFactory implements CatalogFactory {
     @Override
     public FlinkGenericCatalog createCatalog(Context context) {
         CatalogFactory hiveFactory = createHiveCatalogFactory(context.getClassLoader());
-        Catalog catalog = hiveFactory.createCatalog(context);
+        Context filteredContext = filterContextOptions(context, hiveFactory);
+        Catalog catalog = hiveFactory.createCatalog(filteredContext);
         return createCatalog(
                 context.getClassLoader(), context.getOptions(), context.getName(), catalog);
+    }
+
+    @VisibleForTesting
+    public Context filterContextOptions(Context context, CatalogFactory catalogFactory) {
+        Set<ConfigOption<?>> catalogOptions = new HashSet<>(catalogFactory.requiredOptions());
+        catalogOptions.addAll(catalogFactory.optionalOptions());
+        Map<String, String> contextOptions = context.getOptions();
+        Map<String, String> flinkCatalogOptions = new HashMap<>();
+        catalogOptions.forEach(
+                option -> {
+                    if (contextOptions.containsKey(option.key())) {
+                        flinkCatalogOptions.put(option.key(), contextOptions.get(option.key()));
+                    }
+                });
+        return new FactoryUtil.DefaultCatalogContext(
+                context.getName(),
+                flinkCatalogOptions,
+                context.getConfiguration(),
+                context.getClassLoader());
     }
 
     @VisibleForTesting

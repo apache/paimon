@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.clone;
 
-import org.apache.paimon.catalog.AbstractCatalog;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.fs.FileIO;
@@ -43,8 +43,8 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
     private final Map<String, String> sourceCatalogConfig;
     private final Map<String, String> targetCatalogConfig;
 
-    private AbstractCatalog sourceCatalog;
-    private AbstractCatalog targetCatalog;
+    private Catalog sourceCatalog;
+    private Catalog targetCatalog;
 
     public CopyFileOperator(
             Map<String, String> sourceCatalogConfig, Map<String, String> targetCatalogConfig) {
@@ -55,13 +55,9 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
     @Override
     public void open() throws Exception {
         sourceCatalog =
-                (AbstractCatalog)
-                        FlinkCatalogFactory.createPaimonCatalog(
-                                Options.fromMap(sourceCatalogConfig));
+                FlinkCatalogFactory.createPaimonCatalog(Options.fromMap(sourceCatalogConfig));
         targetCatalog =
-                (AbstractCatalog)
-                        FlinkCatalogFactory.createPaimonCatalog(
-                                Options.fromMap(targetCatalogConfig));
+                FlinkCatalogFactory.createPaimonCatalog(Options.fromMap(targetCatalogConfig));
     }
 
     @Override
@@ -71,10 +67,10 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
         FileIO sourceTableFileIO = sourceCatalog.fileIO();
         FileIO targetTableFileIO = targetCatalog.fileIO();
         Path sourceTableRootPath =
-                sourceCatalog.getDataTableLocation(
+                sourceCatalog.getTableLocation(
                         Identifier.fromString(cloneFileInfo.getSourceIdentifier()));
         Path targetTableRootPath =
-                targetCatalog.getDataTableLocation(
+                targetCatalog.getTableLocation(
                         Identifier.fromString(cloneFileInfo.getTargetIdentifier()));
 
         String filePathExcludeTableRoot = cloneFileInfo.getFilePathExcludeTableRoot();

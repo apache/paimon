@@ -18,8 +18,9 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.Snapshot
 import org.apache.paimon.catalog.{Catalog, CatalogContext, CatalogFactory, Identifier}
-import org.apache.paimon.options.Options
+import org.apache.paimon.options.{CatalogOptions, Options}
 import org.apache.paimon.spark.catalog.Catalogs
 import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
 import org.apache.paimon.spark.sql.{SparkVersionSupport, WithTableOptions}
@@ -36,6 +37,8 @@ import org.scalactic.source.Position
 import org.scalatest.Tag
 
 import java.io.File
+import java.util
+import java.util.{HashMap => JHashMap}
 import java.util.TimeZone
 
 import scala.util.Random
@@ -64,6 +67,7 @@ class PaimonSparkTestBase
     super.sparkConf
       .set("spark.sql.catalog.paimon", classOf[SparkCatalog].getName)
       .set("spark.sql.catalog.paimon.warehouse", tempDBDir.getCanonicalPath)
+      .set("spark.sql.catalog.paimon.cache-enabled", "false")
       .set("spark.sql.extensions", classOf[PaimonSparkSessionExtensions].getName)
       .set("spark.serializer", serializer)
   }
@@ -122,7 +126,9 @@ class PaimonSparkTestBase
 
   private def initCatalog(): Catalog = {
     val currentCatalog = spark.sessionState.catalogManager.currentCatalog.name()
-    val options = Catalogs.catalogOptions(currentCatalog, spark.sessionState.conf)
+    val options =
+      new JHashMap[String, String](Catalogs.catalogOptions(currentCatalog, spark.sessionState.conf))
+    options.put(CatalogOptions.CACHE_ENABLED.key(), "false")
     val catalogContext =
       CatalogContext.create(Options.fromMap(options), spark.sessionState.newHadoopConf())
     CatalogFactory.createCatalog(catalogContext)

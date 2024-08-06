@@ -364,6 +364,59 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
+    public void testCreateInsensitiveTable() throws Exception {
+        tEnv.executeSql(
+                        String.join(
+                                "\n",
+                                "CREATE CATALOG paimon_catalog_01 WITH (",
+                                "  'type' = 'paimon',",
+                                "  'metastore' = 'hive',",
+                                "  'uri' = '',",
+                                "  'warehouse' = '" + path + "',",
+                                "  'lock.enabled' = 'true',",
+                                "  'table.type' = 'EXTERNAL',",
+                                "  'allow-upper-case' = 'true'",
+                                ")"))
+                .await();
+        tEnv.executeSql("USE CATALOG paimon_catalog_01").await();
+        tEnv.executeSql("USE test_db").await();
+        tEnv.executeSql("CREATE TABLE t ( aa INT, Bb STRING ) WITH ( 'file.format' = 'avro' )")
+                .await();
+        assertThat(
+                        hiveShell
+                                .executeQuery("DESC FORMATTED t")
+                                .contains("Table Type:         \tEXTERNAL_TABLE      \tNULL"))
+                .isTrue();
+        tEnv.executeSql("DROP TABLE t").await();
+        Path tablePath = new Path(path, "test_db.db/t");
+        assertThat(tablePath.getFileSystem().exists(tablePath)).isTrue();
+
+        tEnv.executeSql(
+                        String.join(
+                                "\n",
+                                "CREATE CATALOG paimon_catalog_02 WITH (",
+                                "  'type' = 'paimon',",
+                                "  'metastore' = 'hive',",
+                                "  'uri' = '',",
+                                "  'warehouse' = '" + path + "',",
+                                "  'lock.enabled' = 'true',",
+                                "  'table.type' = 'EXTERNAL',",
+                                "  'allow-upper-case' = 'false'",
+                                ")"))
+                .await();
+        tEnv.executeSql("USE CATALOG paimon_catalog_02").await();
+        tEnv.executeSql("USE test_db").await();
+
+        // set case-sensitive = false would throw exception out
+        assertThrows(
+                RuntimeException.class,
+                () ->
+                        tEnv.executeSql(
+                                        "CREATE TABLE t1 ( aa INT, Bb STRING ) WITH ( 'file.format' = 'avro' )")
+                                .await());
+    }
+
+    @Test
     public void testFlinkWriteAndHiveRead() throws Exception {
         tEnv.executeSql(
                         "CREATE TABLE t ( "
@@ -408,6 +461,107 @@ public abstract class HiveCatalogITCaseBase {
                 .isInstanceOf(TableException.class)
                 .hasMessage(
                         "Cannot find table '`my_hive`.`test_db`.`hive_table`' in any of the catalogs [default_catalog, my_hive], nor as a temporary table.");
+    }
+
+    @Test
+    public void testFlinkCreateBranchAndHiveRead() throws Exception {
+        tEnv.executeSql("CREATE TABLE t ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
+                .await();
+        tEnv.executeSql("CALL sys.create_branch('test_db.t', 'test')").await();
+        tEnv.executeSql("ALTER TABLE `t$branch_test` SET ( 'primary-key' = 'a', 'bucket' = '1' )")
+                .await();
+        tEnv.executeSql("ALTER TABLE `t$branch_test` ADD (c INT)").await();
+
+        tEnv.executeSql("INSERT INTO `t$branch_test` VALUES (1, 'x1', 10), (2, 'x2', 20)").await();
+        tEnv.executeSql("INSERT INTO t VALUES (3, 'x3'), (4, 'x4')").await();
+        tEnv.executeSql("INSERT INTO `t$branch_test` VALUES (1, 'x11', 11)").await();
+        tEnv.executeSql("INSERT INTO t VALUES (3, 'x33')").await();
+
+        assertThat(collect("SELECT * FROM t"))
+                .containsExactlyInAnyOrder(Row.of(3, "x3"), Row.of(3, "x33"), Row.of(4, "x4"));
+        assertThat(collect("SELECT * FROM `t$branch_test`"))
+                .containsExactlyInAnyOrder(Row.of(1, "x11", 11), Row.of(2, "x2", 20));
+        assertThat(hiveShell.executeQuery("SELECT * FROM t"))
+                .containsExactlyInAnyOrder("3\tx3", "3\tx33", "4\tx4");
+    }
+
+    @Test
+    public void testDropPartitionFromBranch() throws Exception {
+        testDropPartitionFromBranchImpl();
+    }
+
+    @Test
+    @LocationInProperties
+    public void testDropPartitionFromBranchLocationInProperties() throws Exception {
+        testDropPartitionFromBranchImpl();
+    }
+
+    private void testDropPartitionFromBranchImpl() throws Exception {
+        tEnv.executeSql(
+                        "CREATE TABLE t ( pt INT, v STRING ) PARTITIONED BY (pt) "
+                                + "WITH ( 'file.format' = 'avro', 'metastore.partitioned-table' = 'true' )")
+                .await();
+        tEnv.executeSql("CALL sys.create_branch('test_db.t', 'test')").await();
+
+        tEnv.executeSql("INSERT INTO t VALUES (1, 'apple'), (2, 'banana'), (4, 'mango')").await();
+        tEnv.executeSql("INSERT INTO `t$branch_test` VALUES (1, 'cat'), (3, 'dog'), (4, 'lion')")
+                .await();
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
+                .containsExactlyInAnyOrder("pt=1", "pt=2", "pt=3", "pt=4");
+
+        tEnv.executeSql("ALTER TABLE `t$branch_test` DROP PARTITION (pt = 1)");
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
+                .containsExactlyInAnyOrder("pt=1", "pt=2", "pt=3", "pt=4");
+
+        tEnv.executeSql("ALTER TABLE `t$branch_test` DROP PARTITION (pt = 3)");
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
+                .containsExactlyInAnyOrder("pt=1", "pt=2", "pt=4");
+
+        tEnv.executeSql("ALTER TABLE t DROP PARTITION (pt = 1)");
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
+                .containsExactlyInAnyOrder("pt=2", "pt=4");
+
+        tEnv.executeSql("ALTER TABLE t DROP PARTITION (pt = 4)");
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
+                .containsExactlyInAnyOrder("pt=2", "pt=4");
+
+        tEnv.executeSql("ALTER TABLE `t$branch_test` DROP PARTITION (pt = 4)");
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t")).containsExactlyInAnyOrder("pt=2");
+
+        tEnv.executeSql("ALTER TABLE t DROP PARTITION (pt = 2)");
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t")).isEmpty();
+    }
+
+    @Test
+    public void testFallbackBranchRead() throws Exception {
+        tEnv.executeSql(
+                        "CREATE TABLE t ( pt INT, a INT, b STRING ) PARTITIONED BY (pt) "
+                                + "WITH ( 'file.format' = 'avro', 'metastore.partitioned-table' = 'true' )")
+                .await();
+        tEnv.executeSql("CALL sys.create_branch('test_db.t', 'test')").await();
+        tEnv.executeSql(
+                        "ALTER TABLE `t$branch_test` SET ( 'primary-key' = 'pt, a', 'bucket' = '1' )")
+                .await();
+        tEnv.executeSql("ALTER TABLE t SET ( 'scan.fallback-branch' = 'test' )").await();
+
+        tEnv.executeSql(
+                        "INSERT INTO `t$branch_test` VALUES "
+                                + "(1, 20, 'cat'), (1, 30, 'dog'), (2, 10, 'tiger'), (2, 20, 'wolf')")
+                .await();
+        tEnv.executeSql("INSERT INTO t VALUES (1, 10, 'apple'), (1, 20, 'banana')").await();
+        tEnv.executeSql("INSERT INTO `t$branch_test` VALUES (2, 10, 'lion')").await();
+
+        assertThat(collect("SELECT * FROM t"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 10, "apple"),
+                        Row.of(1, 20, "banana"),
+                        Row.of(2, 10, "lion"),
+                        Row.of(2, 20, "wolf"));
+        assertThat(hiveShell.executeQuery("SELECT pt, a, b FROM t"))
+                .containsExactlyInAnyOrder(
+                        "1\t10\tapple", "1\t20\tbanana", "2\t10\tlion", "2\t20\twolf");
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
+                .containsExactlyInAnyOrder("pt=1", "pt=2");
     }
 
     /**
@@ -1410,6 +1564,16 @@ public abstract class HiveCatalogITCaseBase {
         try (CloseableIterator<Row> it = tEnv.executeSql(sql).collect()) {
             while (it.hasNext()) {
                 result.add(it.next());
+            }
+        }
+        return result;
+    }
+
+    private List<String> collectString(String sql) throws Exception {
+        List<String> result = new ArrayList<>();
+        try (CloseableIterator<Row> it = tEnv.executeSql(sql).collect()) {
+            while (it.hasNext()) {
+                result.add(it.next().toString());
             }
         }
         return result;

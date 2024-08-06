@@ -20,9 +20,6 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.privilege.FileBasedPrivilegeManager;
-import org.apache.paimon.privilege.PrivilegeManager;
-import org.apache.paimon.privilege.PrivilegedCatalog;
 import org.apache.paimon.table.TableType;
 
 import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
@@ -44,18 +41,6 @@ public class FileSystemCatalogFactory implements CatalogFactory {
                     "Only managed table is supported in File system catalog.");
         }
 
-        Catalog catalog = new FileSystemCatalog(fileIO, warehouse, context.options());
-
-        PrivilegeManager privilegeManager =
-                new FileBasedPrivilegeManager(
-                        warehouse.toString(),
-                        fileIO,
-                        context.options().get(PrivilegedCatalog.USER),
-                        context.options().get(PrivilegedCatalog.PASSWORD));
-        if (privilegeManager.privilegeEnabled()) {
-            catalog = new PrivilegedCatalog(catalog, privilegeManager);
-        }
-
-        return catalog;
+        return new FileSystemCatalog(fileIO, warehouse, context.options());
     }
 }

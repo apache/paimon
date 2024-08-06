@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.utils;
 
+import org.apache.paimon.catalog.CachingCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.hive.migrate.HiveMigrator;
@@ -30,7 +31,7 @@ public class TableMigrationUtils {
 
     public static Migrator getImporter(
             String connector,
-            Catalog paimonCatalog,
+            Catalog catalog,
             String sourceDatabase,
             String sourceTableName,
             String targetDatabase,
@@ -38,9 +39,14 @@ public class TableMigrationUtils {
             Map<String, String> options) {
         switch (connector) {
             case "hive":
-                assert paimonCatalog instanceof HiveCatalog;
+                if (catalog instanceof CachingCatalog) {
+                    catalog = ((CachingCatalog) catalog).wrapped();
+                }
+                if (!(catalog instanceof HiveCatalog)) {
+                    throw new IllegalArgumentException("Only support Hive Catalog");
+                }
                 return new HiveMigrator(
-                        (HiveCatalog) paimonCatalog,
+                        (HiveCatalog) catalog,
                         sourceDatabase,
                         sourceTableName,
                         targetDatabase,
