@@ -43,6 +43,7 @@ public class TimestampToNumericPrimitiveCastRule extends AbstractCastRule<Timest
     }
 
     @Override
+    @SuppressWarnings("fallthrough")
     public CastExecutor<Timestamp, Number> create(DataType inputType, DataType targetType) {
         switch (targetType.getTypeRoot()) {
             case INTEGER:
