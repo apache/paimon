@@ -116,7 +116,13 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         private long schemaId = Long.MIN_VALUE;
 
         ManifestEntryWriter(FormatWriterFactory factory, Path path, String fileCompression) {
-            super(ManifestFile.this.fileIO, factory, path, serializer::toRow, fileCompression);
+            super(
+                    ManifestFile.this.fileIO,
+                    factory,
+                    path,
+                    serializer::toRow,
+                    fileCompression,
+                    false);
 
             this.partitionStatsCollector = new SimpleStatsCollector(partitionType);
             this.partitionStatsSerializer = new SimpleStatsConverter(partitionType);

@@ -163,7 +163,8 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                 spillCompression,
                 statsCollectors,
                 maxDiskSize,
-                fileIndexOptions);
+                fileIndexOptions,
+                options.asyncFileWrite());
     }
 
     public AppendOnlyCompactManager.CompactRewriter compactRewriter(
@@ -184,7 +185,8 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                             fileCompression,
                             statsCollectors,
                             fileIndexOptions,
-                            FileSource.COMPACT);
+                            FileSource.COMPACT,
+                            options.asyncFileWrite());
             try {
                 rewriter.write(bucketReader(partition, bucket).read(toCompact));
             } finally {

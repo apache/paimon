@@ -62,7 +62,8 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
             String fileCompression,
             SimpleColStatsCollector.Factory[] statsCollectors,
             FileIndexOptions fileIndexOptions,
-            FileSource fileSource) {
+            FileSource fileSource,
+            boolean asyncFileWrite) {
         super(
                 fileIO,
                 factory,
@@ -71,7 +72,8 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 writeSchema,
                 simpleStatsExtractor,
                 fileCompression,
-                statsCollectors);
+                statsCollectors,
+                asyncFileWrite);
         this.schemaId = schemaId;
         this.seqNumCounter = seqNumCounter;
         this.statsArraySerializer = new SimpleStatsConverter(writeSchema);
