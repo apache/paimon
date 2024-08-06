@@ -19,7 +19,6 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.branch.TableBranch;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -27,9 +26,9 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.BranchDeletion;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,7 +37,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.function.Predicate;
@@ -229,7 +227,7 @@ public class BranchManager {
 
             if (snapshotToClean != null) {
                 if (!snapshotManager.snapshotExists(snapshotToClean.id())) {
-                    SortedMap<Snapshot, List<TableBranch>> branchReferenceSnapshotsMap =
+                    SortedMap<Snapshot, List<String>> branchReferenceSnapshotsMap =
                             branchesCreateSnapshots();
                     // If the snapshotToClean is not referenced by other branches or tags, we need
                     // to do clean the dataFiles and manifestFiles.
@@ -399,45 +397,34 @@ public class BranchManager {
         for (String branchName : branches()) {
             Snapshot branchCreateSnapshot =
                     snapshotManager.copyWithBranch(branchName).earliestSnapshot();
-            if (branchCreateSnapshot == null) {
-                // Support empty branch.
-                branchSnapshots.put(new TableBranch(branchName, path.getValue()), null);
-                continue;
-            }
-            FileStoreTable branchTable =
-                    FileStoreTableFactory.create(
-                            fileIO, new Path(branchPath(tablePath, branchName)));
-            SortedMap<Snapshot, List<String>> snapshotTags = branchTable.tagManager().tags();
-            Snapshot earliestSnapshot = branchTable.snapshotManager().earliestSnapshot();
-            if (snapshotTags.isEmpty()) {
-                // Create based on snapshotId.
-                branchSnapshots.put(
-                        new TableBranch(branchName, earliestSnapshot.id(), path.getValue()),
-                        earliestSnapshot);
-            } else {
-                Snapshot snapshot = snapshotTags.firstKey();
-                // current branch is create from tag.
-                if (earliestSnapshot.id() == snapshot.id()) {
-                    List<String> tags = snapshotTags.get(snapshot);
-                    checkArgument(tags.size() == 1);
-                    branchSnapshots.put(
-                            new TableBranch(
-                                    branchName, tags.get(0), snapshot.id(), path.getValue()),
-                            snapshot);
-                } else {
+            // Ignore the empty branch.
+            if (branchCreateSnapshot != null) {
+                FileStoreTable branchTable =
+                        FileStoreTableFactory.create(
+                                fileIO, new Path(branchPath(tablePath, branchName)));
+                SortedMap<Snapshot, List<String>> snapshotTags = branchTable.tagManager().tags();
+                Snapshot earliestSnapshot = branchTable.snapshotManager().earliestSnapshot();
+                if (snapshotTags.isEmpty()) {
                     // Create based on snapshotId.
-                    branchSnapshots.put(
-                            new TableBranch(branchName, earliestSnapshot.id(), path.getValue()),
-                            earliestSnapshot);
+                    sortedSnapshots
+                            .computeIfAbsent(earliestSnapshot, s -> new ArrayList<>())
+                            .add(branchName);
+                } else {
+                    Snapshot snapshot = snapshotTags.firstKey();
+                    // current branch is create from tag.
+                    if (earliestSnapshot.id() == snapshot.id()) {
+                        List<String> tags = snapshotTags.get(snapshot);
+                        checkArgument(tags.size() == 1);
+                        sortedSnapshots
+                                .computeIfAbsent(snapshot, s -> new ArrayList<>())
+                                .add(branchName);
+                    } else {
+                        // Create based on snapshotId.
+                        sortedSnapshots
+                                .computeIfAbsent(earliestSnapshot, s -> new ArrayList<>())
+                                .add(branchName);
+                    }
                 }
-            }
-        }
-
-        for (Map.Entry<String, Snapshot> snapshotEntry : branches().entrySet()) {
-            if (snapshotEntry.getValue() != null) {
-                sortedSnapshots
-                        .computeIfAbsent(snapshotEntry.getValue(), s -> new ArrayList<>())
-                        .add(snapshotEntry.getKey());
             }
         }
         return sortedSnapshots;

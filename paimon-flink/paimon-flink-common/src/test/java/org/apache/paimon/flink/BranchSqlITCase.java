@@ -19,8 +19,6 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.branch.TableBranch;
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -555,6 +553,15 @@ public class BranchSqlITCase extends CatalogITCaseBase {
         sql("CALL sys.create_branch('default.T', 'test2', 1)");
         sql("CALL sys.create_tag('default.T', 'tag', 1)");
 
+        // Snapshot-1 is referenced by branch [test, test2].
+        assertThat(
+                        table.branchManager().branchesCreateSnapshots().entrySet().stream()
+                                .filter(x -> x.getKey().id() == 1L)
+                                .findFirst()
+                                .get()
+                                .getValue())
+                .containsExactlyInAnyOrder("test", "test2");
+
         // Only retain 2,3 snapshot, snapshot-1 will be expired.
         sql(
                 "INSERT INTO T /*+ OPTIONS("
@@ -587,8 +594,6 @@ public class BranchSqlITCase extends CatalogITCaseBase {
         checkSnapshots(snapshotManager, 3, 4);
 
         BranchManager branchManager = table.branchManager();
-        assertThat(branchManager.branches().keySet().stream().map(TableBranch::getBranchName))
-                .containsExactlyInAnyOrder("test", "empty");
 
         Snapshot snapshotsToClean =
                 branchManager.branchesCreateSnapshots().keySet().iterator().next();
