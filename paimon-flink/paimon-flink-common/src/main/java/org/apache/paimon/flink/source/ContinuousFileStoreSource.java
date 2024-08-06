@@ -19,7 +19,9 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.StreamDataTableScan;
@@ -99,14 +101,15 @@ public class ContinuousFileStoreSource extends FlinkSource {
             Collection<FileStoreSourceSplit> splits,
             @Nullable Long nextSnapshotId,
             StreamTableScan scan) {
-        CoreOptions coreOptions = CoreOptions.fromMap(options);
+        Options options = Options.fromMap(this.options);
         return new ContinuousFileSplitEnumerator(
                 context,
                 splits,
                 nextSnapshotId,
-                coreOptions.continuousDiscoveryInterval().toMillis(),
+                options.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL).toMillis(),
                 scan,
                 bucketMode,
-                coreOptions.scanSplitMaxPerTask());
+                options.get(CoreOptions.SCAN_MAX_SPLITS_PER_TASK),
+                options.get(FlinkConnectorOptions.STREAMING_READ_SHUFFLE_BY_PARTITION));
     }
 }
