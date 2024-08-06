@@ -57,6 +57,6 @@ public class Int2ShortHashMapTest {
 
     @Test
     public void testCapacity() {
-        assertThrows(IllegalArgumentException.class, () -> new Int2ShortHashMap(1073741824));
+        assertThrows(RuntimeException.class, () -> new Int2ShortHashMap(1073741824));
     }
 }

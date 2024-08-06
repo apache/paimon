@@ -74,7 +74,7 @@ public class Int2ShortHashMap {
                     map.put(keyList.getInt(i), valueList.getShort(i));
                 }
             } catch (IllegalArgumentException e) {
-                throw new PaimonUtilsException(
+                throw new RuntimeException(
                         "capacity of Int2ShortOpenHashMap is too large, advise raise your parallelism in your Flink/Spark job",
                         e);
             }
