@@ -3,7 +3,7 @@ title: "Auxiliary"
 weight: 7
 type: docs
 aliases:
-- /spark/sql-alter.html
+- /spark/auxiliary.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
