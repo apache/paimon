@@ -88,7 +88,7 @@ public class AsyncPositionOutputStream extends PositionOutputStream {
                 }
                 if (event instanceof DataEvent) {
                     DataEvent dataEvent = (DataEvent) event;
-                    out.write(dataEvent.data, dataEvent.offset, dataEvent.length);
+                    out.write(dataEvent.data, 0, dataEvent.length);
                     bufferQueue.add(dataEvent.data);
                 }
                 if (event instanceof FlushEvent) {
@@ -111,7 +111,7 @@ public class AsyncPositionOutputStream extends PositionOutputStream {
         if (buffer.getCount() == 0) {
             return;
         }
-        putEvent(new DataEvent(buffer.getBuffer(), 0, buffer.getCount()));
+        putEvent(new DataEvent(buffer.getBuffer(), buffer.getCount()));
         byte[] byteArray = bufferQueue.poll();
         if (byteArray == null) {
             byteArray = new byte[BUFFER_SIZE];
@@ -211,12 +211,10 @@ public class AsyncPositionOutputStream extends PositionOutputStream {
     private static class DataEvent implements AsyncEvent {
 
         private final byte[] data;
-        private final int offset;
         private final int length;
 
-        public DataEvent(byte[] data, int offset, int length) {
+        public DataEvent(byte[] data, int length) {
             this.data = data;
-            this.offset = offset;
             this.length = length;
         }
     }
