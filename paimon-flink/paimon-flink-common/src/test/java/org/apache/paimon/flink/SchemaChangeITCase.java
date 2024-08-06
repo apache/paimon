@@ -1032,4 +1032,26 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         // change name from non-physical column to physical column is not allowed
         assertThatThrownBy(() -> sql("ALTER TABLE T MODIFY name VARCHAR COMMENT 'header3'"));
     }
+
+    @Test
+    public void testCreateTableWithInvalidOption() {
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "CREATE TABLE MyTable (\n"
+                                                + "  user_id BIGINT,\n"
+                                                + "  item_id BIGINT,\n"
+                                                + "  behavior STRING,\n"
+                                                + "  dt STRING,\n"
+                                                + "  hh STRING,\n"
+                                                + "  PRIMARY KEY (dt, hh, user_id) NOT ENFORCED\n"
+                                                + "  ) PARTITIONED BY (dt) WITH (\n"
+                                                + "    'partition.expiration-time' = '1 d',\n"
+                                                + "    'partition.timestamp-formattedsdsr' = 'yyyyMMdd'   -- this is required in `values-time` strategy.\n"
+                                                + ");\n"),
+                        "")
+                .rootCause()
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Invalid option: partition.timestamp-formattedsdsr");
+    }
 }
