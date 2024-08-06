@@ -288,24 +288,35 @@ public class CastExecutorTest {
 
     @Test
     public void testTimestampToNumeric() {
-        long mills = System.currentTimeMillis();
+        long mills = System.currentTimeMillis() / 1000 * 1000;
         Timestamp timestamp1 = Timestamp.fromEpochMillis(mills);
-        long millisecond1 = timestamp1.getMillisecond();
-
+        long millisecond = timestamp1.getMillisecond();
         Timestamp timestamp2 =
                 Timestamp.fromLocalDateTime(
                         DateTimeUtils.toLocalDateTime(mills, TimeZone.getDefault().toZoneId()));
-        long millisecond2 = timestamp2.getMillisecond();
+        long millisecond1 = timestamp2.getMillisecond();
 
+        // cast from TimestampType to BigIntType
         compareCastResult(
                 CastExecutors.resolve(new TimestampType(3), new BigIntType(false)),
                 timestamp1,
-                DateTimeUtils.unixTimestamp(millisecond1));
+                DateTimeUtils.unixTimestamp(millisecond));
 
         compareCastResult(
                 CastExecutors.resolve(new LocalZonedTimestampType(3), new BigIntType(false)),
                 timestamp2,
-                DateTimeUtils.unixTimestamp(millisecond2));
+                DateTimeUtils.unixTimestamp(millisecond1));
+
+        // cast from BigIntType to TimestampType
+        compareCastResult(
+                CastExecutors.resolve(new BigIntType(false), new TimestampType(3)),
+                DateTimeUtils.unixTimestamp(millisecond),
+                timestamp1);
+
+        compareCastResult(
+                CastExecutors.resolve(new BigIntType(false), new LocalZonedTimestampType(3)),
+                DateTimeUtils.unixTimestamp(millisecond),
+                timestamp2);
     }
 
     @Test

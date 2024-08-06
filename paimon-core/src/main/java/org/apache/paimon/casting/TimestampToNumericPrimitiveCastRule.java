@@ -25,8 +25,8 @@ import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.utils.DateTimeUtils;
 
 /**
- * @link DataTypeRoot#TIMESTAMP_WITHOUT_TIME_ZONE}/{@link
- *     DataTypeRoot#TIMESTAMP_WITH_LOCAL_TIME_ZONE} to {@link DataTypeFamily#NUMERIC} cast rule.
+ * {@link DataTypeRoot#TIMESTAMP_WITHOUT_TIME_ZONE}/{@link
+ * DataTypeRoot#TIMESTAMP_WITH_LOCAL_TIME_ZONE} to {@link DataTypeFamily#NUMERIC} cast rule.
  */
 public class TimestampToNumericPrimitiveCastRule extends AbstractCastRule<Timestamp, Number> {
 
@@ -43,21 +43,14 @@ public class TimestampToNumericPrimitiveCastRule extends AbstractCastRule<Timest
     }
 
     @Override
-    @SuppressWarnings("fallthrough")
     public CastExecutor<Timestamp, Number> create(DataType inputType, DataType targetType) {
-        switch (targetType.getTypeRoot()) {
-            case INTEGER:
-            case BIGINT:
-                if (inputType.is(DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE)) {
-                    return value -> DateTimeUtils.unixTimestamp(value.getMillisecond());
-                } else if (inputType.is(DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE)) {
-                    return value ->
-                            DateTimeUtils.unixTimestamp(
-                                    Timestamp.fromLocalDateTime(value.toLocalDateTime())
-                                            .getMillisecond());
-                }
-            default:
-                return null;
+        if (inputType.is(DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE)) {
+            return value -> DateTimeUtils.unixTimestamp(value.getMillisecond());
+        } else if (inputType.is(DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE)) {
+            return value ->
+                    DateTimeUtils.unixTimestamp(
+                            Timestamp.fromLocalDateTime(value.toLocalDateTime()).getMillisecond());
         }
+        return null;
     }
 }
