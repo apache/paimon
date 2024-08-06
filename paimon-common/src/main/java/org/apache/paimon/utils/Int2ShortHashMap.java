@@ -78,7 +78,6 @@ public class Int2ShortHashMap {
                         "capacity of Int2ShortOpenHashMap is too large, advise raise your parallelism in your Flink/Spark job",
                         e);
             }
-
             return map;
         }
     }
