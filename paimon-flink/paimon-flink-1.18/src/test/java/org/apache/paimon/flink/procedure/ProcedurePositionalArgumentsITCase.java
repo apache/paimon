@@ -74,7 +74,7 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
         sql("INSERT INTO T VALUES ('1', '2024-06-01')");
         sql("INSERT INTO T VALUES ('2', '9024-06-01')");
         assertThat(read(table)).containsExactlyInAnyOrder("1:2024-06-01", "2:9024-06-01");
-        sql("CALL sys.expire_partitions('default.T', '1 d', 'yyyy-MM-dd', 'values-time')");
+        sql("CALL sys.expire_partitions('default.T', '1 d', 'yyyy-MM-dd', '$dt', 'values-time')");
         assertThat(read(table)).containsExactlyInAnyOrder("2:9024-06-01");
     }
 
