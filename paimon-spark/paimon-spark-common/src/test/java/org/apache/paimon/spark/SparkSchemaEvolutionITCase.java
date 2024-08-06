@@ -203,7 +203,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                 .satisfies(
                         anyCauseMatches(
                                 UnsupportedOperationException.class,
-                                "Cannot drop/rename partition key[a]"));
+                                "Cannot rename partition column: [a]"));
     }
 
     @Test
@@ -254,7 +254,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                 .satisfies(
                         anyCauseMatches(
                                 UnsupportedOperationException.class,
-                                "Cannot drop/rename partition key[a]"));
+                                "Cannot drop partition key or primary key: [a]"));
     }
 
     @Test
