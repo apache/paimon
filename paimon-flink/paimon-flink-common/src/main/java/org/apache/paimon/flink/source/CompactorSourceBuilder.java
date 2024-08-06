@@ -19,26 +19,37 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.LogicalTypeConversion;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.system.BucketsTable;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
+import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 
 import javax.annotation.Nullable;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
+
+import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 
 /**
  * Source builder to build a Flink {@link StaticFileStoreSource} or {@link
@@ -52,6 +63,7 @@ public class CompactorSourceBuilder {
     private boolean isContinuous = false;
     private StreamExecutionEnvironment env;
     @Nullable private Predicate partitionPredicate = null;
+    @Nullable private Duration partitionIdleTime = null;
 
     public CompactorSourceBuilder(String tableIdentifier, FileStoreTable table) {
         this.tableIdentifier = tableIdentifier;
@@ -65,6 +77,11 @@ public class CompactorSourceBuilder {
 
     public CompactorSourceBuilder withEnv(StreamExecutionEnvironment env) {
         this.env = env;
+        return this;
+    }
+
+    public CompactorSourceBuilder withPartitionIdleTime(@Nullable Duration partitionIdleTime) {
+        this.partitionIdleTime = partitionIdleTime;
         return this;
     }
 
@@ -101,6 +118,25 @@ public class CompactorSourceBuilder {
                         WatermarkStrategy.noWatermarks(),
                         tableIdentifier + "-compact-source",
                         InternalTypeInfo.of(LogicalTypeConversion.toLogicalType(produceType)));
+        if (isContinuous) {
+            Preconditions.checkArgument(
+                    partitionIdleTime == null, "Streaming mode does not support partitionIdleTime");
+        } else if (partitionIdleTime != null) {
+            Map<BinaryRow, Long> partitionInfo = getPartitionInfo(bucketsTable);
+            long historyMilli =
+                    LocalDateTime.now()
+                            .minus(partitionIdleTime)
+                            .atZone(ZoneId.systemDefault())
+                            .toInstant()
+                            .toEpochMilli();
+            SingleOutputStreamOperator<RowData> filterStream =
+                    dataStream.filter(
+                            rowData -> {
+                                BinaryRow partition = deserializeBinaryRow(rowData.getBinary(1));
+                                return partitionInfo.get(partition) <= historyMilli;
+                            });
+            dataStream = new DataStreamSource<>(filterStream);
+        }
         Integer parallelism =
                 Options.fromMap(table.options()).get(FlinkConnectorOptions.SCAN_PARALLELISM);
         if (parallelism != null) {
@@ -137,5 +173,14 @@ public class CompactorSourceBuilder {
     public CompactorSourceBuilder withPartitionPredicate(@Nullable Predicate partitionPredicate) {
         this.partitionPredicate = partitionPredicate;
         return this;
+    }
+
+    private Map<BinaryRow, Long> getPartitionInfo(BucketsTable table) {
+        List<PartitionEntry> partitions = table.newSnapshotReader().partitionEntries();
+
+        return partitions.stream()
+                .collect(
+                        Collectors.toMap(
+                                PartitionEntry::partition, PartitionEntry::lastFileCreationTime));
     }
 }

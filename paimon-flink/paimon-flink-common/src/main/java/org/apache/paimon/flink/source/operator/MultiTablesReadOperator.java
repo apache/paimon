@@ -20,9 +20,11 @@ package org.apache.paimon.flink.source.operator;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.flink.FlinkRowData;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.Split;
@@ -37,10 +39,16 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.utils.MultiTablesCompactorUtil.compactOptions;
+import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 
 /**
  * The operator that reads the Tuple2<{@link Split}, String> received from the preceding {@link
@@ -56,9 +64,18 @@ public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
     private final Catalog.Loader catalogLoader;
     private final boolean isStreaming;
 
+    private Duration partitionIdleTime = null;
+
     public MultiTablesReadOperator(Catalog.Loader catalogLoader, boolean isStreaming) {
         this.catalogLoader = catalogLoader;
         this.isStreaming = isStreaming;
+    }
+
+    public MultiTablesReadOperator(
+            Catalog.Loader catalogLoader, boolean isStreaming, Duration partitionIdleTime) {
+        this.catalogLoader = catalogLoader;
+        this.isStreaming = isStreaming;
+        this.partitionIdleTime = partitionIdleTime;
     }
 
     private transient Catalog catalog;
@@ -83,17 +100,33 @@ public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
 
         this.reuseRow = new FlinkRowData(null);
         this.reuseRecord = new StreamRecord<>(reuseRow);
+
+        if (isStreaming) {
+            Preconditions.checkArgument(
+                    partitionIdleTime == null, "Streaming mode does not support partitionIdleTime");
+        }
     }
 
     @Override
     public void processElement(StreamRecord<Tuple2<Split, String>> record) throws Exception {
         Identifier identifier = Identifier.fromString(record.getValue().f1);
         TableRead read = getTableRead(identifier);
+        Map<BinaryRow, Long> partitionInfo = getPartitionInfo(tablesMap.get(identifier));
         try (CloseableIterator<InternalRow> iterator =
                 read.createReader(record.getValue().f0).toCloseableIterator()) {
-            while (iterator.hasNext()) {
-                reuseRow.replace(iterator.next());
-                output.collect(reuseRecord);
+            if (partitionIdleTime == null) {
+                while (iterator.hasNext()) {
+                    reuseRow.replace(iterator.next());
+                    output.collect(reuseRecord);
+                }
+            } else {
+                while (iterator.hasNext()) {
+                    InternalRow row = iterator.next();
+                    if (checkIsHistoryPartition(row, partitionInfo)) {
+                        reuseRow.replace(row);
+                        output.collect(reuseRecord);
+                    }
+                }
             }
         }
     }
@@ -121,6 +154,26 @@ public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
         }
 
         return readsMap.get(tableId);
+    }
+
+    private Map<BinaryRow, Long> getPartitionInfo(BucketsTable table) {
+        List<PartitionEntry> partitions = table.newSnapshotReader().partitionEntries();
+
+        return partitions.stream()
+                .collect(
+                        Collectors.toMap(
+                                PartitionEntry::partition, PartitionEntry::lastFileCreationTime));
+    }
+
+    private boolean checkIsHistoryPartition(InternalRow row, Map<BinaryRow, Long> partitionInfo) {
+        BinaryRow partition = deserializeBinaryRow(row.getBinary(1));
+        long historyMilli =
+                LocalDateTime.now()
+                        .minus(partitionIdleTime)
+                        .atZone(ZoneId.systemDefault())
+                        .toInstant()
+                        .toEpochMilli();
+        return partitionInfo.get(partition) <= historyMilli;
     }
 
     @Override
