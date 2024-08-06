@@ -45,8 +45,6 @@ public class IcebergConversions {
             ThreadLocal.withInitial(StandardCharsets.UTF_8::newEncoder);
 
     public static ByteBuffer toByteBuffer(DataType type, Object value) {
-        int precision;
-        Timestamp timestamp;
         switch (type.getTypeRoot()) {
             case BOOLEAN:
                 return ByteBuffer.allocate(1).put(0, (Boolean) value ? (byte) 0x01 : (byte) 0x00);
@@ -81,14 +79,10 @@ public class IcebergConversions {
                 return ByteBuffer.wrap((decimal.toUnscaledBytes()));
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 TimestampType timestampType = (TimestampType) type;
-                precision = timestampType.getPrecision();
-                timestamp = (Timestamp) value;
-                return convertTimestampWithPrecisionToBuffer(timestamp, precision);
+                return convertTimestampWithPrecisionToBuffer((Timestamp) value, timestampType.getPrecision());
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 LocalZonedTimestampType localTimestampType = (LocalZonedTimestampType) type;
-                precision = localTimestampType.getPrecision();
-                timestamp = (Timestamp) value;
-                return convertTimestampWithPrecisionToBuffer(timestamp, precision);
+                return convertTimestampWithPrecisionToBuffer((Timestamp) value, localTimestampType.getPrecision());
             case TIME_WITHOUT_TIME_ZONE:
                 Long time = ((Integer) value).longValue();
                 return ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putLong(0, time);
