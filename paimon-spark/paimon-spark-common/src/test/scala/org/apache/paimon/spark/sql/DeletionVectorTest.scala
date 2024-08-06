@@ -48,7 +48,7 @@ class DeletionVectorTest extends PaimonSparkTestBase {
           spark.sql(
             s"""
                |CREATE TABLE T (id INT, name STRING)
-               |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'bucket' = '$bucket' $bucketKey)
+               |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'compaction.max.file-num' = '5', 'bucket' = '$bucket' $bucketKey)
                |""".stripMargin)
 
           val table = loadTable("T")
