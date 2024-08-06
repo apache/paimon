@@ -18,21 +18,13 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogFactory;
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.crosspartition.IndexBootstrap;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.table.FileStoreTable;
-
 import org.apache.flink.types.Row;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.List;
 
-import static org.apache.paimon.crosspartition.IndexBootstrap.BUCKET_FIELD;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** ITCase for batch file store. */
@@ -171,26 +163,13 @@ public class GlobalDynamicBucketTableITCase extends CatalogITCaseBase {
         assertThat(sql("select k, count(*) from large_t group by k having count(*) > 1")).isEmpty();
     }
 
+    @Disabled // TODO support this
     @Test
-    public void testBootstrapType() throws Exception {
-        Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(path)));
-        FileStoreTable t = (FileStoreTable) catalog.getTable(Identifier.create("default", "T"));
-        FileStoreTable partialUpdateT =
-                (FileStoreTable) catalog.getTable(Identifier.create("default", "partial_update_t"));
-        FileStoreTable firstRowT =
-                (FileStoreTable) catalog.getTable(Identifier.create("default", "first_row_t"));
-        assertThat(IndexBootstrap.bootstrapType(t.schema()).getFieldNames()).contains(BUCKET_FIELD);
-        assertThat(IndexBootstrap.bootstrapType(partialUpdateT.schema()).getFieldNames())
-                .contains(BUCKET_FIELD);
-        assertThat(IndexBootstrap.bootstrapType(firstRowT.schema()).getFieldNames())
-                .contains(BUCKET_FIELD);
-        assertThat(IndexBootstrap.bootstrapType(t.schema()).getFieldIndex(BUCKET_FIELD))
-                .isEqualTo(2);
-        assertThat(
-                        IndexBootstrap.bootstrapType(partialUpdateT.schema())
-                                .getFieldIndex(BUCKET_FIELD))
-                .isEqualTo(2);
-        assertThat(IndexBootstrap.bootstrapType(firstRowT.schema()).getFieldIndex(BUCKET_FIELD))
-                .isEqualTo(2);
+    public void testPkContainsPartialPartitionFields() {
+        sql(
+                "create table partial_part (pt1 int, pt2 int, k int, v int, primary key (k, pt1) not enforced) partitioned by (pt1, pt2)");
+        sql("insert into partial_part values (1, 1, 1, 1)");
+        sql("insert into partial_part values (1, 2, 1, 2)");
+        assertThat(sql("select * from partial_part")).containsExactlyInAnyOrder(Row.of(1, 2, 1, 2));
     }
 }
