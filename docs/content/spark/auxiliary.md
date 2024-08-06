@@ -33,7 +33,7 @@ To set paimon configs specifically, you need add the `spark.paimon.` prefix.
 
 ```sql
 -- set spark conf
-set spark.sql.sources.partitionOverwriteMode=dynamic;
+SET spark.sql.sources.partitionOverwriteMode=dynamic;
  
 -- set paimon conf
 SET spark.paimon.file.block-size=512M;
