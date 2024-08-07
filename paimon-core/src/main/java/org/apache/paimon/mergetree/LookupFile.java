@@ -33,7 +33,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -43,7 +42,7 @@ import static org.apache.paimon.mergetree.LookupUtils.fileKibiBytes;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Lookup file for cache remote file to local. */
-public class LookupFile implements Closeable {
+public class LookupFile {
 
     private static final Logger LOG = LoggerFactory.getLogger(LookupFile.class);
 
@@ -54,7 +53,6 @@ public class LookupFile implements Closeable {
 
     private long requestCount;
     private long hitCount;
-    private boolean used;
     private boolean isClosed = false;
 
     public LookupFile(
@@ -76,20 +74,6 @@ public class LookupFile implements Closeable {
         return res;
     }
 
-    public boolean isUsed() {
-        return used;
-    }
-
-    public LookupFile pin() {
-        this.used = true;
-        return this;
-    }
-
-    public LookupFile unPin() {
-        this.used = false;
-        return this;
-    }
-
     public DataFileMeta remoteFile() {
         return remoteFile;
     }
@@ -98,14 +82,14 @@ public class LookupFile implements Closeable {
         return isClosed;
     }
 
-    @Override
-    public void close() throws IOException {
+    public void close(RemovalCause cause) throws IOException {
         reader.close();
         isClosed = true;
         callback.run();
         LOG.info(
-                "Delete Lookup file {} stats: requestCount={}, hitCount={}, size={}KB",
-                localFile,
+                "Delete Lookup file {} due to {}. Access stats: requestCount={}, hitCount={}, size={}KB",
+                localFile.getName(),
+                cause,
                 requestCount,
                 hitCount,
                 localFile.length() >> 10);
@@ -126,13 +110,13 @@ public class LookupFile implements Closeable {
     }
 
     private static int fileWeigh(String file, LookupFile lookupFile) {
-        return lookupFile.isUsed() ? 0 : fileKibiBytes(lookupFile.localFile);
+        return fileKibiBytes(lookupFile.localFile);
     }
 
     private static void removalCallback(String file, LookupFile lookupFile, RemovalCause cause) {
         if (lookupFile != null) {
             try {
-                lookupFile.close();
+                lookupFile.close(cause);
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }
