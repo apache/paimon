@@ -79,6 +79,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                                 changelogRow("+I", 3L, "Paimon")))
                 .close();
 
+        Thread.sleep(1000);
         ConsumerManager consumerManager = new ConsumerManager(table.fileIO(), table.location());
         Optional<Consumer> consumer1 = consumerManager.consumer("myid");
         assertThat(consumer1).isPresent();
