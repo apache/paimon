@@ -105,7 +105,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
         this.pathFactory = pathFactory;
         this.targetFileSize = options.targetFileSize(false);
         this.compactionMinFileNum = options.compactionMinFileNum();
-        this.compactionMaxFileNum = options.compactionMaxFileNum();
+        this.compactionMaxFileNum = options.compactionMaxFileNum().orElse(5);
         this.commitForceCompact = options.commitForceCompact();
         this.skipCompaction = options.writeOnly();
         this.fileCompression = options.fileCompression();
