@@ -29,10 +29,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
@@ -197,6 +194,55 @@ public class SnapshotManagerTest {
                         null,
                         null,
                         null));
+    }
+
+    @Test
+    public void testLatestSnapshotOfUser() throws IOException, InterruptedException {
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                new SnapshotManager(localFileIO, new Path(tempDir.toString()));
+        // create 100 snapshots using user "lastCommitUser"
+        for (long i = 0; i < 100; i++) {
+            Snapshot snapshot =
+                    new Snapshot(
+                            i,
+                            0L,
+                            null,
+                            null,
+                            null,
+                            null,
+                            "lastCommitUser",
+                            0L,
+                            Snapshot.CommitKind.APPEND,
+                            i * 1000,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null);
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+
+        // read the latest snapshot of user "currentCommitUser"
+        AtomicReference<Exception> exception = new AtomicReference<>();
+        Thread thread =
+                new Thread(
+                        () -> {
+                            try {
+                                snapshotManager.latestSnapshotOfUser("currentCommitUser");
+                            } catch (Exception e) {
+                                exception.set(e);
+                            }
+                        });
+        thread.start();
+        Thread.sleep(100);
+
+        // expire snapshot
+        localFileIO.deleteQuietly(snapshotManager.snapshotPath(0));
+        thread.join();
+
+        assertThat(exception.get()).isNull();
     }
 
     @Test
