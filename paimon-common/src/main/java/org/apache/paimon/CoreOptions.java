@@ -2032,10 +2032,6 @@ public class CoreOptions implements Serializable {
         return options.get(METADATA_ICEBERG_COMPATIBLE);
     }
 
-    public boolean forLookup() {
-        return options.get(FORCE_LOOKUP);
-    }
-
     /** Specifies the merge engine for table with primary key. */
     public enum MergeEngine implements DescribedEnum {
         DEDUPLICATE("deduplicate", "De-duplicate and keep the last row."),
