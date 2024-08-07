@@ -1699,7 +1699,7 @@ public class CoreOptions implements Serializable {
                 mergeEngine().equals(MergeEngine.FIRST_ROW),
                 changelogProducer().equals(ChangelogProducer.LOOKUP),
                 deletionVectorsEnabled(),
-                forLookup());
+                options.get(FORCE_LOOKUP));
     }
 
     public boolean changelogRowDeduplicate() {
