@@ -346,6 +346,12 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>The maximal fan-in for external merge sort. It limits the number of file handles. If it is too small, may cause intermediate merging. But if it is too large, it will cause too many files opened at the same time, consume memory and lead to random reading.</td>
         </tr>
         <tr>
+            <td><h5>force-lookup</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to force the use of lookup for compaction.</td>
+        </tr>
+        <tr>
             <td><h5>lookup-wait</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>

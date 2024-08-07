@@ -29,6 +29,8 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
@@ -65,9 +67,11 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CompatibilityTestUtils;
+import org.apache.paimon.utils.Pair;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
@@ -95,7 +99,11 @@ import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.LOOKUP_LOCAL_FILE_TYPE;
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
+import static org.apache.paimon.CoreOptions.MergeEngine;
+import static org.apache.paimon.CoreOptions.MergeEngine.AGGREGATE;
+import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
+import static org.apache.paimon.CoreOptions.MergeEngine.PARTIAL_UPDATE;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_EXPIRE_LIMIT;
 import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST;
 import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_TARGET_SIZE;
@@ -1668,6 +1676,62 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         // table-path/changelog
         // table-path/changelog/LATEST
         // table-path/changelog/EARLIEST
+    }
+
+    @ParameterizedTest
+    @EnumSource(CoreOptions.MergeEngine.class)
+    public void testForceLookupCompaction(CoreOptions.MergeEngine mergeEngine) throws Exception {
+        Map<MergeEngine, Pair<Long, Long>> testData = new HashMap<>();
+        testData.put(DEDUPLICATE, Pair.of(50L, 100L));
+        testData.put(PARTIAL_UPDATE, Pair.of(null, 100L));
+        testData.put(AGGREGATE, Pair.of(30L, 70L));
+        testData.put(FIRST_ROW, Pair.of(100L, 70L));
+
+        Pair<Long, Long> currentTestData = testData.get(mergeEngine);
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set(CoreOptions.FORCE_LOOKUP, true);
+                            options.set(MERGE_ENGINE, mergeEngine);
+                            if (mergeEngine == AGGREGATE) {
+                                options.set("fields.b.aggregate-function", "sum");
+                            }
+                        });
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        write.withIOManager(IOManager.create(tempDir.toString()));
+
+        // write data
+        write.write(rowData(1, 10, currentTestData.getLeft()));
+        commit.commit(1, write.prepareCommit(true, 1));
+        assertThat(table.snapshotManager().snapshotCount()).isEqualTo(2L);
+
+        write.write(rowData(1, 10, currentTestData.getRight()));
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.close();
+        commit.close();
+        assertThat(table.snapshotManager().snapshotCount()).isEqualTo(4L);
+        assertThat(table.snapshotManager().latestSnapshot())
+                .matches(snapshot -> snapshot.commitKind() == COMPACT);
+
+        // 3 data files + bucket-0 directory
+        List<java.nio.file.Path> files =
+                Files.walk(new File(tablePath.toUri().getPath(), "pt=1/bucket-0").toPath())
+                        .collect(Collectors.toList());
+        assertThat(files.size()).isEqualTo(4);
+
+        // 2 data files compact into 1 file
+        FileStoreScan scan = table.store().newScan().withKind(ScanMode.DELTA);
+        assertThat(scan.plan().files(FileKind.ADD).size()).isEqualTo(1);
+        assertThat(scan.plan().files(FileKind.DELETE).size()).isEqualTo(2);
+
+        // check result
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        TableRead read = table.newRead();
+        assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
+                .isEqualTo(
+                        Collections.singletonList(
+                                "1|10|100|binary|varbinary|mapKey:mapVal|multiset"));
     }
 
     private void assertReadChangelog(int id, FileStoreTable table) throws Exception {

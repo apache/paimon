@@ -1258,6 +1258,13 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("Specifies the commit user prefix.");
 
+    @Immutable
+    public static final ConfigOption<Boolean> FORCE_LOOKUP =
+            key("force-lookup")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to force the use of lookup for compaction.");
+
     public static final ConfigOption<Boolean> LOOKUP_WAIT =
             key("lookup-wait")
                     .booleanType()
@@ -1705,7 +1712,8 @@ public class CoreOptions implements Serializable {
         return LookupStrategy.from(
                 mergeEngine().equals(MergeEngine.FIRST_ROW),
                 changelogProducer().equals(ChangelogProducer.LOOKUP),
-                deletionVectorsEnabled());
+                deletionVectorsEnabled(),
+                options.get(FORCE_LOOKUP));
     }
 
     public boolean changelogRowDeduplicate() {
