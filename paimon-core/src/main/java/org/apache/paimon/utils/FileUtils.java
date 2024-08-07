@@ -31,45 +31,10 @@ import javax.annotation.Nullable;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.concurrent.ForkJoinPool;
-import java.util.concurrent.ForkJoinWorkerThread;
 import java.util.stream.Stream;
 
 /** Utils for file reading and writing. */
 public class FileUtils {
-
-    public static final ForkJoinPool COMMON_IO_FORK_JOIN_POOL;
-
-    private static volatile ForkJoinPool scanIoForkJoinPool;
-
-    static {
-        COMMON_IO_FORK_JOIN_POOL =
-                createForkJoinPool(
-                        "file-store-common-io", Runtime.getRuntime().availableProcessors());
-    }
-
-    private static ForkJoinPool createForkJoinPool(String namePrefix, int parallelism) {
-        // if we want to name threads in the fork join pool we need all these
-        // see https://stackoverflow.com/questions/34303094/
-        ForkJoinPool.ForkJoinWorkerThreadFactory factory =
-                pool -> {
-                    ForkJoinWorkerThread worker =
-                            ForkJoinPool.defaultForkJoinWorkerThreadFactory.newThread(pool);
-                    worker.setName(namePrefix + "-" + worker.getPoolIndex());
-                    return worker;
-                };
-        return new ForkJoinPool(parallelism, factory, null, false);
-    }
-
-    public static synchronized ForkJoinPool getScanIoForkJoinPool(int parallelism) {
-        if (scanIoForkJoinPool == null || parallelism > scanIoForkJoinPool.getParallelism()) {
-            if (scanIoForkJoinPool != null) {
-                scanIoForkJoinPool.shutdown();
-            }
-            scanIoForkJoinPool = createForkJoinPool("paimon-scan-io", parallelism);
-        }
-        return scanIoForkJoinPool;
-    }
 
     /**
      * List versioned files for the directory.

@@ -27,10 +27,13 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
 
-/** This test mainly test for the methods in {@link ScanParallelExecutor}. */
-public class ScanParallelExecutorTest {
+import static java.util.Collections.emptyList;
+import static java.util.Collections.singletonList;
+import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedExecute;
+
+/** This test mainly test for the methods in {@link ManifestReadThreadPool}. */
+public class ManifestReadThreadPoolTest {
 
     @Test
     public void testParallelismBatchIterable() {
@@ -40,11 +43,7 @@ public class ScanParallelExecutorTest {
             nums.add(i);
         }
 
-        Iterable<Integer> re =
-                ScanParallelExecutor.parallelismBatchIterable(
-                        l -> l.parallelStream().map(i -> i + 1).collect(Collectors.toList()),
-                        nums,
-                        null);
+        Iterable<Integer> re = sequentialBatchedExecute(i -> singletonList(i + 1), nums, null);
 
         AtomicInteger atomicInteger = new AtomicInteger(0);
         re.forEach(
@@ -61,11 +60,7 @@ public class ScanParallelExecutorTest {
             nums.add(i);
         }
 
-        Iterable<Integer> re =
-                ScanParallelExecutor.parallelismBatchIterable(
-                        l -> l.parallelStream().map(i -> i + 1).collect(Collectors.toList()),
-                        nums,
-                        null);
+        Iterable<Integer> re = sequentialBatchedExecute(i -> singletonList(i + 1), nums, null);
 
         AtomicInteger atomicInteger = new AtomicInteger(0);
         re.forEach(
@@ -82,11 +77,7 @@ public class ScanParallelExecutorTest {
             nums.add(i);
         }
 
-        Iterable<Integer> re =
-                ScanParallelExecutor.parallelismBatchIterable(
-                        l -> l.parallelStream().map(i -> i + 1).collect(Collectors.toList()),
-                        nums,
-                        null);
+        Iterable<Integer> re = sequentialBatchedExecute(i -> singletonList(i + 1), nums, null);
 
         Iterator<Integer> iterator = re.iterator();
         for (int i = 0; i < 100; i++) {
@@ -108,11 +99,7 @@ public class ScanParallelExecutorTest {
             nums.add(i);
         }
 
-        Iterable<Integer> re =
-                ScanParallelExecutor.parallelismBatchIterable(
-                        l -> l.parallelStream().map(i -> i + 1).collect(Collectors.toList()),
-                        nums,
-                        null);
+        Iterable<Integer> re = sequentialBatchedExecute(i -> singletonList(i + 1), nums, null);
 
         Iterator<Integer> iterator = re.iterator();
         for (int i = 0; i < 123; i++) {
@@ -129,20 +116,15 @@ public class ScanParallelExecutorTest {
     @Test
     public void testForEmptyInput() {
         Iterable<Integer> re =
-                ScanParallelExecutor.parallelismBatchIterable(
-                        l -> l.parallelStream().map(i -> i + 1).collect(Collectors.toList()),
-                        (List<Integer>) Collections.EMPTY_LIST,
-                        null);
+                sequentialBatchedExecute(
+                        i -> singletonList(i + 1), (List<Integer>) Collections.EMPTY_LIST, null);
         Assertions.assertThat(!re.iterator().hasNext()).isTrue();
     }
 
     @Test
     public void testForSingletonInput() {
         Iterable<Integer> re =
-                ScanParallelExecutor.parallelismBatchIterable(
-                        l -> l.parallelStream().map(i -> i + 1).collect(Collectors.toList()),
-                        Collections.singletonList(1),
-                        null);
+                sequentialBatchedExecute(i -> singletonList(i + 1), singletonList(1), null);
         re.forEach(i -> Assertions.assertThat(i).isEqualTo(2));
     }
 
@@ -150,8 +132,8 @@ public class ScanParallelExecutorTest {
     public void testDifferentQueueSizeWithFilterElement() {
         for (int queueSize = 1; queueSize < 20; queueSize++) {
             Iterable<Integer> re =
-                    ScanParallelExecutor.parallelismBatchIterable(
-                            l -> l.parallelStream().filter(i -> i > 5).collect(Collectors.toList()),
+                    sequentialBatchedExecute(
+                            i -> i > 5 ? singletonList(i) : emptyList(),
                             Arrays.asList(1, 2, 3, 4, 5, 6, 7, 8, 9, 10),
                             queueSize);
             Integer[] result = new Integer[] {6, 7, 8, 9, 10};
