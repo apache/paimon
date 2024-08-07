@@ -109,10 +109,7 @@ So by default, compaction is synchronous, and if asynchronous is turned on, ther
 If you don't want to use Deletion Vectors mode, you want to query fast enough in MOR mode, but can only find
 older data, you can also:
 
-1. Configure 'compaction.optimization-interval' when writing data. For streaming jobs, optimized compaction will then
-   be performed periodically; For batch jobs, optimized compaction will be carried out when the job ends. (Or configure
-   `'full-compaction.delta-commits'`, its disadvantage is that it can only perform compaction synchronously, which will
-   affect writing efficiency)
+1. Configure 'compaction.optimization-interval' when writing data.
 2. Query from [read-optimized system table]({{< ref "maintenance/system-tables#read-optimized-table" >}}). Reading from
    results of optimized files avoids merging records with the same key, thus improving reading performance.
 
