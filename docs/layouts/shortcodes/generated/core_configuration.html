@@ -340,6 +340,12 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>The maximal fan-in for external merge sort. It limits the number of file handles. If it is too small, may cause intermediate merging. But if it is too large, it will cause too many files opened at the same time, consume memory and lead to random reading.</td>
         </tr>
         <tr>
+            <td><h5>force-lookup</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to force the use of lookup for compaction.</td>
+        </tr>
+        <tr>
             <td><h5>lookup-wait</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
@@ -466,12 +472,6 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
             <td>Total level number, for example, there are 3 levels, including 0,1,2 levels.</td>
-        </tr>
-        <tr>
-            <td><h5>prefer-compaction-strategy</h5></td>
-            <td style="word-wrap: break-word;">universal</td>
-            <td>Enum</td>
-            <td>By default, universal compaction strategy is used. Note: This is just a suggestion for paimon to use this compaction strategy. Paimon will automatically decide which compaction strategy to use. For example, when 'changelog-producer' is set to 'lookup', paimon will automatically use the lookup compaction strategy.<br /><br />Possible values:<ul><li>"universal": Universal compaction strategy, mainly triggered by the number of sorted runs, space amplification, etc.</li><li>"lookup": When the L0 file is generated, compaction will be triggered as soon as possible.</li></ul></td>
         </tr>
         <tr>
             <td><h5>num-sorted-run.compaction-trigger</h5></td>

@@ -20,7 +20,6 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
-import org.apache.paimon.CoreOptions.CompactionStrategy;
 import org.apache.paimon.CoreOptions.LookupLocalFileType;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
@@ -1681,8 +1680,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
 
     @ParameterizedTest
     @EnumSource(CoreOptions.MergeEngine.class)
-    public void testPreferLookupCompactionStrategy(CoreOptions.MergeEngine mergeEngine)
-            throws Exception {
+    public void testForceLookupCompaction(CoreOptions.MergeEngine mergeEngine) throws Exception {
         Map<MergeEngine, Pair<Long, Long>> testData = new HashMap<>();
         testData.put(DEDUPLICATE, Pair.of(50L, 100L));
         testData.put(PARTIAL_UPDATE, Pair.of(null, 100L));
@@ -1693,9 +1691,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table =
                 createFileStoreTable(
                         options -> {
-                            options.set(
-                                    CoreOptions.PREFER_COMPACTION_STRATEGY,
-                                    CompactionStrategy.LOOKUP);
+                            options.set(CoreOptions.FORCE_LOOKUP, true);
                             options.set(MERGE_ENGINE, mergeEngine);
                             if (mergeEngine == AGGREGATE) {
                                 options.set("fields.b.aggregate-function", "sum");

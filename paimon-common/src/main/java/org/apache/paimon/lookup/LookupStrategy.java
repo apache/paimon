@@ -33,18 +33,18 @@ public class LookupStrategy {
             boolean isFirstRow,
             boolean produceChangelog,
             boolean deletionVector,
-            boolean preferLookup) {
+            boolean forceLookup) {
         this.isFirstRow = isFirstRow;
         this.produceChangelog = produceChangelog;
         this.deletionVector = deletionVector;
-        this.needLookup = produceChangelog || deletionVector || isFirstRow || preferLookup;
+        this.needLookup = produceChangelog || deletionVector || isFirstRow || forceLookup;
     }
 
     public static LookupStrategy from(
             boolean isFirstRow,
             boolean produceChangelog,
             boolean deletionVector,
-            boolean preferLookup) {
-        return new LookupStrategy(isFirstRow, produceChangelog, deletionVector, preferLookup);
+            boolean forceLookup) {
+        return new LookupStrategy(isFirstRow, produceChangelog, deletionVector, forceLookup);
     }
 }
