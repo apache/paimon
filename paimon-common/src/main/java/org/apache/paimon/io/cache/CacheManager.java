@@ -25,7 +25,6 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.RemovalCause;
-import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
 
 import java.io.IOException;
 
@@ -48,13 +47,13 @@ public class CacheManager {
                         .weigher(this::weigh)
                         .maximumWeight(maxMemorySize.getBytes())
                         .removalListener(this::onRemoval)
-                        .executor(MoreExecutors.directExecutor())
+                        .executor(Runnable::run)
                         .build();
         this.fileReadCount = 0;
     }
 
     @VisibleForTesting
-    public Cache<CacheKey, CacheValue> cache() {
+    public Cache<CacheKey, ?> cache() {
         return cache;
     }
 
@@ -81,8 +80,10 @@ public class CacheManager {
     }
 
     private void onRemoval(CacheKey key, CacheValue value, RemovalCause cause) {
-        value.isClosed = true;
-        value.callback.onRemoval(key);
+        if (value != null) {
+            value.isClosed = true;
+            value.callback.onRemoval(key);
+        }
     }
 
     public int fileReadCount() {

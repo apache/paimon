@@ -67,6 +67,7 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
         super(
                 fileIO,
                 new IcebergManifestEntrySerializer(partitionType),
+                IcebergManifestEntry.schema(partitionType),
                 readerFactory,
                 writerFactory,
                 compression,
@@ -124,7 +125,8 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
                     factory,
                     path,
                     serializer::toRow,
-                    fileCompression);
+                    fileCompression,
+                    false);
             this.partitionStatsCollector = new SimpleStatsCollector(partitionType);
             this.sequenceNumber = sequenceNumber;
         }

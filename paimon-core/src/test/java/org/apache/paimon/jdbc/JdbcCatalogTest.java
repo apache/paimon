@@ -32,8 +32,6 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayOutputStream;
 import java.io.ObjectOutputStream;
 import java.sql.SQLException;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -86,13 +84,6 @@ public class JdbcCatalogTest extends CatalogTestBase {
         Thread.sleep(2000);
         assertThat(JdbcUtils.acquire(((JdbcCatalog) catalog).getConnections(), lockId, 1000))
                 .isTrue();
-    }
-
-    @Test
-    @Override
-    public void testListDatabasesWhenNoDatabases() {
-        List<String> databases = catalog.listDatabases();
-        assertThat(databases).isEqualTo(new ArrayList<>());
     }
 
     @Test

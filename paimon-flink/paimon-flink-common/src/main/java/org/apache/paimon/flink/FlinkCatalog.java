@@ -347,10 +347,7 @@ public class FlinkCatalog extends AbstractCatalog {
             // Although catalog.createTable will copy the default options, but we need this info
             // here before create table, such as table-default.kafka.bootstrap.servers defined in
             // catalog options. Temporarily, we copy the default options here.
-            if (catalog instanceof org.apache.paimon.catalog.AbstractCatalog) {
-                ((org.apache.paimon.catalog.AbstractCatalog) catalog)
-                        .copyTableDefaultOptions(options);
-            }
+            Catalog.tableDefaultOptions(catalog.options()).forEach(options::putIfAbsent);
             options.put(REGISTER_TIMEOUT.key(), logStoreAutoRegisterTimeout.toString());
             registerLogSystem(catalog, identifier, options, classLoader);
         }

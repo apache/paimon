@@ -90,7 +90,6 @@ public class FileStoreTestUtils {
             long commitIdentifier,
             Map<BinaryRow, Map<Integer, RecordWriter<KeyValue>>> writers)
             throws Exception {
-        FileStoreCommit commit = store.newCommit();
         ManifestCommittable committable = new ManifestCommittable(commitIdentifier, null);
         for (Map.Entry<BinaryRow, Map<Integer, RecordWriter<KeyValue>>> entryWithPartition :
                 writers.entrySet()) {
@@ -106,7 +105,9 @@ public class FileStoreTestUtils {
             }
         }
 
-        commit.commit(committable, Collections.emptyMap());
+        try (FileStoreCommit commit = store.newCommit()) {
+            commit.commit(committable, Collections.emptyMap());
+        }
 
         writers.values().stream()
                 .flatMap(m -> m.values().stream())

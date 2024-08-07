@@ -18,6 +18,8 @@
 
 package org.apache.paimon.deletionvectors;
 
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
@@ -38,15 +40,41 @@ public class DeletionVectorIndexFileMaintainer {
 
     private final IndexFileHandler indexFileHandler;
 
+    private final BinaryRow partition;
+    private final int bucket;
     private final Map<String, IndexManifestEntry> indexNameToEntry = new HashMap<>();
 
     private final Map<String, Map<String, DeletionFile>> indexFileToDeletionFiles = new HashMap<>();
+    private final Map<String, String> dataFileToIndexFile = new HashMap<>();
 
     private final Set<String> touchedIndexFiles = new HashSet<>();
 
+    private final DeletionVectorsMaintainer maintainer;
+
+    // the key of dataFileToDeletionFiles is the relative path again table's location.
     public DeletionVectorIndexFileMaintainer(
-            IndexFileHandler indexFileHandler, Map<String, DeletionFile> dataFileToDeletionFiles) {
+            IndexFileHandler indexFileHandler,
+            Long snapshotId,
+            BinaryRow partition,
+            int bucket,
+            boolean restore) {
         this.indexFileHandler = indexFileHandler;
+        this.partition = partition;
+        this.bucket = bucket;
+        if (restore) {
+            this.maintainer =
+                    new DeletionVectorsMaintainer.Factory(indexFileHandler)
+                            .createOrRestore(snapshotId, partition, bucket);
+        } else {
+            this.maintainer = new DeletionVectorsMaintainer.Factory(indexFileHandler).create();
+        }
+        Map<String, DeletionFile> dataFileToDeletionFiles =
+                indexFileHandler.scanDVIndex(snapshotId, partition, bucket);
+        init(dataFileToDeletionFiles);
+    }
+
+    @VisibleForTesting
+    public void init(Map<String, DeletionFile> dataFileToDeletionFiles) {
         List<String> touchedIndexFileNames =
                 dataFileToDeletionFiles.values().stream()
                         .map(deletionFile -> new Path(deletionFile.path()).getName())
@@ -66,7 +94,32 @@ public class DeletionVectorIndexFileMaintainer {
                 indexFileToDeletionFiles.put(indexFileName, new HashMap<>());
             }
             indexFileToDeletionFiles.get(indexFileName).put(dataFile, deletionFile);
+            dataFileToIndexFile.put(dataFile, indexFileName);
         }
+    }
+
+    public BinaryRow getPartition() {
+        return this.partition;
+    }
+
+    public int getBucket() {
+        return this.bucket;
+    }
+
+    public void notifyDeletionFiles(String dataFile, DeletionVector deletionVector) {
+        DeletionVectorsIndexFile deletionVectorsIndexFile = indexFileHandler.deletionVectorsIndex();
+        DeletionFile previous = null;
+        if (dataFileToIndexFile.containsKey(dataFile)) {
+            String indexFileName = dataFileToIndexFile.get(dataFile);
+            touchedIndexFiles.add(indexFileName);
+            if (indexFileToDeletionFiles.containsKey(indexFileName)) {
+                previous = indexFileToDeletionFiles.get(indexFileName).remove(dataFile);
+            }
+        }
+        if (previous != null) {
+            deletionVector.merge(deletionVectorsIndexFile.readDeletionVector(dataFile, previous));
+        }
+        maintainer.notifyNewDeletion(dataFile, deletionVector);
     }
 
     public void notifyDeletionFiles(Map<String, DeletionFile> dataFileToDeletionFiles) {
@@ -78,6 +131,19 @@ public class DeletionVectorIndexFileMaintainer {
                 indexFileToDeletionFiles.get(indexFileName).remove(dataFile);
             }
         }
+    }
+
+    public List<IndexManifestEntry> persist() {
+        List<IndexManifestEntry> result = writeUnchangedDeletionVector();
+        List<IndexManifestEntry> newIndexFileEntries =
+                maintainer.writeDeletionVectorsIndex().stream()
+                        .map(
+                                fileMeta ->
+                                        new IndexManifestEntry(
+                                                FileKind.ADD, partition, bucket, fileMeta))
+                        .collect(Collectors.toList());
+        result.addAll(newIndexFileEntries);
+        return result;
     }
 
     public List<IndexManifestEntry> writeUnchangedDeletionVector() {

@@ -18,7 +18,6 @@
 
 package org.apache.paimon.catalog;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.Lock;
@@ -37,7 +36,6 @@ import java.util.Map;
 import java.util.concurrent.Callable;
 
 import static org.apache.paimon.catalog.FileSystemCatalogOptions.CASE_SENSITIVE;
-import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 
 /** A catalog implementation for {@link FileIO}. */
 public class FileSystemCatalog extends AbstractCatalog {
@@ -62,13 +60,8 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected boolean databaseExistsImpl(String databaseName) {
-        return uncheck(() -> fileIO.exists(newDatabasePath(databaseName)));
-    }
-
-    @Override
     protected void createDatabaseImpl(String name, Map<String, String> properties) {
-        if (properties.containsKey(AbstractCatalog.DB_LOCATION_PROP)) {
+        if (properties.containsKey(Catalog.DB_LOCATION_PROP)) {
             throw new IllegalArgumentException(
                     "Cannot specify location for a database when using fileSystem catalog.");
         }
@@ -81,7 +74,11 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
-    public Map<String, String> loadDatabasePropertiesImpl(String name) {
+    public Map<String, String> loadDatabasePropertiesImpl(String name)
+            throws DatabaseNotExistException {
+        if (!uncheck(() -> fileIO.exists(newDatabasePath(name)))) {
+            throw new DatabaseNotExistException(name);
+        }
         return Collections.emptyMap();
     }
 
@@ -101,43 +98,33 @@ public class FileSystemCatalog extends AbstractCatalog {
             return super.tableExists(identifier);
         }
 
-        return tableExistsInFileSystem(getDataTableLocation(identifier));
+        return tableExistsInFileSystem(
+                getTableLocation(identifier), identifier.getBranchNameOrDefault());
     }
 
     @Override
-    public TableSchema getDataTableSchema(Identifier identifier, String branchName)
-            throws TableNotExistException {
-        return schemaManager(identifier, branchName)
-                .latest()
-                .map(
-                        s -> {
-                            if (!DEFAULT_MAIN_BRANCH.equals(branchName)) {
-                                Options branchOptions = new Options(s.options());
-                                branchOptions.set(CoreOptions.BRANCH, branchName);
-                                return s.copy(branchOptions.toMap());
-                            } else {
-                                return s;
-                            }
-                        })
+    public TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
+        return tableSchemaInFileSystem(
+                        getTableLocation(identifier), identifier.getBranchNameOrDefault())
                 .orElseThrow(() -> new TableNotExistException(identifier));
     }
 
     @Override
     protected void dropTableImpl(Identifier identifier) {
-        Path path = getDataTableLocation(identifier);
+        Path path = getTableLocation(identifier);
         uncheck(() -> fileIO.delete(path, true));
     }
 
     @Override
     public void createTableImpl(Identifier identifier, Schema schema) {
-        uncheck(() -> schemaManager(identifier, DEFAULT_MAIN_BRANCH).createTable(schema));
+        uncheck(() -> schemaManager(identifier).createTable(schema));
     }
 
-    private SchemaManager schemaManager(Identifier identifier, String branchName) {
-        Path path = getDataTableLocation(identifier);
+    private SchemaManager schemaManager(Identifier identifier) {
+        Path path = getTableLocation(identifier);
         CatalogLock catalogLock =
                 lockFactory().map(fac -> fac.createLock(assertGetLockContext())).orElse(null);
-        return new SchemaManager(fileIO, path, branchName)
+        return new SchemaManager(fileIO, path, identifier.getBranchNameOrDefault())
                 .withLock(catalogLock == null ? null : Lock.fromCatalog(catalogLock, identifier));
     }
 
@@ -148,16 +135,15 @@ public class FileSystemCatalog extends AbstractCatalog {
 
     @Override
     public void renameTableImpl(Identifier fromTable, Identifier toTable) {
-        Path fromPath = getDataTableLocation(fromTable);
-        Path toPath = getDataTableLocation(toTable);
+        Path fromPath = getTableLocation(fromTable);
+        Path toPath = getTableLocation(toTable);
         uncheck(() -> fileIO.rename(fromPath, toPath));
     }
 
     @Override
-    protected void alterTableImpl(
-            Identifier identifier, String branchName, List<SchemaChange> changes)
+    protected void alterTableImpl(Identifier identifier, List<SchemaChange> changes)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
-        schemaManager(identifier, branchName).commitChanges(changes);
+        schemaManager(identifier).commitChanges(changes);
     }
 
     protected static <T> T uncheck(Callable<T> callable) {
@@ -177,7 +163,7 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
-    public boolean caseSensitive() {
+    public boolean allowUpperCase() {
         return catalogOptions.get(CASE_SENSITIVE);
     }
 }

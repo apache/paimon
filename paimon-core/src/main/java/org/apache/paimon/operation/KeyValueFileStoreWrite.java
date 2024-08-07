@@ -43,6 +43,7 @@ import org.apache.paimon.io.RecordLevelExpire;
 import org.apache.paimon.lookup.LookupStoreFactory;
 import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.mergetree.Levels;
+import org.apache.paimon.mergetree.LookupFile;
 import org.apache.paimon.mergetree.LookupLevels;
 import org.apache.paimon.mergetree.LookupLevels.ContainsValueProcessor;
 import org.apache.paimon.mergetree.LookupLevels.KeyValueProcessor;
@@ -71,6 +72,8 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
 
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -85,6 +88,7 @@ import java.util.function.Supplier;
 import static org.apache.paimon.CoreOptions.ChangelogProducer.FULL_COMPACTION;
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 import static org.apache.paimon.lookup.LookupStoreFactory.bfGenerator;
+import static org.apache.paimon.mergetree.LookupFile.localFilePrefix;
 
 /** {@link FileStoreWrite} for {@link KeyValueFileStore}. */
 public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
@@ -101,13 +105,16 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     private final FileIO fileIO;
     private final RowType keyType;
     private final RowType valueType;
+    private final RowType partitionType;
     @Nullable private final RecordLevelExpire recordLevelExpire;
+    @Nullable private Cache<String, LookupFile> lookupFileCache;
 
     public KeyValueFileStoreWrite(
             FileIO fileIO,
             SchemaManager schemaManager,
             TableSchema schema,
             String commitUser,
+            RowType partitionType,
             RowType keyType,
             RowType valueType,
             Supplier<Comparator<InternalRow>> keyComparatorSupplier,
@@ -132,6 +139,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 deletionVectorsMaintainerFactory,
                 tableName);
         this.fileIO = fileIO;
+        this.partitionType = partitionType;
         this.keyType = keyType;
         this.valueType = valueType;
         this.udsComparatorSupplier = udsComparatorSupplier;
@@ -321,7 +329,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             return new LookupMergeTreeCompactRewriter(
                     maxLevel,
                     mergeEngine,
-                    createLookupLevels(levels, processor, lookupReaderFactory),
+                    createLookupLevels(partition, bucket, levels, processor, lookupReaderFactory),
                     readerFactory,
                     writerFactory,
                     keyComparator,
@@ -343,6 +351,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     }
 
     private <T> LookupLevels<T> createLookupLevels(
+            BinaryRow partition,
+            int bucket,
             Levels levels,
             LookupLevels.ValueProcessor<T> valueProcessor,
             FileReaderFactory<KeyValue> readerFactory) {
@@ -356,16 +366,33 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         cacheManager,
                         new RowCompactedSerializer(keyType).createSliceComparator());
         Options options = this.options.toConfiguration();
+        if (lookupFileCache == null) {
+            lookupFileCache =
+                    LookupFile.createCache(
+                            options.get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
+                            options.get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE));
+        }
         return new LookupLevels<>(
                 levels,
                 keyComparatorSupplier.get(),
                 keyType,
                 valueProcessor,
                 readerFactory::createRecordReader,
-                () -> ioManager.createChannel().getPathFile(),
+                file ->
+                        ioManager
+                                .createChannel(
+                                        localFilePrefix(partitionType, partition, bucket, file))
+                                .getPathFile(),
                 lookupStoreFactory,
-                options.get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
-                options.get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE),
-                bfGenerator(options));
+                bfGenerator(options),
+                lookupFileCache);
+    }
+
+    @Override
+    public void close() throws Exception {
+        super.close();
+        if (lookupFileCache != null) {
+            lookupFileCache.invalidateAll();
+        }
     }
 }

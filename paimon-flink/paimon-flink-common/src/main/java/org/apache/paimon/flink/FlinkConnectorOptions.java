@@ -211,11 +211,18 @@ public class FlinkConnectorOptions {
             key("scan.remove-normalize")
                     .booleanType()
                     .defaultValue(false)
-                    .withDeprecatedKeys("log.scan.remove-normalize")
+                    .withFallbackKeys("log.scan.remove-normalize")
                     .withDescription(
                             "Whether to force the removal of the normalize node when streaming read."
                                     + " Note: This is dangerous and is likely to cause data errors if downstream"
                                     + " is used to calculate aggregation and the input is not complete changelog.");
+
+    public static final ConfigOption<Boolean> STREAMING_READ_SHUFFLE_BY_PARTITION =
+            key("streaming-read.shuffle-by-partition")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether shuffle by partition and bucket when streaming read.");
 
     /**
      * Weight of writer buffer in managed memory, Flink will compute the memory size for writer

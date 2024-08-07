@@ -66,10 +66,12 @@ public class DynamicPartitionLoader implements Serializable {
         this.comparator = CodeGenUtils.newRecordComparator(partitionType.getFieldTypes());
     }
 
-    public void addJoinKeys(List<String> joinKeys) {
+    public void addPartitionKeysTo(List<String> joinKeys, List<String> projectFields) {
         List<String> partitionKeys = table.partitionKeys();
         checkArgument(joinKeys.stream().noneMatch(partitionKeys::contains));
         joinKeys.addAll(partitionKeys);
+
+        partitionKeys.stream().filter(k -> !projectFields.contains(k)).forEach(projectFields::add);
     }
 
     @Nullable

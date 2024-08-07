@@ -67,9 +67,16 @@ public class Int2ShortHashMap {
         }
 
         public Int2ShortHashMap build() {
-            Int2ShortHashMap map = new Int2ShortHashMap(keyList.size());
-            for (int i = 0; i < keyList.size(); i++) {
-                map.put(keyList.getInt(i), valueList.getShort(i));
+            Int2ShortHashMap map;
+            try {
+                map = new Int2ShortHashMap(keyList.size());
+                for (int i = 0; i < keyList.size(); i++) {
+                    map.put(keyList.getInt(i), valueList.getShort(i));
+                }
+            } catch (IllegalArgumentException e) {
+                throw new RuntimeException(
+                        "capacity of Int2ShortOpenHashMap is too large, advise raise your parallelism in your Flink/Spark job",
+                        e);
             }
             return map;
         }

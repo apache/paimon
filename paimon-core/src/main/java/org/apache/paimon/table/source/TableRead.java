@@ -23,6 +23,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.operation.SplitRead;
+import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 
 import java.io.IOException;
@@ -44,7 +45,7 @@ public interface TableRead {
     RecordReader<InternalRow> createReader(Split split) throws IOException;
 
     default RecordReader<InternalRow> createReader(List<Split> splits) throws IOException {
-        List<ConcatRecordReader.ReaderSupplier<InternalRow>> readers = new ArrayList<>();
+        List<ReaderSupplier<InternalRow>> readers = new ArrayList<>();
         for (Split split : splits) {
             readers.add(() -> createReader(split));
         }

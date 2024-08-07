@@ -19,7 +19,6 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
@@ -38,14 +37,12 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.system.SystemTableLoader;
-import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.StringUtils;
+import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -54,19 +51,15 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.createCommitUser;
+import static org.apache.paimon.options.CatalogOptions.ALLOW_UPPER_CASE;
 import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
-import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Common implementation of {@link Catalog}. */
 public abstract class AbstractCatalog implements Catalog {
-
-    public static final String DB_SUFFIX = ".db";
-    protected static final String TABLE_DEFAULT_OPTION_PREFIX = "table-default.";
-    protected static final String DB_LOCATION_PROP = "location";
 
     protected final FileIO fileIO;
     protected final Map<String, String> tableDefaultOptions;
@@ -85,8 +78,7 @@ public abstract class AbstractCatalog implements Catalog {
         this.fileIO = fileIO;
         this.lineageMetaFactory =
                 findAndCreateLineageMeta(options, AbstractCatalog.class.getClassLoader());
-        this.tableDefaultOptions =
-                convertToPropertiesPrefixKey(options.toMap(), TABLE_DEFAULT_OPTION_PREFIX);
+        this.tableDefaultOptions = Catalog.tableDefaultOptions(options.toMap());
         this.catalogOptions = options;
     }
 
@@ -130,15 +122,9 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
-    public boolean databaseExists(String databaseName) {
-        if (isSystemDatabase(databaseName)) {
-            return true;
-        }
-
-        return databaseExistsImpl(databaseName);
+    public boolean allowUpperCase() {
+        return catalogOptions.getOptional(ALLOW_UPPER_CASE).orElse(true);
     }
-
-    protected abstract boolean databaseExistsImpl(String databaseName);
 
     @Override
     public void createDatabase(String name, boolean ignoreIfExists, Map<String, String> properties)
@@ -159,26 +145,26 @@ public abstract class AbstractCatalog implements Catalog {
         if (isSystemDatabase(name)) {
             return Collections.emptyMap();
         }
-        if (!databaseExists(name)) {
-            throw new DatabaseNotExistException(name);
-        }
         return loadDatabasePropertiesImpl(name);
     }
 
-    protected abstract Map<String, String> loadDatabasePropertiesImpl(String name);
+    protected abstract Map<String, String> loadDatabasePropertiesImpl(String name)
+            throws DatabaseNotExistException;
 
     @Override
     public void dropPartition(Identifier identifier, Map<String, String> partitionSpec)
             throws TableNotExistException {
+        checkNotSystemTable(identifier, "dropPartition");
         Table table = getTable(identifier);
         FileStoreTable fileStoreTable = (FileStoreTable) table;
-        FileStoreCommit commit =
+        try (FileStoreCommit commit =
                 fileStoreTable
                         .store()
                         .newCommit(
-                                createCommitUser(fileStoreTable.coreOptions().toConfiguration()));
-        commit.dropPartitions(
-                Collections.singletonList(partitionSpec), BatchWriteBuilder.COMMIT_IDENTIFIER);
+                                createCommitUser(fileStoreTable.coreOptions().toConfiguration()))) {
+            commit.dropPartitions(
+                    Collections.singletonList(partitionSpec), BatchWriteBuilder.COMMIT_IDENTIFIER);
+        }
     }
 
     protected abstract void createDatabaseImpl(String name, Map<String, String> properties);
@@ -194,7 +180,7 @@ public abstract class AbstractCatalog implements Catalog {
             throw new DatabaseNotExistException(name);
         }
 
-        if (!cascade && listTables(name).size() > 0) {
+        if (!cascade && !listTables(name).isEmpty()) {
             throw new DatabaseNotEmptyException(name);
         }
 
@@ -295,14 +281,6 @@ public abstract class AbstractCatalog implements Catalog {
         validateIdentifierNameCaseInsensitive(identifier);
         validateFieldNameCaseInsensitiveInSchemaChange(changes);
 
-        Optional<Pair<Identifier, String>> optionalBranchName =
-                getOriginalIdentifierAndBranch(identifier);
-        String branchName = DEFAULT_MAIN_BRANCH;
-        if (optionalBranchName.isPresent()) {
-            identifier = optionalBranchName.get().getLeft();
-            branchName = optionalBranchName.get().getRight();
-        }
-
         if (!tableExists(identifier)) {
             if (ignoreIfNotExists) {
                 return;
@@ -310,11 +288,10 @@ public abstract class AbstractCatalog implements Catalog {
             throw new TableNotExistException(identifier);
         }
 
-        alterTableImpl(identifier, branchName, changes);
+        alterTableImpl(identifier, changes);
     }
 
-    protected abstract void alterTableImpl(
-            Identifier identifier, String branchName, List<SchemaChange> changes)
+    protected abstract void alterTableImpl(Identifier identifier, List<SchemaChange> changes)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException;
 
     @Nullable
@@ -330,7 +307,7 @@ public abstract class AbstractCatalog implements Catalog {
     @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {
         if (isSystemDatabase(identifier.getDatabaseName())) {
-            String tableName = identifier.getObjectName();
+            String tableName = identifier.getTableName();
             Table table =
                     SystemTableLoader.loadGlobal(
                             tableName,
@@ -343,35 +320,32 @@ public abstract class AbstractCatalog implements Catalog {
             }
             return table;
         } else if (isSpecifiedSystemTable(identifier)) {
-            String[] splits = tableAndSystemName(identifier);
-            String tableName = splits[0];
-            String type = splits[1];
             FileStoreTable originTable =
-                    getDataTable(new Identifier(identifier.getDatabaseName(), tableName));
-            Table table = SystemTableLoader.load(type, fileIO, originTable);
+                    getDataTable(
+                            new Identifier(
+                                    identifier.getDatabaseName(),
+                                    identifier.getTableName(),
+                                    identifier.getBranchName(),
+                                    null));
+            Table table =
+                    SystemTableLoader.load(
+                            Preconditions.checkNotNull(identifier.getSystemTableName()),
+                            originTable);
             if (table == null) {
                 throw new TableNotExistException(identifier);
             }
             return table;
         } else {
-            Table table = getDataTable(identifier);
-            return table;
+            return getDataTable(identifier);
         }
     }
 
     private FileStoreTable getDataTable(Identifier identifier) throws TableNotExistException {
-        Optional<Pair<Identifier, String>> optionalBranchName =
-                getOriginalIdentifierAndBranch(identifier);
-        String branch = DEFAULT_MAIN_BRANCH;
-        if (optionalBranchName.isPresent()) {
-            identifier = optionalBranchName.get().getLeft();
-            branch = optionalBranchName.get().getRight();
-        }
-
-        TableSchema tableSchema = getDataTableSchema(identifier, branch);
+        Preconditions.checkArgument(identifier.getSystemTableName() == null);
+        TableSchema tableSchema = getDataTableSchema(identifier);
         return FileStoreTableFactory.create(
                 fileIO,
-                getDataTableLocation(identifier),
+                getTableLocation(identifier),
                 tableSchema,
                 new CatalogEnvironment(
                         identifier,
@@ -399,7 +373,7 @@ public abstract class AbstractCatalog implements Catalog {
                 Map<String, Path> tableMap =
                         allPaths.computeIfAbsent(database, d -> new HashMap<>());
                 for (String table : listTables(database)) {
-                    tableMap.put(table, getDataTableLocation(Identifier.create(database, table)));
+                    tableMap.put(table, getTableLocation(Identifier.create(database, table)));
                 }
             }
             return allPaths;
@@ -408,35 +382,16 @@ public abstract class AbstractCatalog implements Catalog {
         }
     }
 
-    protected abstract TableSchema getDataTableSchema(Identifier identifier, String branchName)
+    protected abstract TableSchema getDataTableSchema(Identifier identifier)
             throws TableNotExistException;
 
-    @VisibleForTesting
-    public Path getDataTableLocation(Identifier identifier) {
-        return new Path(newDatabasePath(identifier.getDatabaseName()), identifier.getObjectName());
+    @Override
+    public Path getTableLocation(Identifier identifier) {
+        return new Path(newDatabasePath(identifier.getDatabaseName()), identifier.getTableName());
     }
 
-    private static Optional<Pair<Identifier, String>> getOriginalIdentifierAndBranch(
-            Identifier identifier) {
-        String tableName = identifier.getObjectName();
-        if (tableName.contains(BRANCH_PREFIX)) {
-            int idx = tableName.indexOf(BRANCH_PREFIX);
-            String branchName = tableName.substring(idx + BRANCH_PREFIX.length());
-            if (StringUtils.isNullOrWhitespaceOnly(branchName)) {
-                return Optional.empty();
-            } else {
-                return Optional.of(
-                        Pair.of(
-                                Identifier.create(
-                                        identifier.getDatabaseName(), tableName.substring(0, idx)),
-                                branchName));
-            }
-        }
-        return Optional.empty();
-    }
-
-    protected void checkNotBranch(Identifier identifier, String method) {
-        if (getOriginalIdentifierAndBranch(identifier).isPresent()) {
+    protected static void checkNotBranch(Identifier identifier, String method) {
+        if (identifier.getBranchName() != null) {
             throw new IllegalArgumentException(
                     String.format(
                             "Cannot '%s' for branch table '%s', "
@@ -445,23 +400,23 @@ public abstract class AbstractCatalog implements Catalog {
         }
     }
 
-    protected void assertMainBranch(String branchName) {
-        if (!DEFAULT_MAIN_BRANCH.equals(branchName)) {
+    protected void assertMainBranch(Identifier identifier) {
+        if (identifier.getBranchName() != null
+                && !DEFAULT_MAIN_BRANCH.equals(identifier.getBranchName())) {
             throw new UnsupportedOperationException(
                     this.getClass().getName() + " currently does not support table branches");
         }
     }
 
-    private static boolean isSpecifiedSystemTable(Identifier identifier) {
-        return identifier.getObjectName().contains(SYSTEM_TABLE_SPLITTER)
-                && !getOriginalIdentifierAndBranch(identifier).isPresent();
+    public static boolean isSpecifiedSystemTable(Identifier identifier) {
+        return identifier.getSystemTableName() != null;
     }
 
-    protected boolean isSystemTable(Identifier identifier) {
+    protected static boolean isSystemTable(Identifier identifier) {
         return isSystemDatabase(identifier.getDatabaseName()) || isSpecifiedSystemTable(identifier);
     }
 
-    protected void checkNotSystemTable(Identifier identifier, String method) {
+    protected static void checkNotSystemTable(Identifier identifier, String method) {
         if (isSystemTable(identifier)) {
             throw new IllegalArgumentException(
                     String.format(
@@ -470,37 +425,23 @@ public abstract class AbstractCatalog implements Catalog {
         }
     }
 
-    public void copyTableDefaultOptions(Map<String, String> options) {
+    private void copyTableDefaultOptions(Map<String, String> options) {
         tableDefaultOptions.forEach(options::putIfAbsent);
     }
 
-    private String[] tableAndSystemName(Identifier identifier) {
-        String[] splits = StringUtils.split(identifier.getObjectName(), SYSTEM_TABLE_SPLITTER);
-        if (splits.length != 2) {
-            throw new IllegalArgumentException(
-                    "System table can only contain one '$' separator, but this is: "
-                            + identifier.getObjectName());
-        }
-        return splits;
-    }
-
     public static Path newTableLocation(String warehouse, Identifier identifier) {
-        if (isSpecifiedSystemTable(identifier)) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "Table name[%s] cannot contain '%s' separator",
-                            identifier.getObjectName(), SYSTEM_TABLE_SPLITTER));
-        }
+        checkNotBranch(identifier, "newTableLocation");
+        checkNotSystemTable(identifier, "newTableLocation");
         return new Path(
                 newDatabasePath(warehouse, identifier.getDatabaseName()),
-                identifier.getObjectName());
+                identifier.getTableName());
     }
 
     public static Path newDatabasePath(String warehouse, String database) {
         return new Path(warehouse, database + DB_SUFFIX);
     }
 
-    private boolean isSystemDatabase(String database) {
+    public static boolean isSystemDatabase(String database) {
         return SYSTEM_DATABASE_NAME.equals(database);
     }
 
@@ -511,30 +452,9 @@ public abstract class AbstractCatalog implements Catalog {
         }
     }
 
-    /** Validate database, table and field names must be lowercase when not case-sensitive. */
-    public static void validateCaseInsensitive(
-            boolean caseSensitive, String type, String... names) {
-        validateCaseInsensitive(caseSensitive, type, Arrays.asList(names));
-    }
-
-    /** Validate database, table and field names must be lowercase when not case-sensitive. */
-    public static void validateCaseInsensitive(
-            boolean caseSensitive, String type, List<String> names) {
-        if (caseSensitive) {
-            return;
-        }
-        List<String> illegalNames =
-                names.stream().filter(f -> !f.equals(f.toLowerCase())).collect(Collectors.toList());
-        checkArgument(
-                illegalNames.isEmpty(),
-                String.format(
-                        "%s name %s cannot contain upper case in the catalog.",
-                        type, illegalNames));
-    }
-
     protected void validateIdentifierNameCaseInsensitive(Identifier identifier) {
-        validateCaseInsensitive(caseSensitive(), "Database", identifier.getDatabaseName());
-        validateCaseInsensitive(caseSensitive(), "Table", identifier.getObjectName());
+        Catalog.validateCaseInsensitive(allowUpperCase(), "Database", identifier.getDatabaseName());
+        Catalog.validateCaseInsensitive(allowUpperCase(), "Table", identifier.getObjectName());
     }
 
     private void validateFieldNameCaseInsensitiveInSchemaChange(List<SchemaChange> changes) {
@@ -552,7 +472,7 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     protected void validateFieldNameCaseInsensitive(List<String> fieldNames) {
-        validateCaseInsensitive(caseSensitive(), "Field", fieldNames);
+        Catalog.validateCaseInsensitive(allowUpperCase(), "Field", fieldNames);
     }
 
     private void validateAutoCreateClose(Map<String, String> options) {
@@ -583,18 +503,29 @@ public abstract class AbstractCatalog implements Catalog {
     protected List<String> listTablesInFileSystem(Path databasePath) throws IOException {
         List<String> tables = new ArrayList<>();
         for (FileStatus status : fileIO.listDirectories(databasePath)) {
-            if (status.isDir() && tableExistsInFileSystem(status.getPath())) {
+            if (status.isDir() && tableExistsInFileSystem(status.getPath(), DEFAULT_MAIN_BRANCH)) {
                 tables.add(status.getPath().getName());
             }
         }
         return tables;
     }
 
-    protected boolean tableExistsInFileSystem(Path tablePath) {
-        return !new SchemaManager(fileIO, tablePath).listAllIds().isEmpty();
+    protected boolean tableExistsInFileSystem(Path tablePath, String branchName) {
+        return !new SchemaManager(fileIO, tablePath, branchName).listAllIds().isEmpty();
     }
 
-    public Optional<TableSchema> tableSchemaInFileSystem(Path tablePath) {
-        return new SchemaManager(fileIO, tablePath).latest();
+    public Optional<TableSchema> tableSchemaInFileSystem(Path tablePath, String branchName) {
+        return new SchemaManager(fileIO, tablePath, branchName)
+                .latest()
+                .map(
+                        s -> {
+                            if (!DEFAULT_MAIN_BRANCH.equals(branchName)) {
+                                Options branchOptions = new Options(s.options());
+                                branchOptions.set(CoreOptions.BRANCH, branchName);
+                                return s.copy(branchOptions.toMap());
+                            } else {
+                                return s;
+                            }
+                        });
     }
 }

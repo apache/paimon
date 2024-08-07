@@ -160,6 +160,7 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
             String commitUser, ManifestCacheFilter manifestFilter) {
         KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
+                rowType(),
                 store().newWrite(commitUser, manifestFilter),
                 createRowKeyExtractor(),
                 (record, rowKind) ->

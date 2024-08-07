@@ -98,7 +98,10 @@ public class SnapshotReaderImpl implements SnapshotReader {
         this.deletionVectors = options.deletionVectorsEnabled();
         this.snapshotManager = snapshotManager;
         this.consumerManager =
-                new ConsumerManager(snapshotManager.fileIO(), snapshotManager.tablePath());
+                new ConsumerManager(
+                        snapshotManager.fileIO(),
+                        snapshotManager.tablePath(),
+                        snapshotManager.branch());
         this.splitGenerator = splitGenerator;
         this.nonPartitionFilterConsumer = nonPartitionFilterConsumer;
         this.defaultValueAssigner = defaultValueAssigner;
@@ -151,6 +154,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Override
     public SnapshotReader withPartitionFilter(Predicate predicate) {
         scan.withPartitionFilter(predicate);
+        return this;
+    }
+
+    @Override
+    public SnapshotReader withPartitionFilter(List<BinaryRow> partitions) {
+        scan.withPartitionFilter(partitions);
         return this;
     }
 

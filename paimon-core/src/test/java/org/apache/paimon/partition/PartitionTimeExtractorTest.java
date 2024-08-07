@@ -18,13 +18,17 @@
 
 package org.apache.paimon.partition;
 
+import org.apache.paimon.testutils.assertj.PaimonAssertions;
+
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.Arrays;
 import java.util.Collections;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link PartitionTimeExtractor}. */
 public class PartitionTimeExtractorTest {
@@ -86,5 +90,19 @@ public class PartitionTimeExtractorTest {
                         extractor.extract(
                                 Collections.emptyList(), Collections.singletonList("20230101")))
                 .isEqualTo(LocalDateTime.parse("2023-01-01T00:00:00"));
+    }
+
+    @Test
+    public void testExtractNonDateFormattedPartition() {
+        PartitionTimeExtractor extractor = new PartitionTimeExtractor("$ds", "yyyyMMdd");
+        assertThatThrownBy(
+                        () ->
+                                extractor.extract(
+                                        Collections.singletonList("ds"),
+                                        Collections.singletonList("unknown")))
+                .satisfies(
+                        PaimonAssertions.anyCauseMatches(
+                                DateTimeParseException.class,
+                                "Text 'unknown' could not be parsed at index 0"));
     }
 }

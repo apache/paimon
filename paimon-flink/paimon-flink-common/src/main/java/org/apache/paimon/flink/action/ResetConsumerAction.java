@@ -50,7 +50,10 @@ public class ResetConsumerAction extends TableActionBase {
     public void run() throws Exception {
         FileStoreTable dataTable = (FileStoreTable) table;
         ConsumerManager consumerManager =
-                new ConsumerManager(dataTable.fileIO(), dataTable.location());
+                new ConsumerManager(
+                        dataTable.fileIO(),
+                        dataTable.location(),
+                        dataTable.snapshotManager().branch());
         if (Objects.isNull(nextSnapshotId)) {
             consumerManager.deleteConsumer(consumerId);
         } else {

@@ -49,7 +49,7 @@ import java.util.Map;
 public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> {
     private static final Logger LOG = LoggerFactory.getLogger(MemoryFileStoreWrite.class);
 
-    private final CoreOptions options;
+    protected final CoreOptions options;
     protected final CacheManager cacheManager;
     private MemoryPoolFactory writeBufferPool;
 

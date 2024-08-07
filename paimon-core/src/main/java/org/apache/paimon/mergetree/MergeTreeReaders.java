@@ -23,9 +23,10 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.FileReaderFactory;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
-import org.apache.paimon.mergetree.compact.ConcatRecordReader.ReaderSupplier;
 import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
+import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.reader.SizedReaderSupplier;
 import org.apache.paimon.utils.FieldsComparator;
 
 import javax.annotation.Nullable;
@@ -71,9 +72,20 @@ public class MergeTreeReaders {
             MergeFunctionWrapper<T> mergeFunctionWrapper,
             MergeSorter mergeSorter)
             throws IOException {
-        List<ReaderSupplier<KeyValue>> readers = new ArrayList<>();
+        List<SizedReaderSupplier<KeyValue>> readers = new ArrayList<>();
         for (SortedRun run : section) {
-            readers.add(() -> readerForRun(run, readerFactory));
+            readers.add(
+                    new SizedReaderSupplier<KeyValue>() {
+                        @Override
+                        public long estimateSize() {
+                            return run.totalSize();
+                        }
+
+                        @Override
+                        public RecordReader<KeyValue> get() throws IOException {
+                            return readerForRun(run, readerFactory);
+                        }
+                    });
         }
         return mergeSorter.mergeSort(
                 readers, userKeyComparator, userDefinedSeqComparator, mergeFunctionWrapper);

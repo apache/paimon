@@ -56,7 +56,10 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             TagManager tagManager) {
         this.snapshotManager = snapshotManager;
         this.consumerManager =
-                new ConsumerManager(snapshotManager.fileIO(), snapshotManager.tablePath());
+                new ConsumerManager(
+                        snapshotManager.fileIO(),
+                        snapshotManager.tablePath(),
+                        snapshotManager.branch());
         this.snapshotDeletion = snapshotDeletion;
         this.tagManager = tagManager;
         this.expireConfig = ExpireConfig.builder().build();
@@ -150,7 +153,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
                     "Snapshot expire range is [" + beginInclusiveId + ", " + endExclusiveId + ")");
         }
 
-        List<Snapshot> taggedSnapshots = tagManager.taggedSnapshots();
+        List<Snapshot> referencedSnapshots = tagManager.taggedSnapshots();
 
         // delete merge tree files
         // deleted merge tree files in a snapshot are not used by the next snapshot, so the range of
@@ -163,7 +166,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             // expire merge tree files and collect changed buckets
             Predicate<ManifestEntry> skipper;
             try {
-                skipper = snapshotDeletion.dataFileSkipper(taggedSnapshots, id);
+                skipper = snapshotDeletion.dataFileSkipper(referencedSnapshots, id);
             } catch (Exception e) {
                 LOG.info(
                         String.format(
@@ -195,8 +198,8 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
 
         // delete manifests and indexFiles
         List<Snapshot> skippingSnapshots =
-                TagManager.findOverlappedSnapshots(
-                        taggedSnapshots, beginInclusiveId, endExclusiveId);
+                SnapshotManager.findOverlappedSnapshots(
+                        referencedSnapshots, beginInclusiveId, endExclusiveId);
         skippingSnapshots.add(snapshotManager.snapshot(endExclusiveId));
         Set<String> skippingSet = snapshotDeletion.manifestSkippingSet(skippingSnapshots);
         for (long id = beginInclusiveId; id < endExclusiveId; id++) {

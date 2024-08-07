@@ -366,36 +366,4 @@ public class TagManager {
                         "Didn't find tag with snapshot id '%s'.This is unexpected.",
                         taggedSnapshot.id()));
     }
-
-    public static List<Snapshot> findOverlappedSnapshots(
-            List<Snapshot> taggedSnapshots, long beginInclusive, long endExclusive) {
-        List<Snapshot> snapshots = new ArrayList<>();
-        int right = findPreviousTag(taggedSnapshots, endExclusive);
-        if (right >= 0) {
-            int left = Math.max(findPreviousOrEqualTag(taggedSnapshots, beginInclusive), 0);
-            for (int i = left; i <= right; i++) {
-                snapshots.add(taggedSnapshots.get(i));
-            }
-        }
-        return snapshots;
-    }
-
-    public static int findPreviousTag(List<Snapshot> taggedSnapshots, long targetSnapshotId) {
-        for (int i = taggedSnapshots.size() - 1; i >= 0; i--) {
-            if (taggedSnapshots.get(i).id() < targetSnapshotId) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
-    private static int findPreviousOrEqualTag(
-            List<Snapshot> taggedSnapshots, long targetSnapshotId) {
-        for (int i = taggedSnapshots.size() - 1; i >= 0; i--) {
-            if (taggedSnapshots.get(i).id() <= targetSnapshotId) {
-                return i;
-            }
-        }
-        return -1;
-    }
 }

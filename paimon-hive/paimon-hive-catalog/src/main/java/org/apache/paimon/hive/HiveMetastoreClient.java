@@ -69,7 +69,7 @@ public class HiveMetastoreClient implements MetastoreClient {
                                 client ->
                                         client.getTable(
                                                 identifier.getDatabaseName(),
-                                                identifier.getObjectName()))
+                                                identifier.getTableName()))
                         .getSd();
     }
 
@@ -86,7 +86,7 @@ public class HiveMetastoreClient implements MetastoreClient {
                     client ->
                             client.getPartition(
                                     identifier.getDatabaseName(),
-                                    identifier.getObjectName(),
+                                    identifier.getTableName(),
                                     partitionValues));
             // do nothing if the partition already exists
         } catch (NoSuchObjectException e) {
@@ -99,7 +99,7 @@ public class HiveMetastoreClient implements MetastoreClient {
 
             Partition hivePartition = new Partition();
             hivePartition.setDbName(identifier.getDatabaseName());
-            hivePartition.setTableName(identifier.getObjectName());
+            hivePartition.setTableName(identifier.getTableName());
             hivePartition.setValues(partitionValues);
             hivePartition.setSd(newSd);
             int currentTime = (int) (System.currentTimeMillis() / 1000);
@@ -118,7 +118,7 @@ public class HiveMetastoreClient implements MetastoreClient {
                     client ->
                             client.dropPartition(
                                     identifier.getDatabaseName(),
-                                    identifier.getObjectName(),
+                                    identifier.getTableName(),
                                     partitionValues,
                                     false));
         } catch (NoSuchObjectException e) {
@@ -133,7 +133,7 @@ public class HiveMetastoreClient implements MetastoreClient {
                     client ->
                             client.markPartitionForEvent(
                                     identifier.getDatabaseName(),
-                                    identifier.getObjectName(),
+                                    identifier.getTableName(),
                                     partitionSpec,
                                     PartitionEventType.LOAD_DONE));
         } catch (NoSuchObjectException e) {

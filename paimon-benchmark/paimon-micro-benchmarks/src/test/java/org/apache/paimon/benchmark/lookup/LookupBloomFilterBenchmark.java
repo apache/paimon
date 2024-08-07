@@ -16,8 +16,9 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.benchmark;
+package org.apache.paimon.benchmark.lookup;
 
+import org.apache.paimon.benchmark.Benchmark;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.hash.HashLookupStoreFactory;
 import org.apache.paimon.lookup.hash.HashLookupStoreReader;
@@ -36,7 +37,7 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 /** Benchmark for measure the bloom filter for lookup. */
-public class LookupBloomFilterBenchmark {
+public class LookupBloomFilterBenchmark extends AbstractLookupBenchmark {
 
     @TempDir Path tempDir;
     ThreadLocalRandom rnd = ThreadLocalRandom.current();
@@ -57,15 +58,6 @@ public class LookupBloomFilterBenchmark {
                 "lookup", generateSequenceInputs(0, 100000), generateRandomInputs(100000, 200000));
     }
 
-    private byte[][] generateSequenceInputs(int start, int end) {
-        int count = end - start;
-        byte[][] result = new byte[count][4];
-        for (int i = 0; i < count; i++) {
-            result[i] = intToByteArray(i);
-        }
-        return result;
-    }
-
     private byte[][] generateRandomInputs(int start, int end) {
         int count = end - start;
         byte[][] result = new byte[count][4];
@@ -75,18 +67,11 @@ public class LookupBloomFilterBenchmark {
         return result;
     }
 
-    public byte[] intToByteArray(int value) {
-        return new byte[] {
-            (byte) (value >>> 24), (byte) (value >>> 16), (byte) (value >>> 8), (byte) value
-        };
-    }
-
     public void innerTest(String name, byte[][] inputs, byte[][] probe) throws Exception {
         Benchmark benchmark =
                 new Benchmark(name, probe.length).setNumWarmupIters(1).setOutputPerIteration(true);
 
-        int[] valueLengths = {0, 500, 1000, 2000};
-        for (int valueLength : valueLengths) {
+        for (int valueLength : VALUE_LENGTHS) {
             HashLookupStoreReader reader = writeData(null, inputs, valueLength);
 
             benchmark.addCase(

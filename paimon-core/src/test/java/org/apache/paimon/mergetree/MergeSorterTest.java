@@ -24,10 +24,11 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.mergetree.compact.ConcatRecordReader.ReaderSupplier;
 import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.reader.SizedReaderSupplier;
 import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
 import org.apache.paimon.testutils.junit.parameterized.Parameters;
 import org.apache.paimon.types.DataTypes;
@@ -139,11 +140,11 @@ public class MergeSorterTest {
         }
         comparator = comparator.thenComparingLong(KeyValue::sequenceNumber);
 
-        List<ReaderSupplier<KeyValue>> readers = new ArrayList<>();
+        List<SizedReaderSupplier<KeyValue>> readers = new ArrayList<>();
         Random rnd = new Random();
         List<KeyValue> expectedKvs = new ArrayList<>();
         Set<Long> distinctSeq = new HashSet<>();
-        for (int i = 0; i < rnd.nextInt(10) + 3; i++) {
+        for (int i = 0; i < rnd.nextInt(20) + 3; i++) {
             List<KeyValue> kvs = new ArrayList<>();
             Set<Integer> distinctKeys = new HashSet<>();
             for (int j = 0; j < 100; j++) {
@@ -172,7 +173,18 @@ public class MergeSorterTest {
             }
             expectedKvs.addAll(kvs);
             kvs.sort(comparator);
-            readers.add(() -> new IteratorRecordReader<>(kvs.iterator()));
+            readers.add(
+                    new SizedReaderSupplier<KeyValue>() {
+                        @Override
+                        public long estimateSize() {
+                            return kvs.size();
+                        }
+
+                        @Override
+                        public RecordReader<KeyValue> get() {
+                            return new IteratorRecordReader<>(kvs.iterator());
+                        }
+                    });
         }
 
         expectedKvs.sort(comparator);

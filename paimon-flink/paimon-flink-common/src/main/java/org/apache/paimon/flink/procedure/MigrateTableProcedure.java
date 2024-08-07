@@ -20,7 +20,6 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.utils.TableMigrationUtils;
-import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.utils.ParameterUtils;
 
 import org.apache.flink.table.procedure.ProcedureContext;
@@ -51,10 +50,6 @@ public class MigrateTableProcedure extends ProcedureBase {
             String sourceTablePath,
             String properties)
             throws Exception {
-        if (!(catalog instanceof HiveCatalog)) {
-            throw new IllegalArgumentException("Only support Hive Catalog");
-        }
-
         String targetPaimonTablePath = sourceTablePath + PAIMON_SUFFIX;
 
         Identifier sourceTableId = Identifier.fromString(sourceTablePath);
@@ -62,7 +57,7 @@ public class MigrateTableProcedure extends ProcedureBase {
 
         TableMigrationUtils.getImporter(
                         connector,
-                        (HiveCatalog) catalog,
+                        catalog,
                         sourceTableId.getDatabaseName(),
                         sourceTableId.getObjectName(),
                         targetTableId.getDatabaseName(),

@@ -56,6 +56,10 @@ public class ExpirePartitionsProcedure extends ProcedureBase {
                         type = @DataTypeHint("STRING"),
                         isOptional = true),
                 @ArgumentHint(
+                        name = "timestamp_pattern",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
                         name = "expire_strategy",
                         type = @DataTypeHint("STRING"),
                         isOptional = true),
@@ -65,6 +69,7 @@ public class ExpirePartitionsProcedure extends ProcedureBase {
             String tableId,
             String expirationTime,
             String timestampFormatter,
+            String timestampPattern,
             String expireStrategy)
             throws Catalog.TableNotExistException {
         FileStoreTable fileStoreTable = (FileStoreTable) table(tableId);
@@ -72,6 +77,7 @@ public class ExpirePartitionsProcedure extends ProcedureBase {
         Map<String, String> map = new HashMap<>();
         map.put(CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(), expireStrategy);
         map.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), timestampFormatter);
+        map.put(CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), timestampPattern);
 
         PartitionExpire partitionExpire =
                 new PartitionExpire(

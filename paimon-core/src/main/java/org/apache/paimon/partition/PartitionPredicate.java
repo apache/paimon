@@ -40,6 +40,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.apache.paimon.utils.InternalRowPartitionComputer.convertSpecToInternal;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** A special predicate to filter partition only, just like {@link Predicate}. */
@@ -50,6 +51,10 @@ public interface PartitionPredicate {
     boolean test(
             long rowCount, InternalRow minValues, InternalRow maxValues, InternalArray nullCounts);
 
+    /**
+     * Compared to the multiple method, this approach can accept filtering of partially partitioned
+     * fields.
+     */
     @Nullable
     static PartitionPredicate fromPredicate(RowType partitionType, Predicate predicate) {
         if (partitionType.getFieldCount() == 0 || predicate == null) {
@@ -61,12 +66,17 @@ public interface PartitionPredicate {
 
     @Nullable
     static PartitionPredicate fromMultiple(RowType partitionType, List<BinaryRow> partitions) {
+        return fromMultiple(partitionType, new HashSet<>(partitions));
+    }
+
+    @Nullable
+    static PartitionPredicate fromMultiple(RowType partitionType, Set<BinaryRow> partitions) {
         if (partitionType.getFieldCount() == 0 || partitions.isEmpty()) {
             return null;
         }
 
         return new MultiplePartitionPredicate(
-                new RowDataToObjectArrayConverter(partitionType), new HashSet<>(partitions));
+                new RowDataToObjectArrayConverter(partitionType), partitions);
     }
 
     /** A {@link PartitionPredicate} using {@link Predicate}. */
@@ -127,13 +137,15 @@ public interface PartitionPredicate {
             PredicateBuilder builder = new PredicateBuilder(partitionType);
             for (int i = 0; i < collectors.length; i++) {
                 SimpleColStats stats = collectors[i].result();
-                if (stats.nullCount() == partitions.size()) {
+                Long nullCount = stats.nullCount();
+                checkArgument(nullCount != null, "nullCount cannot be null!");
+                if (nullCount == partitions.size()) {
                     min[i] = builder.isNull(i);
                     max[i] = builder.isNull(i);
                 } else {
                     min[i] = builder.greaterOrEqual(i, checkNotNull(stats.min()));
                     max[i] = builder.lessOrEqual(i, checkNotNull(stats.max()));
-                    if (stats.nullCount() > 0) {
+                    if (nullCount > 0) {
                         min[i] = PredicateBuilder.or(builder.isNull(i), min[i]);
                         max[i] = PredicateBuilder.or(builder.isNull(i), max[i]);
                     }

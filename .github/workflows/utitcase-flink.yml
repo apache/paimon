@@ -52,7 +52,7 @@ jobs:
           jvm_timezone=$(random_timezone)
           echo "JVM timezone is set to $jvm_timezone"
           test_modules=""
-          for suffix in 1.15 1.16 1.17 1.18 1.19 common; do
+          for suffix in 1.15 1.16 1.17 1.18 1.19 1.20 common; do
             test_modules+="org.apache.paimon:paimon-flink-${suffix}," 
           done
           test_modules="${test_modules%,}"

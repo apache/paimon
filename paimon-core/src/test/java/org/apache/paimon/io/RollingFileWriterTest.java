@@ -90,7 +90,8 @@ public class RollingFileWriterTest {
                                                 new CoreOptions(new HashMap<>()),
                                                 SCHEMA.getFieldNames()),
                                         new FileIndexOptions(),
-                                        FileSource.APPEND),
+                                        FileSource.APPEND,
+                                        true),
                         TARGET_FILE_SIZE);
     }
 

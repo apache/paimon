@@ -42,7 +42,8 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
             String fileCompression,
             SimpleColStatsCollector.Factory[] statsCollectors,
             FileIndexOptions fileIndexOptions,
-            FileSource fileSource) {
+            FileSource fileSource,
+            boolean asyncFileWrite) {
         super(
                 () ->
                         new RowDataFileWriter(
@@ -60,7 +61,8 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
                                 fileCompression,
                                 statsCollectors,
                                 fileIndexOptions,
-                                fileSource),
+                                fileSource,
+                                asyncFileWrite),
                 targetFileSize);
     }
 }

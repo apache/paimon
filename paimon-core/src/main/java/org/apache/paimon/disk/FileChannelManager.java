@@ -26,6 +26,9 @@ public interface FileChannelManager extends AutoCloseable {
     /** Creates an ID identifying an underlying file channel and returns it. */
     FileIOChannel.ID createChannel();
 
+    /** Creates an ID identifying an underlying file channel and returns it. */
+    FileIOChannel.ID createChannel(String prefix);
+
     /** Creates an enumerator for channels that logically belong together and returns it. */
     FileIOChannel.Enumerator createChannelEnumerator();
 

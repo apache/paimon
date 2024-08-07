@@ -127,7 +127,8 @@ abstract class PaimonBaseScan(
 
   override def estimateStatistics(): Statistics = {
     val stats = PaimonStatistics(this)
-    if (reservedFilters.nonEmpty) {
+    // When using paimon stats, we need to perform additional FilterEstimation with reservedFilters on stats.
+    if (stats.paimonStatsEnabled && reservedFilters.nonEmpty) {
       filterStatistics(stats, reservedFilters)
     } else {
       stats

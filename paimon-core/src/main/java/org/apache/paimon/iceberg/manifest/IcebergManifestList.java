@@ -39,6 +39,7 @@ public class IcebergManifestList extends ObjectsFile<IcebergManifestFileMeta> {
         super(
                 fileIO,
                 new IcebergManifestFileMetaSerializer(),
+                IcebergManifestFileMeta.schema(),
                 readerFactory,
                 writerFactory,
                 compression,

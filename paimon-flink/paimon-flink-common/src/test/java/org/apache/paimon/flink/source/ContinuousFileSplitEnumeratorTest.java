@@ -878,7 +878,7 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
 
         public ContinuousFileSplitEnumerator build() {
             return new ContinuousFileSplitEnumerator(
-                    context, initialSplits, null, discoveryInterval, scan, bucketMode, 10);
+                    context, initialSplits, null, discoveryInterval, scan, bucketMode, 10, false);
         }
     }
 

@@ -28,18 +28,17 @@ import org.apache.paimon.utils.FileStorePathFactory;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /** Commit operation which provides commit and overwrite. */
-public interface FileStoreCommit {
+public interface FileStoreCommit extends AutoCloseable {
 
     /** With global lock. */
     FileStoreCommit withLock(Lock lock);
 
     FileStoreCommit ignoreEmptyCommit(boolean ignoreEmptyCommit);
 
-    /** Find out which commit identifier need to be retried when recovering from the failure. */
-    Set<Long> filterCommitted(Set<Long> commitIdentifiers);
+    /** Find out which committables need to be retried when recovering from the failure. */
+    List<ManifestCommittable> filterCommitted(List<ManifestCommittable> committables);
 
     /** Commit from manifest committable. */
     void commit(ManifestCommittable committable, Map<String, String> properties);
@@ -88,4 +87,7 @@ public interface FileStoreCommit {
     FileStorePathFactory pathFactory();
 
     FileIO fileIO();
+
+    @Override
+    void close();
 }

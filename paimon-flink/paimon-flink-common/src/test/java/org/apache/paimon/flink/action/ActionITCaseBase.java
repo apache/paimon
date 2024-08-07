@@ -51,6 +51,8 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
+import static org.apache.paimon.options.CatalogOptions.CACHE_ENABLED;
+
 /** {@link Action} test base. */
 public abstract class ActionITCaseBase extends AbstractTestBase {
 
@@ -70,7 +72,9 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
         tableName = "test_table_" + UUID.randomUUID();
         commitUser = UUID.randomUUID().toString();
         incrementalIdentifier = 0;
-        catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
+        CatalogContext context = CatalogContext.create(new Path(warehouse));
+        context.options().set(CACHE_ENABLED, false);
+        catalog = CatalogFactory.createCatalog(context);
     }
 
     @AfterEach

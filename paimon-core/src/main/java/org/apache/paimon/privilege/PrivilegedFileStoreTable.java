@@ -18,20 +18,15 @@
 
 package org.apache.paimon.privilege;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.Statistics;
-import org.apache.paimon.table.BucketMode;
-import org.apache.paimon.table.CatalogEnvironment;
+import org.apache.paimon.table.DelegatedFileStoreTable;
 import org.apache.paimon.table.ExpireSnapshots;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.query.LocalTableQuery;
-import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.sink.WriteSelector;
@@ -40,53 +35,30 @@ import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.utils.BranchManager;
-import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
 import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.OptionalLong;
 
 /** {@link FileStoreTable} with privilege checks. */
-public class PrivilegedFileStoreTable implements FileStoreTable {
+public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
 
-    private final FileStoreTable wrapped;
     private final PrivilegeChecker privilegeChecker;
     private final Identifier identifier;
 
     public PrivilegedFileStoreTable(
             FileStoreTable wrapped, PrivilegeChecker privilegeChecker, Identifier identifier) {
-        this.wrapped = wrapped;
+        super(wrapped);
         this.privilegeChecker = privilegeChecker;
         this.identifier = identifier;
-    }
-
-    @Override
-    public String name() {
-        return wrapped.name();
-    }
-
-    @Override
-    public String fullName() {
-        return wrapped.fullName();
     }
 
     @Override
     public SnapshotReader newSnapshotReader() {
         privilegeChecker.assertCanSelect(identifier);
         return wrapped.newSnapshotReader();
-    }
-
-    @Override
-    public CoreOptions coreOptions() {
-        return wrapped.coreOptions();
-    }
-
-    @Override
-    public SnapshotManager snapshotManager() {
-        return wrapped.snapshotManager();
     }
 
     @Override
@@ -103,33 +75,8 @@ public class PrivilegedFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public Path location() {
-        return wrapped.location();
-    }
-
-    @Override
-    public FileIO fileIO() {
-        return wrapped.fileIO();
-    }
-
-    @Override
-    public TableSchema schema() {
-        return wrapped.schema();
-    }
-
-    @Override
     public FileStore<?> store() {
         return new PrivilegedFileStore<>(wrapped.store(), privilegeChecker, identifier);
-    }
-
-    @Override
-    public BucketMode bucketMode() {
-        return wrapped.bucketMode();
-    }
-
-    @Override
-    public CatalogEnvironment catalogEnvironment() {
-        return wrapped.catalogEnvironment();
     }
 
     @Override
@@ -142,11 +89,6 @@ public class PrivilegedFileStoreTable implements FileStoreTable {
     public FileStoreTable copy(Map<String, String> dynamicOptions) {
         return new PrivilegedFileStoreTable(
                 wrapped.copy(dynamicOptions), privilegeChecker, identifier);
-    }
-
-    @Override
-    public OptionalLong latestSnapshotId() {
-        return wrapped.latestSnapshotId();
     }
 
     @Override
@@ -297,16 +239,6 @@ public class PrivilegedFileStoreTable implements FileStoreTable {
     public LocalTableQuery newLocalTableQuery() {
         privilegeChecker.assertCanSelect(identifier);
         return wrapped.newLocalTableQuery();
-    }
-
-    @Override
-    public boolean supportStreamingReadOverwrite() {
-        return wrapped.supportStreamingReadOverwrite();
-    }
-
-    @Override
-    public RowKeyExtractor createRowKeyExtractor() {
-        return wrapped.createRowKeyExtractor();
     }
 
     @Override

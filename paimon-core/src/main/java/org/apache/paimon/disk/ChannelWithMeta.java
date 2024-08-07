@@ -23,17 +23,11 @@ public class ChannelWithMeta {
 
     private final FileIOChannel.ID channel;
     private final int blockCount;
-    private final int numBytesInLastBlock;
     private final long numBytes;
 
-    public ChannelWithMeta(
-            FileIOChannel.ID channel,
-            int blockCount,
-            int numBytesInLastBlock,
-            long numEstimatedBytes) {
+    public ChannelWithMeta(FileIOChannel.ID channel, int blockCount, long numEstimatedBytes) {
         this.channel = channel;
         this.blockCount = blockCount;
-        this.numBytesInLastBlock = numBytesInLastBlock;
         this.numBytes = numEstimatedBytes;
     }
 
@@ -43,10 +37,6 @@ public class ChannelWithMeta {
 
     public int getBlockCount() {
         return blockCount;
-    }
-
-    public int getNumBytesInLastBlock() {
-        return numBytesInLastBlock;
     }
 
     public long getNumBytes() {

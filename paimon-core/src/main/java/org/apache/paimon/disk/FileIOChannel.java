@@ -102,6 +102,11 @@ public interface FileIOChannel {
             this.bucketNum = bucketNum;
         }
 
+        public ID(File basePath, int bucketNum, String prefix, Random random) {
+            this.path = new File(basePath, prefix + "-" + randomString(random) + ".channel");
+            this.bucketNum = bucketNum;
+        }
+
         /** Returns the path to the underlying temporary file. */
         public String getPath() {
             return path.getAbsolutePath();

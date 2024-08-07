@@ -45,7 +45,7 @@ under the License.
     </modules>
 
     <properties>
-        <hive.version>2.3.9</hive.version>
+        <hive.version>2.3.10</hive.version>
         <hiverunner.version>4.0.0</hiverunner.version>
         <reflections.version>0.9.8</reflections.version>
         <aws.version>1.12.319</aws.version>

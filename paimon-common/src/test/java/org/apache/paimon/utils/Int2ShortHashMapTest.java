@@ -25,6 +25,7 @@ import java.util.Map;
 import java.util.Random;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Test for {@link Int2ShortHashMap}. */
 public class Int2ShortHashMapTest {
@@ -52,5 +53,10 @@ public class Int2ShortHashMapTest {
                     assertThat(map.containsKey(k)).isTrue();
                     assertThat(map.get(k)).isEqualTo(v);
                 });
+    }
+
+    @Test
+    public void testCapacity() {
+        assertThrows(RuntimeException.class, () -> new Int2ShortHashMap(1073741824));
     }
 }

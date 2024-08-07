@@ -20,7 +20,6 @@ package org.apache.paimon.codegen;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
-import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
 
 import org.codehaus.janino.SimpleCompiler;
 import org.slf4j.Logger;
@@ -46,12 +45,12 @@ public final class CompileUtils {
      */
     static final Cache<ClassKey, Class<?>> COMPILED_CLASS_CACHE =
             Caffeine.newBuilder()
+                    .softValues()
                     // estimated maximum planning/startup time
                     .expireAfterAccess(Duration.ofMinutes(5))
                     // estimated cache size
                     .maximumSize(300)
-                    .softValues()
-                    .executor(MoreExecutors.directExecutor())
+                    .executor(Runnable::run)
                     .build();
 
     /**

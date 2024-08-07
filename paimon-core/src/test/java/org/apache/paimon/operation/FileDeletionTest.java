@@ -155,6 +155,7 @@ public class FileDeletionTest {
         partitionSpec.put("hr", "8");
         commit.overwrite(
                 partitionSpec, new ManifestCommittable(commitIdentifier++), Collections.emptyMap());
+        commit.close();
 
         // step 4: generate snapshot 4 by cleaning dt=0402/hr=12/bucket-0
         BinaryRow partition = partitions.get(7);
@@ -786,19 +787,20 @@ public class FileDeletionTest {
                                                 entry.file()))
                         .collect(Collectors.toList());
         // commit
-        store.newCommit()
-                .tryCommitOnce(
-                        delete,
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        commitIdentifier++,
-                        null,
-                        Collections.emptyMap(),
-                        Snapshot.CommitKind.APPEND,
-                        store.snapshotManager().latestSnapshot(),
-                        mustConflictCheck(),
-                        DEFAULT_MAIN_BRANCH,
-                        null);
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            commit.tryCommitOnce(
+                    delete,
+                    Collections.emptyList(),
+                    Collections.emptyList(),
+                    commitIdentifier++,
+                    null,
+                    Collections.emptyMap(),
+                    Snapshot.CommitKind.APPEND,
+                    store.snapshotManager().latestSnapshot(),
+                    mustConflictCheck(),
+                    DEFAULT_MAIN_BRANCH,
+                    null);
+        }
     }
 
     private void createTag(Snapshot snapshot, String tagName, Duration timeRetained) {

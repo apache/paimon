@@ -22,9 +22,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.testcontainers.containers.ComposeContainer;
 import org.testcontainers.containers.Container;
 import org.testcontainers.containers.ContainerState;
-import org.testcontainers.containers.DockerComposeContainer;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.output.OutputFrame;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
@@ -82,7 +82,7 @@ public abstract class E2eTestBase {
     private final List<String> currentResults = new ArrayList<>();
 
     protected Network network;
-    protected DockerComposeContainer<?> environment;
+    protected ComposeContainer environment;
     protected ContainerState jobManager;
 
     @BeforeEach
@@ -94,24 +94,24 @@ public abstract class E2eTestBase {
         network = Network.newNetwork();
         LOG.info("Network {} created", network.getId());
         environment =
-                new DockerComposeContainer<>(
+                new ComposeContainer(
                                 new File(
                                         E2eTestBase.class
                                                 .getClassLoader()
                                                 .getResource("docker-compose.yaml")
                                                 .toURI()))
                         .withEnv("NETWORK_ID", ((Network.NetworkImpl) network).getName())
-                        .withLogConsumer("jobmanager_1", new LogConsumer(LOG))
-                        .withLogConsumer("taskmanager_1", new LogConsumer(LOG))
+                        .withLogConsumer("jobmanager-1", new LogConsumer(LOG))
+                        .withLogConsumer("taskmanager-1", new LogConsumer(LOG))
                         .withStartupTimeout(Duration.ofMinutes(3))
                         .withLocalCompose(true);
         if (withKafka) {
             List<String> kafkaServices = Arrays.asList("zookeeper", "kafka");
             services.addAll(kafkaServices);
             for (String s : kafkaServices) {
-                environment.withLogConsumer(s + "_1", new Slf4jLogConsumer(LOG));
+                environment.withLogConsumer(s + "-1", new Slf4jLogConsumer(LOG));
             }
-            environment.waitingFor("kafka_1", buildWaitStrategy(".*Recorded new controller.*", 2));
+            environment.waitingFor("kafka-1", buildWaitStrategy(".*Recorded new controller.*", 2));
         }
         if (withHive) {
             List<String> hiveServices =
@@ -123,31 +123,31 @@ public abstract class E2eTestBase {
                             "hive-metastore-postgresql");
             services.addAll(hiveServices);
             for (String s : hiveServices) {
-                environment.withLogConsumer(s + "_1", new Slf4jLogConsumer(LOG));
+                environment.withLogConsumer(s + "-1", new Slf4jLogConsumer(LOG));
             }
             environment.waitingFor(
-                    "hive-server_1", buildWaitStrategy(".*Starting HiveServer2.*", 1));
+                    "hive-server-1", buildWaitStrategy(".*Starting HiveServer2.*", 1));
         }
         if (withSpark) {
             List<String> sparkServices = Arrays.asList("spark-master", "spark-worker");
             services.addAll(sparkServices);
             for (String s : sparkServices) {
-                environment.withLogConsumer(s + "_1", new Slf4jLogConsumer(LOG));
+                environment.withLogConsumer(s + "-1", new Slf4jLogConsumer(LOG));
             }
             environment.waitingFor(
-                    "spark-master_1",
+                    "spark-master-1",
                     buildWaitStrategy(
                             ".*Master: I have been elected leader! New state: ALIVE.*", 1));
         }
         environment.withServices(services.toArray(new String[0])).withLocalCompose(true);
 
-        environment.waitingFor("jobmanager_1", buildWaitStrategy(".*Registering TaskManager.*", 1));
+        environment.waitingFor("jobmanager-1", buildWaitStrategy(".*Registering TaskManager.*", 1));
         environment.waitingFor(
-                "taskmanager_1",
+                "taskmanager-1",
                 buildWaitStrategy(".*Successful registration at resource manager.*", 1));
         environment.start();
 
-        jobManager = environment.getContainerByServiceName("jobmanager_1").get();
+        jobManager = environment.getContainerByServiceName("jobmanager-1").get();
         jobManager.execInContainer("chown", "-R", "flink:flink", TEST_DATA_DIR);
     }
 
@@ -193,7 +193,7 @@ public abstract class E2eTestBase {
     protected void createKafkaTopic(String topicName, int partitionNum)
             throws IOException, InterruptedException {
         assert withKafka;
-        ContainerState kafka = environment.getContainerByServiceName("kafka_1").get();
+        ContainerState kafka = environment.getContainerByServiceName("kafka-1").get();
         kafka.execInContainer(
                 "bash",
                 "-c",
@@ -205,7 +205,7 @@ public abstract class E2eTestBase {
     protected void sendKafkaMessage(String filename, String content, String topicName)
             throws IOException, InterruptedException {
         assert withKafka;
-        ContainerState kafka = environment.getContainerByServiceName("kafka_1").get();
+        ContainerState kafka = environment.getContainerByServiceName("kafka-1").get();
         String uuid = topicName.substring("ts-topic-".length() + 1);
         String tmpDir = "/tmp" + TEST_DATA_DIR + "/" + uuid;
         kafka.execInContainer("mkdir", "-p", tmpDir);
@@ -235,7 +235,7 @@ public abstract class E2eTestBase {
     }
 
     protected ContainerState getHive() {
-        return environment.getContainerByServiceName("hive-server_1").get();
+        return environment.getContainerByServiceName("hive-server-1").get();
     }
 
     private static final Pattern JOB_ID_PATTERN =

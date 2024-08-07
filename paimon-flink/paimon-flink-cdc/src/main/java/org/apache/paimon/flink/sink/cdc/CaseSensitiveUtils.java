@@ -29,7 +29,7 @@ public class CaseSensitiveUtils {
 
     public static DataStream<CdcRecord> cdcRecordConvert(
             Catalog.Loader catalogLoader, DataStream<CdcRecord> input) {
-        if (caseSensitive(catalogLoader)) {
+        if (allowUpperCase(catalogLoader)) {
             return input;
         }
 
@@ -47,7 +47,7 @@ public class CaseSensitiveUtils {
 
     public static DataStream<CdcMultiplexRecord> cdcMultiplexRecordConvert(
             Catalog.Loader catalogLoader, DataStream<CdcMultiplexRecord> input) {
-        if (caseSensitive(catalogLoader)) {
+        if (allowUpperCase(catalogLoader)) {
             return input;
         }
 
@@ -65,9 +65,9 @@ public class CaseSensitiveUtils {
                 .name("Case-insensitive Convert");
     }
 
-    private static boolean caseSensitive(Catalog.Loader catalogLoader) {
+    private static boolean allowUpperCase(Catalog.Loader catalogLoader) {
         try (Catalog catalog = catalogLoader.load()) {
-            return catalog.caseSensitive();
+            return catalog.allowUpperCase();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

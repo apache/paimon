@@ -56,7 +56,10 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
         this.snapshotManager = snapshotManager;
         this.tagManager = tagManager;
         this.consumerManager =
-                new ConsumerManager(snapshotManager.fileIO(), snapshotManager.tablePath());
+                new ConsumerManager(
+                        snapshotManager.fileIO(),
+                        snapshotManager.tablePath(),
+                        snapshotManager.branch());
         this.changelogDeletion = changelogDeletion;
         this.expireConfig = ExpireConfig.builder().build();
     }
@@ -131,10 +134,11 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
             LOG.debug("Changelog expire range is [" + earliestId + ", " + endExclusiveId + ")");
         }
 
-        List<Snapshot> taggedSnapshots = tagManager.taggedSnapshots();
+        List<Snapshot> referencedSnapshots = tagManager.taggedSnapshots();
 
         List<Snapshot> skippingSnapshots =
-                TagManager.findOverlappedSnapshots(taggedSnapshots, earliestId, endExclusiveId);
+                SnapshotManager.findOverlappedSnapshots(
+                        referencedSnapshots, earliestId, endExclusiveId);
         skippingSnapshots.add(snapshotManager.changelog(endExclusiveId));
         Set<String> manifestSkippSet = changelogDeletion.manifestSkippingSet(skippingSnapshots);
         for (long id = earliestId; id < endExclusiveId; id++) {
@@ -144,7 +148,7 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
             Changelog changelog = snapshotManager.longLivedChangelog(id);
             Predicate<ManifestEntry> skipper;
             try {
-                skipper = changelogDeletion.dataFileSkipper(taggedSnapshots, id);
+                skipper = changelogDeletion.dataFileSkipper(referencedSnapshots, id);
             } catch (Exception e) {
                 LOG.info(
                         String.format(

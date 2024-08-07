@@ -139,6 +139,7 @@ class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
         AppendOnlyFileStoreWrite writer =
                 store().newWrite(commitUser, manifestFilter).withBucketMode(bucketMode());
         return new TableWriteImpl<>(
+                rowType(),
                 writer,
                 createRowKeyExtractor(),
                 (record, rowKind) -> {

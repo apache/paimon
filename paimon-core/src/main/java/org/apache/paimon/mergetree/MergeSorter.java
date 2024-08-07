@@ -21,31 +21,30 @@ package org.apache.paimon.mergetree;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.SortEngine;
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.JoinedRow;
+import org.apache.paimon.data.serializer.BinaryRowSerializer;
+import org.apache.paimon.disk.ChannelReaderInputView;
+import org.apache.paimon.disk.ChannelReaderInputViewIterator;
+import org.apache.paimon.disk.ChannelWithMeta;
+import org.apache.paimon.disk.ChannelWriterOutputView;
+import org.apache.paimon.disk.FileChannelUtil;
+import org.apache.paimon.disk.FileIOChannel;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.memory.CachelessSegmentPool;
 import org.apache.paimon.memory.MemorySegmentPool;
-import org.apache.paimon.mergetree.compact.ConcatRecordReader;
-import org.apache.paimon.mergetree.compact.ConcatRecordReader.ReaderSupplier;
 import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
 import org.apache.paimon.mergetree.compact.SortMergeReader;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.sort.BinaryExternalSortBuffer;
-import org.apache.paimon.sort.SortBuffer;
-import org.apache.paimon.types.BigIntType;
-import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.IntType;
-import org.apache.paimon.types.RowKind;
+import org.apache.paimon.reader.RecordReader.RecordIterator;
+import org.apache.paimon.reader.SizedReaderSupplier;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.IOUtils;
-import org.apache.paimon.utils.MutableObjectIterator;
-import org.apache.paimon.utils.OffsetRow;
+import org.apache.paimon.utils.KeyValueWithLevelNoReusingSerializer;
 
 import javax.annotation.Nullable;
 
@@ -53,10 +52,8 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.stream.IntStream;
 
-import static org.apache.paimon.schema.SystemColumns.SEQUENCE_NUMBER;
-import static org.apache.paimon.schema.SystemColumns.VALUE_KIND;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** The merge sorter to sort and merge readers with key overlap. */
 public class MergeSorter {
@@ -66,9 +63,7 @@ public class MergeSorter {
 
     private final SortEngine sortEngine;
     private final int spillThreshold;
-    private final int spillSortMaxNumFiles;
     private final String compression;
-    private final MemorySize maxDiskSize;
 
     private final MemorySegmentPool memoryPool;
 
@@ -81,14 +76,12 @@ public class MergeSorter {
             @Nullable IOManager ioManager) {
         this.sortEngine = options.sortEngine();
         this.spillThreshold = options.sortSpillThreshold();
-        this.spillSortMaxNumFiles = options.localSortMaxNumFileHandles();
         this.compression = options.spillCompression();
         this.keyType = keyType;
         this.valueType = valueType;
         this.memoryPool =
                 new CachelessSegmentPool(options.sortSpillBufferSize(), options.pageSize());
         this.ioManager = ioManager;
-        this.maxDiskSize = options.writeBufferSpillDiskSize();
     }
 
     public MemorySegmentPool memoryPool() {
@@ -108,7 +101,7 @@ public class MergeSorter {
     }
 
     public <T> RecordReader<T> mergeSort(
-            List<ReaderSupplier<KeyValue>> lazyReaders,
+            List<SizedReaderSupplier<KeyValue>> lazyReaders,
             Comparator<InternalRow> keyComparator,
             @Nullable FieldsComparator userDefinedSeqComparator,
             MergeFunctionWrapper<T> mergeFunction)
@@ -118,6 +111,16 @@ public class MergeSorter {
                     lazyReaders, keyComparator, userDefinedSeqComparator, mergeFunction);
         }
 
+        return mergeSortNoSpill(
+                lazyReaders, keyComparator, userDefinedSeqComparator, mergeFunction);
+    }
+
+    public <T> RecordReader<T> mergeSortNoSpill(
+            List<? extends ReaderSupplier<KeyValue>> lazyReaders,
+            Comparator<InternalRow> keyComparator,
+            @Nullable FieldsComparator userDefinedSeqComparator,
+            MergeFunctionWrapper<T> mergeFunction)
+            throws IOException {
         List<RecordReader<KeyValue>> readers = new ArrayList<>(lazyReaders.size());
         for (ReaderSupplier<KeyValue> supplier : lazyReaders) {
             try {
@@ -134,192 +137,129 @@ public class MergeSorter {
     }
 
     private <T> RecordReader<T> spillMergeSort(
-            List<ReaderSupplier<KeyValue>> readers,
+            List<SizedReaderSupplier<KeyValue>> inputReaders,
             Comparator<InternalRow> keyComparator,
             @Nullable FieldsComparator userDefinedSeqComparator,
             MergeFunctionWrapper<T> mergeFunction)
             throws IOException {
-        ExternalSorterWithLevel sorter = new ExternalSorterWithLevel(userDefinedSeqComparator);
-        ConcatRecordReader.create(readers).forIOEachRemaining(sorter::put);
-        sorter.flushMemory();
+        List<SizedReaderSupplier<KeyValue>> sortedReaders = new ArrayList<>(inputReaders);
+        sortedReaders.sort(Comparator.comparingLong(SizedReaderSupplier::estimateSize));
+        int spillSize = inputReaders.size() - spillThreshold;
 
-        NoReusingMergeIterator<T> iterator = sorter.newIterator(keyComparator, mergeFunction);
-        return new RecordReader<T>() {
+        List<ReaderSupplier<KeyValue>> readers =
+                new ArrayList<>(sortedReaders.subList(spillSize, sortedReaders.size()));
+        for (ReaderSupplier<KeyValue> supplier : sortedReaders.subList(0, spillSize)) {
+            readers.add(spill(supplier));
+        }
 
-            private boolean read = false;
-
-            @Nullable
-            @Override
-            public RecordIterator<T> readBatch() {
-                if (read) {
-                    return null;
-                }
-
-                read = true;
-                return new RecordIterator<T>() {
-                    @Override
-                    public T next() throws IOException {
-                        return iterator.next();
-                    }
-
-                    @Override
-                    public void releaseBatch() {}
-                };
-            }
-
-            @Override
-            public void close() {
-                sorter.clear();
-            }
-        };
+        return mergeSortNoSpill(readers, keyComparator, userDefinedSeqComparator, mergeFunction);
     }
 
-    /**
-     * Here can not use {@link SortBufferWriteBuffer} for two reasons:
-     *
-     * <p>1.Changelog-producer: full-compaction and lookup need to know the level of the KeyValue.
-     *
-     * <p>2.Changelog-producer: full-compaction and lookup need to store the reference of
-     * update_before.
-     */
-    private class ExternalSorterWithLevel {
+    private ReaderSupplier<KeyValue> spill(ReaderSupplier<KeyValue> readerSupplier)
+            throws IOException {
+        checkArgument(ioManager != null);
 
-        private final SortBuffer buffer;
+        FileIOChannel.ID channel = ioManager.createChannel();
+        KeyValueWithLevelNoReusingSerializer serializer =
+                new KeyValueWithLevelNoReusingSerializer(keyType, valueType);
+        BlockCompressionFactory compressFactory = BlockCompressionFactory.create(compression);
+        int compressBlock = (int) MemorySize.parse("64 kb").getBytes();
 
-        public ExternalSorterWithLevel(@Nullable FieldsComparator userDefinedSeqComparator) {
-            if (memoryPool.freePages() < 3) {
-                throw new IllegalArgumentException(
-                        "Write buffer requires a minimum of 3 page memory, please increase write buffer memory size.");
+        ChannelWithMeta channelWithMeta;
+        ChannelWriterOutputView out =
+                FileChannelUtil.createOutputView(
+                        ioManager, channel, compressFactory, compressBlock);
+        try (RecordReader<KeyValue> reader = readerSupplier.get(); ) {
+            RecordIterator<KeyValue> batch;
+            KeyValue record;
+            while ((batch = reader.readBatch()) != null) {
+                while ((record = batch.next()) != null) {
+                    serializer.serialize(record, out);
+                }
+                batch.releaseBatch();
             }
-
-            // key fields
-            IntStream sortFields = IntStream.range(0, keyType.getFieldCount());
-
-            // user define sequence fields
-            if (userDefinedSeqComparator != null) {
-                IntStream udsFields =
-                        IntStream.of(userDefinedSeqComparator.compareFields())
-                                .map(operand -> operand + keyType.getFieldCount() + 3);
-                sortFields = IntStream.concat(sortFields, udsFields);
-            }
-
-            // sequence field
-            sortFields = IntStream.concat(sortFields, IntStream.of(keyType.getFieldCount()));
-
-            // row type
-            List<DataField> fields = new ArrayList<>(keyType.getFields());
-            fields.add(new DataField(0, SEQUENCE_NUMBER, new BigIntType(false)));
-            fields.add(new DataField(1, VALUE_KIND, new TinyIntType(false)));
-            fields.add(new DataField(2, "_LEVEL", new IntType(false)));
-            fields.addAll(valueType.getFields());
-
-            this.buffer =
-                    BinaryExternalSortBuffer.create(
-                            ioManager,
-                            new RowType(fields),
-                            sortFields.toArray(),
-                            memoryPool,
-                            spillSortMaxNumFiles,
-                            compression,
-                            maxDiskSize);
+        } finally {
+            out.close();
+            channelWithMeta =
+                    new ChannelWithMeta(channel, out.getBlockCount(), out.getWriteBytes());
         }
 
-        public boolean put(KeyValue keyValue) throws IOException {
-            GenericRow meta = new GenericRow(3);
-            meta.setField(0, keyValue.sequenceNumber());
-            meta.setField(1, keyValue.valueKind().toByteValue());
-            meta.setField(2, keyValue.level());
-            JoinedRow row =
-                    new JoinedRow()
-                            .replace(
-                                    new JoinedRow().replace(keyValue.key(), meta),
-                                    keyValue.value());
-            return buffer.write(row);
+        return new SpilledReaderSupplier(
+                channelWithMeta, compressFactory, compressBlock, serializer);
+    }
+
+    private class SpilledReaderSupplier implements ReaderSupplier<KeyValue> {
+
+        private final ChannelWithMeta channel;
+        private final BlockCompressionFactory compressFactory;
+        private final int compressBlock;
+        private final KeyValueWithLevelNoReusingSerializer serializer;
+
+        public SpilledReaderSupplier(
+                ChannelWithMeta channel,
+                BlockCompressionFactory compressFactory,
+                int compressBlock,
+                KeyValueWithLevelNoReusingSerializer serializer) {
+            this.channel = channel;
+            this.compressFactory = compressFactory;
+            this.compressBlock = compressBlock;
+            this.serializer = serializer;
         }
 
-        public boolean flushMemory() throws IOException {
-            return buffer.flushMemory();
-        }
-
-        public void clear() {
-            buffer.clear();
-        }
-
-        public <T> NoReusingMergeIterator<T> newIterator(
-                Comparator<InternalRow> keyComparator, MergeFunctionWrapper<T> mergeFunction)
-                throws IOException {
-            return new NoReusingMergeIterator<>(
-                    buffer.sortedIterator(), keyComparator, mergeFunction);
+        @Override
+        public RecordReader<KeyValue> get() throws IOException {
+            ChannelReaderInputView view =
+                    FileChannelUtil.createInputView(
+                            ioManager, channel, new ArrayList<>(), compressFactory, compressBlock);
+            BinaryRowSerializer rowSerializer = new BinaryRowSerializer(serializer.numFields());
+            ChannelReaderInputViewIterator iterator =
+                    new ChannelReaderInputViewIterator(view, null, rowSerializer);
+            return new ChannelReaderReader(view, iterator, serializer);
         }
     }
 
-    private class NoReusingMergeIterator<T> {
+    private static class ChannelReaderReader implements RecordReader<KeyValue> {
 
-        private final MutableObjectIterator<BinaryRow> kvIter;
-        private final Comparator<InternalRow> keyComparator;
-        private final MergeFunctionWrapper<T> mergeFunc;
+        private final ChannelReaderInputView view;
+        private final ChannelReaderInputViewIterator iterator;
+        private final KeyValueWithLevelNoReusingSerializer serializer;
 
-        private KeyValue left;
-
-        private boolean isEnd;
-
-        private NoReusingMergeIterator(
-                MutableObjectIterator<BinaryRow> kvIter,
-                Comparator<InternalRow> keyComparator,
-                MergeFunctionWrapper<T> mergeFunction) {
-            this.kvIter = kvIter;
-            this.keyComparator = keyComparator;
-            this.mergeFunc = mergeFunction;
-            this.isEnd = false;
+        private ChannelReaderReader(
+                ChannelReaderInputView view,
+                ChannelReaderInputViewIterator iterator,
+                KeyValueWithLevelNoReusingSerializer serializer) {
+            this.view = view;
+            this.iterator = iterator;
+            this.serializer = serializer;
         }
 
-        public T next() throws IOException {
-            if (isEnd) {
+        private boolean read = false;
+
+        @Override
+        public RecordIterator<KeyValue> readBatch() {
+            if (read) {
                 return null;
             }
 
-            T result;
-            do {
-                mergeFunc.reset();
-                InternalRow key = null;
-                KeyValue keyValue;
-                while ((keyValue = readOnce()) != null) {
-                    if (key != null && keyComparator.compare(keyValue.key(), key) != 0) {
-                        break;
+            read = true;
+            return new RecordIterator<KeyValue>() {
+                @Override
+                public KeyValue next() throws IOException {
+                    BinaryRow noReuseRow = iterator.next();
+                    if (noReuseRow == null) {
+                        return null;
                     }
-                    key = keyValue.key();
-                    mergeFunc.add(keyValue);
+                    return serializer.fromRow(noReuseRow);
                 }
-                left = keyValue;
-                if (key == null) {
-                    return null;
-                }
-                result = mergeFunc.getResult();
-            } while (result == null);
-            return result;
+
+                @Override
+                public void releaseBatch() {}
+            };
         }
 
-        private KeyValue readOnce() throws IOException {
-            if (left != null) {
-                KeyValue ret = left;
-                left = null;
-                return ret;
-            }
-            BinaryRow row = kvIter.next();
-            if (row == null) {
-                isEnd = true;
-                return null;
-            }
-
-            int keyArity = keyType.getFieldCount();
-            int valueArity = valueType.getFieldCount();
-            return new KeyValue()
-                    .replace(
-                            new OffsetRow(keyArity, 0).replace(row),
-                            row.getLong(keyArity),
-                            RowKind.fromByteValue(row.getByte(keyArity + 1)),
-                            new OffsetRow(valueArity, keyArity + 3).replace(row))
-                    .setLevel(row.getInt(keyArity + 2));
+        @Override
+        public void close() throws IOException {
+            view.getChannel().closeAndDelete();
         }
     }
 }

@@ -21,6 +21,7 @@ package org.apache.paimon.mergetree.compact;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.SortEngine;
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.utils.ReusingTestData;
 import org.apache.paimon.utils.TestReusingRecordReader;
@@ -48,9 +49,7 @@ public class ConcatRecordReaderTest extends CombiningRecordReaderTestBase {
     protected RecordReader<KeyValue> createRecordReader(
             List<TestReusingRecordReader> readers, SortEngine sortEngine) {
         return new ConcatRecordReader(
-                readers.stream()
-                        .map(r -> (ConcatRecordReader.ReaderSupplier) () -> r)
-                        .collect(Collectors.toList()));
+                readers.stream().map(r -> (ReaderSupplier) () -> r).collect(Collectors.toList()));
     }
 
     @Test

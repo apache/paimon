@@ -40,6 +40,8 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.options.CatalogOptions.CACHE_ENABLED;
+
 /** Abstract base of {@link Action} for table. */
 public abstract class ActionBase implements Action {
 
@@ -54,6 +56,11 @@ public abstract class ActionBase implements Action {
     public ActionBase(String warehouse, Map<String, String> catalogConfig) {
         catalogOptions = Options.fromMap(catalogConfig);
         catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse);
+
+        // disable cache to avoid concurrent modification exception
+        if (!catalogOptions.contains(CACHE_ENABLED)) {
+            catalogOptions.set(CACHE_ENABLED, false);
+        }
 
         catalog = initPaimonCatalog();
         flinkCatalog = initFlinkCatalog();

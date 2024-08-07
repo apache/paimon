@@ -53,8 +53,9 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
             RowType writeSchema,
             @Nullable SimpleStatsExtractor simpleStatsExtractor,
             String compression,
-            SimpleColStatsCollector.Factory[] statsCollectors) {
-        super(fileIO, factory, path, converter, compression);
+            SimpleColStatsCollector.Factory[] statsCollectors,
+            boolean asyncWrite) {
+        super(fileIO, factory, path, converter, compression, asyncWrite);
         this.simpleStatsExtractor = simpleStatsExtractor;
         if (this.simpleStatsExtractor == null) {
             this.simpleStatsCollector = new SimpleStatsCollector(writeSchema, statsCollectors);

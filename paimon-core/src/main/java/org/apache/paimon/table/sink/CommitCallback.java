@@ -19,6 +19,9 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.manifest.ManifestEntry;
+
+import javax.annotation.Nullable;
 
 import java.util.List;
 
@@ -35,5 +38,7 @@ import java.util.List;
  */
 public interface CommitCallback extends AutoCloseable {
 
-    void call(List<ManifestCommittable> committables);
+    void call(List<ManifestEntry> committedEntries, long identifier, @Nullable Long watermark);
+
+    void retry(ManifestCommittable committable);
 }

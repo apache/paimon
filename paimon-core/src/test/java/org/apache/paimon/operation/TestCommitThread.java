@@ -193,8 +193,7 @@ public class TestCommitThread extends Thread {
         while (true) {
             try {
                 if (shouldCheckFilter) {
-                    if (commit.filterCommitted(Collections.singleton(committable.identifier()))
-                            .isEmpty()) {
+                    if (commit.filterCommitted(Collections.singletonList(committable)).isEmpty()) {
                         break;
                     }
                 }

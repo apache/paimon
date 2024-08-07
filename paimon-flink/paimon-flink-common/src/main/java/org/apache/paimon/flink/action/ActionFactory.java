@@ -56,6 +56,7 @@ public interface ActionFactory extends Factory {
     String EXPIRATIONTIME = "expiration_time";
     String TIMESTAMPFORMATTER = "timestamp_formatter";
     String EXPIRE_STRATEGY = "expire_strategy";
+    String TIMESTAMP_PATTERN = "timestamp_pattern";
 
     Optional<Action> create(MultipleParameterToolAdapter params);
 

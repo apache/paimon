@@ -90,6 +90,12 @@ public class FileChannelManagerImpl implements FileChannelManager {
     }
 
     @Override
+    public ID createChannel(String prefix) {
+        int num = (int) (nextPath.getAndIncrement() % paths.length);
+        return new ID(paths[num], num, prefix, random);
+    }
+
+    @Override
     public Enumerator createChannelEnumerator() {
         return new Enumerator(paths, random);
     }

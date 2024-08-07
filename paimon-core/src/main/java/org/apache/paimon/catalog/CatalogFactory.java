@@ -24,6 +24,7 @@ import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.privilege.PrivilegedCatalog;
 import org.apache.paimon.utils.Preconditions;
 
 import java.io.IOException;
@@ -67,6 +68,13 @@ public interface CatalogFactory extends Factory {
     }
 
     static Catalog createCatalog(CatalogContext context, ClassLoader classLoader) {
+        Catalog catalog = createUnwrappedCatalog(context, classLoader);
+        Options options = context.options();
+        catalog = CachingCatalog.tryToCreate(catalog, options);
+        return PrivilegedCatalog.tryToCreate(catalog, options);
+    }
+
+    static Catalog createUnwrappedCatalog(CatalogContext context, ClassLoader classLoader) {
         Options options = context.options();
         String metastore = options.get(METASTORE);
         CatalogFactory catalogFactory =

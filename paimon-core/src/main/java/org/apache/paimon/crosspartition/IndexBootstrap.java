@@ -142,6 +142,7 @@ public class IndexBootstrap implements Serializable {
                 new ArrayList<>(
                         schema.projectedLogicalRowType(
                                         Stream.concat(primaryKeys.stream(), partitionKeys.stream())
+                                                .distinct()
                                                 .collect(Collectors.toList()))
                                 .getFields());
         bootstrapFields.add(

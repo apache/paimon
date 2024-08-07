@@ -1,4 +1,4 @@
-![Paimon](https://paimon.apache.org/assets/paimon_blue.svg)
+![Paimon](https://github.com/apache/paimon/blob/master/docs/static/paimon-simple.png)
 
 [![License](https://img.shields.io/badge/license-Apache%202-4EB1BA.svg)](https://www.apache.org/licenses/LICENSE-2.0.html)
 [![Get on Slack](https://img.shields.io/badge/slack-join-orange.svg)](https://the-asf.slack.com/archives/C053Q2NCW8G)

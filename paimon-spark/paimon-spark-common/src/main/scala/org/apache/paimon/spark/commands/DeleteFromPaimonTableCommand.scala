@@ -25,6 +25,7 @@ import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.schema.SparkSystemColumns.ROW_KIND_COL
+import org.apache.paimon.spark.util.SQLHelper
 import org.apache.paimon.table.{BucketMode, FileStoreTable}
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage}
 import org.apache.paimon.types.RowKind
@@ -49,7 +50,8 @@ case class DeleteFromPaimonTableCommand(
   extends PaimonLeafRunnableCommand
   with PaimonCommand
   with ExpressionHelper
-  with SupportsSubquery {
+  with SupportsSubquery
+  with SQLHelper {
 
   private lazy val writer = PaimonSparkWriter(table)
 
@@ -124,21 +126,18 @@ case class DeleteFromPaimonTableCommand(
     val dataFilePathToMeta = candidateFileMap(candidateDataSplits)
 
     if (deletionVectorsEnabled) {
-      // Step2: collect all the deletion vectors that marks the deleted rows.
-      val deletionVectors = collectDeletionVectors(
-        candidateDataSplits,
-        dataFilePathToMeta,
-        condition,
-        relation,
-        sparkSession)
+      withSQLConf("spark.sql.adaptive.enabled" -> "false") {
+        // Step2: collect all the deletion vectors that marks the deleted rows.
+        val deletionVectors = collectDeletionVectors(
+          candidateDataSplits,
+          dataFilePathToMeta,
+          condition,
+          relation,
+          sparkSession)
 
-      deletionVectors.cache()
-      try {
-        updateDeletionVector(deletionVectors, dataFilePathToMeta, writer)
-      } finally {
-        deletionVectors.unpersist()
+        // Step3: update the touched deletion vectors and index files
+        writer.persistDeletionVectors(deletionVectors)
       }
-
     } else {
       // Step2: extract out the exactly files, which must have at least one record to be updated.
       val touchedFilePaths =

@@ -20,7 +20,6 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.utils.TableMigrationUtils;
-import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.migrate.Migrator;
 
 import org.apache.flink.table.procedure.ProcedureContext;
@@ -62,9 +61,6 @@ public class MigrateFileProcedure extends ProcedureBase {
             String targetPaimonTablePath,
             boolean deleteOrigin)
             throws Exception {
-        if (!(catalog instanceof HiveCatalog)) {
-            throw new IllegalArgumentException("Only support Hive Catalog");
-        }
         Identifier sourceTableId = Identifier.fromString(sourceTablePath);
         Identifier targetTableId = Identifier.fromString(targetPaimonTablePath);
 
@@ -76,7 +72,7 @@ public class MigrateFileProcedure extends ProcedureBase {
         Migrator importer =
                 TableMigrationUtils.getImporter(
                         connector,
-                        (HiveCatalog) catalog,
+                        catalog,
                         sourceTableId.getDatabaseName(),
                         sourceTableId.getObjectName(),
                         targetTableId.getDatabaseName(),

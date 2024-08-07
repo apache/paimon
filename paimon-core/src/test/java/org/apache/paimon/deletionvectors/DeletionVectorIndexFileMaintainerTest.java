@@ -69,7 +69,7 @@ public class DeletionVectorIndexFileMaintainerTest {
                         indexPathFactory, commitMessage2.indexIncrement().newIndexFiles()));
 
         DeletionVectorIndexFileMaintainer dvIFMaintainer =
-                store.createDVIFMaintainer(dataFileToDeletionFiles);
+                store.createDVIFMaintainer(BinaryRow.EMPTY_ROW, 1, dataFileToDeletionFiles);
 
         // no dv should be rewritten, because nothing is changed.
         List<IndexManifestEntry> res = dvIFMaintainer.writeUnchangedDeletionVector();

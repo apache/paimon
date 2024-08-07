@@ -35,7 +35,7 @@ import org.apache.paimon.io.RowDataRollingFileWriter;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.memory.MemorySegmentPool;
-import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
+import org.apache.paimon.operation.AppendOnlyFileStoreWrite.BucketFileRead;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
@@ -68,8 +68,9 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     private final RowType writeSchema;
     private final DataFilePathFactory pathFactory;
     private final CompactManager compactManager;
-    private final AppendOnlyFileStoreWrite.BucketFileRead bucketFileRead;
+    private final BucketFileRead bucketFileRead;
     private final boolean forceCompact;
+    private final boolean asyncFileWrite;
     private final List<DataFileMeta> newFiles;
     private final List<DataFileMeta> deletedFiles;
     private final List<DataFileMeta> compactBefore;
@@ -94,7 +95,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             RowType writeSchema,
             long maxSequenceNumber,
             CompactManager compactManager,
-            AppendOnlyFileStoreWrite.BucketFileRead bucketFileRead,
+            BucketFileRead bucketFileRead,
             boolean forceCompact,
             DataFilePathFactory pathFactory,
             @Nullable CommitIncrement increment,
@@ -104,7 +105,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             String spillCompression,
             SimpleColStatsCollector.Factory[] statsCollectors,
             MemorySize maxDiskSize,
-            FileIndexOptions fileIndexOptions) {
+            FileIndexOptions fileIndexOptions,
+            boolean asyncFileWrite) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
@@ -114,6 +116,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         this.compactManager = compactManager;
         this.bucketFileRead = bucketFileRead;
         this.forceCompact = forceCompact;
+        this.asyncFileWrite = asyncFileWrite;
         this.newFiles = new ArrayList<>();
         this.deletedFiles = new ArrayList<>();
         this.compactBefore = new ArrayList<>();
@@ -261,7 +264,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
                 fileCompression,
                 statsCollectors,
                 fileIndexOptions,
-                FileSource.APPEND);
+                FileSource.APPEND,
+                asyncFileWrite);
     }
 
     private void trySyncLatestCompaction(boolean blocking)

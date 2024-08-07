@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink.partition;
 
 import org.apache.paimon.partition.PartitionTimeExtractor;
+import org.apache.paimon.testutils.assertj.PaimonAssertions;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,6 +33,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class PartitionMarkDoneTriggerTest {
 
@@ -140,6 +142,24 @@ class PartitionMarkDoneTriggerTest {
         trigger.notifyPartition("dt=2024-02-02", toEpochMillis("2024-02-01"));
         List<String> partitions = trigger.donePartitions(true, toEpochMillis("2024-02-03"));
         assertThat(partitions).containsOnly("dt=2024-02-02");
+    }
+
+    @Test
+    public void testParseNonDateFormattedPartition() throws Exception {
+        PartitionMarkDoneTrigger trigger =
+                new PartitionMarkDoneTrigger(
+                        state,
+                        extractor,
+                        timeInterval,
+                        idleTime,
+                        toEpochMillis("2024-02-01"),
+                        true);
+
+        assertThatThrownBy(() -> trigger.extractDateTime("unknown"))
+                .satisfies(
+                        PaimonAssertions.anyCauseMatches(
+                                RuntimeException.class,
+                                "Can't extract datetime from partition unknown"));
     }
 
     private long toEpochMillis(String dt) {

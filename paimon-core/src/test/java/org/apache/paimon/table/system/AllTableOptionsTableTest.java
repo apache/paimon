@@ -18,10 +18,7 @@
 
 package org.apache.paimon.table.system;
 
-import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.types.DataTypes;
@@ -29,18 +26,12 @@ import org.apache.paimon.types.DataTypes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
-import java.util.Spliterator;
-import java.util.Spliterators;
+import java.util.Objects;
 import java.util.stream.Collectors;
-import java.util.stream.StreamSupport;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
-import static org.apache.paimon.table.system.AllTableOptionsTable.options;
-import static org.apache.paimon.table.system.AllTableOptionsTable.toRow;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unit tests for {@link AllTableOptionsTable}. */
@@ -69,18 +60,14 @@ public class AllTableOptionsTableTest extends TableTestBase {
 
     @Test
     public void testSchemasTable() throws Exception {
-        List<InternalRow> expectRow = getExceptedResult();
-        List<InternalRow> result = read(allTableOptionsTable);
-        assertThat(result).containsExactlyElementsOf(expectRow);
-    }
-
-    private List<InternalRow> getExceptedResult() {
-        AbstractCatalog abstractCatalog = (AbstractCatalog) catalog;
-        Map<String, Map<String, Path>> stringMapMap = abstractCatalog.allTablePaths();
-        Iterator<InternalRow> rows =
-                toRow(options(((AbstractCatalog) catalog).fileIO(), stringMapMap));
-        return StreamSupport.stream(
-                        Spliterators.spliteratorUnknownSize(rows, Spliterator.ORDERED), false)
-                .collect(Collectors.toList());
+        List<String> result =
+                read(allTableOptionsTable).stream()
+                        .map(Objects::toString)
+                        .collect(Collectors.toList());
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        "+I(default,T,fields.sales.aggregate-function,sum)",
+                        "+I(default,T,merge-engine,aggregation)",
+                        "+I(default,T,fields.price.aggregate-function,max)");
     }
 }

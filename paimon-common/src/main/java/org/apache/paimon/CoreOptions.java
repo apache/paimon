@@ -49,6 +49,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -286,7 +287,7 @@ public class CoreOptions implements Serializable {
             key("snapshot.clean-empty-directories")
                     .booleanType()
                     .defaultValue(false)
-                    .withDeprecatedKeys("snapshot.expire.clean-empty-directories")
+                    .withFallbackKeys("snapshot.expire.clean-empty-directories")
                     .withDescription(
                             Description.builder()
                                     .text(
@@ -322,7 +323,7 @@ public class CoreOptions implements Serializable {
             key("ignore-delete")
                     .booleanType()
                     .defaultValue(false)
-                    .withDeprecatedKeys(
+                    .withFallbackKeys(
                             "first-row.ignore-delete",
                             "deduplicate.ignore-delete",
                             "partial-update.ignore-delete")
@@ -359,7 +360,7 @@ public class CoreOptions implements Serializable {
             key("write-only")
                     .booleanType()
                     .defaultValue(false)
-                    .withDeprecatedKeys("write.compaction-skip")
+                    .withFallbackKeys("write.compaction-skip")
                     .withDescription(
                             "If set to true, compactions and snapshot expiration will be skipped. "
                                     + "This option is used along with dedicated compact jobs.");
@@ -410,7 +411,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Integer> WRITE_MAX_WRITERS_TO_SPILL =
             key("write-max-writers-to-spill")
                     .intType()
-                    .defaultValue(5)
+                    .defaultValue(10)
                     .withDescription(
                             "When in batch append inserting, if the writer number is greater than this option, we open the buffer cache and spill function to avoid out-of-memory. ");
 
@@ -522,7 +523,7 @@ public class CoreOptions implements Serializable {
             key("compaction.max.file-num")
                     .intType()
                     .defaultValue(50)
-                    .withDeprecatedKeys("compaction.early-max.file-num")
+                    .withFallbackKeys("compaction.early-max.file-num")
                     .withDescription(
                             "For file set [f_0,...,f_N], the maximum file number to trigger a compaction "
                                     + "for append-only table, even if sum(size(f_i)) < targetFileSize. This value "
@@ -574,7 +575,7 @@ public class CoreOptions implements Serializable {
             key("scan.mode")
                     .enumType(StartupMode.class)
                     .defaultValue(StartupMode.DEFAULT)
-                    .withDeprecatedKeys("log.scan")
+                    .withFallbackKeys("log.scan")
                     .withDescription("Specify the scanning behavior of the source.");
 
     public static final ConfigOption<String> SCAN_TIMESTAMP =
@@ -588,7 +589,7 @@ public class CoreOptions implements Serializable {
             key("scan.timestamp-millis")
                     .longType()
                     .noDefaultValue()
-                    .withDeprecatedKeys("log.scan.timestamp-millis")
+                    .withFallbackKeys("log.scan.timestamp-millis")
                     .withDescription(
                             "Optional timestamp used in case of \"from-timestamp\" scan mode. "
                                     + "If there is no snapshot earlier than this time, the earliest snapshot will be chosen.");
@@ -707,20 +708,7 @@ public class CoreOptions implements Serializable {
                     .enumType(PartitionExpireStrategy.class)
                     .defaultValue(PartitionExpireStrategy.VALUES_TIME)
                     .withDescription(
-                            Description.builder()
-                                    .text(
-                                            "Specifies the expiration strategy for partition expiration.")
-                                    .linebreak()
-                                    .text("Possible values:")
-                                    .list(
-                                            text(
-                                                    PartitionExpireStrategy.VALUES_TIME.value
-                                                            + ": A partition expiration policy that compares the time extracted from the partition value with the current time."))
-                                    .list(
-                                            text(
-                                                    PartitionExpireStrategy.UPDATE_TIME.value
-                                                            + ": A partition expiration policy that compares the last update time of the partition with the current time."))
-                                    .build());
+                            "The strategy determines how to extract the partition time and compare it with the current time.");
 
     public static final ConfigOption<Duration> PARTITION_EXPIRATION_TIME =
             key("partition.expiration-time")
@@ -898,22 +886,7 @@ public class CoreOptions implements Serializable {
                     .enumType(StreamingReadMode.class)
                     .noDefaultValue()
                     .withDescription(
-                            Description.builder()
-                                    .text(
-                                            "The mode of streaming read that specifies to read the data of table file or log")
-                                    .linebreak()
-                                    .linebreak()
-                                    .text("Possible values:")
-                                    .linebreak()
-                                    .list(
-                                            text(
-                                                    StreamingReadMode.FILE.getValue()
-                                                            + ": Reads from the data of table file store."))
-                                    .list(
-                                            text(
-                                                    StreamingReadMode.LOG.getValue()
-                                                            + ": Read from the data of table log store."))
-                                    .build());
+                            "The mode of streaming read that specifies to read the data of table file or log.");
 
     public static final ConfigOption<Duration> CONSUMER_EXPIRATION_TIME =
             key("consumer.expiration-time")
@@ -1302,6 +1275,21 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The maximum number of concurrent deleting files. "
                                     + "By default is the number of processors available to the Java virtual machine.");
+
+    public static final ConfigOption<String> SCAN_FALLBACK_BRANCH =
+            key("scan.fallback-branch")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "When a batch job queries from a table, if a partition does not exist in the current branch, "
+                                    + "the reader will try to get this partition from this fallback branch.");
+
+    public static final ConfigOption<Boolean> ASYNC_FILE_WRITE =
+            key("async-file-write")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to enable asynchronous IO writing when writing files.");
 
     private final Options options;
 
@@ -1972,7 +1960,11 @@ public class CoreOptions implements Serializable {
                 continue;
             }
 
-            String param = options.get(callbackParam.key().replace("#", className));
+            String originParamKey = callbackParam.key().replace("#", className);
+            String param = options.get(originParamKey);
+            if (param == null) {
+                param = options.get(originParamKey.toLowerCase(Locale.ROOT));
+            }
             result.put(className, param);
         }
         return result;
@@ -2038,6 +2030,10 @@ public class CoreOptions implements Serializable {
         }
 
         return options.get(LOOKUP_WAIT);
+    }
+
+    public boolean asyncFileWrite() {
+        return options.get(ASYNC_FILE_WRITE);
     }
 
     public boolean metadataIcebergCompatible() {
@@ -2249,8 +2245,8 @@ public class CoreOptions implements Serializable {
 
     /** Specifies the type for streaming read. */
     public enum StreamingReadMode implements DescribedEnum {
-        LOG("log", "Reads from the log store."),
-        FILE("file", "Reads from the file store.");
+        LOG("log", "Read from the data of table log store."),
+        FILE("file", "Read from the data of table file store.");
 
         private final String value;
         private final String description;
@@ -2601,11 +2597,11 @@ public class CoreOptions implements Serializable {
     public enum PartitionExpireStrategy implements DescribedEnum {
         VALUES_TIME(
                 "values-time",
-                "The strategy compares the time extracted from the partition value with the current time."),
+                "This strategy compares the time extracted from the partition value with the current time."),
 
         UPDATE_TIME(
                 "update-time",
-                "The strategy compares the last update time of the partition with the current time.");
+                "This strategy compares the last update time of the partition with the current time.");
 
         private final String value;
 

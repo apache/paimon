@@ -119,8 +119,11 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
     }
 
     public DeletionVectorIndexFileMaintainer createDVIFMaintainer(
-            Map<String, DeletionFile> dataFileToDeletionFiles) {
-        return new DeletionVectorIndexFileMaintainer(fileHandler, dataFileToDeletionFiles);
+            BinaryRow partition, int bucket, Map<String, DeletionFile> dataFileToDeletionFiles) {
+        DeletionVectorIndexFileMaintainer maintainer =
+                new DeletionVectorIndexFileMaintainer(fileHandler, null, partition, bucket, false);
+        maintainer.init(dataFileToDeletionFiles);
+        return maintainer;
     }
 
     public DeletionVectorsMaintainer createOrRestoreDVMaintainer(BinaryRow partition, int bucket) {

@@ -21,8 +21,7 @@ package org.apache.paimon.manifest;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.manifest.FileEntry.Identifier;
-import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.types.BigIntType;
@@ -30,7 +29,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.IOUtils;
-import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,9 +43,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.stream.Collectors;
 
-import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Metadata of a manifest file. */
@@ -291,11 +287,9 @@ public class ManifestFileMeta {
         int j = 0;
         if (partitionType.getFieldCount() > 0) {
             Set<BinaryRow> deletePartitions = computeDeletePartitions(deltaMerged);
-            Optional<Predicate> predicateOpt =
-                    convertPartitionToPredicate(partitionType, deletePartitions);
-
-            if (predicateOpt.isPresent()) {
-                Predicate predicate = predicateOpt.get();
+            PartitionPredicate predicate =
+                    PartitionPredicate.fromMultiple(partitionType, deletePartitions);
+            if (predicate != null) {
                 for (; j < base.size(); j++) {
                     // TODO: optimize this to binary search.
                     ManifestFileMeta file = base.get(j);
@@ -403,24 +397,5 @@ public class ManifestFileMeta {
             }
         }
         return partitions;
-    }
-
-    private static Optional<Predicate> convertPartitionToPredicate(
-            RowType partitionType, Set<BinaryRow> partitions) {
-        Optional<Predicate> predicateOpt;
-        if (!partitions.isEmpty()) {
-            RowDataToObjectArrayConverter rowArrayConverter =
-                    new RowDataToObjectArrayConverter(partitionType);
-
-            List<Predicate> predicateList =
-                    partitions.stream()
-                            .map(rowArrayConverter::convert)
-                            .map(values -> createPartitionPredicate(partitionType, values))
-                            .collect(Collectors.toList());
-            predicateOpt = Optional.of(PredicateBuilder.or(predicateList));
-        } else {
-            predicateOpt = Optional.empty();
-        }
-        return predicateOpt;
     }
 }

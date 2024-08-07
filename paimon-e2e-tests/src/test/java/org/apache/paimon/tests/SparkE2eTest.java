@@ -77,6 +77,6 @@ public class SparkE2eTest extends E2eReaderTestBase {
     }
 
     private ContainerState getSpark() {
-        return environment.getContainerByServiceName("spark-master_1").get();
+        return environment.getContainerByServiceName("spark-master-1").get();
     }
 }

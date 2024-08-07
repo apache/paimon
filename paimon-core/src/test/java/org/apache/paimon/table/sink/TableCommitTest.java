@@ -24,6 +24,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -40,6 +41,8 @@ import org.apache.paimon.utils.FailingFileIO;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+
+import javax.annotation.Nullable;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -177,8 +180,13 @@ public class TableCommitTest {
         }
 
         @Override
-        public void call(List<ManifestCommittable> committables) {
-            committables.forEach(c -> commitCallbackResult.get(testId).add(c.identifier()));
+        public void call(List<ManifestEntry> entries, long identifier, @Nullable Long watermark) {
+            commitCallbackResult.get(testId).add(identifier);
+        }
+
+        @Override
+        public void retry(ManifestCommittable committable) {
+            commitCallbackResult.get(testId).add(committable.identifier());
         }
 
         @Override

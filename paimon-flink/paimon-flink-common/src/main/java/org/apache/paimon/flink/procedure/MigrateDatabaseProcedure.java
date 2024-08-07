@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.flink.utils.TableMigrationUtils;
-import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.migrate.Migrator;
 import org.apache.paimon.utils.ParameterUtils;
 
@@ -47,14 +46,10 @@ public class MigrateDatabaseProcedure extends ProcedureBase {
             String sourceDatabasePath,
             String properties)
             throws Exception {
-        if (!(catalog instanceof HiveCatalog)) {
-            throw new IllegalArgumentException("Only support Hive Catalog");
-        }
-        HiveCatalog hiveCatalog = (HiveCatalog) this.catalog;
         List<Migrator> migrators =
                 TableMigrationUtils.getImporters(
                         connector,
-                        hiveCatalog,
+                        catalog,
                         sourceDatabasePath,
                         ParameterUtils.parseCommaSeparatedKeyValues(properties));
 

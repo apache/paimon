@@ -86,6 +86,12 @@ public abstract class AbstractDataTableScan implements DataTableScan {
     }
 
     @Override
+    public AbstractDataTableScan withPartitionFilter(List<BinaryRow> partitions) {
+        snapshotReader.withPartitionFilter(partitions);
+        return this;
+    }
+
+    @Override
     public AbstractDataTableScan withLevelFilter(Filter<Integer> levelFilter) {
         snapshotReader.withLevelFilter(levelFilter);
         return this;

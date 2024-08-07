@@ -246,14 +246,15 @@ public class TestFileStore extends KeyValueFileStore {
     }
 
     public Snapshot dropPartitions(List<Map<String, String>> partitions) {
-        FileStoreCommit commit = newCommit(commitUser);
-
         SnapshotManager snapshotManager = snapshotManager();
         Long snapshotIdBeforeCommit = snapshotManager.latestSnapshotId();
         if (snapshotIdBeforeCommit == null) {
             snapshotIdBeforeCommit = Snapshot.FIRST_SNAPSHOT_ID - 1;
         }
-        commit.dropPartitions(partitions, Long.MAX_VALUE);
+
+        try (FileStoreCommit commit = newCommit(commitUser)) {
+            commit.dropPartitions(partitions, Long.MAX_VALUE);
+        }
 
         Long snapshotIdAfterCommit = snapshotManager.latestSnapshotId();
         assertThat(snapshotIdAfterCommit).isNotNull();
@@ -316,7 +317,6 @@ public class TestFileStore extends KeyValueFileStore {
                     .write(kv);
         }
 
-        FileStoreCommit commit = newCommit(commitUser);
         ManifestCommittable committable =
                 new ManifestCommittable(
                         identifier == null ? commitIdentifier++ : identifier, watermark);
@@ -341,7 +341,11 @@ public class TestFileStore extends KeyValueFileStore {
         if (snapshotIdBeforeCommit == null) {
             snapshotIdBeforeCommit = Snapshot.FIRST_SNAPSHOT_ID - 1;
         }
-        commitFunction.accept(commit, committable);
+
+        try (FileStoreCommit commit = newCommit(commitUser)) {
+            commitFunction.accept(commit, committable);
+        }
+
         Long snapshotIdAfterCommit = snapshotManager.latestSnapshotId();
         if (snapshotIdAfterCommit == null) {
             snapshotIdAfterCommit = Snapshot.FIRST_SNAPSHOT_ID - 1;

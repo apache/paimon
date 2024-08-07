@@ -18,11 +18,6 @@
 
 package org.apache.paimon.partition;
 
-import org.apache.paimon.CoreOptions;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import javax.annotation.Nullable;
 
 import java.time.LocalDate;
@@ -39,8 +34,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 import static java.time.temporal.ChronoField.DAY_OF_MONTH;
 import static java.time.temporal.ChronoField.HOUR_OF_DAY;
@@ -51,8 +44,6 @@ import static java.time.temporal.ChronoField.YEAR;
 
 /** Time extractor to extract time from partition values. */
 public class PartitionTimeExtractor {
-
-    private static final Logger LOG = LoggerFactory.getLogger(PartitionTimeExtractor.class);
 
     private static final DateTimeFormatter TIMESTAMP_FORMATTER =
             new DateTimeFormatterBuilder()
@@ -98,36 +89,18 @@ public class PartitionTimeExtractor {
     }
 
     public LocalDateTime extract(List<String> partitionKeys, List<?> partitionValues) {
-        LocalDateTime dateTime = null;
-        try {
-            String timestampString;
-            if (pattern == null) {
-                timestampString = partitionValues.get(0).toString();
-            } else {
-                timestampString = pattern;
-                for (int i = 0; i < partitionKeys.size(); i++) {
-                    timestampString =
-                            timestampString.replaceAll(
-                                    "\\$" + partitionKeys.get(i),
-                                    partitionValues.get(i).toString());
-                }
+        String timestampString;
+        if (pattern == null) {
+            timestampString = partitionValues.get(0).toString();
+        } else {
+            timestampString = pattern;
+            for (int i = 0; i < partitionKeys.size(); i++) {
+                timestampString =
+                        timestampString.replaceAll(
+                                "\\$" + partitionKeys.get(i), partitionValues.get(i).toString());
             }
-            dateTime = toLocalDateTime(timestampString, this.formatter);
-        } catch (Exception e) {
-            String partitionInfos =
-                    IntStream.range(0, partitionKeys.size())
-                            .mapToObj(i -> partitionKeys.get(i) + ":" + partitionValues.get(i))
-                            .collect(Collectors.joining(","));
-            LOG.warn(
-                    "Partition {} can't uses '{}' formatter to extract datetime to expire."
-                            + " Please check the partition expiration configuration or"
-                            + " manually delete the partition using the drop-partition command or"
-                            + " use 'update-time' expiration strategy by set {}, the strategy support non-date formatted partition.",
-                    partitionInfos,
-                    this.formatter,
-                    CoreOptions.PARTITION_EXPIRATION_STRATEGY.key());
         }
-        return dateTime;
+        return toLocalDateTime(timestampString, this.formatter);
     }
 
     private static LocalDateTime toLocalDateTime(

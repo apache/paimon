@@ -45,7 +45,7 @@ public class MySqlSyncDatabaseTableListITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    @Timeout(120)
+    @Timeout(180)
     public void testActionRunResult() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put(

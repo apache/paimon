@@ -93,7 +93,8 @@ public class KeyValueDataFileWriter
                 simpleStatsExtractor,
                 compression,
                 StatsCollectorFactories.createStatsFactories(
-                        options, KeyValue.schema(keyType, valueType).getFieldNames()));
+                        options, KeyValue.schema(keyType, valueType).getFieldNames()),
+                options.asyncFileWrite());
 
         this.keyType = keyType;
         this.valueType = valueType;

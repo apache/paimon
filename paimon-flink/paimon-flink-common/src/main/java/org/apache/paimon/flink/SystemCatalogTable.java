@@ -19,17 +19,24 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.system.AuditLogTable;
 
 import org.apache.flink.table.api.Schema;
+import org.apache.flink.table.api.WatermarkSpec;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.types.utils.TypeConversions;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.apache.flink.table.descriptors.DescriptorProperties.WATERMARK;
+import static org.apache.flink.table.descriptors.Schema.SCHEMA;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
+import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.compoundKey;
+import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.deserializeWatermarkSpec;
 
 /** A {@link CatalogTable} to represent system table. */
 public class SystemCatalogTable implements CatalogTable {
@@ -46,10 +53,21 @@ public class SystemCatalogTable implements CatalogTable {
 
     @Override
     public Schema getUnresolvedSchema() {
-        return Schema.newBuilder()
-                .fromRowDataType(
-                        TypeConversions.fromLogicalToDataType(toLogicalType(table.rowType())))
-                .build();
+        Schema.Builder builder = Schema.newBuilder();
+        builder.fromRowDataType(
+                TypeConversions.fromLogicalToDataType(toLogicalType(table.rowType())));
+        if (table instanceof AuditLogTable) {
+            Map<String, String> newOptions = new HashMap<>(table.options());
+            if (newOptions.keySet().stream()
+                    .anyMatch(key -> key.startsWith(compoundKey(SCHEMA, WATERMARK)))) {
+                WatermarkSpec watermarkSpec = deserializeWatermarkSpec(newOptions);
+                return builder.watermark(
+                                watermarkSpec.getRowtimeAttribute(),
+                                watermarkSpec.getWatermarkExpr())
+                        .build();
+            }
+        }
+        return builder.build();
     }
 
     @Override

@@ -33,6 +33,7 @@ import org.apache.paimon.iceberg.metadata.IcebergSchema;
 import org.apache.paimon.iceberg.metadata.IcebergSnapshot;
 import org.apache.paimon.iceberg.metadata.IcebergSnapshotSummary;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitCallback;
@@ -44,6 +45,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -111,18 +114,26 @@ public class IcebergCommitCallback implements CommitCallback {
     }
 
     @Override
-    public void call(List<ManifestCommittable> committables) {
-        for (ManifestCommittable committable : committables) {
-            try {
-                commitMetadata(committable);
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
+    public void call(
+            List<ManifestEntry> committedEntries, long identifier, @Nullable Long watermark) {
+        try {
+            commitMetadata(identifier);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
         }
     }
 
-    private void commitMetadata(ManifestCommittable committable) throws IOException {
-        Pair<Long, Long> pair = getCurrentAndBaseSnapshotIds(committable.identifier());
+    @Override
+    public void retry(ManifestCommittable committable) {
+        try {
+            commitMetadata(committable.identifier());
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private void commitMetadata(long identifier) throws IOException {
+        Pair<Long, Long> pair = getCurrentAndBaseSnapshotIds(identifier);
         long currentSnapshot = pair.getLeft();
         Long baseSnapshot = pair.getRight();
 

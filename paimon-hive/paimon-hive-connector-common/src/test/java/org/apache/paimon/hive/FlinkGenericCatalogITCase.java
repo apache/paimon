@@ -33,7 +33,7 @@ import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.internal.TableEnvironmentImpl;
 import org.apache.flink.table.catalog.hive.HiveCatalog;
 import org.apache.flink.table.catalog.hive.client.HiveShimLoader;
-import org.apache.flink.test.util.AbstractTestBase;
+import org.apache.flink.test.util.AbstractTestBaseJUnit4;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.apache.hadoop.hive.conf.HiveConf;
@@ -51,7 +51,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for using Flink {@code FlinkGenericCatalog}. */
 @RunWith(PaimonEmbeddedHiveRunner.class)
-public class FlinkGenericCatalogITCase extends AbstractTestBase {
+public class FlinkGenericCatalogITCase extends AbstractTestBaseJUnit4 {
 
     @Rule public TemporaryFolder folder = new TemporaryFolder();
 

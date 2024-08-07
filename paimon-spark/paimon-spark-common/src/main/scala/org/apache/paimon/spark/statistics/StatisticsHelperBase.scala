@@ -26,6 +26,7 @@ import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference,
 import org.apache.spark.sql.catalyst.plans.logical
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.plans.logical.statsEstimation.FilterEstimation
+import org.apache.spark.sql.catalyst.util.CharVarcharUtils
 import org.apache.spark.sql.connector.expressions.NamedReference
 import org.apache.spark.sql.connector.read.Statistics
 import org.apache.spark.sql.connector.read.colstats.ColumnStatistics
@@ -38,9 +39,12 @@ trait StatisticsHelperBase extends SQLConfHelper {
 
   val requiredStatsSchema: StructType
 
+  private lazy val replacedStatsSchema =
+    CharVarcharUtils.replaceCharVarcharWithStringInSchema(requiredStatsSchema)
+
   def filterStatistics(v2Stats: Statistics, filters: Seq[Filter]): Statistics = {
     val attrs: Seq[AttributeReference] =
-      requiredStatsSchema.map(f => AttributeReference(f.name, f.dataType, f.nullable, f.metadata)())
+      replacedStatsSchema.map(f => AttributeReference(f.name, f.dataType, f.nullable, f.metadata)())
     val condition = filterToCondition(filters, attrs)
 
     if (condition.isDefined && v2Stats.numRows().isPresent) {
@@ -57,14 +61,14 @@ trait StatisticsHelperBase extends SQLConfHelper {
       expression =>
         expression.transform {
           case ref: BoundReference =>
-            attrs.find(_.name == requiredStatsSchema(ref.ordinal).name).get
+            attrs.find(_.name == replacedStatsSchema(ref.ordinal).name).get
         }
     }
   }
 
   private def toRef(attr: String): Option[BoundReference] = {
-    val index = requiredStatsSchema.fieldIndex(attr)
-    val field = requiredStatsSchema(index)
+    val index = replacedStatsSchema.fieldIndex(attr)
+    val field = replacedStatsSchema(index)
     Option.apply(BoundReference(index, field.dataType, field.nullable))
   }
 

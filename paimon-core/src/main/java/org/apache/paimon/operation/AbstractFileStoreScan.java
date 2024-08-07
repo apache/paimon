@@ -41,7 +41,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.ScanParallelExecutor;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
@@ -54,14 +53,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ForkJoinPool;
-import java.util.concurrent.ForkJoinTask;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
+import static org.apache.paimon.utils.ManifestReadThreadPool.getExecutorService;
+import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedExecute;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
+import static org.apache.paimon.utils.ThreadPoolUtils.randomlyOnlyExecute;
 
 /** Default implementation of {@link FileStoreScan}. */
 public abstract class AbstractFileStoreScan implements FileStoreScan {
@@ -261,22 +262,13 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     public List<PartitionEntry> readPartitionEntries() {
         List<ManifestFileMeta> manifests = readManifests().getRight();
         Map<BinaryRow, PartitionEntry> partitions = new ConcurrentHashMap<>();
-        // Don't need to use parallelismBatchIterable here
         // Can be executed in disorder
-        ForkJoinPool executePool = ScanParallelExecutor.getExecutePool(scanManifestParallelism);
-        List<ForkJoinTask<?>> tasks = new ArrayList<>();
-        for (ManifestFileMeta manifest : manifests) {
-            ForkJoinTask<?> task =
-                    executePool.submit(
-                            () ->
-                                    PartitionEntry.merge(
-                                            PartitionEntry.merge(readManifestFileMeta(manifest)),
-                                            partitions));
-            tasks.add(task);
-        }
-        for (ForkJoinTask<?> task : tasks) {
-            task.join();
-        }
+        ThreadPoolExecutor executor = getExecutorService(scanManifestParallelism);
+        Consumer<ManifestFileMeta> processor =
+                m ->
+                        PartitionEntry.merge(
+                                PartitionEntry.merge(readManifestFileMeta(m)), partitions);
+        randomlyOnlyExecute(executor, processor, manifests);
         return partitions.values().stream()
                 .filter(p -> p.fileCount() > 0)
                 .collect(Collectors.toList());
@@ -371,22 +363,24 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             List<ManifestFileMeta> manifests,
             Function<ManifestFileMeta, List<T>> manifestReader,
             @Nullable Filter<T> filterUnmergedEntry) {
-        Iterable<T> entries =
-                ScanParallelExecutor.parallelismBatchIterable(
-                        files -> {
-                            Stream<T> stream =
-                                    files.parallelStream()
-                                            .filter(this::filterManifestFileMeta)
-                                            .flatMap(m -> manifestReader.apply(m).stream());
-                            if (filterUnmergedEntry != null) {
-                                stream = stream.filter(filterUnmergedEntry::test);
-                            }
-                            return stream.collect(Collectors.toList());
-                        },
-                        manifests,
-                        scanManifestParallelism);
-
-        return FileEntry.mergeEntries(entries);
+        // in memory filter, do it first
+        manifests =
+                manifests.stream()
+                        .filter(this::filterManifestFileMeta)
+                        .collect(Collectors.toList());
+        Function<ManifestFileMeta, List<T>> reader =
+                file -> {
+                    List<T> entries = manifestReader.apply(file);
+                    if (filterUnmergedEntry != null) {
+                        entries =
+                                entries.stream()
+                                        .filter(filterUnmergedEntry::test)
+                                        .collect(Collectors.toList());
+                    }
+                    return entries;
+                };
+        return FileEntry.mergeEntries(
+                sequentialBatchedExecute(reader, manifests, scanManifestParallelism));
     }
 
     private Pair<Snapshot, List<ManifestFileMeta>> readManifests() {

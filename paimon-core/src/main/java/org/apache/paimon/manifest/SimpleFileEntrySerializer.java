@@ -19,6 +19,7 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
@@ -51,7 +52,7 @@ public class SimpleFileEntrySerializer extends VersionedObjectSerializer<SimpleF
             throw new IllegalArgumentException("Unsupported version: " + version);
         }
 
-        InternalRow file = row.getRow(4, 3);
+        InternalRow file = row.getRow(4, DataFileMeta.SCHEMA.getFieldCount());
         return new SimpleFileEntry(
                 FileKind.fromByteValue(row.getByte(0)),
                 deserializeBinaryRow(row.getBinary(1)),

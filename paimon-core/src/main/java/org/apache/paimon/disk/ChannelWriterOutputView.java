@@ -25,6 +25,7 @@ import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.memory.Buffer;
 import org.apache.paimon.memory.MemorySegment;
 
+import java.io.Closeable;
 import java.io.IOException;
 
 /**
@@ -32,7 +33,7 @@ import java.io.IOException;
  * output stream. The view will compress its data before writing it in blocks to the underlying
  * channel.
  */
-public final class ChannelWriterOutputView extends AbstractPagedOutputView {
+public final class ChannelWriterOutputView extends AbstractPagedOutputView implements Closeable {
 
     private final MemorySegment compressedBuffer;
     private final BlockCompressor compressor;
@@ -60,7 +61,8 @@ public final class ChannelWriterOutputView extends AbstractPagedOutputView {
         return writer;
     }
 
-    public int close() throws IOException {
+    @Override
+    public void close() throws IOException {
         if (!writer.isClosed()) {
             int currentPositionInSegment = getCurrentPositionInSegment();
             writeCompressed(currentSegment, currentPositionInSegment);
@@ -68,7 +70,6 @@ public final class ChannelWriterOutputView extends AbstractPagedOutputView {
             this.writeBytes = writer.getSize();
             this.writer.close();
         }
-        return -1;
     }
 
     public void closeAndDelete() throws IOException {
