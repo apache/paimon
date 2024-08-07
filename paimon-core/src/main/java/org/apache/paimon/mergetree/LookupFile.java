@@ -29,9 +29,11 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cach
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.RemovalCause;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
-import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -42,13 +44,17 @@ import static org.apache.paimon.utils.InternalRowPartitionComputer.toSimpleStrin
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Lookup file for cache remote file to local. */
-public class LookupFile implements Closeable {
+public class LookupFile {
+
+    private static final Logger LOG = LoggerFactory.getLogger(LookupFile.class);
 
     private final File localFile;
     private final DataFileMeta remoteFile;
     private final LookupStoreReader reader;
     private final Runnable callback;
 
+    private long requestCount;
+    private long hitCount;
     private boolean isClosed = false;
 
     public LookupFile(
@@ -62,7 +68,12 @@ public class LookupFile implements Closeable {
     @Nullable
     public byte[] get(byte[] key) throws IOException {
         checkArgument(!isClosed);
-        return reader.lookup(key);
+        requestCount++;
+        byte[] res = reader.lookup(key);
+        if (res != null) {
+            hitCount++;
+        }
+        return res;
     }
 
     public DataFileMeta remoteFile() {
@@ -73,11 +84,17 @@ public class LookupFile implements Closeable {
         return isClosed;
     }
 
-    @Override
-    public void close() throws IOException {
+    public void close(RemovalCause cause) throws IOException {
         reader.close();
         isClosed = true;
         callback.run();
+        LOG.info(
+                "Delete Lookup file {} due to {}. Access stats: requestCount={}, hitCount={}, size={}KB",
+                localFile.getName(),
+                cause,
+                requestCount,
+                hitCount,
+                localFile.length() >> 10);
         FileIOUtils.deleteFileOrDirectory(localFile);
     }
 
@@ -101,7 +118,7 @@ public class LookupFile implements Closeable {
     private static void removalCallback(String file, LookupFile lookupFile, RemovalCause cause) {
         if (lookupFile != null) {
             try {
-                lookupFile.close();
+                lookupFile.close(cause);
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }
