@@ -75,7 +75,7 @@ public class CdcDebeziumDeserializationSchema
         }
         byte[] bytes =
                 jsonConverter.fromConnectData(record.topic(), record.valueSchema(), record.value());
-        out.collect(new CdcSourceRecord(record.topic(), null, new String(bytes)));
+        out.collect(new CdcSourceRecord(record.topic(), null, bytes));
     }
 
     /** Initialize {@link JsonConverter} with given configs. */

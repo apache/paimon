@@ -21,7 +21,6 @@ package org.apache.paimon.flink.action.cdc.serialization;
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.DeserializationFeature;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.apache.flink.api.common.serialization.DeserializationSchema;
@@ -53,13 +52,7 @@ public class CdcJsonDeserializationSchema implements DeserializationSchema<CdcSo
         if (message == null) {
             return null;
         }
-
-        try {
-            return new CdcSourceRecord(objectMapper.readValue(message, JsonNode.class));
-        } catch (Exception e) {
-            LOG.error("Invalid Json:\n{}", new String(message));
-            throw e;
-        }
+        return new CdcSourceRecord(message);
     }
 
     @Override

@@ -70,9 +70,9 @@ public class CdcTimestampExtractorFactory implements Serializable {
 
         @Override
         public long extractTimestamp(CdcSourceRecord record) throws JsonProcessingException {
-            JsonNode json = JsonSerdeUtil.fromJson((String) record.getValue(), JsonNode.class);
             // If the record is a schema-change event return Long.MIN_VALUE as result.
-            return JsonSerdeUtil.extractValueOrDefault(json, Long.class, Long.MIN_VALUE, "ts_ms");
+            return JsonSerdeUtil.extractValueOrDefault(
+                    record.getJsonNode(), Long.class, Long.MIN_VALUE, "ts_ms");
         }
     }
 
@@ -84,7 +84,7 @@ public class CdcTimestampExtractorFactory implements Serializable {
         @Override
         public long extractTimestamp(CdcSourceRecord cdcSourceRecord)
                 throws JsonProcessingException {
-            JsonNode record = (JsonNode) cdcSourceRecord.getValue();
+            JsonNode record = cdcSourceRecord.getJsonNode();
             if (JsonSerdeUtil.isNodeExists(record, "mysqlType")) {
                 // Canal json
                 return JsonSerdeUtil.extractValue(record, Long.class, "ts");
@@ -117,10 +117,8 @@ public class CdcTimestampExtractorFactory implements Serializable {
 
         @Override
         public long extractTimestamp(CdcSourceRecord record) throws JsonProcessingException {
-            JsonNode json = JsonSerdeUtil.fromJson((String) record.getValue(), JsonNode.class);
-
             return JsonSerdeUtil.extractValueOrDefault(
-                    json, Long.class, Long.MIN_VALUE, "payload", "ts_ms");
+                    record.getJsonNode(), Long.class, Long.MIN_VALUE, "payload", "ts_ms");
         }
     }
 

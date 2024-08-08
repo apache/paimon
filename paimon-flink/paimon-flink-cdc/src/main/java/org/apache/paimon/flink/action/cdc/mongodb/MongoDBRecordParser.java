@@ -71,7 +71,7 @@ public class MongoDBRecordParser
     @Override
     public void flatMap(CdcSourceRecord value, Collector<RichCdcMultiplexRecord> out)
             throws Exception {
-        root = OBJECT_MAPPER.readValue((String) value.getValue(), JsonNode.class);
+        root = value.getJsonNode();
         String databaseName = extractString(FIELD_DATABASE);
         String collection = extractString(FIELD_TABLE);
         MongoVersionStrategy versionStrategy =
