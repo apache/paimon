@@ -59,6 +59,14 @@ public interface FileStoreTable extends DataTable {
         return schema().primaryKeys();
     }
 
+    default BucketSpec bucketSpec() {
+        return new BucketSpec(bucketMode(), schema().bucketKeys(), schema().numBuckets());
+    }
+
+    default BucketMode bucketMode() {
+        return store().bucketMode();
+    }
+
     @Override
     default Map<String, String> options() {
         return schema().options();
@@ -72,8 +80,6 @@ public interface FileStoreTable extends DataTable {
     TableSchema schema();
 
     FileStore<?> store();
-
-    BucketMode bucketMode();
 
     CatalogEnvironment catalogEnvironment();
 

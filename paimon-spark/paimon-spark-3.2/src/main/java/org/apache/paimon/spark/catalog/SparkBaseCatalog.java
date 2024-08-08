@@ -22,32 +22,16 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.spark.SparkProcedures;
 import org.apache.paimon.spark.SparkSource;
 import org.apache.paimon.spark.analysis.NoSuchProcedureException;
-import org.apache.paimon.spark.catalog.functions.PaimonFunctions;
 import org.apache.paimon.spark.procedure.Procedure;
 import org.apache.paimon.spark.procedure.ProcedureBuilder;
 
-import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
-
-import org.apache.spark.sql.catalyst.analysis.NoSuchFunctionException;
-import org.apache.spark.sql.catalyst.analysis.NoSuchNamespaceException;
-import org.apache.spark.sql.connector.catalog.FunctionCatalog;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.SupportsNamespaces;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
-import org.apache.spark.sql.connector.catalog.functions.UnboundFunction;
-
-import java.util.Arrays;
-import java.util.Map;
-
-import scala.Option;
 
 /** Spark base catalog. */
 public abstract class SparkBaseCatalog
-        implements TableCatalog,
-                FunctionCatalog,
-                SupportsNamespaces,
-                ProcedureCatalog,
-                WithPaimonCatalog {
+        implements TableCatalog, SupportsNamespaces, ProcedureCatalog, WithPaimonCatalog {
 
     protected String catalogName;
 
@@ -69,30 +53,5 @@ public abstract class SparkBaseCatalog
 
     public boolean usePaimon(String provider) {
         return provider == null || SparkSource.NAME().equalsIgnoreCase(provider);
-    }
-
-    // --------------------- Function Catalog Methods ----------------------------
-    private static final Map<String, UnboundFunction> FUNCTIONS =
-            ImmutableMap.of("bucket", new PaimonFunctions.BucketFunction());
-
-    @Override
-    public UnboundFunction loadFunction(Identifier ident) throws NoSuchFunctionException {
-        UnboundFunction func = FUNCTIONS.get(ident.name());
-        if (func == null) {
-            throw new NoSuchFunctionException(
-                    "Function " + ident + " is not a paimon function", Option.empty());
-        }
-        return func;
-    }
-
-    @Override
-    public Identifier[] listFunctions(String[] namespace) throws NoSuchNamespaceException {
-        if (namespace.length != 0) {
-            throw new NoSuchNamespaceException(
-                    "Namespace " + Arrays.toString(namespace) + " is not valid", Option.empty());
-        }
-        return FUNCTIONS.keySet().stream()
-                .map(name -> Identifier.of(namespace, name))
-                .toArray(Identifier[]::new);
     }
 }

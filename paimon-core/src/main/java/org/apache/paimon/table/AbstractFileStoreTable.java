@@ -151,11 +151,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public BucketMode bucketMode() {
-        return store().bucketMode();
-    }
-
-    @Override
     public Optional<WriteSelector> newWriteSelector() {
         switch (bucketMode()) {
             case HASH_FIXED:
