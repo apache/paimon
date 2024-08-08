@@ -41,9 +41,6 @@ import org.apache.flink.table.connector.source.LookupTableSource.LookupContext;
 import org.apache.flink.table.connector.source.LookupTableSource.LookupRuntimeProvider;
 import org.apache.flink.table.connector.source.ScanTableSource.ScanContext;
 import org.apache.flink.table.connector.source.ScanTableSource.ScanRuntimeProvider;
-import org.apache.flink.table.connector.source.lookup.LookupOptions;
-import org.apache.flink.table.connector.source.lookup.cache.DefaultLookupCache;
-import org.apache.flink.table.connector.source.lookup.cache.LookupCache;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.plan.stats.TableStats;
@@ -55,11 +52,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.stream.IntStream;
 
-import static org.apache.flink.table.connector.source.lookup.LookupOptions.CACHE_TYPE;
-import static org.apache.flink.table.connector.source.lookup.LookupOptions.PARTIAL_CACHE_CACHE_MISSING_KEY;
-import static org.apache.flink.table.connector.source.lookup.LookupOptions.PARTIAL_CACHE_EXPIRE_AFTER_ACCESS;
-import static org.apache.flink.table.connector.source.lookup.LookupOptions.PARTIAL_CACHE_EXPIRE_AFTER_WRITE;
-import static org.apache.flink.table.connector.source.lookup.LookupOptions.PARTIAL_CACHE_MAX_ROWS;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.paimon.CoreOptions.LOG_CONSISTENCY;
@@ -253,25 +245,8 @@ public class DataTableSource extends FlinkTableSource {
         Options options = new Options(table.options());
         boolean enableAsync = options.get(LOOKUP_ASYNC);
         int asyncThreadNumber = options.get(LOOKUP_ASYNC_THREAD_NUMBER);
-
-        LookupOptions.LookupCacheType cacheType = LookupOptions.LookupCacheType.NONE;
-        try {
-            // The old option `lookup.cache` in paimon conflicts with flink.
-            cacheType = config.get(CACHE_TYPE);
-        } catch (Exception ignored) {
-        }
-        LookupCache lookupCache = null;
-        if (cacheType == LookupOptions.LookupCacheType.PARTIAL) {
-            DefaultLookupCache.Builder builder = DefaultLookupCache.newBuilder();
-            config.getOptional(PARTIAL_CACHE_CACHE_MISSING_KEY).map(builder::cacheMissingKey);
-            config.getOptional(PARTIAL_CACHE_MAX_ROWS).map(builder::maximumSize);
-            config.getOptional(PARTIAL_CACHE_EXPIRE_AFTER_ACCESS).map(builder::expireAfterAccess);
-            config.getOptional(PARTIAL_CACHE_EXPIRE_AFTER_WRITE).map(builder::expireAfterWrite);
-            lookupCache = builder.build();
-        }
         return LookupRuntimeProviderFactory.create(
                 new FileStoreLookupFunction(table, projection, joinKey, predicate),
-                lookupCache,
                 enableAsync,
                 asyncThreadNumber);
     }

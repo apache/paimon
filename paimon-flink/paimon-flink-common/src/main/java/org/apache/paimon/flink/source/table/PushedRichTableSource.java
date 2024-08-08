@@ -20,6 +20,7 @@ package org.apache.paimon.flink.source.table;
 
 import org.apache.paimon.flink.source.FlinkTableSource;
 
+import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.table.connector.source.abilities.SupportsFilterPushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsLimitPushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsProjectionPushDown;
@@ -33,14 +34,14 @@ public class PushedRichTableSource extends RichTableSource
 
     private final FlinkTableSource source;
 
-    public PushedRichTableSource(FlinkTableSource source) {
-        super(source);
+    public PushedRichTableSource(FlinkTableSource source, ReadableConfig config) {
+        super(source, config);
         this.source = source;
     }
 
     @Override
     public PushedRichTableSource copy() {
-        return new PushedRichTableSource(source.copy());
+        return new PushedRichTableSource(source.copy(), config);
     }
 
     @Override

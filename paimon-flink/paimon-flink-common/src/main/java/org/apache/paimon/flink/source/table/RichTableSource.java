@@ -21,6 +21,7 @@ package org.apache.paimon.flink.source.table;
 import org.apache.paimon.flink.source.FlinkTableSource;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.table.connector.source.LookupTableSource;
 import org.apache.flink.table.connector.source.abilities.SupportsDynamicFiltering;
 import org.apache.flink.table.connector.source.abilities.SupportsStatisticReport;
@@ -38,20 +39,22 @@ public class RichTableSource extends BaseTableSource
                 SupportsDynamicFiltering {
 
     private final FlinkTableSource source;
+    protected final ReadableConfig config;
 
-    public RichTableSource(FlinkTableSource source) {
+    public RichTableSource(FlinkTableSource source, ReadableConfig config) {
         super(source);
         this.source = source;
+        this.config = config;
     }
 
     @Override
     public RichTableSource copy() {
-        return new RichTableSource(source.copy());
+        return new RichTableSource(source.copy(), config);
     }
 
     @Override
     public LookupRuntimeProvider getLookupRuntimeProvider(LookupContext context) {
-        return source.getLookupRuntimeProvider(context);
+        return source.getLookupRuntimeProvider(context, config);
     }
 
     @Override
