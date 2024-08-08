@@ -166,23 +166,23 @@ public class FieldAggregatorTest {
         assertThat(fieldCountAggInt.agg(3, 6)).isEqualTo(4);
 
         FieldCountAgg fieldCountAggLong = new FieldCountAgg(new BigIntType());
-        assertThat(fieldCountAggLong.agg(null, null)).isEqualTo(0);
+        assertThat(fieldCountAggLong.agg(null, null)).isEqualTo(0L);
         assertThat(fieldCountAggLong.agg((long) 1, null)).isEqualTo((long) 1);
-        assertThat(fieldCountAggLong.agg(null, (long) 15)).isEqualTo(1);
+        assertThat(fieldCountAggLong.agg(null, (long) 15)).isEqualTo(1L);
         assertThat(fieldCountAggLong.agg((long) 1, 0)).isEqualTo((long) 2);
         assertThat(fieldCountAggLong.agg((long) 3, (long) 6)).isEqualTo((long) 4);
 
         FieldCountAgg fieldCountAggByte = new FieldCountAgg(new TinyIntType());
-        assertThat(fieldCountAggByte.agg(null, null)).isEqualTo(0);
+        assertThat(fieldCountAggByte.agg(null, null)).isEqualTo((byte) 0);
         assertThat(fieldCountAggByte.agg((byte) 1, null)).isEqualTo((byte) 1);
-        assertThat(fieldCountAggByte.agg(null, (byte) 15)).isEqualTo(1);
+        assertThat(fieldCountAggByte.agg(null, (byte) 15)).isEqualTo((byte) 1);
         assertThat(fieldCountAggByte.agg((byte) 1, 0)).isEqualTo((byte) 2);
         assertThat(fieldCountAggByte.agg((byte) 3, (byte) 6)).isEqualTo((byte) 4);
 
         FieldCountAgg fieldCountAggShort = new FieldCountAgg(new SmallIntType());
-        assertThat(fieldCountAggShort.agg(null, null)).isEqualTo(0);
+        assertThat(fieldCountAggShort.agg(null, null)).isEqualTo((short) 0);
         assertThat(fieldCountAggShort.agg((short) 1, null)).isEqualTo((short) 1);
-        assertThat(fieldCountAggShort.agg(null, (short) 15)).isEqualTo(1);
+        assertThat(fieldCountAggShort.agg(null, (short) 15)).isEqualTo((short) 1);
         assertThat(fieldCountAggShort.agg((short) 1, 0)).isEqualTo((short) 2);
         assertThat(fieldCountAggShort.agg((short) 3, (short) 6)).isEqualTo((short) 4);
     }
