@@ -114,11 +114,6 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public BucketMode bucketMode() {
-        return wrapped.bucketMode();
-    }
-
-    @Override
     public CatalogEnvironment catalogEnvironment() {
         return wrapped.catalogEnvironment();
     }

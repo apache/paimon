@@ -105,7 +105,7 @@ abstract class PaimonBaseScan(
       .toArray
   }
 
-  def getInputPartitions: Seq[PaimonInputPartition] = {
+  final def lazyInputPartitions: Seq[PaimonInputPartition] = {
     if (inputPartitions == null) {
       inputPartitions = getInputPartitions(getOriginSplits)
     }
@@ -118,7 +118,7 @@ abstract class PaimonBaseScan(
 
   override def toBatch: Batch = {
     val metadataColumns = metadataFields.map(field => PaimonMetadataColumn.get(field.name))
-    PaimonBatch(getInputPartitions, readBuilder, metadataColumns)
+    PaimonBatch(lazyInputPartitions, readBuilder, metadataColumns)
   }
 
   override def toMicroBatchStream(checkpointLocation: String): MicroBatchStream = {

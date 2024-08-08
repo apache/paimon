@@ -42,7 +42,7 @@ class PaimonMetricTest extends PaimonSparkTestBase {
       def checkMetrics(s: String, skippedTableFiles: Long, resultedTableFiles: Long): Unit = {
         val scan = getPaimonScan(s)
         // call getInputPartitions to trigger scan
-        scan.getInputPartitions
+        scan.lazyInputPartitions
         val metrics = scan.reportDriverMetrics()
         Assertions.assertEquals(skippedTableFiles, metric(metrics, SKIPPED_TABLE_FILES))
         Assertions.assertEquals(resultedTableFiles, metric(metrics, RESULTED_TABLE_FILES))

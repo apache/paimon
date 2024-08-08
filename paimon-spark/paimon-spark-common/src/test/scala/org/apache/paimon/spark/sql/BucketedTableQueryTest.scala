@@ -1,0 +1,136 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.spark.sql
+
+import org.apache.paimon.spark.PaimonSparkTestBase
+
+import org.apache.spark.sql.Row
+import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
+import org.apache.spark.sql.execution.exchange.ShuffleExchangeLike
+
+class BucketedTableQueryTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelper {
+  private def checkAnswerAndShuffle(query: String, numShuffle: Int): Unit = {
+    var expectedResult: Array[Row] = null
+    // avoid config default value change in future, so specify it manually
+    withSQLConf(
+      "spark.sql.sources.v2.bucketing.enabled" -> "false",
+      "spark.sql.autoBroadcastJoinThreshold" -> "-1") {
+      expectedResult = spark.sql(query).collect()
+    }
+    withSQLConf(
+      "spark.sql.sources.v2.bucketing.enabled" -> "true",
+      "spark.sql.autoBroadcastJoinThreshold" -> "-1") {
+      val df = spark.sql(query)
+      checkAnswer(df, expectedResult.toSeq)
+      assert(collect(df.queryExecution.executedPlan) {
+        case shuffle: ShuffleExchangeLike => shuffle
+      }.size == numShuffle)
+    }
+  }
+
+  test("Query on a bucketed table - join - positive case") {
+    assume(gteqSpark3_3)
+
+    withTable("t1", "t2", "t3", "t4") {
+      spark.sql(
+        "CREATE TABLE t1 (id INT, c STRING) TBLPROPERTIES ('primary-key' = 'id', 'bucket'='10')")
+      spark.sql("INSERT INTO t1 VALUES (1, 'x1'), (2, 'x3'), (3, 'x3'), (4, 'x4'), (5, 'x5')")
+
+      // all matched
+      spark.sql(
+        "CREATE TABLE t2 (id INT, c STRING) TBLPROPERTIES ('primary-key' = 'id', 'bucket'='10')")
+      spark.sql("INSERT INTO t2 VALUES (1, 'x1'), (2, 'x3'), (3, 'x3'), (4, 'x4'), (5, 'x5')")
+      checkAnswerAndShuffle("SELECT * FROM t1 JOIN t2 on t1.id = t2.id", 0)
+
+      // different primary-key name but does not matter
+      spark.sql(
+        "CREATE TABLE t3 (id2 INT, c STRING) TBLPROPERTIES ('primary-key' = 'id2', 'bucket'='10')")
+      spark.sql("INSERT INTO t3 VALUES (1, 'x1'), (2, 'x3'), (3, 'x3'), (4, 'x4'), (5, 'x5')")
+      checkAnswerAndShuffle("SELECT * FROM t1 JOIN t3 on t1.id = t3.id2", 0)
+
+      // one primary-key table and one bucketed table
+      spark.sql(
+        "CREATE TABLE t4 (id INT, c STRING) TBLPROPERTIES ('bucket-key' = 'id', 'bucket'='10')")
+      spark.sql("INSERT INTO t4 VALUES (1, 'x1'), (2, 'x3'), (3, 'x3'), (4, 'x4'), (5, 'x5')")
+      checkAnswerAndShuffle("SELECT * FROM t1 JOIN t4 on t1.id = t4.id", 0)
+    }
+  }
+
+  test("Query on a bucketed table - join - negative case") {
+    assume(gteqSpark3_3)
+
+    withTable("t1", "t2", "t3", "t4", "t5", "t6") {
+      spark.sql(
+        "CREATE TABLE t1 (id INT, c STRING) TBLPROPERTIES ('primary-key' = 'id', 'bucket'='10')")
+      spark.sql("INSERT INTO t1 VALUES (1, 'x1'), (2, 'x3'), (3, 'x3'), (4, 'x4'), (5, 'x5')")
+
+      // dynamic bucket number
+      spark.sql("CREATE TABLE t2 (id INT, c STRING) TBLPROPERTIES ('primary-key' = 'id')")
+      spark.sql("INSERT INTO t2 VALUES (1, 'x1'), (2, 'x3'), (3, 'x3'), (4, 'x4'), (5, 'x5')")
+      checkAnswerAndShuffle("SELECT * FROM t1 JOIN t2 on t1.id = t2.id", 2)
+
+      // different bucket number
+      spark.sql(
+        "CREATE TABLE t3 (id INT, c STRING) TBLPROPERTIES ('primary-key' = 'id', 'bucket'='2')")
+      spark.sql("INSERT INTO t3 VALUES (1, 'x1'), (2, 'x3'), (3, 'x3'), (4, 'x4'), (5, 'x5')")
+      checkAnswerAndShuffle("SELECT * FROM t1 JOIN t3 on t1.id = t3.id", 2)
+
+      // different primary-key data type
+      spark.sql(
+        "CREATE TABLE t4 (id STRING, c STRING) TBLPROPERTIES ('primary-key' = 'id', 'bucket'='10')")
+      spark.sql("INSERT INTO t4 VALUES (1, 'x1'), (2, 'x3'), (3, 'x3'), (4, 'x4'), (5, 'x5')")
+      checkAnswerAndShuffle("SELECT * FROM t1 JOIN t4 on t1.id = t4.id", 2)
+
+      // different input partition number
+      spark.sql(
+        "CREATE TABLE t5 (id INT, c STRING) TBLPROPERTIES ('primary-key' = 'id', 'bucket'='10')")
+      spark.sql("INSERT INTO t5 VALUES (1, 'x1')")
+      checkAnswerAndShuffle("SELECT * FROM t1 JOIN t5 on t1.id = t5.id", 2)
+
+      // one more bucket keys
+      spark.sql(
+        "CREATE TABLE t6 (id1 INT, id2 INT, c STRING) TBLPROPERTIES ('bucket-key' = 'id1,id2', 'bucket'='10')")
+      spark.sql(
+        "INSERT INTO t6 VALUES (1, 1, 'x1'), (2, 2, 'x3'), (3, 3, 'x3'), (4, 4, 'x4'), (5, 5, 'x5')")
+      checkAnswerAndShuffle("SELECT * FROM t1 JOIN t6 on t1.id = t6.id1", 2)
+    }
+  }
+
+  test("Query on a bucketed table - other operators") {
+    assume(gteqSpark3_3)
+
+    withTable("t1") {
+      spark.sql(
+        "CREATE TABLE t1 (id INT, c STRING) TBLPROPERTIES ('primary-key' = 'id', 'bucket'='10')")
+      spark.sql("INSERT INTO t1 VALUES (1, 'x1'), (2, 'x3'), (3, 'x3'), (4, 'x4'), (5, 'x5')")
+
+      checkAnswerAndShuffle("SELECT id, count(*) FROM t1 GROUP BY id", 0)
+      checkAnswerAndShuffle("SELECT c, count(*) FROM t1 GROUP BY c", 1)
+      checkAnswerAndShuffle("select sum(c) OVER (PARTITION BY id ORDER BY c) from t1", 0)
+      checkAnswerAndShuffle("select sum(id) OVER (PARTITION BY c ORDER BY id) from t1", 1)
+
+      withSQLConf("spark.sql.requireAllClusterKeysForDistribution" -> "false") {
+        checkAnswerAndShuffle("SELECT id, c, count(*) FROM t1 GROUP BY id, c", 0)
+      }
+      withSQLConf("spark.sql.requireAllClusterKeysForDistribution" -> "true") {
+        checkAnswerAndShuffle("SELECT id, c, count(*) FROM t1 GROUP BY id, c", 1)
+      }
+    }
+  }
+}

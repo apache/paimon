@@ -19,13 +19,11 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.predicate.Predicate
-import org.apache.paimon.table.{BucketMode, FileStoreTable, Table}
-import org.apache.paimon.table.source.{DataSplit, Split}
+import org.apache.paimon.table.Table
 
 import org.apache.spark.sql.PaimonUtils.fieldReference
-import org.apache.spark.sql.connector.expressions.{Expressions, NamedReference}
-import org.apache.spark.sql.connector.read.{SupportsReportPartitioning, SupportsRuntimeFiltering}
-import org.apache.spark.sql.connector.read.partitioning.{KeyGroupedPartitioning, Partitioning, UnknownPartitioning}
+import org.apache.spark.sql.connector.expressions.NamedReference
+import org.apache.spark.sql.connector.read.SupportsRuntimeFiltering
 import org.apache.spark.sql.sources.{Filter, In}
 import org.apache.spark.sql.types.StructType
 
@@ -38,45 +36,7 @@ case class PaimonScan(
     reservedFilters: Seq[Filter],
     pushDownLimit: Option[Int])
   extends PaimonBaseScan(table, requiredSchema, filters, reservedFilters, pushDownLimit)
-  with SupportsRuntimeFiltering
-  with SupportsReportPartitioning {
-
-  override def outputPartitioning(): Partitioning = {
-    table match {
-      case fileStoreTable: FileStoreTable =>
-        val bucketSpec = fileStoreTable.bucketSpec()
-        if (bucketSpec.getBucketMode != BucketMode.HASH_FIXED) {
-          new UnknownPartitioning(0)
-        } else if (bucketSpec.getBucketKeys.size() > 1) {
-          new UnknownPartitioning(0)
-        } else {
-          // Spark does not support bucket with several input attributes,
-          // so we only support one bucket key case.
-          assert(bucketSpec.getNumBuckets > 0)
-          assert(bucketSpec.getBucketKeys.size() == 1)
-          val key = Expressions.bucket(bucketSpec.getNumBuckets, bucketSpec.getBucketKeys.get(0))
-          new KeyGroupedPartitioning(Array(key), lazyInputPartitions.size)
-        }
-
-      case _ =>
-        new UnknownPartitioning(0)
-    }
-  }
-
-  override def getInputPartitions(splits: Array[Split]): Seq[PaimonInputPartition] = {
-    if (!conf.v2BucketingEnabled || splits.exists(!_.isInstanceOf[DataSplit])) {
-      return super.getInputPartitions(splits)
-    }
-
-    splits
-      .map(_.asInstanceOf[DataSplit])
-      .groupBy(_.bucket())
-      .map {
-        case (bucket, groupedSplits) =>
-          PaimonBucketedInputPartition(groupedSplits, bucket)
-      }
-      .toSeq
-  }
+  with SupportsRuntimeFiltering {
 
   override def filterAttributes(): Array[NamedReference] = {
     val requiredFields = readBuilder.readType().getFieldNames.asScala
