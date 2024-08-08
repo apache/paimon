@@ -18,4 +18,12 @@
 
 package org.apache.paimon.spark.sql
 
-class MergeIntoTableTest extends MergeIntoTableTestBase {}
+import org.apache.paimon.spark.{PaimonPrimaryKeyBucketedTableTest, PaimonPrimaryKeyNonBucketTableTest}
+
+class MergeIntoPrimaryKeyBucketedTableTest
+  extends MergeIntoTableTestBase
+  with PaimonPrimaryKeyBucketedTableTest {}
+
+class MergeIntoPrimaryKeyNonBucketTableTest
+  extends MergeIntoTableTestBase
+  with PaimonPrimaryKeyNonBucketTableTest {}
