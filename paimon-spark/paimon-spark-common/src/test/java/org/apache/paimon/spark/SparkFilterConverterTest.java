@@ -40,6 +40,7 @@ import org.apache.spark.sql.sources.IsNull;
 import org.apache.spark.sql.sources.LessThan;
 import org.apache.spark.sql.sources.LessThanOrEqual;
 import org.apache.spark.sql.sources.Not;
+import org.apache.spark.sql.sources.StringContains;
 import org.apache.spark.sql.sources.StringEndsWith;
 import org.apache.spark.sql.sources.StringStartsWith;
 import org.junit.jupiter.api.Test;
@@ -167,6 +168,13 @@ public class SparkFilterConverterTest {
         boolean test1 = endsWithPre.test(10, min, max, new GenericArray(nullCount));
         assertThat(test).isEqualTo(true);
         assertThat(test1).isEqualTo(true);
+
+        // StringContains
+        StringContains stringContains = StringContains.apply("id", "aa");
+        Predicate contains = converter01.convert(stringContains);
+        assertThat(contains.test(row)).isEqualTo(true);
+        assertThat(contains.test(max)).isEqualTo(false);
+        assertThat(contains.test(min)).isEqualTo(true);
     }
 
     @Test
