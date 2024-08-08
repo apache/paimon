@@ -112,6 +112,10 @@ public class PredicateBuilder {
         return leaf(EndsWith.INSTANCE, idx, patternLiteral);
     }
 
+    public Predicate contains(int idx, Object patternLiteral) {
+        return leaf(Contains.INSTANCE, idx, patternLiteral);
+    }
+
     public Predicate leaf(NullFalseLeafBinaryFunction function, int idx, Object literal) {
         DataField field = rowType.getFields().get(idx);
         return new LeafPredicate(function, field.type(), idx, field.name(), singletonList(literal));

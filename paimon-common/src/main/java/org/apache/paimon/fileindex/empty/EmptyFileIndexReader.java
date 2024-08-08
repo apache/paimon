@@ -53,6 +53,11 @@ public class EmptyFileIndexReader extends FileIndexReader {
     }
 
     @Override
+    public FileIndexResult visitContains(FieldRef fieldRef, Object literal) {
+        return SKIP;
+    }
+
+    @Override
     public FileIndexResult visitLessThan(FieldRef fieldRef, Object literal) {
         return SKIP;
     }
