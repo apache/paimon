@@ -21,7 +21,6 @@ package org.apache.paimon.flink.action.cdc.pulsar;
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
-import org.apache.paimon.flink.action.cdc.serialization.CdcJsonDeserializationSchema;
 
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
@@ -172,7 +171,7 @@ public class PulsarActionUtils {
                 .setServiceUrl(pulsarConfig.get(PULSAR_SERVICE_URL))
                 .setAdminUrl(pulsarConfig.get(PULSAR_ADMIN_URL))
                 .setSubscriptionName(pulsarConfig.get(PULSAR_SUBSCRIPTION_NAME))
-                .setDeserializationSchema(new CdcJsonDeserializationSchema());
+                .setDeserializationSchema(new PulsarKeyValueDeserializationSchema());
 
         pulsarConfig.getOptional(TOPIC).ifPresent(pulsarSourceBuilder::setTopics);
         pulsarConfig.getOptional(TOPIC_PATTERN).ifPresent(pulsarSourceBuilder::setTopicPattern);
@@ -387,12 +386,11 @@ public class PulsarActionUtils {
         public List<CdcSourceRecord> getRecords(int pollTimeOutMills) {
             try {
                 Message<byte[]> message = consumer.receive(pollTimeOutMills, TimeUnit.MILLISECONDS);
-                CdcJsonDeserializationSchema deserializationSchema =
-                        new CdcJsonDeserializationSchema();
+                PulsarKeyValueDeserializationSchema deserializationSchema =
+                        new PulsarKeyValueDeserializationSchema();
                 return message == null
                         ? Collections.emptyList()
-                        : Collections.singletonList(
-                                deserializationSchema.deserialize(message.getValue()));
+                        : Collections.singletonList(deserializationSchema.deserialize(message));
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }

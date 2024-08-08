@@ -147,4 +147,16 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaSyncTableActionITCa
                 rowType,
                 Collections.singletonList("id"));
     }
+
+    @Timeout(120)
+    @Test
+    public void testRecordAndAutoDiscoveryPrimaryKeys() throws Exception {
+        testRecordWithPrimaryKeys(DEBEZIUM);
+    }
+
+    @Test
+    @Timeout(120)
+    public void testRecordIncludeSchemaAndAutoDiscoveryPrimaryKeys() throws Exception {
+        testSchemaIncludeRecordWithPrimaryKeys(DEBEZIUM);
+    }
 }

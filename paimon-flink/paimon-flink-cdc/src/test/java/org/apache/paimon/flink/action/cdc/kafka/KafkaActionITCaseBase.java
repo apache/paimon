@@ -328,6 +328,18 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
         }
     }
 
+    private void send(String topic, String key, String record, boolean wait) {
+        Future<RecordMetadata> sendFuture =
+                kafkaProducer.send(new ProducerRecord<>(topic, key, record));
+        if (wait) {
+            try {
+                sendFuture.get();
+            } catch (InterruptedException | ExecutionException e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
     private void send(String topic, String record, boolean wait) {
         Future<RecordMetadata> sendFuture = kafkaProducer.send(new ProducerRecord<>(topic, record));
         if (wait) {
@@ -337,6 +349,20 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
                 throw new RuntimeException(e);
             }
         }
+    }
+
+    void writeRecordsToKafkaWithKey(String topic, boolean wait, String resourceDirFormat)
+            throws Exception {
+        URL url =
+                KafkaCanalSyncTableActionITCase.class
+                        .getClassLoader()
+                        .getResource(String.format(resourceDirFormat));
+        List<String> lines = Files.readAllLines(Paths.get(url.toURI()));
+        lines.stream()
+                .map(line -> line.split(";"))
+                .filter(keyValues -> (keyValues.length > 1))
+                .filter(keyValues -> isRecordLine(keyValues[0]) && isRecordLine(keyValues[1]))
+                .forEach(keyValues -> this.send(topic, keyValues[0], keyValues[1], wait));
     }
 
     /** Kafka container extension for junit5. */
