@@ -43,6 +43,7 @@ public class ExpirePartitionsAction extends TableActionBase {
             Map<String, String> catalogConfig,
             String expirationTime,
             String timestampFormatter,
+            String timestampPattern,
             String expireStrategy) {
         super(warehouse, databaseName, tableName, catalogConfig);
         if (!(table instanceof FileStoreTable)) {
@@ -54,6 +55,7 @@ public class ExpirePartitionsAction extends TableActionBase {
         Map<String, String> map = new HashMap<>();
         map.put(CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(), expireStrategy);
         map.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), timestampFormatter);
+        map.put(CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), timestampPattern);
 
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         FileStore<?> fileStore = fileStoreTable.store();

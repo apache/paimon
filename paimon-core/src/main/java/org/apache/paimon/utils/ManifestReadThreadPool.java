@@ -18,22 +18,24 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.paimon.fs.FileIO;
+import javax.annotation.Nullable;
 
+import java.util.List;
 import java.util.concurrent.ThreadPoolExecutor;
+import java.util.function.Function;
 
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 
-/** Thread pool to delete files using {@link FileIO}. */
-public class FileDeletionThreadPool {
+/** Thread pool to read manifests. */
+public class ManifestReadThreadPool {
 
-    private static final String THREAD_NAME = "DELETE-FILE-THREAD-POOL";
+    private static final String THREAD_NAME = "MANIFEST-READ-THREAD-POOL";
 
     private static ThreadPoolExecutor executorService =
             createCachedThreadPool(Runtime.getRuntime().availableProcessors(), THREAD_NAME);
 
-    public static synchronized ThreadPoolExecutor getExecutorService(int threadNum) {
-        if (threadNum <= executorService.getMaximumPoolSize()) {
+    public static synchronized ThreadPoolExecutor getExecutorService(@Nullable Integer threadNum) {
+        if (threadNum == null || threadNum <= executorService.getMaximumPoolSize()) {
             return executorService;
         }
         // we don't need to close previous pool
@@ -41,5 +43,12 @@ public class FileDeletionThreadPool {
         executorService = createCachedThreadPool(threadNum, THREAD_NAME);
 
         return executorService;
+    }
+
+    /** This method aims to parallel process tasks with memory control and sequentially. */
+    public static <T, U> Iterable<T> sequentialBatchedExecute(
+            Function<U, List<T>> processor, List<U> input, @Nullable Integer threadNum) {
+        ThreadPoolExecutor executor = getExecutorService(threadNum);
+        return ThreadPoolUtils.sequentialBatchedExecute(executor, processor, input, threadNum);
     }
 }

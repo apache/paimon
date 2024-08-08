@@ -128,13 +128,21 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
     private T lookup(InternalRow key, DataFileMeta file) throws IOException {
         LookupFile lookupFile = lookupFileCache.getIfPresent(file.fileName());
 
-        while (lookupFile == null || lookupFile.isClosed()) {
+        boolean newCreatedLookupFile = false;
+        if (lookupFile == null) {
             lookupFile = createLookupFile(file);
-            lookupFileCache.put(file.fileName(), lookupFile);
+            newCreatedLookupFile = true;
         }
 
-        byte[] keyBytes = keySerializer.serializeToBytes(key);
-        byte[] valueBytes = lookupFile.get(keyBytes);
+        byte[] valueBytes;
+        try {
+            byte[] keyBytes = keySerializer.serializeToBytes(key);
+            valueBytes = lookupFile.get(keyBytes);
+        } finally {
+            if (newCreatedLookupFile) {
+                lookupFileCache.put(file.fileName(), lookupFile);
+            }
+        }
         if (valueBytes == null) {
             return null;
         }

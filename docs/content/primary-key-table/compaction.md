@@ -79,6 +79,19 @@ In compaction, you can configure record-Level expire time to expire records, you
 
 Expiration happens in compaction, and there is no strong guarantee to expire records in time.
 
+## Full Compaction
+
+Paimon Compaction uses [Universal-Compaction](https://github.com/facebook/rocksdb/wiki/Universal-Compaction).
+By default, when there is too much incremental data, Full Compaction will be automatically performed. You don't usually
+have to worry about it.
+
+Paimon also provides a configuration that allows for regular execution of Full Compaction.
+
+1. 'compaction.optimization-interval': Implying how often to perform an optimization full compaction, this
+    configuration is used to ensure the query timeliness of the read-optimized system table.
+2. 'full-compaction.delta-commits': Full compaction will be constantly triggered after delta commits. its disadvantage
+    is that it can only perform compaction synchronously, which will affect writing efficiency.
+
 ## Compaction Options
 
 ### Number of Sorted Runs to Pause Writing

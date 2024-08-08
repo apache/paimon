@@ -33,11 +33,11 @@ import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.metrics.CommitMetrics;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.utils.ExecutorThreadFactory;
-import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PathFactory;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
 
 import org.slf4j.Logger;
@@ -55,7 +55,6 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
@@ -63,9 +62,13 @@ import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import static java.util.Collections.emptyList;
+import static java.util.Collections.singletonList;
 import static org.apache.paimon.CoreOptions.ExpireExecutionMode;
 import static org.apache.paimon.table.sink.BatchWriteBuilder.COMMIT_IDENTIFIER;
+import static org.apache.paimon.utils.ManifestReadThreadPool.getExecutorService;
 import static org.apache.paimon.utils.Preconditions.checkState;
+import static org.apache.paimon.utils.ThreadPoolUtils.randomlyExecute;
 
 /** An abstraction layer above {@link FileStoreCommit} to provide snapshot commit and expiration. */
 public class TableCommitImpl implements InnerTableCommit {
@@ -196,7 +199,7 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     public void commit(ManifestCommittable committable) {
-        commitMultiple(Collections.singletonList(committable), false);
+        commitMultiple(singletonList(committable), false);
     }
 
     public void commitMultiple(List<ManifestCommittable> committables, boolean checkAppendFiles) {
@@ -285,22 +288,13 @@ public class TableCommitImpl implements InnerTableCommit {
                         throw new UncheckedIOException(e);
                     }
                 };
-        List<Path> nonExistFiles;
-        try {
-            nonExistFiles =
-                    FileUtils.COMMON_IO_FORK_JOIN_POOL
-                            .submit(
-                                    () ->
-                                            files.parallelStream()
-                                                    .filter(nonExists)
-                                                    .collect(Collectors.toList()))
-                            .get();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException(e);
-        } catch (ExecutionException e) {
-            throw new RuntimeException(e.getCause());
-        }
+
+        List<Path> nonExistFiles =
+                Lists.newArrayList(
+                        randomlyExecute(
+                                getExecutorService(null),
+                                f -> nonExists.test(f) ? singletonList(f) : emptyList(),
+                                files));
 
         if (nonExistFiles.size() > 0) {
             String message =

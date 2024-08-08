@@ -62,6 +62,10 @@ class PaimonPartitionManagementTest extends PaimonSparkTestBase {
             }
 
             assertThrows[AnalysisException] {
+              spark.sql("alter table T drop partition (dt='20230816'), partition (dt='20230817')")
+            }
+
+            assertThrows[AnalysisException] {
               spark.sql("show partitions T partition (dt='20230816', hh='1134')")
             }
 
@@ -101,12 +105,15 @@ class PaimonPartitionManagementTest extends PaimonSparkTestBase {
             spark.sql("INSERT INTO T VALUES('a','b',2,20230817,'1132')")
             spark.sql("INSERT INTO T VALUES('a','b',2,20230817,'1133')")
             spark.sql("INSERT INTO T VALUES('a','b',2,20230817,'1134')")
+            spark.sql("INSERT INTO T VALUES('a','b',2,20240101,'00')")
+            spark.sql("INSERT INTO T VALUES('a','b',2,20240102,'00')")
 
             checkAnswer(
               spark.sql("show partitions T "),
               Row("dt=20230816/hh=1132") :: Row("dt=20230816/hh=1133")
                 :: Row("dt=20230816/hh=1134") :: Row("dt=20230817/hh=1132") :: Row(
-                  "dt=20230817/hh=1133") :: Row("dt=20230817/hh=1134") :: Nil
+                  "dt=20230817/hh=1133") :: Row("dt=20230817/hh=1134") :: Row(
+                  "dt=20240101/hh=00") :: Row("dt=20240102/hh=00") :: Nil
             )
 
             checkAnswer(
@@ -129,6 +136,17 @@ class PaimonPartitionManagementTest extends PaimonSparkTestBase {
             spark.sql("alter table T drop partition (dt=20230816, hh='1134')")
 
             spark.sql("alter table T drop partition (dt=20230817, hh='1133')")
+
+            assertThrows[AnalysisException] {
+              spark.sql(
+                "alter table T drop partition (dt=20240101, hh='00'), partition(dt=999999, hh='00')")
+            }
+            checkAnswer(
+              spark.sql("show partitions T PARTITION (dt=20240101)"),
+              Row("dt=20240101/hh=00") :: Nil)
+
+            spark.sql(
+              "alter table T drop partition (dt=20240101, hh='00'), partition (dt=20240102, hh='00')")
 
             assertThrows[AnalysisException] {
               spark.sql("alter table T drop partition (dt=20230816)")
