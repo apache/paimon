@@ -384,7 +384,7 @@ public class CompactProcedure extends BaseProcedure {
             for (byte[] serializedMessage : serializedMessages) {
                 messages.add(
                         messageSerializerser.deserialize(
-                                serializer.getVersion(), serializedMessage));
+                                messageSerializerser.getVersion(), serializedMessage));
             }
             commit.commit(messages);
         } catch (Exception e) {
