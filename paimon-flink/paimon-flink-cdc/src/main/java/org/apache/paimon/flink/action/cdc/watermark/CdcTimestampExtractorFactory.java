@@ -26,8 +26,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.Deseriali
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
-import com.ververica.cdc.connectors.mongodb.source.MongoDBSource;
-import com.ververica.cdc.connectors.mysql.source.MySqlSource;
+import org.apache.flink.cdc.connectors.mongodb.source.MongoDBSource;
+import org.apache.flink.cdc.connectors.mysql.source.MySqlSource;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.pulsar.source.PulsarSource;
 

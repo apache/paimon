@@ -20,8 +20,8 @@ package org.apache.paimon.flink.action.cdc.postgres;
 
 import org.apache.paimon.flink.action.cdc.CdcActionITCaseBase;
 
-import com.ververica.cdc.connectors.postgres.source.PostgresConnectionPoolFactory;
-import com.ververica.cdc.connectors.postgres.source.config.PostgresSourceOptions;
+import org.apache.flink.cdc.connectors.postgres.source.PostgresConnectionPoolFactory;
+import org.apache.flink.cdc.connectors.postgres.source.config.PostgresSourceOptions;
 import org.junit.jupiter.api.AfterAll;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

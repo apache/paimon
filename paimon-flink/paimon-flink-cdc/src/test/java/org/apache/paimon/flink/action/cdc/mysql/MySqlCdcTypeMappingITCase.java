@@ -24,7 +24,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import com.ververica.cdc.debezium.utils.JdbcUrlUtils;
+import org.apache.flink.cdc.debezium.utils.JdbcUrlUtils;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;

@@ -18,11 +18,11 @@
 
 package org.apache.paimon.flink.action.cdc.mysql.format;
 
-import com.ververica.cdc.debezium.history.FlinkJsonTableChangeSerializer;
 import io.debezium.document.Array;
 import io.debezium.document.DocumentReader;
 import io.debezium.relational.history.HistoryRecord;
 import io.debezium.relational.history.TableChanges;
+import org.apache.flink.cdc.debezium.history.FlinkJsonTableChangeSerializer;
 
 import java.io.IOException;
 

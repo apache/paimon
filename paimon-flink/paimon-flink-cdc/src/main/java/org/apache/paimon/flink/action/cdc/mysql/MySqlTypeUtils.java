@@ -47,7 +47,7 @@ import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TIN
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
 
 /* This file is based on source code from MySqlTypeUtils in the flink-cdc-connectors Project
- * (https://ververica.github.io/flink-cdc-connectors/), licensed by the Apache Software Foundation (ASF)
+ * (https://github.com/apache/flink-cdc/), licensed by the Apache Software Foundation (ASF)
  * under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
  * additional information regarding copyright ownership. */
 
