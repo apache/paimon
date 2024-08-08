@@ -34,6 +34,7 @@ import org.apache.flink.streaming.api.graph.StreamConfig;
 import org.apache.flink.streaming.api.operators.InternalTimerService;
 import org.apache.flink.streaming.api.operators.Output;
 import org.apache.flink.streaming.api.watermark.Watermark;
+import org.apache.flink.streaming.runtime.streamrecord.RecordAttributes;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.runtime.tasks.ProcessingTimeService;
 import org.apache.flink.streaming.runtime.tasks.StreamTask;
@@ -51,6 +52,7 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
     private static final long serialVersionUID = 3L;
 
     @Nullable private final LogSinkFunction logSinkFunction;
+    @Nullable private final RecordAttributesProcessor recordAttributesProcessor;
     private transient SimpleContext sinkContext;
     @Nullable private transient LogWriteCallback logCallback;
 
@@ -60,10 +62,12 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
     public RowDataStoreWriteOperator(
             FileStoreTable table,
             @Nullable LogSinkFunction logSinkFunction,
+            @Nullable RecordAttributesProcessor recordAttributesProcessor,
             StoreSinkWrite.Provider storeSinkWriteProvider,
             String initialCommitUser) {
         super(table, storeSinkWriteProvider, initialCommitUser);
         this.logSinkFunction = logSinkFunction;
+        this.recordAttributesProcessor = recordAttributesProcessor;
     }
 
     @Override
@@ -134,6 +138,15 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
             // write to log store, need to preserve original pk (which includes partition fields)
             SinkRecord logRecord = write.toLogRecord(record);
             logSinkFunction.invoke(logRecord, sinkContext);
+        }
+    }
+
+    @Override
+    public void processRecordAttributes(RecordAttributes recordAttributes) throws Exception {
+        super.processRecordAttributes(recordAttributes);
+        if (recordAttributesProcessor != null) {
+            recordAttributesProcessor.processRecordAttributes(
+                    recordAttributes, new RecordAttributesProcessor.RecordAttributesContext(write));
         }
     }
 

@@ -45,10 +45,15 @@ import org.apache.paimon.types.RowType;
 
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
+import org.apache.flink.api.common.typeutils.base.IntSerializer;
+import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.api.java.typeutils.runtime.TupleSerializer;
 import org.apache.flink.metrics.Gauge;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.metrics.groups.OperatorMetricGroup;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
+import org.apache.flink.streaming.runtime.streamrecord.RecordAttributes;
+import org.apache.flink.streaming.runtime.streamrecord.RecordAttributesBuilder;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.junit.jupiter.api.BeforeEach;
@@ -60,6 +65,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -114,6 +120,7 @@ public class WriterOperatorTest {
         RowDataStoreWriteOperator operator =
                 new RowDataStoreWriteOperator(
                         fileStoreTable,
+                        null,
                         null,
                         (table, commitUser, state, ioManager, memoryPool, metricGroup) ->
                                 new StoreSinkWriteImpl(
@@ -256,6 +263,7 @@ public class WriterOperatorTest {
         return new RowDataStoreWriteOperator(
                 fileStoreTable,
                 null,
+                null,
                 (table, commitUser, state, ioManager, memoryPool, metricGroup) ->
                         new AsyncLookupSinkWrite(
                                 table,
@@ -312,6 +320,7 @@ public class WriterOperatorTest {
         RowDataStoreWriteOperator operator =
                 new RowDataStoreWriteOperator(
                         fileStoreTable,
+                        null,
                         null,
                         (table, commitUser, state, ioManager, memoryPool, metricGroup) ->
                                 new StoreSinkWriteImpl(
@@ -378,6 +387,93 @@ public class WriterOperatorTest {
                     .containsExactlyInAnyOrder(
                             "+I[1, 10, 100]", "-D[1, 10, 200]", "+I[1, 10, 300]");
         }
+    }
+
+    @Test
+    public void testProcessRecordAttributesWithFixedBucket() throws Exception {
+        testProcessRecordAttributesInternal(true);
+    }
+
+    @Test
+    public void testProcessRecordAttributesWithDynamicBucket() throws Exception {
+        testProcessRecordAttributesInternal(false);
+    }
+
+    private void testProcessRecordAttributesInternal(boolean isFixedBucket) throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.INT()},
+                        new String[] {"pt", "k", "v"});
+
+        FileStoreTable fileStoreTable =
+                createFileStoreTable(
+                        rowType,
+                        Arrays.asList("pt", "k"),
+                        Collections.singletonList("k"),
+                        new Options());
+
+        AtomicReference<RecordAttributes> actualRecordAttributes = new AtomicReference<>();
+        AtomicReference<RecordAttributesProcessor.RecordAttributesContext>
+                actualRecordAttributesContext = new AtomicReference<>();
+        RecordAttributesProcessor recordAttributesProcessor =
+                (recordAttributes, recordAttributesContext) -> {
+                    actualRecordAttributes.set(recordAttributes);
+                    actualRecordAttributesContext.set(recordAttributesContext);
+                };
+
+        StoreSinkWrite.Provider provider =
+                (table, commitUser, state, ioManager, memoryPool, metricGroup) ->
+                        new StoreSinkWriteImpl(
+                                table,
+                                commitUser,
+                                state,
+                                ioManager,
+                                false,
+                                false,
+                                true,
+                                memoryPool,
+                                metricGroup);
+
+        OneInputStreamOperatorTestHarness<?, Committable> harness;
+        if (isFixedBucket) {
+            TableWriteOperator<InternalRow> operator =
+                    new RowDataStoreWriteOperator(
+                            fileStoreTable, null, recordAttributesProcessor, provider, "test");
+            InternalTypeInfo<InternalRow> internalRowInternalTypeInfo =
+                    new InternalTypeInfo<>(
+                            new InternalRowTypeSerializer(RowType.builder().build()));
+            harness =
+                    new OneInputStreamOperatorTestHarness<>(
+                            operator,
+                            internalRowInternalTypeInfo.createSerializer(new ExecutionConfig()));
+        } else {
+            TableWriteOperator<Tuple2<InternalRow, Integer>> operator =
+                    new DynamicBucketRowWriteOperator(
+                            fileStoreTable, provider, "test", recordAttributesProcessor);
+            harness =
+                    new OneInputStreamOperatorTestHarness<>(
+                            operator,
+                            new TupleSerializer<Tuple2<InternalRow, Integer>>(
+                                    (Class<Tuple2<InternalRow, Integer>>) (Class<?>) Tuple2.class,
+                                    new TypeSerializer[] {
+                                        new InternalRowTypeSerializer(RowType.builder().build()),
+                                        new IntSerializer()
+                                    }));
+        }
+
+        TypeSerializer<Committable> serializer =
+                new CommittableTypeInfo().createSerializer(new ExecutionConfig());
+        harness.setup(serializer);
+        harness.open();
+
+        // write basic records
+        RecordAttributes expectedRecordAttributes =
+                new RecordAttributesBuilder(Collections.emptyList()).setBacklog(true).build();
+        harness.processRecordAttributes(expectedRecordAttributes);
+        harness.close();
+
+        assertThat(actualRecordAttributes.get()).isEqualTo(expectedRecordAttributes);
+        assertThat(actualRecordAttributesContext.get().getWrite()).isNotNull();
     }
 
     private FileStoreTable createFileStoreTable(

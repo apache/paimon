@@ -37,10 +37,14 @@ import java.util.Map;
 public class RowDynamicBucketSink extends DynamicBucketSink<InternalRow> {
 
     private static final long serialVersionUID = 1L;
+    @Nullable private final RecordAttributesProcessor recordAttributesProcessor;
 
     public RowDynamicBucketSink(
-            FileStoreTable table, @Nullable Map<String, String> overwritePartition) {
+            FileStoreTable table,
+            @Nullable Map<String, String> overwritePartition,
+            @Nullable RecordAttributesProcessor recordAttributesProcessor) {
         super(table, overwritePartition);
+        this.recordAttributesProcessor = recordAttributesProcessor;
     }
 
     @Override
@@ -62,6 +66,7 @@ public class RowDynamicBucketSink extends DynamicBucketSink<InternalRow> {
     @Override
     protected OneInputStreamOperator<Tuple2<InternalRow, Integer>, Committable> createWriteOperator(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new DynamicBucketRowWriteOperator(table, writeProvider, commitUser);
+        return new DynamicBucketRowWriteOperator(
+                table, writeProvider, commitUser, recordAttributesProcessor);
     }
 }

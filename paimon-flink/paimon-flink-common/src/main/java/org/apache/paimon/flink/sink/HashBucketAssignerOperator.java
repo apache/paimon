@@ -32,6 +32,7 @@ import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
+import org.apache.flink.streaming.runtime.streamrecord.RecordAttributes;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
 /** Assign bucket for the input record, output record with bucket. */
@@ -98,6 +99,11 @@ public class HashBucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2
                 assigner.assign(
                         extractor.partition(value), extractor.trimmedPrimaryKey(value).hashCode());
         output.collect(new StreamRecord<>(new Tuple2<>(value, bucket)));
+    }
+
+    @Override
+    public void processRecordAttributes(RecordAttributes recordAttributes) {
+        output.emitRecordAttributes(recordAttributes);
     }
 
     @Override

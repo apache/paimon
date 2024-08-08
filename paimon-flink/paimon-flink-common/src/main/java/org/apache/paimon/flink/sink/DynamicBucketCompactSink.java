@@ -38,7 +38,7 @@ public class DynamicBucketCompactSink extends RowDynamicBucketSink {
 
     public DynamicBucketCompactSink(
             FileStoreTable table, @Nullable Map<String, String> overwritePartition) {
-        super(table, overwritePartition);
+        super(table, overwritePartition, null);
     }
 
     @Override

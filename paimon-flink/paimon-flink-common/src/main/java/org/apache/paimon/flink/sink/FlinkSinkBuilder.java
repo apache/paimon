@@ -83,6 +83,7 @@ public class FlinkSinkBuilder {
 
     protected boolean compactSink = false;
     @Nullable protected LogSinkFunction logSinkFunction;
+    @Nullable protected RecordAttributesProcessor recordAttributesProcessor;
 
     public FlinkSinkBuilder(Table table) {
         if (!(table instanceof FileStoreTable)) {
@@ -102,9 +103,12 @@ public class FlinkSinkBuilder {
         DataFormatConverters.RowConverter converter =
                 new DataFormatConverters.RowConverter(fieldDataTypes);
         this.input =
-                input.map((MapFunction<Row, RowData>) converter::toInternal)
-                        .setParallelism(input.getParallelism())
-                        .returns(InternalTypeInfo.of(rowType));
+                input.transform(
+                                "Map",
+                                InternalTypeInfo.of(rowType),
+                                new StreamMapWithForwardingRecordAttributes<>(
+                                        (MapFunction<Row, RowData>) converter::toInternal))
+                        .setParallelism(input.getParallelism());
         return this;
     }
 
@@ -219,6 +223,11 @@ public class FlinkSinkBuilder {
         return this;
     }
 
+    public FlinkSinkBuilder withRecordAttributesProcessor(RecordAttributesProcessor processor) {
+        this.recordAttributesProcessor = processor;
+        return this;
+    }
+
     /** Build {@link DataStreamSink}. */
     public DataStreamSink<?> build() {
         input = trySortInput(input);
@@ -250,9 +259,12 @@ public class FlinkSinkBuilder {
 
     protected DataStream<InternalRow> mapToInternalRow(
             DataStream<RowData> input, org.apache.paimon.types.RowType rowType) {
-        return input.map((MapFunction<RowData, InternalRow>) FlinkRowWrapper::new)
-                .setParallelism(input.getParallelism())
-                .returns(org.apache.paimon.flink.utils.InternalTypeInfo.fromRowType(rowType));
+        return input.transform(
+                        "Map",
+                        org.apache.paimon.flink.utils.InternalTypeInfo.fromRowType(rowType),
+                        new StreamMapWithForwardingRecordAttributes<>(
+                                (MapFunction<RowData, InternalRow>) FlinkRowWrapper::new))
+                .setParallelism(input.getParallelism());
     }
 
     protected DataStreamSink<?> buildDynamicBucketSink(
@@ -262,9 +274,11 @@ public class FlinkSinkBuilder {
                 // todo support global index sort compact
                 ? new DynamicBucketCompactSink(table, overwritePartition).build(input, parallelism)
                 : globalIndex
-                        ? new GlobalDynamicBucketSink(table, overwritePartition)
+                        ? new GlobalDynamicBucketSink(
+                                        table, overwritePartition, recordAttributesProcessor)
                                 .build(input, parallelism)
-                        : new RowDynamicBucketSink(table, overwritePartition)
+                        : new RowDynamicBucketSink(
+                                        table, overwritePartition, recordAttributesProcessor)
                                 .build(input, parallelism);
     }
 
@@ -274,7 +288,9 @@ public class FlinkSinkBuilder {
                         input,
                         new RowDataChannelComputer(table.schema(), logSinkFunction != null),
                         parallelism);
-        FixedBucketSink sink = new FixedBucketSink(table, overwritePartition, logSinkFunction);
+        FixedBucketSink sink =
+                new FixedBucketSink(
+                        table, overwritePartition, logSinkFunction, recordAttributesProcessor);
         return sink.sinkFrom(partitioned);
     }
 

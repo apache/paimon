@@ -24,6 +24,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.DynamicBucketRowWriteOperator;
 import org.apache.paimon.flink.sink.FlinkWriteSink;
+import org.apache.paimon.flink.sink.RecordAttributesProcessor;
 import org.apache.paimon.flink.sink.RowWithBucketChannelComputer;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.flink.utils.InternalRowTypeSerializer;
@@ -55,16 +56,21 @@ import static org.apache.paimon.flink.utils.ManagedMemoryUtils.declareManagedMem
 public class GlobalDynamicBucketSink extends FlinkWriteSink<Tuple2<InternalRow, Integer>> {
 
     private static final long serialVersionUID = 1L;
+    @Nullable private final RecordAttributesProcessor recordAttributesProcessor;
 
     public GlobalDynamicBucketSink(
-            FileStoreTable table, @Nullable Map<String, String> overwritePartition) {
+            FileStoreTable table,
+            @Nullable Map<String, String> overwritePartition,
+            @Nullable RecordAttributesProcessor processor) {
         super(table, overwritePartition);
+        recordAttributesProcessor = processor;
     }
 
     @Override
     protected OneInputStreamOperator<Tuple2<InternalRow, Integer>, Committable> createWriteOperator(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new DynamicBucketRowWriteOperator(table, writeProvider, commitUser);
+        return new DynamicBucketRowWriteOperator(
+                table, writeProvider, commitUser, recordAttributesProcessor);
     }
 
     public DataStreamSink<?> build(DataStream<InternalRow> input, @Nullable Integer parallelism) {
