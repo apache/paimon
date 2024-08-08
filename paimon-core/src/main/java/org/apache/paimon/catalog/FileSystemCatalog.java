@@ -18,6 +18,7 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.Lock;
@@ -36,6 +37,7 @@ import java.util.Map;
 import java.util.concurrent.Callable;
 
 import static org.apache.paimon.catalog.FileSystemCatalogOptions.CASE_SENSITIVE;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A catalog implementation for {@link FileIO}. */
 public class FileSystemCatalog extends AbstractCatalog {
@@ -117,6 +119,9 @@ public class FileSystemCatalog extends AbstractCatalog {
 
     @Override
     public void createTableImpl(Identifier identifier, Schema schema) {
+        checkArgument(
+                !schema.options().containsKey(CoreOptions.PATH.key()),
+                "The FileSystemCatalog does not support specifying location when creating a table.");
         uncheck(() -> schemaManager(identifier).createTable(schema));
     }
 
