@@ -497,10 +497,32 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
         Row(1, 10, Row("x1", "y")) :: Row(2, 20, Row("x", "y")) :: Nil)
     }
   }
+  test(s"Paimon MergeInto: update on source eq target condition") {
+    withTable("source", "target") {
+      Seq((1, 100, "c11"), (3, 300, "c33")).toDF("a", "b", "c").createOrReplaceTempView("source")
+
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
+      sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
+
+      sql(s"""
+             |MERGE INTO target
+             |USING source
+             |ON source.a = target.a
+             |WHEN MATCHED THEN
+             |UPDATE SET a = source.a, b = source.b, c = source.c
+             |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT * FROM target ORDER BY a, b"),
+        Row(1, 100, "c11") :: Row(2, 20, "c2") :: Nil)
+    }
+  }
+}
+
+trait MergeIntoPrimaryKeyTableTest extends PaimonSparkTestBase with PaimonTableTest {
+  import testImplicits._
 
   test("Paimon MergeInto: fail in case that maybe update primary key column") {
-    assume(isPrimaryKeyTable)
-
     withTable("source", "target") {
 
       Seq((101, 10, "c111"), (103, 30, "c333"))
@@ -535,27 +557,6 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
       checkAnswer(
         spark.sql("SELECT * FROM target ORDER BY a, b"),
         Row(1, 10, "c111") :: Row(2, 20, "c2") :: Row(103, 30, "c333") :: Nil)
-    }
-  }
-
-  test(s"Paimon MergeInto: update on source eq target condition") {
-    withTable("source", "target") {
-      Seq((1, 100, "c11"), (3, 300, "c33")).toDF("a", "b", "c").createOrReplaceTempView("source")
-
-      createTable("target", "a INT, b INT, c STRING", Seq("a"))
-      sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
-
-      sql(s"""
-             |MERGE INTO target
-             |USING source
-             |ON source.a = target.a
-             |WHEN MATCHED THEN
-             |UPDATE SET a = source.a, b = source.b, c = source.c
-             |""".stripMargin)
-
-      checkAnswer(
-        sql("SELECT * FROM target ORDER BY a, b"),
-        Row(1, 100, "c11") :: Row(2, 20, "c2") :: Nil)
     }
   }
 }

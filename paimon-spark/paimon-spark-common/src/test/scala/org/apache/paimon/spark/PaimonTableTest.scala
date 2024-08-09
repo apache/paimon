@@ -20,11 +20,7 @@ package org.apache.paimon.spark
 
 import org.apache.spark.sql.test.SharedSparkSession
 
-import scala.collection.mutable
-
 trait PaimonTableTest extends SharedSparkSession {
-
-  val isPrimaryKeyTable: Boolean
 
   val bucket: Int
 
@@ -92,8 +88,6 @@ trait PaimonNonBucketedTable {
 }
 
 trait PaimonPrimaryKeyTable extends PaimonTableTest {
-  val isPrimaryKeyTable: Boolean = true
-
   def initProps(
       primaryOrBucketKeys: Seq[String],
       partitionKeys: Seq[String]): Map[String, String] = {
@@ -103,8 +97,6 @@ trait PaimonPrimaryKeyTable extends PaimonTableTest {
 }
 
 trait PaimonAppendTable extends PaimonTableTest {
-  val isPrimaryKeyTable: Boolean = false
-
   def initProps(
       primaryOrBucketKeys: Seq[String],
       partitionKeys: Seq[String]): Map[String, String] = {

@@ -22,11 +22,13 @@ import org.apache.paimon.spark.{PaimonAppendBucketedTableTest, PaimonAppendNonBu
 
 class MergeIntoPrimaryKeyBucketedTableTest
   extends MergeIntoTableTestBase
+  with MergeIntoPrimaryKeyTableTest
   with MergeIntoNotMatchedBySourceTest
   with PaimonPrimaryKeyBucketedTableTest {}
 
 class MergeIntoPrimaryKeyNonBucketTableTest
   extends MergeIntoTableTestBase
+  with MergeIntoPrimaryKeyTableTest
   with MergeIntoNotMatchedBySourceTest
   with PaimonPrimaryKeyNonBucketTableTest {}
 
