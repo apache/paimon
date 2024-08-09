@@ -52,8 +52,16 @@ public class IncrementalTimeStampStartingScanner extends AbstractStartingScanner
                 || endTimestamp < earliestSnapshot.timeMillis()) {
             return new NoSnapshot();
         }
+        // in org.apache.paimon.utils.SnapshotManager.earlierOrEqualTimeMills
+        // 1. if earliestSnapshotId or latestSnapshotId is null startingSnapshotId will be null
+        // 2. if earliestSnapShot.timeMillis() > startTimestamp startingSnapshotId will be
+        // earliestSnapShotId
+        // if  earliestSnapShot.timeMillis() > startTimestamp we should include the earliestSnapShot
+        // data
         Long startSnapshotId =
-                (startingSnapshotId == null) ? earliestSnapshot.id() - 1 : startingSnapshotId;
+                (startingSnapshotId == null || earliestSnapshot.timeMillis() > startTimestamp)
+                        ? earliestSnapshot.id() - 1
+                        : startingSnapshotId;
         Snapshot endSnapshot = snapshotManager.earlierOrEqualTimeMills(endTimestamp);
         Long endSnapshotId = (endSnapshot == null) ? latestSnapshot.id() : endSnapshot.id();
         IncrementalStartingScanner incrementalStartingScanner =

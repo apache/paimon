@@ -270,8 +270,9 @@ public class SnapshotManager implements Serializable {
             return null;
         }
 
-        if (snapshot(earliest).timeMillis() > timestampMills) {
-            return null;
+        Snapshot earliestSnapShot = snapshot(earliest);
+        if (earliestSnapShot.timeMillis() > timestampMills) {
+            return earliestSnapShot;
         }
         Snapshot finalSnapshot = null;
         while (earliest <= latest) {
