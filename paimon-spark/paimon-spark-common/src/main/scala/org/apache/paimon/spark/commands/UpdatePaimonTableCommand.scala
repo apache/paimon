@@ -33,7 +33,7 @@ import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.catalyst.expressions.{Alias, Expression, If}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.{Assignment, Filter, Project, SupportsSubquery}
-import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
+import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2ScanRelation}
 import org.apache.spark.sql.functions.lit
 
 case class UpdatePaimonTableCommand(
@@ -116,15 +116,11 @@ case class UpdatePaimonTableCommand(
           findTouchedFiles(candidateDataSplits, condition, relation, sparkSession)
 
         // Step3: the smallest range of data files that need to be rewritten.
-        val touchedFiles = touchedFilePaths.map {
-          file =>
-            dataFilePathToMeta.getOrElse(file, throw new RuntimeException(s"Missing file: $file"))
-        }
+        val (touchedFiles, touchedFileRelation) =
+          createNewRelation(touchedFilePaths, dataFilePathToMeta, relation)
 
         // Step4: build a dataframe that contains the unchanged and updated data, and write out them.
-        val touchedDataSplits =
-          SparkDataFileMeta.convertToDataSplits(touchedFiles, rawConvertible = true, pathFactory)
-        val addCommitMessage = writeUpdatedAndUnchangedData(sparkSession, touchedDataSplits)
+        val addCommitMessage = writeUpdatedAndUnchangedData(sparkSession, touchedFileRelation)
 
         // Step5: convert the deleted files that need to be wrote to commit message.
         val deletedCommitMessage = buildDeletedCommitMessage(touchedFiles)
@@ -157,7 +153,7 @@ case class UpdatePaimonTableCommand(
 
   private def writeUpdatedAndUnchangedData(
       sparkSession: SparkSession,
-      touchedDataSplits: Array[DataSplit]): Seq[CommitMessage] = {
+      toUpdateScanRelation: DataSourceV2ScanRelation): Seq[CommitMessage] = {
     val updateColumns = updateExpressions.zip(relation.output).map {
       case (update, origin) =>
         val updated = if (condition == TrueLiteral) {
@@ -168,10 +164,6 @@ case class UpdatePaimonTableCommand(
         new Column(updated).as(origin.name, origin.metadata)
     }
 
-    val toUpdateScanRelation = Compatibility.createDataSourceV2ScanRelation(
-      relation,
-      PaimonSplitScan(table, touchedDataSplits),
-      relation.output)
     val data = createDataset(sparkSession, toUpdateScanRelation).select(updateColumns: _*)
     writer.write(data)
   }
