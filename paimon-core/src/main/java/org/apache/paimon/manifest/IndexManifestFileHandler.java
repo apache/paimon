@@ -30,6 +30,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
@@ -140,12 +141,20 @@ public class IndexManifestFileHandler {
                 indexEntries.put(identifier(entry), entry);
             }
 
-            for (IndexManifestEntry entry : newIndexFiles) {
-                if (entry.kind() == FileKind.ADD) {
-                    indexEntries.put(identifier(entry), entry);
-                } else {
-                    indexEntries.remove(identifier(entry));
-                }
+            // The deleted entry is processed first to avoid overwriting a new entry.
+            List<IndexManifestEntry> removed =
+                    newIndexFiles.stream()
+                            .filter(f -> f.kind() == FileKind.DELETE)
+                            .collect(Collectors.toList());
+            List<IndexManifestEntry> added =
+                    newIndexFiles.stream()
+                            .filter(f -> f.kind() == FileKind.ADD)
+                            .collect(Collectors.toList());
+            for (IndexManifestEntry entry : removed) {
+                indexEntries.remove(identifier(entry));
+            }
+            for (IndexManifestEntry entry : added) {
+                indexEntries.put(identifier(entry), entry);
             }
             return new ArrayList<>(indexEntries.values());
         }

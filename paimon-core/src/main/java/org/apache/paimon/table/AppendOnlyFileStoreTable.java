@@ -135,9 +135,7 @@ class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     @Override
     public TableWriteImpl<InternalRow> newWrite(
             String commitUser, ManifestCacheFilter manifestFilter) {
-        // if this table is unaware-bucket table, we skip compaction and restored files searching
-        AppendOnlyFileStoreWrite writer =
-                store().newWrite(commitUser, manifestFilter).withBucketMode(bucketMode());
+        AppendOnlyFileStoreWrite writer = store().newWrite(commitUser, manifestFilter);
         return new TableWriteImpl<>(
                 rowType(),
                 writer,

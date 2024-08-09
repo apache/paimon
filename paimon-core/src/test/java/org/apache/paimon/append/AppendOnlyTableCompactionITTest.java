@@ -165,7 +165,7 @@ public class AppendOnlyTableCompactionITTest {
     private List<CommitMessage> doCompact(List<AppendOnlyCompactionTask> tasks) throws Exception {
         List<CommitMessage> result = new ArrayList<>();
         for (AppendOnlyCompactionTask task : tasks) {
-            result.add(task.doCompact(write));
+            result.add(task.doCompact(appendOnlyFileStoreTable, write));
         }
         return result;
     }

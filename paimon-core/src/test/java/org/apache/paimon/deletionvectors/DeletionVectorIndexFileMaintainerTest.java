@@ -72,14 +72,14 @@ public class DeletionVectorIndexFileMaintainerTest {
                 store.createDVIFMaintainer(BinaryRow.EMPTY_ROW, 1, dataFileToDeletionFiles);
 
         // no dv should be rewritten, because nothing is changed.
-        List<IndexManifestEntry> res = dvIFMaintainer.writeUnchangedDeletionVector();
+        List<IndexManifestEntry> res = dvIFMaintainer.persist();
         assertThat(res.size()).isEqualTo(0);
 
         // the dv of f3 is updated, and the index file that contains the dv of f3 should be marked
         // as REMOVE.
         dvIFMaintainer.notifyDeletionFiles(
                 Collections.singletonMap("f3", dataFileToDeletionFiles.get("f3")));
-        res = dvIFMaintainer.writeUnchangedDeletionVector();
+        res = dvIFMaintainer.persist();
         assertThat(res.size()).isEqualTo(1);
         assertThat(res.get(0).kind()).isEqualTo(FileKind.DELETE);
 
@@ -87,7 +87,7 @@ public class DeletionVectorIndexFileMaintainerTest {
         // the dv of f2 need to be rewritten, and this index file should be marked as REMOVE.
         dvIFMaintainer.notifyDeletionFiles(
                 Collections.singletonMap("f1", dataFileToDeletionFiles.get("f1")));
-        res = dvIFMaintainer.writeUnchangedDeletionVector();
+        res = dvIFMaintainer.persist();
         assertThat(res.size()).isEqualTo(3);
         IndexManifestEntry entry =
                 res.stream().filter(file -> file.kind() == FileKind.ADD).findAny().get();

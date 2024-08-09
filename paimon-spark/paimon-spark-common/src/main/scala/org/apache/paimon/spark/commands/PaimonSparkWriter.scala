@@ -229,7 +229,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
 
             sdv.dataFileAndDeletionVector.foreach {
               case (dataFileName, dv) =>
-                dvIndexFileMaintainer.notifyDeletionFiles(
+                dvIndexFileMaintainer.notifyNewDeletionVector(
                   dataFileName,
                   DeletionVector.deserializeFromBytes(dv))
             }
