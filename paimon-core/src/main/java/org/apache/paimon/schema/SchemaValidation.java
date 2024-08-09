@@ -487,8 +487,9 @@ public class SchemaValidation {
     private static void validateForDeletionVectors(CoreOptions options) {
         checkArgument(
                 options.changelogProducer() == ChangelogProducer.NONE
+                        || options.changelogProducer() == ChangelogProducer.INPUT
                         || options.changelogProducer() == ChangelogProducer.LOOKUP,
-                "Deletion vectors mode is only supported for none or lookup changelog producer now.");
+                "Deletion vectors mode is only supported for NONE/INPUT/LOOKUP changelog producer now.");
 
         checkArgument(
                 !options.mergeEngine().equals(MergeEngine.FIRST_ROW),

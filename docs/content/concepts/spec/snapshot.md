@@ -61,5 +61,5 @@ Snapshot File is JSON, it includes:
 12. totalRecordCount: record count of all changes occurred in this snapshot.
 13. deltaRecordCount: record count of all new changes occurred in this snapshot.
 14. changelogRecordCount: record count of all changelog produced in this snapshot.
-15. watermark: watermark for input records, from Flink watermark mechanism, null if there is no watermark.
+15. watermark: watermark for input records, from Flink watermark mechanism, Long.MIN_VALUE if there is no watermark.
 16. statistics: stats file name for statistics of this table.

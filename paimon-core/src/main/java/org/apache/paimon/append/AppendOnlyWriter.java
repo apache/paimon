@@ -84,7 +84,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     private final FileIndexOptions fileIndexOptions;
 
     private MemorySegmentPool memorySegmentPool;
-    private MemorySize maxDiskSize;
+    private final MemorySize maxDiskSize;
 
     public AppendOnlyWriter(
             FileIO fileIO,
