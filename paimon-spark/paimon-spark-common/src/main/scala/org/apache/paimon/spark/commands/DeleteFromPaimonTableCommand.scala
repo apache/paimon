@@ -18,15 +18,12 @@
 
 package org.apache.paimon.spark.commands
 
-import org.apache.paimon.CoreOptions
 import org.apache.paimon.CoreOptions.MergeEngine
-import org.apache.paimon.spark.PaimonSplitScan
-import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.schema.SparkSystemColumns.ROW_KIND_COL
 import org.apache.paimon.spark.util.SQLHelper
-import org.apache.paimon.table.{BucketMode, FileStoreTable}
+import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage}
 import org.apache.paimon.types.RowKind
 import org.apache.paimon.utils.InternalRowPartitionComputer
@@ -144,20 +141,11 @@ case class DeleteFromPaimonTableCommand(
         findTouchedFiles(candidateDataSplits, condition, relation, sparkSession)
 
       // Step3: the smallest range of data files that need to be rewritten.
-      val touchedFiles = touchedFilePaths.map {
-        file =>
-          dataFilePathToMeta.getOrElse(file, throw new RuntimeException(s"Missing file: $file"))
-      }
+      val (touchedFiles, newRelation) =
+        createNewRelation(touchedFilePaths, dataFilePathToMeta, relation)
 
       // Step4: build a dataframe that contains the unchanged data, and write out them.
-      val touchedDataSplits =
-        SparkDataFileMeta.convertToDataSplits(touchedFiles, rawConvertible = true, pathFactory)
-      val toRewriteScanRelation = Filter(
-        Not(condition),
-        Compatibility.createDataSourceV2ScanRelation(
-          relation,
-          PaimonSplitScan(table, touchedDataSplits),
-          relation.output))
+      val toRewriteScanRelation = Filter(Not(condition), newRelation)
       val data = createDataset(sparkSession, toRewriteScanRelation)
 
       // only write new files, should have no compaction

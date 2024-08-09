@@ -33,12 +33,12 @@ import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.types.RowType
 import org.apache.paimon.utils.SerializationUtils
 
-import org.apache.spark.sql.{Dataset, SparkSession}
+import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.{Filter => FilterLogicalNode, LogicalPlan, Project}
-import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
+import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2ScanRelation}
 import org.apache.spark.sql.sources.{AlwaysTrue, And, EqualNullSafe, Filter}
 
 import java.net.URI
@@ -101,7 +101,7 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
       output: Seq[Attribute]): Seq[DataSplit] = {
     // low level snapshot reader, it can not be affected by 'scan.mode'
     val snapshotReader = table.newSnapshotReader()
-    if (condition == TrueLiteral) {
+    if (condition != TrueLiteral) {
       val filter =
         convertConditionToPaimonPredicate(condition, output, rowType, ignoreFailure = true)
       filter.foreach(snapshotReader.withFilter)
@@ -115,8 +115,6 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
       condition: Expression,
       relation: DataSourceV2Relation,
       sparkSession: SparkSession): Array[String] = {
-    import sparkSession.implicits._
-
     for (split <- candidateDataSplits) {
       if (!split.rawConvertible()) {
         throw new IllegalArgumentException(
@@ -126,12 +124,34 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
 
     val metadataCols = Seq(FILE_PATH)
     val filteredRelation = createNewScanPlan(candidateDataSplits, condition, relation, metadataCols)
-    createDataset(sparkSession, filteredRelation)
+    findTouchedFiles(createDataset(sparkSession, filteredRelation), sparkSession)
+  }
+
+  protected def findTouchedFiles(
+      dataset: Dataset[Row],
+      sparkSession: SparkSession): Array[String] = {
+    import sparkSession.implicits._
+    dataset
       .select(FILE_PATH_COLUMN)
       .distinct()
       .as[String]
       .collect()
       .map(relativePath)
+  }
+
+  protected def createNewRelation(
+      filePaths: Array[String],
+      filePathToMeta: Map[String, SparkDataFileMeta],
+      relation: DataSourceV2Relation): (Array[SparkDataFileMeta], DataSourceV2ScanRelation) = {
+    val files = filePaths.map(
+      file => filePathToMeta.getOrElse(file, throw new RuntimeException(s"Missing file: $file")))
+    val touchedDataSplits =
+      SparkDataFileMeta.convertToDataSplits(files, rawConvertible = true, fileStore.pathFactory())
+    val newRelation = Compatibility.createDataSourceV2ScanRelation(
+      relation,
+      PaimonSplitScan(table, touchedDataSplits),
+      relation.output)
+    (files, newRelation)
   }
 
   /** Notice that, the key is a relative path, not just the file name. */
