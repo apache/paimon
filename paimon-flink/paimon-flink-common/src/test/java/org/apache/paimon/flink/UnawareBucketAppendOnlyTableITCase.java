@@ -25,6 +25,7 @@ import org.apache.paimon.utils.FailingFileIO;
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.io.File;
@@ -206,6 +207,35 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
 
         List<Row> rows = batchSql("SELECT * FROM append_table");
         assertThat(rows.size()).isEqualTo(10);
+    }
+
+    @Test
+    public void testCompactionInStreamingModeWithMaxWatermark() throws Exception {
+        batchSql("ALTER TABLE append_table SET ('compaction.min.file-num' = '2')");
+        batchSql("ALTER TABLE append_table SET ('compaction.early-max.file-num' = '4')");
+
+        sEnv.getConfig().getConfiguration().set(CHECKPOINTING_INTERVAL, Duration.ofMillis(500));
+        sEnv.executeSql(
+                "CREATE TEMPORARY TABLE Orders_in (\n"
+                        + "    f0        INT,\n"
+                        + "    f1        STRING,\n"
+                        + "    ts        TIMESTAMP(3),\n"
+                        + "WATERMARK FOR ts AS ts - INTERVAL '0' SECOND"
+                        + ") WITH (\n"
+                        + "    'connector' = 'datagen',\n"
+                        + "    'rows-per-second' = '1',\n"
+                        + "    'number-of-rows' = '10'\n"
+                        + ")");
+
+        assertStreamingHasCompact("INSERT INTO append_table SELECT f0, f1 FROM Orders_in", 60000);
+        // ensure data gen finished
+        Thread.sleep(5000);
+
+        Snapshot snapshot = findLatestSnapshot("append_table");
+        Assertions.assertNotNull(snapshot);
+        Long watermark = snapshot.watermark();
+        Assertions.assertNotNull(watermark);
+        Assertions.assertTrue(watermark > Long.MIN_VALUE);
     }
 
     @Test

@@ -32,6 +32,7 @@ import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.source.RichSourceFunction;
 import org.apache.flink.streaming.api.operators.StreamSource;
+import org.apache.flink.streaming.api.watermark.Watermark;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -60,16 +61,19 @@ public class BucketUnawareCompactSource extends RichSourceFunction<AppendOnlyCom
     private transient AppendOnlyTableCompactionCoordinator compactionCoordinator;
     private transient SourceContext<AppendOnlyCompactionTask> ctx;
     private volatile boolean isRunning = true;
+    private final boolean emitMaxWatermark;
 
     public BucketUnawareCompactSource(
             FileStoreTable table,
             boolean isStreaming,
             long scanInterval,
-            @Nullable Predicate filter) {
+            @Nullable Predicate filter,
+            boolean emitMaxWatermark) {
         this.table = table;
         this.streaming = isStreaming;
         this.scanInterval = scanInterval;
         this.filter = filter;
+        this.emitMaxWatermark = emitMaxWatermark;
     }
 
     @Override
@@ -94,6 +98,10 @@ public class BucketUnawareCompactSource extends RichSourceFunction<AppendOnlyCom
                     List<AppendOnlyCompactionTask> tasks = compactionCoordinator.run();
                     isEmpty = tasks.isEmpty();
                     tasks.forEach(ctx::collect);
+
+                    if (emitMaxWatermark) {
+                        ctx.emitWatermark(Watermark.MAX_WATERMARK);
+                    }
                 } catch (EndOfScanException esf) {
                     LOG.info("Catching EndOfStreamException, the stream is finished.");
                     return;
