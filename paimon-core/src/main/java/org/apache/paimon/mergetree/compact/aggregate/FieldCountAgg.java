@@ -36,63 +36,65 @@ public class FieldCountAgg extends FieldAggregator {
 
     @Override
     public Object agg(Object accumulator, Object inputField) {
-        Object count;
-        if (accumulator == null || inputField == null) {
-            count = (accumulator == null ? (inputField == null ? 0 : 1) : accumulator);
-        } else {
-            // ordered by type root definition
-            switch (fieldType.getTypeRoot()) {
-                case TINYINT:
-                    count = (byte) ((byte) accumulator + 1);
-                    break;
-                case SMALLINT:
-                    count = (short) ((short) accumulator + 1);
-                    break;
-                case INTEGER:
-                    count = (int) accumulator + 1;
-                    break;
-                case BIGINT:
-                    count = (long) accumulator + 1L;
-                    break;
-                default:
-                    String msg =
-                            String.format(
-                                    "type %s not support in %s",
-                                    fieldType.getTypeRoot().toString(), this.getClass().getName());
-                    throw new IllegalArgumentException(msg);
-            }
+
+        if (accumulator != null && inputField == null) {
+            return accumulator;
         }
-        return count;
+        // ordered by type root definition
+        switch (fieldType.getTypeRoot()) {
+            case TINYINT:
+                return accumulator == null
+                        ? (inputField == null ? (byte) 0 : (byte) 1)
+                        : (byte) ((byte) accumulator + 1);
+            case SMALLINT:
+                return accumulator == null
+                        ? (inputField == null ? (short) 0 : (short) 1)
+                        : (short) ((short) accumulator + 1);
+            case INTEGER:
+                return accumulator == null ? (inputField == null ? 0 : 1) : (int) accumulator + 1;
+            case BIGINT:
+                return accumulator == null
+                        ? (inputField == null ? 0L : 1L)
+                        : (long) accumulator + 1L;
+            default:
+                String msg =
+                        String.format(
+                                "type %s not support in %s",
+                                fieldType.getTypeRoot().toString(), this.getClass().getName());
+                throw new IllegalArgumentException(msg);
+        }
     }
 
     @Override
     public Object retract(Object accumulator, Object inputField) {
-        Object count;
-        if (accumulator == null || inputField == null) {
-            count = (accumulator == null ? (inputField == null ? 0 : -1) : accumulator);
-        } else {
-            // ordered by type root definition
-            switch (fieldType.getTypeRoot()) {
-                case TINYINT:
-                    count = (byte) ((byte) accumulator - 1);
-                    break;
-                case SMALLINT:
-                    count = (short) ((short) accumulator - 1);
-                    break;
-                case INTEGER:
-                    count = (int) accumulator - 1;
-                    break;
-                case BIGINT:
-                    count = (long) accumulator - 1L;
-                    break;
-                default:
-                    String msg =
-                            String.format(
-                                    "type %s not support in %s",
-                                    fieldType.getTypeRoot().toString(), this.getClass().getName());
-                    throw new IllegalArgumentException(msg);
-            }
+
+        if (accumulator != null && inputField == null) {
+            return accumulator;
         }
-        return count;
+
+        // ordered by type root definition
+        switch (fieldType.getTypeRoot()) {
+            case TINYINT:
+                return accumulator == null
+                        ? (inputField == null ? (byte) 0 : (byte) -1)
+                        : (byte) ((byte) accumulator - 1);
+            case SMALLINT:
+                return accumulator == null
+                        ? (inputField == null ? (short) 0 : (short) -1)
+                        : (short) ((short) accumulator - 1);
+            case INTEGER:
+                return accumulator == null ? (inputField == null ? 0 : -1) : (int) accumulator - 1;
+
+            case BIGINT:
+                return accumulator == null
+                        ? (inputField == null ? 0L : -1L)
+                        : (long) accumulator - 1L;
+            default:
+                String msg =
+                        String.format(
+                                "type %s not support in %s",
+                                fieldType.getTypeRoot().toString(), this.getClass().getName());
+                throw new IllegalArgumentException(msg);
+        }
     }
 }
