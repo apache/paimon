@@ -130,6 +130,12 @@ public class IcebergDataField {
                 DecimalType decimalType = (DecimalType) dataType;
                 return String.format(
                         "decimal(%d, %d)", decimalType.getPrecision(), decimalType.getScale());
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+                return "timestamptz";
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                return "timestamp";
+            case TIME_WITHOUT_TIME_ZONE:
+                return "time";
             default:
                 throw new UnsupportedOperationException("Unsupported data type: " + dataType);
         }

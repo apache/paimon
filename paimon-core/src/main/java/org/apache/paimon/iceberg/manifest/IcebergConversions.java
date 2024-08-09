@@ -19,7 +19,10 @@
 package org.apache.paimon.iceberg.manifest;
 
 import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.LocalZonedTimestampType;
+import org.apache.paimon.types.TimestampType;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -74,8 +77,34 @@ public class IcebergConversions {
             case DECIMAL:
                 Decimal decimal = (Decimal) value;
                 return ByteBuffer.wrap((decimal.toUnscaledBytes()));
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+                TimestampType timestampType = (TimestampType) type;
+                return convertTimestampWithPrecisionToBuffer(
+                        (Timestamp) value, timestampType.getPrecision());
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                LocalZonedTimestampType localTimestampType = (LocalZonedTimestampType) type;
+                return convertTimestampWithPrecisionToBuffer(
+                        (Timestamp) value, localTimestampType.getPrecision());
+            case TIME_WITHOUT_TIME_ZONE:
+                long microsecondsFromMidnight = (Integer) value / 1_000;
+                return ByteBuffer.allocate(8)
+                        .order(ByteOrder.LITTLE_ENDIAN)
+                        .putLong(0, microsecondsFromMidnight);
             default:
                 throw new UnsupportedOperationException("Cannot serialize type: " + type);
         }
+    }
+
+    private static ByteBuffer convertTimestampWithPrecisionToBuffer(
+            Timestamp timestamp, int precision) {
+        long timestampValue;
+        long secondsSinceEpoch = timestamp.toInstant().getEpochSecond();
+        if (precision <= 6) {
+            timestampValue =
+                    secondsSinceEpoch * 1_000_000 + timestamp.getNanoOfMillisecond() / 1_000;
+        } else {
+            timestampValue = secondsSinceEpoch * 1_000_000_000 + timestamp.getNanoOfMillisecond();
+        }
+        return ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putLong(timestampValue);
     }
 }

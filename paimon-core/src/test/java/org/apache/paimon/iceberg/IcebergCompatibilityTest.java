@@ -26,6 +26,7 @@ import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
@@ -48,6 +49,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.ByteBuffer;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -158,6 +160,52 @@ public class IcebergCompatibilityTest {
                                 r.get(1, String.class),
                                 r.get(2, String.class)),
                 r -> String.format("%d|%d", r.get(3, Integer.class), r.get(4, Long.class)));
+    }
+
+    @Test
+    public void testPartitionedPrimaryKeyTableTimestamp() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.TIMESTAMP(6),
+                            DataTypes.STRING(),
+                            DataTypes.INT(),
+                            DataTypes.BIGINT()
+                        },
+                        new String[] {"pt", "k", "v1", "v2"});
+
+        Function<Timestamp, BinaryRow> binaryRow =
+                (pt) -> {
+                    BinaryRow b = new BinaryRow(2);
+                    BinaryRowWriter writer = new BinaryRowWriter(b);
+                    writer.writeTimestamp(0, pt, 6);
+                    writer.complete();
+                    return b;
+                };
+
+        int numRecords = 1000;
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        List<TestRecord> testRecords = new ArrayList<>();
+        for (int i = 0; i < numRecords; i++) {
+            Timestamp pt = Timestamp.fromEpochMillis(random.nextInt(0, 99999));
+            String k = String.valueOf(random.nextInt(0, 100));
+            int v1 = random.nextInt();
+            long v2 = random.nextLong();
+            testRecords.add(
+                    new TestRecord(
+                            binaryRow.apply(pt),
+                            String.format("%s|%s", pt.toInstant().atOffset(ZoneOffset.UTC), k),
+                            String.format("%d|%d", v1, v2),
+                            GenericRow.of(pt, BinaryString.fromString(k), v1, v2)));
+        }
+
+        runCompatibilityTest(
+                rowType,
+                Arrays.asList("pt"),
+                Arrays.asList("pt", "k"),
+                testRecords,
+                r -> String.format("%s|%s", r.get(0), r.get(1)),
+                r -> String.format("%d|%d", r.get(2, Integer.class), r.get(3, Long.class)));
     }
 
     @Test
