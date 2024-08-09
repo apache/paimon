@@ -24,7 +24,7 @@ import scala.collection.mutable
 
 trait PaimonTableTest extends SharedSparkSession {
 
-  val bucket: Map[String, String]
+  val bucket: Int
 
   def appendPrimaryKey(primaryKeys: Seq[String], props: mutable.Map[String, String]): Unit
 
@@ -34,7 +34,8 @@ trait PaimonTableTest extends SharedSparkSession {
       primaryKeys: Seq[String],
       partitionKeys: Seq[String] = Seq.empty,
       props: Map[String, String] = Map.empty): Unit = {
-    val newProps: mutable.Map[String, String] = mutable.Map.empty[String, String] ++ bucket ++ props
+    val newProps: mutable.Map[String, String] =
+      mutable.Map.empty[String, String] ++ Map("bucket" -> bucket.toString) ++ props
     appendPrimaryKey(primaryKeys, newProps)
     createTable0(tableName, columns, partitionKeys, newProps.toMap)
   }
@@ -64,11 +65,11 @@ trait PaimonTableTest extends SharedSparkSession {
 }
 
 trait PaimonBucketedTable {
-  val bucket: Map[String, String] = Map("bucket" -> "3")
+  val bucket: Int = 3
 }
 
 trait PaimonNonBucketedTable {
-  val bucket: Map[String, String] = Map("bucket" -> "-1")
+  val bucket: Int = -1
 }
 
 trait PaimonPrimaryKeyTable {
