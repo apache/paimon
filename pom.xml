@@ -828,19 +828,18 @@ under the License.
                             </importOrder>
 
                             <licenseHeader>
-                                <!-- replace it with ${project.rootDirectory} after maven 4.0.0, see MNG-7038 -->
-                                <file>${maven.multiModuleProjectDirectory}/copyright.txt</file>
+                                <file>copyright.txt</file>
                                 <delimiter>${spotless.delimiter}</delimiter>
                             </licenseHeader>
                         </java>
                         <scala>
                             <scalafmt>
                                 <version>3.4.3</version>
-                                <file>${maven.multiModuleProjectDirectory}/.scalafmt.conf</file>
+                                <file>.scalafmt.conf</file>
                             </scalafmt>
 
                             <licenseHeader>
-                                <file>${maven.multiModuleProjectDirectory}/copyright.txt</file>
+                                <file>copyright.txt</file>
                                 <delimiter>${spotless.delimiter}</delimiter>
                             </licenseHeader>
                         </scala>
