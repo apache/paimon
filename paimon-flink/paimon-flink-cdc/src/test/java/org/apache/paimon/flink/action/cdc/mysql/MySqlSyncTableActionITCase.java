@@ -326,6 +326,65 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
+    @Timeout(60)
+    public void testSchemaEvolutionWithComment() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", DATABASE_NAME);
+        mySqlConfig.put("table-name", "schema_evolution_comment");
+        mySqlConfig.put("debezium.include.schema.comments", "true");
+
+        MySqlSyncTableAction action =
+                syncTableActionBuilder(mySqlConfig)
+                        .withCatalogConfig(
+                                Collections.singletonMap(
+                                        CatalogOptions.METASTORE.key(), "test-alter-table"))
+                        .withTableConfig(getBasicTableConfig())
+                        .withPrimaryKeys("_id")
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        try (Statement statement = getStatement()) {
+            testSchemaEvolutionWithCommentImpl(statement);
+        }
+    }
+
+    private void testSchemaEvolutionWithCommentImpl(Statement statement) throws Exception {
+        FileStoreTable table = getFileStoreTable();
+        statement.executeUpdate("USE " + DATABASE_NAME);
+        statement.executeUpdate("INSERT INTO schema_evolution_comment VALUES (1, 'one')");
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                        new String[] {"_id", "v1"});
+        List<String> primaryKeys = Collections.singletonList("_id");
+        List<String> expected = Collections.singletonList("+I[1, one]");
+        waitForResult(expected, table, rowType, primaryKeys);
+
+        statement.executeUpdate(
+                "ALTER TABLE schema_evolution_comment MODIFY COLUMN v1 VARCHAR(20) COMMENT 'v1-new'");
+        statement.executeUpdate("INSERT INTO schema_evolution_comment VALUES (2, 'two')");
+
+        statement.executeUpdate(
+                "ALTER TABLE schema_evolution_comment ADD COLUMN v2 INT COMMENT 'v2'");
+
+        statement.executeUpdate("INSERT INTO schema_evolution_comment VALUES (3, 'three', 30)");
+        rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(), DataTypes.VARCHAR(20), DataTypes.INT()
+                        },
+                        new String[] {"_id", "v1", "v2"});
+        expected = Arrays.asList("+I[1, one, NULL]", "+I[2, two, NULL]", "+I[3, three, 30]");
+        waitForResult(expected, table, rowType, primaryKeys);
+
+        checkTableSchema(
+                "[{\"id\":0,\"name\":\"_id\",\"type\":\"INT NOT NULL\",\"description\":\"primary\"},"
+                        + "{\"id\":1,\"name\":\"v1\",\"type\":\"VARCHAR(20)\",\"description\":\"v1-new\"},"
+                        + "{\"id\":2,\"name\":\"v2\",\"type\":\"INT\",\"description\":\"v2\"}]");
+    }
+
+    @Test
     @Timeout(90)
     public void testAllTypes() throws Exception {
         // the first round checks for table creation

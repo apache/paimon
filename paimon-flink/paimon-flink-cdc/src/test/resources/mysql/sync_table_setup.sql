@@ -49,6 +49,20 @@ CREATE TABLE schema_evolution_multiple (
     PRIMARY KEY (_id)
 );
 
+-- ################################################################################
+--  MySqlSyncTableActionITCase
+-- ################################################################################
+
+CREATE TABLE schema_evolution_comment (
+    _id INT comment 'primary',
+    v1 VARCHAR(10) comment 'v1',
+    PRIMARY KEY (_id)
+);
+
+-- ################################################################################
+--  testAllTypes
+-- ################################################################################
+
 CREATE TABLE all_types_table (
     _id INT,
     pt DECIMAL(2, 1),

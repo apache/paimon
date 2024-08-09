@@ -38,8 +38,10 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
+import com.ververica.cdc.debezium.table.DebeziumOptions;
 import io.debezium.connector.AbstractSourceInfo;
 import io.debezium.relational.Column;
+import io.debezium.relational.RelationalDatabaseConnectorConfig;
 import io.debezium.relational.Table;
 import io.debezium.relational.history.TableChanges;
 import org.apache.flink.api.common.functions.FlatMapFunction;
@@ -74,7 +76,7 @@ public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichC
     private final ZoneId serverTimeZone;
     private final List<ComputedColumn> computedColumns;
     private final TypeMapping typeMapping;
-
+    private final boolean isDebeziumSchemaCommentsEnabled;
     private DebeziumEvent root;
 
     // NOTE: current table name is not converted by tableNameConverter
@@ -96,6 +98,12 @@ public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichC
                 .configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true)
                 .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         String stringifyServerTimeZone = mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
+
+        this.isDebeziumSchemaCommentsEnabled =
+                mySqlConfig.getBoolean(
+                        DebeziumOptions.DEBEZIUM_OPTIONS_PREFIX
+                                + RelationalDatabaseConnectorConfig.INCLUDE_SCHEMA_COMMENTS.name(),
+                        false);
         this.serverTimeZone =
                 stringifyServerTimeZone == null
                         ? ZoneId.systemDefault()
@@ -174,7 +182,12 @@ public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichC
                             typeMapping);
             dataType = dataType.copy(typeMapping.containsMode(TO_NULLABLE) || column.isOptional());
 
-            rowType.field(column.name(), dataType);
+            // add column comment when we upgrade flink cdc to 2.4
+            if (isDebeziumSchemaCommentsEnabled) {
+                rowType.field(column.name(), dataType, column.comment());
+            } else {
+                rowType.field(column.name(), dataType);
+            }
         }
         return rowType.build().getFields();
     }
