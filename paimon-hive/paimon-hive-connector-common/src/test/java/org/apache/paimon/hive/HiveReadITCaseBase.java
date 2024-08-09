@@ -19,6 +19,7 @@
 package org.apache.paimon.hive;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
@@ -26,37 +27,40 @@ import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.hive.mapred.PaimonInputFormat;
+import org.apache.paimon.hive.mapred.PaimonRecordReader;
 import org.apache.paimon.hive.objectinspector.PaimonObjectInspectorFactory;
-import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 
-import com.klarna.hiverunner.HiveShell;
-import com.klarna.hiverunner.annotations.HiveSQL;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
+
 import org.apache.hadoop.hive.common.type.HiveDecimal;
 import org.apache.hadoop.hive.serde2.objectinspector.ListObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.MapObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.AbstractPrimitiveJavaObjectInspector;
-import org.junit.After;
 import org.junit.Before;
-import org.junit.BeforeClass;
 import org.junit.ClassRule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
-import org.junit.runner.RunWith;
 
-import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -71,62 +75,25 @@ import java.util.concurrent.ThreadLocalRandom;
 import static org.apache.paimon.hive.FileStoreTestUtils.DATABASE_NAME;
 import static org.apache.paimon.hive.FileStoreTestUtils.TABLE_NAME;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
-/** IT cases for {@link PaimonStorageHandler} and {@link PaimonInputFormat}. */
-@RunWith(PaimonEmbeddedHiveRunner.class)
-public class PaimonStorageHandlerITCase {
+/** IT cases for {@link PaimonRecordReader} and {@link PaimonInputFormat}. */
+public abstract class HiveReadITCaseBase extends HiveTestBase {
 
     @ClassRule public static TemporaryFolder folder = new TemporaryFolder();
 
-    @HiveSQL(files = {})
-    private static HiveShell hiveShell;
-
-    private static String engine;
-
-    private String warehouse;
     private String tablePath;
     private Identifier identifier;
     private String externalTable;
     private long commitIdentifier;
 
-    @BeforeClass
-    public static void beforeClass() {
-        // TODO Currently FlinkEmbeddedHiveRunner can only be used for one test class,
-        //  so we have to select engine randomly. Write our own Hive tester in the future.
-        // engine = ThreadLocalRandom.current().nextBoolean() ? "mr" : "tez";
-        engine = "mr";
-    }
-
     @Before
-    public void before() throws IOException {
-        if ("mr".equals(engine)) {
-            hiveShell.execute("SET hive.execution.engine=mr");
-        } else if ("tez".equals(engine)) {
-            hiveShell.execute("SET hive.execution.engine=tez");
-            hiveShell.execute("SET tez.local.mode=true");
-            hiveShell.execute("SET hive.jar.directory=" + folder.getRoot().getAbsolutePath());
-            hiveShell.execute("SET tez.staging-dir=" + folder.getRoot().getAbsolutePath());
-            // JVM will crash if we do not set this and include paimon-flink-common as dependency
-            // not sure why
-            // in real use case there won't be any Flink dependency in Hive's classpath, so it's OK
-            hiveShell.execute("SET hive.tez.exec.inplace.progress=false");
-        } else {
-            throw new UnsupportedOperationException("Unsupported engine " + engine);
-        }
-
-        hiveShell.execute("CREATE DATABASE IF NOT EXISTS test_db");
-        hiveShell.execute("USE test_db");
-
-        warehouse = folder.newFolder().toURI().toString();
-        tablePath = String.format("%s/test_db.db/%s", warehouse, TABLE_NAME);
+    public void before() throws Exception {
+        super.before();
+        tablePath = String.format("%s/test_db.db/%s", path, TABLE_NAME);
         identifier = Identifier.create(DATABASE_NAME, TABLE_NAME);
         externalTable = "test_table_" + UUID.randomUUID().toString().substring(0, 4);
         commitIdentifier = 0;
-    }
-
-    @After
-    public void after() {
-        hiveShell.execute("DROP DATABASE IF EXISTS test_db CASCADE");
     }
 
     @Test
@@ -970,7 +937,7 @@ public class PaimonStorageHandlerITCase {
 
     private Options getBasicConf() {
         Options conf = new Options();
-        conf.set(CatalogOptions.WAREHOUSE, warehouse);
+        conf.set(CatalogOptions.WAREHOUSE, path);
         return conf;
     }
 
@@ -982,5 +949,130 @@ public class PaimonStorageHandlerITCase {
                                 "CREATE EXTERNAL TABLE " + externalTable + " ",
                                 "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
                                 "LOCATION '" + tablePath + "'")));
+    }
+
+    protected void setHiveExecutionEngine() {
+        // By default uses hive on mr.
+    }
+
+    protected void setHiveExecuteEngineToMR() {
+        hiveShell.execute("SET hive.execution.engine=mr");
+    }
+
+    @Test
+    public void testReadExternalTableWithEmptyDataAndIgnoreCase() throws Exception {
+        // Create hive external table with paimon table
+        String tableName = "with_ignore_case";
+
+        // Create a paimon table
+        Schema schema =
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "col1", DataTypes.INT(), "first comment"),
+                                new DataField(1, "Col2", DataTypes.STRING(), "second comment")),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Maps.newHashMap(),
+                        "");
+        Identifier identifier = Identifier.create(DATABASE_TEST, tableName);
+        Path tablePath = AbstractCatalog.newTableLocation(path, identifier);
+        new SchemaManager(LocalFileIO.create(), tablePath).createTable(schema);
+
+        // Create hive external table
+        String hiveSql =
+                String.join(
+                        "\n",
+                        Arrays.asList(
+                                "CREATE EXTERNAL TABLE " + tableName + " ",
+                                "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
+                                "LOCATION '" + tablePath.toUri().toString() + "'"));
+        assertThatCode(() -> hiveShell.execute(hiveSql)).doesNotThrowAnyException();
+        List<String> result = hiveShell.executeQuery("SHOW CREATE TABLE " + tableName);
+        assertThat(result)
+                .containsAnyOf(
+                        "CREATE EXTERNAL TABLE `with_ignore_case`(",
+                        "  `col1` int COMMENT 'first comment', ",
+                        "  `col2` string COMMENT 'second comment')",
+                        "ROW FORMAT SERDE ",
+                        "  'org.apache.paimon.hive.PaimonSerDe' ",
+                        "STORED BY ",
+                        "  'org.apache.paimon.hive.PaimonStorageHandler' ");
+
+        // Only support hive on mr to insert data.
+        setHiveExecuteEngineToMR();
+        hiveShell.execute("INSERT INTO " + tableName + " VALUES (1,'Hello'),(2,'Paimon')");
+
+        setHiveExecutionEngine();
+        result = hiveShell.executeQuery("SELECT col2, col1 FROM " + tableName);
+        assertThat(result).containsExactly("Hello\t1", "Paimon\t2");
+        result = hiveShell.executeQuery("SELECT col2 FROM " + tableName);
+        assertThat(result).containsExactly("Hello", "Paimon");
+        result = hiveShell.executeQuery("SELECT Col2 FROM " + tableName);
+        assertThat(result).containsExactly("Hello", "Paimon");
+        result = hiveShell.executeQuery("SELECT * FROM " + tableName + " WHERE col2 = 'Hello'");
+        assertThat(result).containsExactly("1\tHello");
+        result =
+                hiveShell.executeQuery(
+                        "SELECT * FROM " + tableName + " WHERE Col2 in ('Hello', 'Paimon')");
+        assertThat(result).containsExactly("1\tHello", "2\tPaimon");
+    }
+
+    @Test
+    public void testReadExternalTableWithDataAndIgnoreCase() throws Exception {
+        // Create hive external table with paimon table
+        String tableName = "with_data_and_ignore_case";
+
+        // Create a paimon table
+        Identifier identifier = Identifier.create(DATABASE_TEST, tableName);
+
+        Options conf = new Options();
+        conf.set(CatalogOptions.WAREHOUSE, path);
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
+        RowType.Builder rowType = RowType.builder();
+        rowType.field("col1", DataTypes.INT());
+        rowType.field("Col2", DataTypes.STRING());
+
+        Table table =
+                FileStoreTestUtils.createFileStoreTable(
+                        conf,
+                        rowType.build(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        identifier);
+
+        // insert data into paimon table, make sure has some data file use older schema file.
+        List<InternalRow> data =
+                Arrays.asList(
+                        GenericRow.of(1, BinaryString.fromString("Hello")),
+                        GenericRow.of(2, BinaryString.fromString("Paimon")));
+
+        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
+        for (InternalRow rowData : data) {
+            write.write(rowData);
+        }
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.close();
+        commit.close();
+
+        // add column, do some ddl which will generate a new version schema-n file.
+        Path tablePath = AbstractCatalog.newTableLocation(path, identifier);
+        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
+        schemaManager.commitChanges(SchemaChange.addColumn("N1", DataTypes.STRING()));
+
+        // Create hive external table
+        String hiveSql =
+                String.join(
+                        "\n",
+                        Arrays.asList(
+                                "CREATE EXTERNAL TABLE " + tableName + " ",
+                                "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
+                                "LOCATION '" + tablePath.toUri().toString() + "'"));
+        assertThatCode(() -> hiveShell.execute(hiveSql)).doesNotThrowAnyException();
+
+        List<String> result =
+                hiveShell.executeQuery("SELECT * FROM " + tableName + " WHERE col2 is not null");
+        assertThat(result).containsExactly("1\tHello\tNULL", "2\tPaimon\tNULL");
     }
 }
