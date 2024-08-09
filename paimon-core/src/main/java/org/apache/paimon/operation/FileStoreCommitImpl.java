@@ -974,15 +974,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 + "with identifier %s and kind %s. "
                                 + "Clean up and try again.",
                         newSnapshotId, newSnapshotPath, commitUser, identifier, commitKind.name());
+        boolean noHint = useSerializableIsolation && !useLockService;
         try {
+            if (noHint) {
+                // we will remove all HINTs,as it may provide incorrect information.
+                cleanAllHint();
+            }
             Callable<Boolean> callable =
-                    () ->
-                            doCommit(
-                                    newSnapshotId,
-                                    newSnapshotPath,
-                                    newSnapshot,
-                                    useSerializableIsolation,
-                                    useLockService);
+                    () -> doCommit(newSnapshotId, newSnapshotPath, newSnapshot, noHint);
             if (useLockService) {
                 success =
                         lock.runWithLock(
@@ -1325,30 +1324,27 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return latestSnapshot -> true;
     }
 
+    void cleanAllHint() throws IOException {
+        snapshotManager.removeSnapshotEarliestHint();
+        snapshotManager.removeSnapshotLatestHint();
+        snapshotManager.removeChangeLogEarliestHint();
+        snapshotManager.removeChangeLogLatestHint();
+    }
+
     boolean doCommit(
-            long newSnapshotId,
-            Path newSnapshotPath,
-            Snapshot newSnapshot,
-            boolean useSerializableIsolation,
-            boolean useLock) {
+            long newSnapshotId, Path newSnapshotPath, Snapshot newSnapshot, boolean noHint) {
+        boolean committed = false;
         try {
-            boolean committed = tryAtomicCommitNewSnapshot(newSnapshotPath, newSnapshot);
-            if (committed) {
-                if (useSerializableIsolation && !useLock) {
-                    // If the useSerializableIsolation is turned on,And we not use lock service,
-                    // we will remove all HINTs,as it may provide incorrect information.
-                    snapshotManager.removeSnapshotEarliestHint();
-                    snapshotManager.removeSnapshotLatestHint();
-                    snapshotManager.removeChangeLogEarliestHint();
-                    snapshotManager.removeChangeLogLatestHint();
-                } else {
-                    snapshotManager.commitLatestHint(newSnapshotId);
-                }
+            committed = tryAtomicCommitNewSnapshot(newSnapshotPath, newSnapshot);
+            if (committed && !noHint) {
+                this.snapshotManager.commitLatestHint(newSnapshotId);
             }
-            return committed;
         } catch (Exception e) {
-            throw new CommitStateUnknownException(e.getMessage(), e);
+            if (!committed) {
+                throw new CommitStateUnknownException(e.getMessage(), e);
+            }
         }
+        return committed;
     }
 
     boolean tryAtomicCommitNewSnapshot(Path newSnapshotPath, Snapshot newSnapshot)
@@ -1363,8 +1359,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         boolean currentCommitIsLatest =
                 Objects.equals(newSnapshotId, latestSnapshotIdBeforeCommit + 1);
         if (!currentCommitIsLatest) {
-            snapshotManager.removeSnapshotLatestHint();
-            snapshotManager.removeSnapshotEarliestHint();
             throw new CommitFailedException(
                     String.format(
                             "Can't submit snapshotId [%s], because it is expected that snapshotId [%s] should be submitted now.",
@@ -1435,8 +1429,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         if (isDirtyCommit) {
             try {
                 snapshotManager.removeSnapshot(newSnapshotId);
-                snapshotManager.removeSnapshotLatestHint();
-                snapshotManager.removeSnapshotEarliestHint();
                 throw new DirtyCommitException(errorMsg);
             } catch (IOException e) {
                 throw new DirtyCommitException(errorMsg, e);

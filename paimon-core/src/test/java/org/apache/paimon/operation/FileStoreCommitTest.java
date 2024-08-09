@@ -1067,7 +1067,7 @@ public class FileStoreCommitTest {
                                                 return p.callRealMethod();
                                             })
                                     .when(spyCommit)
-                                    .doCommit(anyLong(), any(), any(), anyBoolean(), anyBoolean());
+                                    .doCommit(anyLong(), any(), any(), anyBoolean());
                             return spyCommit;
                         })
                 .when(spyStore)
@@ -1236,7 +1236,7 @@ public class FileStoreCommitTest {
                                                 return p.callRealMethod();
                                             })
                                     .when(spyCommit)
-                                    .doCommit(anyLong(), any(), any(), anyBoolean(), anyBoolean());
+                                    .doCommit(anyLong(), any(), any(), anyBoolean());
                             return spyCommit;
                         })
                 .when(spyStore)
@@ -1322,7 +1322,7 @@ public class FileStoreCommitTest {
                                                 return p.callRealMethod();
                                             })
                                     .when(spyCommit)
-                                    .doCommit(anyLong(), any(), any(), anyBoolean(), anyBoolean());
+                                    .doCommit(anyLong(), any(), any(), anyBoolean());
                             return spyCommit;
                         })
                 .when(spyStore)
