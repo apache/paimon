@@ -51,7 +51,7 @@ class AsyncPositionOutputStreamTest {
     public void testHugeWriteByte() throws IOException {
         ByteArrayPositionOutputStream result = new ByteArrayPositionOutputStream();
         AsyncPositionOutputStream out = new AsyncPositionOutputStream(result);
-        int len = 32 * 1024 + 20;
+        int len = 64 * 1024 + 20;
         ByteArrayOutputStream expected = new ByteArrayOutputStream(len);
         ThreadLocalRandom rnd = ThreadLocalRandom.current();
         for (int i = 0; i < len; i++) {
@@ -112,6 +112,7 @@ class AsyncPositionOutputStreamTest {
         out.flush();
         assertThat(byteOut.getPos()).isEqualTo(8);
 
+        out.close();
         assertThat(out.getBufferQueue().size()).isEqualTo(1);
     }
 
