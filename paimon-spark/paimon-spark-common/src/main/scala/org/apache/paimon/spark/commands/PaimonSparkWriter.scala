@@ -80,7 +80,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
             val write = newWrite()
             try {
               iter.foreach(row => write.write(row))
-              write.finish().asScala
+              write.finish()
             } finally {
               write.close()
             }
@@ -99,7 +99,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
             val write = newWrite()
             try {
               iter.foreach(row => write.write(row, row.getInt(bucketColIdx)))
-              write.finish().asScala
+              write.finish()
             } finally {
               write.close()
             }
@@ -117,7 +117,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
             val write = newWrite()
             try {
               iter.foreach(row => write.write(row, assigner.apply(row)))
-              write.finish().asScala
+              write.finish()
             } finally {
               write.close()
             }
