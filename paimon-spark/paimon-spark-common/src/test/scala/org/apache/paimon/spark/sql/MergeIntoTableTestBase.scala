@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.spark.{PaimonSparkTestBase, PaimonTableTest}
+import org.apache.paimon.spark.{PaimonPrimaryKeyTable, PaimonSparkTestBase, PaimonTableTest}
 
 import org.apache.spark.sql.Row
 
@@ -519,7 +519,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
   }
 }
 
-trait MergeIntoPrimaryKeyTableTest extends PaimonSparkTestBase with PaimonTableTest {
+trait MergeIntoPrimaryKeyTableTest extends PaimonSparkTestBase with PaimonPrimaryKeyTable {
   import testImplicits._
 
   test("Paimon MergeInto: fail in case that maybe update primary key column") {
