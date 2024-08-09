@@ -24,7 +24,6 @@ import org.apache.paimon.spark.execution.adaptive.DisableUnnecessaryPaimonBucket
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.DataFrame
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
-import org.apache.spark.sql.internal.SQLConf
 
 class DisableUnnecessaryPaimonBucketedScanSuite
   extends PaimonSparkTestBase
@@ -49,13 +48,13 @@ class DisableUnnecessaryPaimonBucketedScanSuite
       assert(bucketedScan.length == expectedNumBucketedScan, query)
     }
 
-    withSQLConf(SQLConf.V2_BUCKETING_ENABLED.key -> "true") {
-      withSQLConf(SQLConf.AUTO_BUCKETED_SCAN_ENABLED.key -> "true") {
+    withSQLConf("spark.sql.sources.v2.bucketing.enabled" -> "true") {
+      withSQLConf("spark.sql.sources.bucketing.autoBucketedScan.enabled" -> "true") {
         val df = sql(query)
         val result = df.collect()
         checkNumBucketedScan(df, expectedNumScanWithAutoScanEnabled)
 
-        withSQLConf(SQLConf.AUTO_BUCKETED_SCAN_ENABLED.key -> "false") {
+        withSQLConf("spark.sql.sources.bucketing.autoBucketedScan.enabled" -> "false") {
           val expected = sql(query)
           checkAnswer(expected, result)
           checkNumBucketedScan(expected, expectedNumScanWithAutoScanDisabled)
