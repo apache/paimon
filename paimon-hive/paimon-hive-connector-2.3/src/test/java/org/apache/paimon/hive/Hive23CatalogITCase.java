@@ -19,7 +19,6 @@
 package org.apache.paimon.hive;
 
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
 import org.apache.paimon.schema.SchemaManager;
 
 import com.klarna.hiverunner.annotations.HiveRunnerSetup;
@@ -30,7 +29,6 @@ import org.apache.flink.table.api.internal.TableEnvironmentImpl;
 import org.apache.flink.types.Row;
 import org.apache.hadoop.hive.ql.lockmgr.DbTxnManager;
 import org.junit.Test;
-import org.junit.runner.RunWith;
 
 import java.util.Arrays;
 
@@ -42,7 +40,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for using Paimon {@link HiveCatalog} together with Paimon Hive 2.3 connector. */
-@RunWith(PaimonEmbeddedHiveRunner.class)
 public class Hive23CatalogITCase extends HiveCatalogITCaseBase {
 
     @HiveRunnerSetup
