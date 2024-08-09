@@ -33,6 +33,7 @@ public class DeltaFollowUpScanner implements FollowUpScanner {
     @Override
     public boolean shouldScanSnapshot(Snapshot snapshot) {
         if (snapshot.commitKind() == Snapshot.CommitKind.APPEND) {
+            System.out.println("here! : " + snapshot.id());
             return true;
         }
 
