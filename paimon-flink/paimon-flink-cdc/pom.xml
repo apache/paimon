@@ -42,7 +42,15 @@ under the License.
         <json-path.version>2.9.0</json-path.version>
         <mongodb.testcontainers.version>1.19.1</mongodb.testcontainers.version>
         <flink.connector.pulsar.version>4.0.0-1.17</flink.connector.pulsar.version>
+        <confluent.platform.version>7.5.0</confluent.platform.version>
     </properties>
+
+    <repositories>
+        <repository>
+            <id>confluent</id>
+            <url>https://packages.confluent.io/maven/</url>
+        </repository>
+    </repositories>
 
     <dependencies>
         <dependency>
@@ -122,6 +130,19 @@ under the License.
             <artifactId>avro</artifactId>
             <version>${avro.version}</version>
             <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>io.confluent</groupId>
+            <artifactId>kafka-avro-serializer</artifactId>
+            <version>${confluent.platform.version}</version>
+            <scope>provided</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.avro</groupId>
+                    <artifactId>avro</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <dependency>

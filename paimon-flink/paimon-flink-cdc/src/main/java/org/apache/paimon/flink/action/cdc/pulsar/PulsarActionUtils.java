@@ -21,8 +21,8 @@ package org.apache.paimon.flink.action.cdc.pulsar;
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
-import org.apache.paimon.flink.action.cdc.serialization.CdcJsonDeserializationSchema;
 
+import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
@@ -57,6 +57,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 import static org.apache.flink.connector.pulsar.common.config.PulsarOptions.PULSAR_ADMIN_URL;
@@ -164,7 +165,9 @@ public class PulsarActionUtils {
                     .defaultValue(true)
                     .withDescription("To specify the boundedness of a stream.");
 
-    public static PulsarSource<CdcSourceRecord> buildPulsarSource(Configuration pulsarConfig) {
+    public static PulsarSource<CdcSourceRecord> buildPulsarSource(
+            Configuration pulsarConfig,
+            DeserializationSchema<CdcSourceRecord> deserializationSchema) {
         PulsarSourceBuilder<CdcSourceRecord> pulsarSourceBuilder = PulsarSource.builder();
 
         // the minimum setup
@@ -172,7 +175,7 @@ public class PulsarActionUtils {
                 .setServiceUrl(pulsarConfig.get(PULSAR_SERVICE_URL))
                 .setAdminUrl(pulsarConfig.get(PULSAR_ADMIN_URL))
                 .setSubscriptionName(pulsarConfig.get(PULSAR_SUBSCRIPTION_NAME))
-                .setDeserializationSchema(new CdcJsonDeserializationSchema());
+                .setDeserializationSchema(deserializationSchema);
 
         pulsarConfig.getOptional(TOPIC).ifPresent(pulsarSourceBuilder::setTopics);
         pulsarConfig.getOptional(TOPIC_PATTERN).ifPresent(pulsarSourceBuilder::setTopicPattern);
@@ -293,7 +296,8 @@ public class PulsarActionUtils {
 
     /** Referenced to {@link PulsarPartitionSplitReader#createPulsarConsumer}. */
     public static MessageQueueSchemaUtils.ConsumerWrapper createPulsarConsumer(
-            Configuration pulsarConfig) {
+            Configuration pulsarConfig,
+            DeserializationSchema<CdcSourceRecord> deserializationSchema) {
         try {
             SourceConfiguration pulsarSourceConfiguration = new SourceConfiguration(pulsarConfig);
             PulsarClient pulsarClient = PulsarClientFactory.createClient(pulsarSourceConfiguration);
@@ -307,10 +311,8 @@ public class PulsarActionUtils {
             // The default position is Latest
             consumerBuilder.subscriptionInitialPosition(SubscriptionInitialPosition.Earliest);
 
-            String topic =
-                    pulsarConfig.contains(TOPIC)
-                            ? pulsarConfig.get(TOPIC).get(0)
-                            : findOneTopic(pulsarClient, pulsarConfig.get(TOPIC_PATTERN));
+            String topic = findOneTopic(pulsarConfig, () -> pulsarClient);
+
             TopicPartition topicPartition = new TopicPartition(topic);
             consumerBuilder.topic(topicPartition.getFullTopicName());
 
@@ -329,47 +331,68 @@ public class PulsarActionUtils {
             // Create the consumer configuration by using common utils.
             Consumer<byte[]> consumer = consumerBuilder.subscribe();
 
-            return new PulsarConsumerWrapper(consumer, topic);
+            return new PulsarConsumerWrapper(consumer, topic, deserializationSchema);
         } catch (PulsarClientException e) {
             throw new RuntimeException(e);
         }
     }
 
+    public static String findOneTopic(Configuration pulsarConfig) {
+        return findOneTopic(
+                pulsarConfig,
+                () -> {
+                    try {
+                        return PulsarClientFactory.createClient(
+                                new SourceConfiguration(pulsarConfig));
+                    } catch (PulsarClientException e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+    }
+
     /** Referenced to {@link TopicPatternSubscriber}. */
-    private static String findOneTopic(PulsarClient pulsarClient, String topicPattern) {
-        TopicName destination = TopicName.get(topicPattern);
-        String pattern = destination.toString();
+    private static String findOneTopic(
+            Configuration pulsarConfig, Supplier<PulsarClient> pulsarClientSupplier) {
+        if (pulsarConfig.contains(TOPIC)) {
+            return pulsarConfig.get(TOPIC).get(0);
+        } else {
+            String topicPattern = pulsarConfig.get(TOPIC_PATTERN);
+            TopicName destination = TopicName.get(topicPattern);
+            String pattern = destination.toString();
 
-        Pattern shortenedPattern = Pattern.compile(pattern.split("://")[1]);
-        String namespace = destination.getNamespaceObject().toString();
+            Pattern shortenedPattern = Pattern.compile(pattern.split("://")[1]);
+            String namespace = destination.getNamespaceObject().toString();
 
-        LookupService lookupService = ((PulsarClientImpl) pulsarClient).getLookup();
-        NamespaceName namespaceName = NamespaceName.get(namespace);
-        try {
-            // Pulsar 2.11.0 can filter regular expression on broker, but it has a bug which
-            // can only be used for wildcard filtering.
-            String queryPattern = shortenedPattern.toString();
-            if (!queryPattern.endsWith(".*")) {
-                queryPattern = null;
+            LookupService lookupService =
+                    ((PulsarClientImpl) pulsarClientSupplier.get()).getLookup();
+            NamespaceName namespaceName = NamespaceName.get(namespace);
+            try {
+                // Pulsar 2.11.0 can filter regular expression on broker, but it has a bug which
+                // can only be used for wildcard filtering.
+                String queryPattern = shortenedPattern.toString();
+                if (!queryPattern.endsWith(".*")) {
+                    queryPattern = null;
+                }
+
+                GetTopicsResult topicsResult =
+                        lookupService
+                                .getTopicsUnderNamespace(
+                                        namespaceName,
+                                        CommandGetTopicsOfNamespace.Mode.ALL,
+                                        queryPattern,
+                                        null)
+                                .get();
+                List<String> topics = topicsResult.getTopics();
+
+                if (topics == null || topics.isEmpty()) {
+                    throw new RuntimeException(
+                            "Cannot find topics match the topic-pattern " + pattern);
+                }
+
+                return topics.get(0);
+            } catch (ExecutionException | InterruptedException e) {
+                throw new RuntimeException(e);
             }
-
-            GetTopicsResult topicsResult =
-                    lookupService
-                            .getTopicsUnderNamespace(
-                                    namespaceName,
-                                    CommandGetTopicsOfNamespace.Mode.ALL,
-                                    queryPattern,
-                                    null)
-                            .get();
-            List<String> topics = topicsResult.getTopics();
-
-            if (topics == null || topics.isEmpty()) {
-                throw new RuntimeException("Cannot find topics match the topic-pattern " + pattern);
-            }
-
-            return topics.get(0);
-        } catch (ExecutionException | InterruptedException e) {
-            throw new RuntimeException(e);
         }
     }
 
@@ -377,18 +400,21 @@ public class PulsarActionUtils {
 
         private final Consumer<byte[]> consumer;
         private final String topic;
+        private final DeserializationSchema<CdcSourceRecord> deserializationSchema;
 
-        PulsarConsumerWrapper(Consumer<byte[]> consumer, String topic) {
+        PulsarConsumerWrapper(
+                Consumer<byte[]> consumer,
+                String topic,
+                DeserializationSchema<CdcSourceRecord> deserializationSchema) {
             this.consumer = consumer;
             this.topic = topic;
+            this.deserializationSchema = deserializationSchema;
         }
 
         @Override
         public List<CdcSourceRecord> getRecords(int pollTimeOutMills) {
             try {
                 Message<byte[]> message = consumer.receive(pollTimeOutMills, TimeUnit.MILLISECONDS);
-                CdcJsonDeserializationSchema deserializationSchema =
-                        new CdcJsonDeserializationSchema();
                 return message == null
                         ? Collections.emptyList()
                         : Collections.singletonList(

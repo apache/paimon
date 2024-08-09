@@ -21,13 +21,14 @@ package org.apache.paimon.flink.action.cdc.kafka;
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
-import org.apache.paimon.flink.action.cdc.serialization.CdcJsonDeserializationSchema;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.KafkaSourceBuilder;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
+import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
+import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
 import org.apache.flink.streaming.connectors.kafka.config.StartupMode;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.ScanStartupMode;
@@ -42,7 +43,6 @@ import org.apache.kafka.common.PartitionInfo;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 
-import java.io.IOException;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collection;
@@ -70,7 +70,9 @@ public class KafkaActionUtils {
     private static final String PARTITION = "partition";
     private static final String OFFSET = "offset";
 
-    public static KafkaSource<CdcSourceRecord> buildKafkaSource(Configuration kafkaConfig) {
+    public static KafkaSource<CdcSourceRecord> buildKafkaSource(
+            Configuration kafkaConfig,
+            KafkaDeserializationSchema<CdcSourceRecord> deserializationSchema) {
         KafkaSourceBuilder<CdcSourceRecord> kafkaSourceBuilder = KafkaSource.builder();
 
         if (kafkaConfig.contains(KafkaConnectorOptions.TOPIC)) {
@@ -85,7 +87,7 @@ public class KafkaActionUtils {
         }
 
         kafkaSourceBuilder
-                .setValueOnlyDeserializer(new CdcJsonDeserializationSchema())
+                .setDeserializer(KafkaRecordDeserializationSchema.of(deserializationSchema))
                 .setGroupId(kafkaPropertiesGroupId(kafkaConfig));
 
         Properties properties = createKafkaProperties(kafkaConfig);
@@ -244,7 +246,8 @@ public class KafkaActionUtils {
     }
 
     public static MessageQueueSchemaUtils.ConsumerWrapper getKafkaEarliestConsumer(
-            Configuration kafkaConfig) {
+            Configuration kafkaConfig,
+            KafkaDeserializationSchema<CdcSourceRecord> deserializationSchema) {
         Properties props = createKafkaProperties(kafkaConfig);
 
         props.put(
@@ -263,12 +266,7 @@ public class KafkaActionUtils {
 
         KafkaConsumer<byte[], byte[]> consumer = new KafkaConsumer<>(props);
 
-        String topic;
-        if (kafkaConfig.contains(KafkaConnectorOptions.TOPIC)) {
-            topic = kafkaConfig.get(KafkaConnectorOptions.TOPIC).get(0);
-        } else {
-            topic = findOneTopic(props, kafkaConfig.get(KafkaConnectorOptions.TOPIC_PATTERN));
-        }
+        String topic = findOneTopic(kafkaConfig, props);
 
         // the return may be null in older versions of the Kafka client
         List<PartitionInfo> partitionInfos = consumer.partitionsFor(topic);
@@ -286,7 +284,7 @@ public class KafkaActionUtils {
         consumer.assign(topicPartitions);
         consumer.seekToBeginning(topicPartitions);
 
-        return new KafkaConsumerWrapper(consumer, topic);
+        return new KafkaConsumerWrapper(consumer, topic, deserializationSchema);
     }
 
     private static Properties createKafkaProperties(Configuration kafkaConfig) {
@@ -295,44 +293,56 @@ public class KafkaActionUtils {
         return props;
     }
 
-    private static String findOneTopic(Properties properties, String pattern) {
-        Pattern topicPattern = Pattern.compile(pattern);
-        try (AdminClient adminClient = AdminClient.create(properties)) {
-            Set<String> allTopicNames = adminClient.listTopics().names().get();
-            for (String topicName : allTopicNames) {
-                if (topicPattern.matcher(topicName).matches()) {
-                    return topicName;
-                }
-            }
-        } catch (ExecutionException | InterruptedException e) {
-            throw new RuntimeException(e);
-        }
+    public static String findOneTopic(Configuration kafkaConfig) {
+        return findOneTopic(kafkaConfig, createKafkaProperties(kafkaConfig));
+    }
 
-        throw new RuntimeException("Cannot find topics match the topic-pattern " + pattern);
+    private static String findOneTopic(Configuration kafkaConfig, Properties properties) {
+        if (kafkaConfig.contains(KafkaConnectorOptions.TOPIC)) {
+            return kafkaConfig.get(KafkaConnectorOptions.TOPIC).get(0);
+        } else {
+            String pattern = kafkaConfig.get(KafkaConnectorOptions.TOPIC_PATTERN);
+            Pattern topicPattern = Pattern.compile(pattern);
+            try (AdminClient adminClient = AdminClient.create(properties)) {
+                Set<String> allTopicNames = adminClient.listTopics().names().get();
+                for (String topicName : allTopicNames) {
+                    if (topicPattern.matcher(topicName).matches()) {
+                        return topicName;
+                    }
+                }
+            } catch (ExecutionException | InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+
+            throw new RuntimeException("Cannot find topics match the topic-pattern " + pattern);
+        }
     }
 
     private static class KafkaConsumerWrapper implements MessageQueueSchemaUtils.ConsumerWrapper {
 
         private final KafkaConsumer<byte[], byte[]> consumer;
         private final String topic;
+        private final KafkaDeserializationSchema<CdcSourceRecord> deserializationSchema;
 
-        KafkaConsumerWrapper(KafkaConsumer<byte[], byte[]> kafkaConsumer, String topic) {
+        KafkaConsumerWrapper(
+                KafkaConsumer<byte[], byte[]> kafkaConsumer,
+                String topic,
+                KafkaDeserializationSchema<CdcSourceRecord> deserializationSchema) {
             this.consumer = kafkaConsumer;
             this.topic = topic;
+            this.deserializationSchema = deserializationSchema;
         }
 
         @Override
         public List<CdcSourceRecord> getRecords(int pollTimeOutMills) {
             ConsumerRecords<byte[], byte[]> consumerRecords =
                     consumer.poll(Duration.ofMillis(pollTimeOutMills));
-            CdcJsonDeserializationSchema deserializationSchema = new CdcJsonDeserializationSchema();
             return StreamSupport.stream(consumerRecords.records(topic).spliterator(), false)
                     .map(
                             consumerRecord -> {
                                 try {
-                                    return deserializationSchema.deserialize(
-                                            consumerRecord.value());
-                                } catch (IOException e) {
+                                    return deserializationSchema.deserialize(consumerRecord);
+                                } catch (Exception e) {
                                     throw new RuntimeException(e);
                                 }
                             })

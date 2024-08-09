@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.serialization;
+package org.apache.paimon.flink.action.cdc.kafka;
 
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 
@@ -24,9 +24,10 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.Deseriali
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
-import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,34 +36,37 @@ import java.io.IOException;
 import static org.apache.flink.api.java.typeutils.TypeExtractor.getForClass;
 
 /** A simple deserialization schema for {@link CdcSourceRecord}. */
-public class CdcJsonDeserializationSchema implements DeserializationSchema<CdcSourceRecord> {
+public class KafkaDebeziumJsonDeserializationSchema
+        implements KafkaDeserializationSchema<CdcSourceRecord> {
 
     private static final long serialVersionUID = 1L;
 
-    private static final Logger LOG = LoggerFactory.getLogger(CdcJsonDeserializationSchema.class);
+    private static final Logger LOG =
+            LoggerFactory.getLogger(KafkaDebeziumJsonDeserializationSchema.class);
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public CdcJsonDeserializationSchema(Configuration cdcSourceConfig) {
+    public KafkaDebeziumJsonDeserializationSchema(Configuration cdcSourceConfig) {
         this();
     }
 
-    public CdcJsonDeserializationSchema() {
+    public KafkaDebeziumJsonDeserializationSchema() {
         objectMapper
                 .configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true)
                 .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     }
 
     @Override
-    public CdcSourceRecord deserialize(byte[] message) throws IOException {
-        if (message == null) {
+    public CdcSourceRecord deserialize(ConsumerRecord<byte[], byte[]> message) throws IOException {
+        if (message.value() == null) {
+            // skip tombstone messages
             return null;
         }
 
         try {
-            return new CdcSourceRecord(objectMapper.readValue(message, JsonNode.class));
+            return new CdcSourceRecord(objectMapper.readValue(message.value(), JsonNode.class));
         } catch (Exception e) {
-            LOG.error("Invalid Json:\n{}", new String(message));
+            LOG.error("Invalid Json:\n{}", new String(message.value()));
             throw e;
         }
     }
