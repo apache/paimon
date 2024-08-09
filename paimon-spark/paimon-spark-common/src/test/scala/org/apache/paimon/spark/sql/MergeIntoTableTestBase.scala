@@ -499,6 +499,8 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
   }
 
   test("Paimon MergeInto: fail in case that maybe update primary key column") {
+    assume(isPrimaryKeyTable)
+
     withTable("source", "target") {
 
       Seq((101, 10, "c111"), (103, 30, "c333"))
@@ -533,31 +535,6 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
       checkAnswer(
         spark.sql("SELECT * FROM target ORDER BY a, b"),
         Row(1, 10, "c111") :: Row(2, 20, "c2") :: Row(103, 30, "c333") :: Nil)
-    }
-  }
-
-  test("Paimon MergeInto: not support in table without primary keys") {
-    withTable("source", "target") {
-
-      Seq((1, 100, "c11"), (3, 300, "c33")).toDF("a", "b", "c").createOrReplaceTempView("source")
-
-      spark.sql(s"""
-                   |CREATE TABLE target (a INT, b INT, c STRING)
-                   |""".stripMargin)
-      spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
-
-      val error = intercept[RuntimeException] {
-        spark.sql(s"""
-                     |MERGE INTO target
-                     |USING source
-                     |ON target.a = source.a
-                     |WHEN MATCHED THEN
-                     |UPDATE SET a = source.a, b = source.b, c = source.c
-                     |WHEN NOT MATCHED
-                     |THEN INSERT (a, b, c) values (a, b, c)
-                     |""".stripMargin)
-      }.getMessage
-      assert(error.contains("Only support to MergeInto table with primary keys."))
     }
   }
 

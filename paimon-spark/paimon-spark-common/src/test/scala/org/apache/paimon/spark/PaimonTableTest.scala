@@ -24,20 +24,23 @@ import scala.collection.mutable
 
 trait PaimonTableTest extends SharedSparkSession {
 
+  val isPrimaryKeyTable: Boolean
+
   val bucket: Int
 
-  def appendPrimaryKey(primaryKeys: Seq[String], props: mutable.Map[String, String]): Unit
+  def initProps(primaryOrBucketKeys: Seq[String], partitionKeys: Seq[String]): Map[String, String]
 
   def createTable(
       tableName: String,
       columns: String,
-      primaryKeys: Seq[String],
+      primaryOrBucketKeys: Seq[String],
       partitionKeys: Seq[String] = Seq.empty,
-      props: Map[String, String] = Map.empty): Unit = {
-    val newProps: mutable.Map[String, String] =
-      mutable.Map.empty[String, String] ++ Map("bucket" -> bucket.toString) ++ props
-    appendPrimaryKey(primaryKeys, newProps)
-    createTable0(tableName, columns, partitionKeys, newProps.toMap)
+      extraProps: Map[String, String] = Map.empty): Unit = {
+    createTable0(
+      tableName,
+      columns,
+      partitionKeys,
+      initProps(primaryOrBucketKeys, partitionKeys) ++ extraProps)
   }
 
   private def createTable0(
@@ -72,35 +75,38 @@ trait PaimonNonBucketedTable {
   val bucket: Int = -1
 }
 
-trait PaimonPrimaryKeyTable {
-  def appendPrimaryKey(primaryKeys: Seq[String], props: mutable.Map[String, String]): Unit = {
-    assert(primaryKeys.nonEmpty)
-    props += ("primary-key" -> primaryKeys.mkString(","))
+trait PaimonPrimaryKeyTable extends PaimonTableTest {
+  val isPrimaryKeyTable: Boolean = true
+
+  def initProps(
+      primaryOrBucketKeys: Seq[String],
+      partitionKeys: Seq[String]): Map[String, String] = {
+    assert(primaryOrBucketKeys.nonEmpty)
+    Map("primary-key" -> primaryOrBucketKeys.mkString(","), "bucket" -> bucket.toString)
   }
 }
 
-trait PaimonAppendTable {
-  def appendPrimaryKey(primaryKeys: Seq[String], props: mutable.Map[String, String]): Unit = {
-    // nothing to do
+trait PaimonAppendTable extends PaimonTableTest {
+  val isPrimaryKeyTable: Boolean = false
+
+  def initProps(
+      primaryOrBucketKeys: Seq[String],
+      partitionKeys: Seq[String]): Map[String, String] = {
+    if (bucket == -1) {
+      Map("bucket" -> bucket.toString)
+    } else {
+      // Bucket keys should not involved partition keys
+      val bucketKeys = primaryOrBucketKeys.filterNot(partitionKeys.contains(_))
+      assert(bucketKeys.nonEmpty)
+      Map("bucket-key" -> bucketKeys.mkString(","), "bucket" -> bucket.toString)
+    }
   }
 }
 
-trait PaimonPrimaryKeyBucketedTableTest
-  extends PaimonTableTest
-  with PaimonPrimaryKeyTable
-  with PaimonBucketedTable
+trait PaimonPrimaryKeyBucketedTableTest extends PaimonPrimaryKeyTable with PaimonBucketedTable
 
-trait PaimonPrimaryKeyNonBucketTableTest
-  extends PaimonTableTest
-  with PaimonPrimaryKeyTable
-  with PaimonNonBucketedTable
+trait PaimonPrimaryKeyNonBucketTableTest extends PaimonPrimaryKeyTable with PaimonNonBucketedTable
 
-trait PaimonAppendBucketedTableTest
-  extends PaimonTableTest
-  with PaimonAppendTable
-  with PaimonBucketedTable
+trait PaimonAppendBucketedTableTest extends PaimonAppendTable with PaimonBucketedTable
 
-trait PaimonAppendNonBucketTableTest
-  extends PaimonTableTest
-  with PaimonAppendTable
-  with PaimonNonBucketedTable
+trait PaimonAppendNonBucketTableTest extends PaimonAppendTable with PaimonNonBucketedTable
