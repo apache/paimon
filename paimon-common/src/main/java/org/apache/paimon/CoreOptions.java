@@ -81,6 +81,8 @@ public class CoreOptions implements Serializable {
 
     public static final String DISTINCT = "distinct";
 
+    public static final String LIST_AGG_DELIMITER = "list-agg-delimiter";
+
     public static final String FILE_INDEX = "file-index";
 
     public static final String COLUMNS = "columns";
@@ -1472,6 +1474,13 @@ public class CoreOptions implements Serializable {
                 key(FIELDS_PREFIX + "." + fieldName + "." + DISTINCT)
                         .booleanType()
                         .defaultValue(false));
+    }
+
+    public String fieldListAggDelimiter(String fieldName) {
+        return options.get(
+                key(FIELDS_PREFIX + "." + fieldName + "." + LIST_AGG_DELIMITER)
+                        .stringType()
+                        .defaultValue(","));
     }
 
     @Nullable
