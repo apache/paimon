@@ -30,6 +30,22 @@ trait PaimonTableTest extends SharedSparkSession {
 
   def initProps(primaryOrBucketKeys: Seq[String], partitionKeys: Seq[String]): Map[String, String]
 
+  /**
+   * Create a table configured by the given parameters.
+   *
+   * @param tableName
+   *   table name
+   * @param columns
+   *   columns string, e.g. "a INT, b INT, c STRING"
+   * @param primaryOrBucketKeys
+   *   for [[PaimonPrimaryKeyTable]] they are `primary-key`, if you want to specify additional
+   *   `bucket-key`, you can specify that in extraProps. for [[PaimonAppendTable]] they are
+   *   `bucket-key`
+   * @param partitionKeys
+   *   partition keys seq
+   * @param extraProps
+   *   extra properties map
+   */
   def createTable(
       tableName: String,
       columns: String,
@@ -93,9 +109,10 @@ trait PaimonAppendTable extends PaimonTableTest {
       primaryOrBucketKeys: Seq[String],
       partitionKeys: Seq[String]): Map[String, String] = {
     if (bucket == -1) {
+      // Ignore bucket keys for unaware bucket table
       Map("bucket" -> bucket.toString)
     } else {
-      // Bucket keys should not involved partition keys
+      // Filter partition keys in bucket keys for fixed bucket table
       val bucketKeys = primaryOrBucketKeys.filterNot(partitionKeys.contains(_))
       assert(bucketKeys.nonEmpty)
       Map("bucket-key" -> bucketKeys.mkString(","), "bucket" -> bucket.toString)
