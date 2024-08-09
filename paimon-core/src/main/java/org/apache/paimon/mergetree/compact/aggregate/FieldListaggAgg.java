@@ -18,6 +18,7 @@
 
 package org.apache.paimon.mergetree.compact.aggregate;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.StringUtils;
@@ -27,11 +28,11 @@ public class FieldListaggAgg extends FieldAggregator {
 
     public static final String NAME = "listagg";
 
-    // TODO: make it configurable by with clause
-    public static final String DELIMITER = ",";
+    private final String delimiter;
 
-    public FieldListaggAgg(DataType dataType) {
+    public FieldListaggAgg(DataType dataType, CoreOptions options, String field) {
         super(dataType);
+        this.delimiter = options.fieldListAggDelimiter(field);
     }
 
     @Override
@@ -54,7 +55,7 @@ public class FieldListaggAgg extends FieldAggregator {
                     BinaryString inFieldSD = (BinaryString) inputField;
                     concatenate =
                             StringUtils.concat(
-                                    mergeFieldSD, BinaryString.fromString(DELIMITER), inFieldSD);
+                                    mergeFieldSD, BinaryString.fromString(delimiter), inFieldSD);
                     break;
                 default:
                     String msg =

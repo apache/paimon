@@ -48,8 +48,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Tests for {@link IntervalPartition}. */
 public class IntervalPartitionTest {
 
-    private static final RecordComparator COMPARATOR =
-            (RecordComparator) (o1, o2) -> o1.getInt(0) - o2.getInt(0);
+    private static final RecordComparator COMPARATOR = (o1, o2) -> o1.getInt(0) - o2.getInt(0);
 
     @Test
     public void testSameMinKey() {
