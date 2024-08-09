@@ -344,6 +344,19 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         return entry -> false;
     }
 
+    public Predicate<ManifestEntry> dataFileSkipper(Snapshot skippingSnapshot) throws Exception {
+        return dataFileSkipper(Collections.singletonList(skippingSnapshot));
+    }
+
+    public Predicate<ManifestEntry> dataFileSkipper(List<Snapshot> skippingSnapshots)
+            throws Exception {
+        Map<BinaryRow, Map<Integer, Set<String>>> skipped = new HashMap<>();
+        for (Snapshot snapshot : skippingSnapshots) {
+            addMergedDataFiles(skipped, snapshot);
+        }
+        return entry -> containsDataFile(skipped, entry);
+    }
+
     /**
      * It is possible that a job was killed during expiration and some manifest files have been
      * deleted, so if the clean methods need to get manifests of a snapshot to be cleaned, we should
@@ -474,5 +487,22 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    public Set<Path> extractDataFilePaths(
+            Collection<ManifestEntry> manifestEntries, Predicate<ManifestEntry> skipper) {
+        Set<Path> dataFileToDelete = new HashSet<>();
+        for (ManifestEntry entry : manifestEntries) {
+            if (!skipper.test(entry)) {
+                Path bucketPath = pathFactory.bucketPath(entry.partition(), entry.bucket());
+                dataFileToDelete.add(new Path(bucketPath, entry.file().fileName()));
+                for (String file : entry.file().extraFiles()) {
+                    dataFileToDelete.add(new Path(bucketPath, file));
+                }
+
+                recordDeletionBuckets(entry);
+            }
+        }
+        return dataFileToDelete;
     }
 }

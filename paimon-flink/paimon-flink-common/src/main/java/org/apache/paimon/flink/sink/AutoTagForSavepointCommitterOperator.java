@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.sink.TagCallback;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.SerializableSupplier;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -71,6 +72,8 @@ public class AutoTagForSavepointCommitterOperator<CommitT, GlobalCommitT>
 
     private final SerializableSupplier<TagManager> tagManagerFactory;
 
+    private final SerializableSupplier<BranchManager> branchManagerFactory;
+
     private final SerializableSupplier<TagDeletion> tagDeletionFactory;
 
     private final SerializableSupplier<List<TagCallback>> callbacksSupplier;
@@ -83,6 +86,8 @@ public class AutoTagForSavepointCommitterOperator<CommitT, GlobalCommitT>
 
     private transient TagManager tagManager;
 
+    private transient BranchManager branchManager;
+
     private transient TagDeletion tagDeletion;
 
     private transient List<TagCallback> callbacks;
@@ -93,11 +98,13 @@ public class AutoTagForSavepointCommitterOperator<CommitT, GlobalCommitT>
             CommitterOperator<CommitT, GlobalCommitT> commitOperator,
             SerializableSupplier<SnapshotManager> snapshotManagerFactory,
             SerializableSupplier<TagManager> tagManagerFactory,
+            SerializableSupplier<BranchManager> branchManagerFactory,
             SerializableSupplier<TagDeletion> tagDeletionFactory,
             SerializableSupplier<List<TagCallback>> callbacksSupplier,
             Duration tagTimeRetained) {
         this.commitOperator = commitOperator;
         this.tagManagerFactory = tagManagerFactory;
+        this.branchManagerFactory = branchManagerFactory;
         this.snapshotManagerFactory = snapshotManagerFactory;
         this.tagDeletionFactory = tagDeletionFactory;
         this.callbacksSupplier = callbacksSupplier;
@@ -113,6 +120,7 @@ public class AutoTagForSavepointCommitterOperator<CommitT, GlobalCommitT>
         } finally {
             snapshotManager = snapshotManagerFactory.get();
             tagManager = tagManagerFactory.get();
+            branchManager = branchManagerFactory.get();
             tagDeletion = tagDeletionFactory.get();
             callbacks = callbacksSupplier.get();
 
@@ -161,7 +169,7 @@ public class AutoTagForSavepointCommitterOperator<CommitT, GlobalCommitT>
         identifiersForTags.remove(checkpointId);
         String tagName = SAVEPOINT_TAG_PREFIX + checkpointId;
         if (tagManager.tagExists(tagName)) {
-            tagManager.deleteTag(tagName, tagDeletion, snapshotManager, callbacks);
+            tagManager.deleteTag(tagName, tagDeletion, snapshotManager, branchManager, callbacks);
         }
     }
 

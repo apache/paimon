@@ -24,6 +24,7 @@ import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.options.ExpireConfig;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -46,15 +47,18 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
     private final ConsumerManager consumerManager;
     private final ChangelogDeletion changelogDeletion;
     private final TagManager tagManager;
+    private final BranchManager branchManager;
 
     private ExpireConfig expireConfig;
 
     public ExpireChangelogImpl(
             SnapshotManager snapshotManager,
             TagManager tagManager,
-            ChangelogDeletion changelogDeletion) {
+            ChangelogDeletion changelogDeletion,
+            BranchManager branchManager) {
         this.snapshotManager = snapshotManager;
         this.tagManager = tagManager;
+        this.branchManager = branchManager;
         this.consumerManager =
                 new ConsumerManager(
                         snapshotManager.fileIO(),
@@ -134,7 +138,10 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
             LOG.debug("Changelog expire range is [" + earliestId + ", " + endExclusiveId + ")");
         }
 
-        List<Snapshot> referencedSnapshots = tagManager.taggedSnapshots();
+        List<Snapshot> referencedSnapshots =
+                SnapshotManager.mergeTreeSetToList(
+                        tagManager.taggedSnapshots(),
+                        branchManager.branchesCreateSnapshots().keySet());
 
         List<Snapshot> skippingSnapshots =
                 SnapshotManager.findOverlappedSnapshots(

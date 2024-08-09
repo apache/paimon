@@ -25,6 +25,7 @@ import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.options.ExpireConfig;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -47,13 +48,15 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
     private final ConsumerManager consumerManager;
     private final SnapshotDeletion snapshotDeletion;
     private final TagManager tagManager;
+    private final BranchManager branchManager;
 
     private ExpireConfig expireConfig;
 
     public ExpireSnapshotsImpl(
             SnapshotManager snapshotManager,
             SnapshotDeletion snapshotDeletion,
-            TagManager tagManager) {
+            TagManager tagManager,
+            BranchManager branchManager) {
         this.snapshotManager = snapshotManager;
         this.consumerManager =
                 new ConsumerManager(
@@ -62,6 +65,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
                         snapshotManager.branch());
         this.snapshotDeletion = snapshotDeletion;
         this.tagManager = tagManager;
+        this.branchManager = branchManager;
         this.expireConfig = ExpireConfig.builder().build();
     }
 
@@ -153,7 +157,10 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
                     "Snapshot expire range is [" + beginInclusiveId + ", " + endExclusiveId + ")");
         }
 
-        List<Snapshot> referencedSnapshots = tagManager.taggedSnapshots();
+        List<Snapshot> referencedSnapshots =
+                SnapshotManager.mergeTreeSetToList(
+                        tagManager.taggedSnapshots(),
+                        branchManager.branchesCreateSnapshots().keySet());
 
         // delete merge tree files
         // deleted merge tree files in a snapshot are not used by the next snapshot, so the range of

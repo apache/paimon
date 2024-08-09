@@ -35,6 +35,7 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -104,6 +105,7 @@ public class OrphanFilesClean {
 
     private final SnapshotManager snapshotManager;
     private final TagManager tagManager;
+    private final BranchManager branchManager;
     private final FileIO fileIO;
     private final Path location;
     private final int partitionKeysNum;
@@ -118,6 +120,7 @@ public class OrphanFilesClean {
     public OrphanFilesClean(FileStoreTable table) {
         this.snapshotManager = table.snapshotManager();
         this.tagManager = table.tagManager();
+        this.branchManager = table.branchManager();
         this.fileIO = table.fileIO();
         this.location = table.location();
         this.partitionKeysNum = table.partitionKeys().size();
@@ -180,13 +183,15 @@ public class OrphanFilesClean {
         return deleteFiles;
     }
 
-    /** Get all the files used by snapshots and tags. */
+    /** Get all the files used by snapshots and tags and branches. */
     private Set<String> getUsedFiles()
             throws IOException, ExecutionException, InterruptedException {
         // safely get all snapshots to be read
         Set<Snapshot> readSnapshots = new HashSet<>(snapshotManager.safelyGetAllSnapshots());
         List<Snapshot> taggedSnapshots = tagManager.taggedSnapshots();
+        Set<Snapshot> branchSnapshots = branchManager.branchesCreateSnapshots().keySet();
         readSnapshots.addAll(taggedSnapshots);
+        readSnapshots.addAll(branchSnapshots);
         readSnapshots.addAll(snapshotManager.safelyGetAllChangelogs());
         return Sets.newHashSet(randomlyExecute(EXECUTOR, this::getUsedFiles, readSnapshots));
     }
