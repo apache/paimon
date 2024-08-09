@@ -71,7 +71,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
     val bucketColIdx = withInitBucketCol.schema.size - 1
     val encoderGroupWithBucketCol = EncoderSerDeGroup(withInitBucketCol.schema)
 
-    def newWrite(): SparkTableWrite = SparkTableWrite(writeBuilder, rowType, rowKindColIdx)
+    def newWrite(): SparkTableWrite = new SparkTableWrite(writeBuilder, rowType, rowKindColIdx)
 
     def writeWithoutBucket(): Dataset[Array[Byte]] = {
       data.mapPartitions {

@@ -29,7 +29,7 @@ import org.apache.spark.sql.{PaimonUtils, Row}
 import scala.collection.JavaConverters._
 import scala.collection.mutable.ListBuffer
 
-case class SparkTableWrite(writeBuilder: BatchWriteBuilder, rowType: RowType, rowKindColIdx: Int)
+class SparkTableWrite(writeBuilder: BatchWriteBuilder, rowType: RowType, rowKindColIdx: Int)
   extends AutoCloseable {
 
   val ioManager: IOManager = SparkUtils.createIOManager
