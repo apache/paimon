@@ -33,7 +33,7 @@ flink-sql-connector-kafka-*.jar
 ```
 
 ## Supported Formats
-Flink provides several Kafka CDC formats: Canal, Debezium, Ogg, Maxwell and Normal JSON.
+Flink provides several Kafka CDC formats: Canal Json, Debezium Json, Debezium Avro, Ogg Json, Maxwell Json and Normal Json.
 If a message in a Kafka topic is a change event captured from another database using the Change Data Capture (CDC) tool, then you can use the Paimon Kafka CDC. Write the INSERT, UPDATE, DELETE messages parsed into the paimon table.
 <table class="table table-bordered">
     <thead>
@@ -252,3 +252,26 @@ Synchronization from multiple Kafka topics to Paimon database.
     --table_conf changelog-producer=input \
     --table_conf sink.parallelism=4
 ```
+
+## Additional kafka_config
+
+There are some useful options to build Flink Kafka Source, but they are not provided by flink-kafka-connector document. They are:
+
+<table class="table table-bordered">
+    <thead>
+      <tr>
+        <th class="text-left">Key</th>
+        <th class="text-left">Default</th>
+        <th class="text-left">Type</th>
+        <th class="text-left">Description</th>
+      </tr>
+    </thead>
+    <tbody>
+        <tr>
+          <td>schema.registry.url</td>
+          <td>(none)</td>
+          <td>String</td>
+          <td>When configuring "value.format=debezium-avro" which requires using the Confluence schema registry model for Apache Avro serialization, you need to provide the schema registry URL.</td>
+        </tr>
+    </tbody>
+</table>

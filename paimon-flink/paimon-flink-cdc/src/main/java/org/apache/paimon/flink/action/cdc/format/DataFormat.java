@@ -18,47 +18,104 @@
 
 package org.apache.paimon.flink.action.cdc.format;
 
+import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.format.canal.CanalRecordParser;
-import org.apache.paimon.flink.action.cdc.format.debezium.DebeziumRecordParser;
+import org.apache.paimon.flink.action.cdc.format.debezium.DebeziumAvroRecordParser;
+import org.apache.paimon.flink.action.cdc.format.debezium.DebeziumJsonRecordParser;
 import org.apache.paimon.flink.action.cdc.format.json.JsonRecordParser;
 import org.apache.paimon.flink.action.cdc.format.maxwell.MaxwellRecordParser;
 import org.apache.paimon.flink.action.cdc.format.ogg.OggRecordParser;
+import org.apache.paimon.flink.action.cdc.kafka.KafkaDebeziumAvroDeserializationSchema;
+import org.apache.paimon.flink.action.cdc.kafka.KafkaDebeziumJsonDeserializationSchema;
+import org.apache.paimon.flink.action.cdc.pulsar.PulsarDebeziumAvroDeserializationSchema;
+import org.apache.paimon.flink.action.cdc.serialization.CdcJsonDeserializationSchema;
+
+import org.apache.flink.api.common.serialization.DeserializationSchema;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
 
 import java.util.List;
+import java.util.function.Function;
 
 /**
  * Enumerates the supported data formats for message queue and provides a mechanism to create their
- * associated {@link RecordParser}.
+ * associated {@link AbstractRecordParser}.
  *
  * <p>Each data format is associated with a specific implementation of {@link RecordParserFactory},
- * which can be used to create instances of {@link RecordParser} for that format.
+ * which can be used to create instances of {@link AbstractRecordParser} for that format.
  */
 public enum DataFormat {
-    CANAL_JSON(CanalRecordParser::new),
-    OGG_JSON(OggRecordParser::new),
-    MAXWELL_JSON(MaxwellRecordParser::new),
-    DEBEZIUM_JSON(DebeziumRecordParser::new),
-    JSON(JsonRecordParser::new);
+    CANAL_JSON(
+            CanalRecordParser::new,
+            KafkaDebeziumJsonDeserializationSchema::new,
+            CdcJsonDeserializationSchema::new),
+    OGG_JSON(
+            OggRecordParser::new,
+            KafkaDebeziumJsonDeserializationSchema::new,
+            CdcJsonDeserializationSchema::new),
+    MAXWELL_JSON(
+            MaxwellRecordParser::new,
+            KafkaDebeziumJsonDeserializationSchema::new,
+            CdcJsonDeserializationSchema::new),
+    DEBEZIUM_JSON(
+            DebeziumJsonRecordParser::new,
+            KafkaDebeziumJsonDeserializationSchema::new,
+            CdcJsonDeserializationSchema::new),
+    DEBEZIUM_AVRO(
+            DebeziumAvroRecordParser::new,
+            KafkaDebeziumAvroDeserializationSchema::new,
+            PulsarDebeziumAvroDeserializationSchema::new),
+    JSON(
+            JsonRecordParser::new,
+            KafkaDebeziumJsonDeserializationSchema::new,
+            CdcJsonDeserializationSchema::new);
+
     // Add more data formats here if needed
 
     private final RecordParserFactory parser;
+    // Deserializer for Kafka
+    private final Function<Configuration, KafkaDeserializationSchema<CdcSourceRecord>>
+            kafkaDeserializer;
+    // Deserializer for Pulsar
+    private final Function<Configuration, DeserializationSchema<CdcSourceRecord>>
+            pulsarDeserializer;
 
-    DataFormat(RecordParserFactory parser) {
+    DataFormat(
+            RecordParserFactory parser,
+            Function<Configuration, KafkaDeserializationSchema<CdcSourceRecord>> kafkaDeserializer,
+            Function<Configuration, DeserializationSchema<CdcSourceRecord>> pulsarDeserializer) {
         this.parser = parser;
+        this.kafkaDeserializer = kafkaDeserializer;
+        this.pulsarDeserializer = pulsarDeserializer;
     }
 
     /**
-     * Creates a new instance of {@link RecordParser} for this data format with the specified
-     * configurations.
+     * Creates a new instance of {@link AbstractRecordParser} for this data format with the
+     * specified configurations.
      *
      * @param computedColumns List of computed columns to be considered by the parser.
-     * @return A new instance of {@link RecordParser}.
+     * @return A new instance of {@link AbstractRecordParser}.
      */
-    public RecordParser createParser(
+    public AbstractRecordParser createParser(
             TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
         return parser.createParser(typeMapping, computedColumns);
+    }
+
+    public KafkaDeserializationSchema<CdcSourceRecord> createKafkaDeserializer(
+            Configuration cdcSourceConfig) {
+        return kafkaDeserializer.apply(cdcSourceConfig);
+    }
+
+    public DeserializationSchema<CdcSourceRecord> createPulsarDeserializer(
+            Configuration cdcSourceConfig) {
+        return pulsarDeserializer.apply(cdcSourceConfig);
+    }
+
+    /** Returns the configuration string representation of this data format. */
+    public String asConfigString() {
+        return this.name().toLowerCase().replace("_", "-");
     }
 
     public static DataFormat fromConfigString(String format) {

@@ -19,9 +19,12 @@
 package org.apache.paimon.flink.action.cdc;
 
 import org.apache.paimon.flink.action.cdc.SyncTableActionBase.SchemaRetrievalException;
+import org.apache.paimon.flink.action.cdc.format.AbstractRecordParser;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
-import org.apache.paimon.flink.action.cdc.format.RecordParser;
 import org.apache.paimon.schema.Schema;
+
+import org.apache.flink.configuration.ConfigOption;
+import org.apache.flink.configuration.ConfigOptions;
 
 import java.util.Collections;
 import java.util.List;
@@ -30,6 +33,13 @@ import java.util.Optional;
 
 /** Utility class to build schema by trying to read and parse records from message queue. */
 public class MessageQueueSchemaUtils {
+
+    public static final ConfigOption<String> SCHEMA_REGISTRY_URL =
+            ConfigOptions.key("schema.registry.url")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "To use the Confluence schema registry model for Apache Avro serialization, you need to provide the schema registry URL.");
 
     private static final int MAX_RETRY = 5;
     private static final int POLL_TIMEOUT_MILLIS = 1000;
@@ -49,7 +59,8 @@ public class MessageQueueSchemaUtils {
         int retry = 0;
         int retryInterval = 1000;
 
-        RecordParser recordParser = dataFormat.createParser(typeMapping, Collections.emptyList());
+        AbstractRecordParser recordParser =
+                dataFormat.createParser(typeMapping, Collections.emptyList());
 
         while (true) {
             Optional<Schema> schema =

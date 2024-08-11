@@ -33,7 +33,7 @@ flink-connector-pulsar-*.jar
 ```
 
 ## Supported Formats
-Flink provides several Pulsar CDC formats: Canal, Debezium, Ogg, Maxwell and Normal JSON.
+Flink provides several Pulsar CDC formats: Canal Json, Debezium Json, Debezium Avro, Ogg Json, Maxwell Json and Normal Json.
 If a message in a pulsar topic is a change event captured from another database using the Change Data Capture (CDC) tool, then you can use the Paimon Pulsar CDC. Write the INSERT, UPDATE, DELETE messages parsed into the paimon table.
 <table class="table table-bordered">
     <thead>
@@ -352,6 +352,11 @@ There are some useful options to build Flink Pulsar Source, but they are not pro
           <td>Boolean</td>
           <td>To specify the boundedness of a stream.</td>
         </tr>
+        <tr>
+          <td>schema.registry.url</td>
+          <td>(none)</td>
+          <td>String</td>
+          <td>When configuring "value.format=debezium-avro" which requires using the Confluence schema registry model for Apache Avro serialization, you need to provide the schema registry URL.</td>
+        </tr>
     </tbody>
 </table>
-
