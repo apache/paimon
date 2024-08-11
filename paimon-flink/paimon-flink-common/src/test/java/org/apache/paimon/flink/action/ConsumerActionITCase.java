@@ -146,8 +146,9 @@ public class ConsumerActionITCase extends ActionITCaseBase {
         writeData(rowData(2L, BinaryString.fromString("Hello")));
         writeData(rowData(3L, BinaryString.fromString("Paimon")));
 
+        table.createTag("tag", 3);
         String branchName = "b1";
-        table.createBranch("b1", 3);
+        table.createBranch("b1", "tag");
         String branchTableName = tableName + "$branch_b1";
 
         // use consumer streaming read table

@@ -46,9 +46,6 @@ Run the following sql:
 -- create branch named 'branch1' from tag 'tag1'
 CALL sys.create_branch('default.T', 'branch1', 'tag1');
 
--- create branch named 'branch1' from snapshot 1
-CALL sys.create_branch('default.T', 'branch1', 1);
-
 -- create empty branch named 'branch1'
 CALL sys.create_branch('default.T', 'branch1');
 ```
@@ -67,7 +64,6 @@ Run the following command:
     --table <table-name> \
     --branch_name <branch-name> \
     [--tag_name <tag-name>] \
-    [--snapshot <snapshot_id>] \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
 ```
 {{< /tab >}}

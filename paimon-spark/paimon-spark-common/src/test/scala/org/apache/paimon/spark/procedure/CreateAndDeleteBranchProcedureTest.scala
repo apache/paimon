@@ -93,33 +93,12 @@ class CreateAndDeleteBranchProcedureTest extends PaimonSparkTestBase with Stream
               Row(true) :: Nil)
             assert(branchManager.branchExists("empty_branch"))
 
-            // create branch with snapshot
-            checkAnswer(
-              spark.sql(
-                "CALL paimon.sys.create_branch(table => 'test.T', branch => 'snapshot_branch', snapshot => 2)"),
-              Row(true) :: Nil)
-            assert(branchManager.branchExists("snapshot_branch"))
-
             // delete branch
             checkAnswer(
               spark.sql(
                 "CALL paimon.sys.delete_branch(table => 'test.T', branch => 'test_branch')"),
               Row(true) :: Nil)
             assert(!branchManager.branchExists("test_branch"))
-
-            // create branch with snapshot2
-            checkAnswer(
-              spark.sql(
-                "CALL paimon.sys.create_branch(table => 'test.T', branch => 'snapshot_branch_2', snapshot => 2)"),
-              Row(true) :: Nil)
-            assert(branchManager.branchExists("snapshot_branch_2"))
-
-            // create branch with snapshot3
-            checkAnswer(
-              spark.sql(
-                "CALL paimon.sys.create_branch(table => 'test.T', branch => 'snapshot_branch_3', snapshot => 3)"),
-              Row(true) :: Nil)
-            assert(branchManager.branchExists("snapshot_branch_3"))
 
             // delete branch:snapshot_branch_2 and snapshot_branch_3
             checkAnswer(

@@ -125,40 +125,6 @@ public class BranchManager {
         }
     }
 
-    public void createBranch(String branchName, long snapshotId) {
-        checkArgument(
-                !isMainBranch(branchName),
-                String.format(
-                        "Branch name '%s' is the default branch and cannot be used.",
-                        DEFAULT_MAIN_BRANCH));
-        checkArgument(!StringUtils.isBlank(branchName), "Branch name '%s' is blank.", branchName);
-        checkArgument(!branchExists(branchName), "Branch name '%s' already exists.", branchName);
-        checkArgument(
-                !branchName.chars().allMatch(Character::isDigit),
-                "Branch name cannot be pure numeric string but is '%s'.",
-                branchName);
-
-        Snapshot snapshot = snapshotManager.snapshot(snapshotId);
-
-        try {
-            // Copy the corresponding snapshot and schema files into the branch directory
-            fileIO.copyFile(
-                    snapshotManager.snapshotPath(snapshotId),
-                    snapshotManager.copyWithBranch(branchName).snapshotPath(snapshot.id()),
-                    true);
-            fileIO.copyFile(
-                    schemaManager.toSchemaPath(snapshot.schemaId()),
-                    schemaManager.copyWithBranch(branchName).toSchemaPath(snapshot.schemaId()),
-                    true);
-        } catch (IOException e) {
-            throw new RuntimeException(
-                    String.format(
-                            "Exception occurs when create branch '%s' (directory in %s).",
-                            branchName, branchPath(tablePath, branchName)),
-                    e);
-        }
-    }
-
     public void createBranch(String branchName, String tagName) {
         checkArgument(
                 !isMainBranch(branchName),
