@@ -177,14 +177,6 @@ public interface ReadonlyTable extends InnerTable {
     }
 
     @Override
-    default void createBranch(String branchName, long snapshotId) {
-        throw new UnsupportedOperationException(
-                String.format(
-                        "Readonly Table %s does not support createBranch with snapshotId.",
-                        this.getClass().getSimpleName()));
-    }
-
-    @Override
     default void createBranch(String branchName, String tagName) {
         throw new UnsupportedOperationException(
                 String.format(

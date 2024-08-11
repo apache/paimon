@@ -169,11 +169,6 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public void createBranch(String branchName, long snapshotId) {
-        wrapped.createBranch(branchName, snapshotId);
-    }
-
-    @Override
     public void createBranch(String branchName, String tagName) {
         wrapped.createBranch(branchName, tagName);
     }

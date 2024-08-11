@@ -30,7 +30,6 @@ public class CreateBranchActionFactory implements ActionFactory {
 
     private static final String TAG_NAME = "tag_name";
     private static final String BRANCH_NAME = "branch_name";
-    private static final String SNAPSHOT = "snapshot";
 
     @Override
     public String identifier() {
@@ -43,11 +42,6 @@ public class CreateBranchActionFactory implements ActionFactory {
 
         Tuple3<String, String, String> tablePath = getTablePath(params);
         Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
-
-        Long snapshot = null;
-        if (params.has(SNAPSHOT)) {
-            snapshot = Long.parseLong(params.get(SNAPSHOT));
-        }
 
         String tagName = null;
         if (params.has(TAG_NAME)) {
@@ -63,8 +57,7 @@ public class CreateBranchActionFactory implements ActionFactory {
                         tablePath.f2,
                         catalogConfig,
                         branchName,
-                        tagName,
-                        snapshot);
+                        tagName);
         return Optional.of(action);
     }
 
@@ -76,7 +69,7 @@ public class CreateBranchActionFactory implements ActionFactory {
         System.out.println("Syntax:");
         System.out.println(
                 "  create_branch --warehouse <warehouse_path> --database <database_name> "
-                        + "--table <table_name> --branch_name <branch_name> [--tag_name <tag_name>] [--snapshot <snapshot_id>]");
+                        + "--table <table_name> --branch_name <branch_name> [--tag_name <tag_name>]");
         System.out.println();
     }
 }
