@@ -24,6 +24,9 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
@@ -55,6 +58,8 @@ import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 public class SnapshotManager implements Serializable {
 
     private static final long serialVersionUID = 1L;
+
+    private static final Logger LOG = LoggerFactory.getLogger(SnapshotManager.class);
 
     private static final String SNAPSHOT_PREFIX = "snapshot-";
     private static final String CHANGELOG_PREFIX = "changelog-";
@@ -523,7 +528,31 @@ public class SnapshotManager implements Serializable {
                         "Latest snapshot id is not null, but earliest snapshot id is null. "
                                 + "This is unexpected.");
         for (long id = latestId; id >= earliestId; id--) {
-            Snapshot snapshot = snapshot(id);
+            Snapshot snapshot;
+            try {
+                snapshot = snapshot(id);
+            } catch (Exception e) {
+                long newEarliestId =
+                        Preconditions.checkNotNull(
+                                earliestSnapshotId(),
+                                "Latest snapshot id is not null, but earliest snapshot id is null. "
+                                        + "This is unexpected.");
+
+                // this is a valid snapshot, should throw exception
+                if (id >= newEarliestId) {
+                    throw e;
+                }
+
+                // this is an expired snapshot
+                LOG.warn(
+                        "Snapshot #"
+                                + id
+                                + " is expired. The latest snapshot of current user("
+                                + user
+                                + ") is not found.");
+                break;
+            }
+
             if (user.equals(snapshot.commitUser())) {
                 return Optional.of(snapshot);
             }
@@ -594,7 +623,7 @@ public class SnapshotManager implements Serializable {
                     return null;
                 }
 
-                // this is a valid snapshot, should not throw exception
+                // this is a valid snapshot, should throw exception
                 if (id >= newEarliestId) {
                     throw e;
                 }
