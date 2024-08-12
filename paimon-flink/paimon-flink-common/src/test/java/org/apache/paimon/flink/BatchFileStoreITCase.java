@@ -51,6 +51,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
 
     @Test
     public void testAdaptiveParallelism() {
+        batchSql("ALTER TABLE T SET ('write-manifest-cache' = '1 mb')");
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
         assertThatThrownBy(() -> batchSql("INSERT INTO T SELECT a, b, c FROM T GROUP BY a,b,c"))
                 .hasMessageContaining(
@@ -59,6 +60,10 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         // work fine
         batchSql(
                 "INSERT INTO T /*+ OPTIONS('sink.parallelism'='1') */ SELECT a, b, c FROM T GROUP BY a,b,c");
+
+        // work fine too
+        batchSql("ALTER TABLE T SET ('write-manifest-cache' = '0 b')");
+        batchSql("INSERT INTO T SELECT a, b, c FROM T GROUP BY a,b,c");
     }
 
     @Test
