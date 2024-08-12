@@ -287,6 +287,59 @@ public class CastExecutorTest {
     }
 
     @Test
+    public void testTimestampToNumeric() {
+        long mills = System.currentTimeMillis() / 1000 * 1000;
+        Timestamp timestamp1 = Timestamp.fromEpochMillis(mills);
+        long millisecond = timestamp1.getMillisecond();
+        Timestamp timestamp2 =
+                Timestamp.fromLocalDateTime(
+                        DateTimeUtils.toLocalDateTime(mills, TimeZone.getDefault().toZoneId()));
+        long millisecond1 = timestamp2.getMillisecond();
+
+        // cast from TimestampType to BigIntType or IntType
+        compareCastResult(
+                CastExecutors.resolve(new TimestampType(3), new BigIntType(false)),
+                timestamp1,
+                DateTimeUtils.unixTimestamp(millisecond));
+
+        compareCastResult(
+                CastExecutors.resolve(new LocalZonedTimestampType(3), new BigIntType(false)),
+                timestamp2,
+                DateTimeUtils.unixTimestamp(millisecond1));
+
+        compareCastResult(
+                CastExecutors.resolve(new TimestampType(3), new IntType(false)),
+                timestamp1,
+                (int) DateTimeUtils.unixTimestamp(millisecond));
+
+        compareCastResult(
+                CastExecutors.resolve(new LocalZonedTimestampType(3), new IntType(false)),
+                timestamp2,
+                (int) DateTimeUtils.unixTimestamp(millisecond1));
+
+        // cast from BigIntType or IntType to TimestampType
+        compareCastResult(
+                CastExecutors.resolve(new BigIntType(false), new TimestampType(3)),
+                DateTimeUtils.unixTimestamp(millisecond),
+                timestamp1);
+
+        compareCastResult(
+                CastExecutors.resolve(new BigIntType(false), new LocalZonedTimestampType(3)),
+                DateTimeUtils.unixTimestamp(millisecond),
+                timestamp2);
+
+        compareCastResult(
+                CastExecutors.resolve(new IntType(false), new TimestampType(3)),
+                (int) DateTimeUtils.unixTimestamp(millisecond),
+                timestamp1);
+
+        compareCastResult(
+                CastExecutors.resolve(new IntType(false), new LocalZonedTimestampType(3)),
+                (int) DateTimeUtils.unixTimestamp(millisecond),
+                timestamp2);
+    }
+
+    @Test
     public void testTimeToString() {
         compareCastResult(
                 CastExecutors.resolve(new TimeType(2), VarCharType.STRING_TYPE),
