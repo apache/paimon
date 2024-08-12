@@ -18,10 +18,11 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.flink.compact.UnawareBucketCompactionTopoBuilder;
+import org.apache.paimon.flink.source.AppendBypassCoordinateOperator;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
+import org.apache.flink.api.java.typeutils.EitherTypeInfo;
 import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.streaming.api.datastream.DataStream;
 
@@ -69,12 +70,19 @@ public abstract class UnawareBucketSink<T> extends FlinkWriteSink<T> {
                         == RuntimeExecutionMode.STREAMING;
         // if enable compaction, we need to add compaction topology to this job
         if (enableCompaction && isStreamingMode && !boundedInput) {
-            // if streaming mode with bounded input, we disable compaction topology
-            UnawareBucketCompactionTopoBuilder builder =
-                    new UnawareBucketCompactionTopoBuilder(
-                            input.getExecutionEnvironment(), table.name(), table);
-            builder.withContinuousMode(true);
-            written = written.union(builder.fetchUncommitted(initialCommitUser));
+            written =
+                    written.transform(
+                                    "Compact Bypass Coordinator",
+                                    new EitherTypeInfo<>(
+                                            new CommittableTypeInfo(),
+                                            new CompactionTaskTypeInfo()),
+                                    new AppendBypassCoordinateOperator<>(table))
+                            .forceNonParallel()
+                            .transform(
+                                    "Compact Worker",
+                                    new CommittableTypeInfo(),
+                                    new AppendBypassCompactWorkerOperator(table, initialCommitUser))
+                            .setParallelism(written.getParallelism());
         }
 
         return written;
