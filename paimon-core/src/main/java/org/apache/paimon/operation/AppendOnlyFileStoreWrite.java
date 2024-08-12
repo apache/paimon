@@ -41,6 +41,7 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
+import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.LongCounter;
 import org.apache.paimon.utils.RecordWriter;
@@ -173,6 +174,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
             if (toCompact.isEmpty()) {
                 return Collections.emptyList();
             }
+            Exception collectedExceptions = null;
             RowDataRollingFileWriter rewriter =
                     new RowDataRollingFileWriter(
                             fileIO,
@@ -189,8 +191,18 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                             options.asyncFileWrite());
             try {
                 rewriter.write(bucketReader(partition, bucket).read(toCompact));
+            } catch (Exception e) {
+                collectedExceptions = e;
             } finally {
-                rewriter.close();
+                try {
+                    rewriter.close();
+                } catch (Exception e) {
+                    collectedExceptions = ExceptionUtils.firstOrSuppressed(e, collectedExceptions);
+                }
+            }
+
+            if (collectedExceptions != null) {
+                throw collectedExceptions;
             }
             return rewriter.result();
         };
