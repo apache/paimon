@@ -27,7 +27,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
-import org.apache.paimon.table.system.BucketsTable;
+import org.apache.paimon.table.system.ModifiedPartitionBucketTable;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.Preconditions;
 
@@ -63,7 +63,7 @@ public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
 
     private transient Catalog catalog;
     private transient IOManager ioManager;
-    private transient Map<Identifier, BucketsTable> tablesMap;
+    private transient Map<Identifier, ModifiedPartitionBucketTable> tablesMap;
     private transient Map<Identifier, TableRead> readsMap;
     private transient StreamRecord<RowData> reuseRecord;
     private transient FlinkRowData reuseRow;
@@ -99,7 +99,7 @@ public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
     }
 
     private TableRead getTableRead(Identifier tableId) {
-        BucketsTable table = tablesMap.get(tableId);
+        ModifiedPartitionBucketTable table = tablesMap.get(tableId);
         if (table == null) {
             try {
                 Table newTable = catalog.getTable(tableId);
@@ -108,7 +108,7 @@ public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
                         "Only FileStoreTable supports compact action. The table type is '%s'.",
                         newTable.getClass().getName());
                 table =
-                        new BucketsTable(
+                        new ModifiedPartitionBucketTable(
                                         (FileStoreTable) newTable,
                                         isStreaming,
                                         tableId.getDatabaseName())

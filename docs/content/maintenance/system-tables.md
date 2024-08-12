@@ -292,6 +292,24 @@ SELECT * FROM my_table$aggregation_fields;
 3 rows in set
 */
 ```
+### Buckets Table
+
+You can query the bucket files of the table.
+
+```sql
+SELECT * FROM my_table$buckets;
+
+/*
++---------+--------------+--------------------+------------+-------------------+---------------------------+-------------------------+
+|  bucket | record_count | file_size_in_bytes | file_count | level0_file_count | level0_file_backlog_ratio |        last_update_time |
++---------+--------------+--------------------+------------+-------------------+---------------------------+-------------------------+
+|    1    |            1 |                645 |          6 |                 6 |                      1.2  | 2024-06-24 10:25:57.400 |
++---------+--------------+--------------------+------------+-------------------+---------------------------+-------------------------+
+*/
+
+```
+The Level 0 file backlog ratio reflects whether compaction is being performed in a timely manner.
+Formula: level0_file_backlog_ratio = level0_file_count / num-sorted-run.compaction-trigger.
 
 ### Partitions Table
 

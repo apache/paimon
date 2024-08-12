@@ -21,6 +21,7 @@ package org.apache.paimon.table.source.snapshot;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.predicate.Predicate;
@@ -86,6 +87,8 @@ public interface SnapshotReader {
     List<BinaryRow> partitions();
 
     List<PartitionEntry> partitionEntries();
+
+    List<BucketEntry> bucketEntries();
 
     /** Result plan of this scan. */
     interface Plan extends TableScan.Plan {

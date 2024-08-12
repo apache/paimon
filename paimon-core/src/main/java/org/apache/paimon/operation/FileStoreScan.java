@@ -21,6 +21,7 @@ package org.apache.paimon.operation;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -84,6 +85,8 @@ public interface FileStoreScan {
     List<SimpleFileEntry> readSimpleEntries();
 
     List<PartitionEntry> readPartitionEntries();
+
+    List<BucketEntry> readBucketEntries();
 
     default List<BinaryRow> listPartitions() {
         return readPartitionEntries().stream()

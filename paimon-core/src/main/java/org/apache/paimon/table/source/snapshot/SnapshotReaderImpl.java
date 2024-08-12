@@ -27,6 +27,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
@@ -331,6 +332,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Override
     public List<PartitionEntry> partitionEntries() {
         return scan.readPartitionEntries();
+    }
+
+    @Override
+    public List<BucketEntry> bucketEntries() {
+        return scan.readBucketEntries();
     }
 
     @Override
