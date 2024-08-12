@@ -44,12 +44,15 @@ public class TimestampToNumericPrimitiveCastRule extends AbstractCastRule<Timest
 
     @Override
     public CastExecutor<Timestamp, Number> create(DataType inputType, DataType targetType) {
-        if (inputType.is(DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE)) {
-            return value -> DateTimeUtils.unixTimestamp(value.getMillisecond());
-        } else if (inputType.is(DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE)) {
-            return value ->
-                    DateTimeUtils.unixTimestamp(
-                            Timestamp.fromLocalDateTime(value.toLocalDateTime()).getMillisecond());
+        if (targetType.is(DataTypeRoot.BIGINT)) {
+            if (inputType.is(DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE)) {
+                return value -> DateTimeUtils.unixTimestamp(value.getMillisecond());
+            } else if (inputType.is(DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE)) {
+                return value ->
+                        DateTimeUtils.unixTimestamp(
+                                Timestamp.fromLocalDateTime(value.toLocalDateTime())
+                                        .getMillisecond());
+            }
         }
         return null;
     }
