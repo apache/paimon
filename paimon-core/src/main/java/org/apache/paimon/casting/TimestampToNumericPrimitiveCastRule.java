@@ -38,22 +38,34 @@ public class TimestampToNumericPrimitiveCastRule extends AbstractCastRule<Timest
                 CastRulePredicate.builder()
                         .input(DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE)
                         .input(DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE)
-                        .target(DataTypeFamily.NUMERIC)
+                        .target(DataTypeRoot.BIGINT)
+                        .target(DataTypeRoot.INTEGER)
                         .build());
     }
 
     @Override
     public CastExecutor<Timestamp, Number> create(DataType inputType, DataType targetType) {
-        if (targetType.is(DataTypeRoot.BIGINT)) {
-            if (inputType.is(DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE)) {
+        if (inputType.is(DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE)) {
+            if (targetType.is(DataTypeRoot.BIGINT)) {
                 return value -> DateTimeUtils.unixTimestamp(value.getMillisecond());
-            } else if (inputType.is(DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE)) {
+            } else if (targetType.is(DataTypeRoot.INTEGER)) {
+                return value -> (int) DateTimeUtils.unixTimestamp(value.getMillisecond());
+            }
+        } else if (inputType.is(DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE)) {
+            if (targetType.is(DataTypeRoot.BIGINT)) {
                 return value ->
                         DateTimeUtils.unixTimestamp(
                                 Timestamp.fromLocalDateTime(value.toLocalDateTime())
                                         .getMillisecond());
+            } else if (targetType.is(DataTypeRoot.INTEGER)) {
+                return value ->
+                        (int)
+                                DateTimeUtils.unixTimestamp(
+                                        Timestamp.fromLocalDateTime(value.toLocalDateTime())
+                                                .getMillisecond());
             }
         }
+
         return null;
     }
 }

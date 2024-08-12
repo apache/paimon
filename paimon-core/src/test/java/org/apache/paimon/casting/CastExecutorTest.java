@@ -296,7 +296,7 @@ public class CastExecutorTest {
                         DateTimeUtils.toLocalDateTime(mills, TimeZone.getDefault().toZoneId()));
         long millisecond1 = timestamp2.getMillisecond();
 
-        // cast from TimestampType to BigIntType
+        // cast from TimestampType to BigIntType or IntType
         compareCastResult(
                 CastExecutors.resolve(new TimestampType(3), new BigIntType(false)),
                 timestamp1,
@@ -307,7 +307,17 @@ public class CastExecutorTest {
                 timestamp2,
                 DateTimeUtils.unixTimestamp(millisecond1));
 
-        // cast from BigIntType to TimestampType
+        compareCastResult(
+                CastExecutors.resolve(new TimestampType(3), new IntType(false)),
+                timestamp1,
+                (int) DateTimeUtils.unixTimestamp(millisecond));
+
+        compareCastResult(
+                CastExecutors.resolve(new LocalZonedTimestampType(3), new IntType(false)),
+                timestamp2,
+                (int) DateTimeUtils.unixTimestamp(millisecond1));
+
+        // cast from BigIntType or IntType to TimestampType
         compareCastResult(
                 CastExecutors.resolve(new BigIntType(false), new TimestampType(3)),
                 DateTimeUtils.unixTimestamp(millisecond),
@@ -316,6 +326,16 @@ public class CastExecutorTest {
         compareCastResult(
                 CastExecutors.resolve(new BigIntType(false), new LocalZonedTimestampType(3)),
                 DateTimeUtils.unixTimestamp(millisecond),
+                timestamp2);
+
+        compareCastResult(
+                CastExecutors.resolve(new IntType(false), new TimestampType(3)),
+                (int) DateTimeUtils.unixTimestamp(millisecond),
+                timestamp1);
+
+        compareCastResult(
+                CastExecutors.resolve(new IntType(false), new LocalZonedTimestampType(3)),
+                (int) DateTimeUtils.unixTimestamp(millisecond),
                 timestamp2);
     }
 
