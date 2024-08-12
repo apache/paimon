@@ -18,189 +18,150 @@
 
 package org.apache.paimon.table.system;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.io.DataFileMetaSerializer;
+import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
-import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.DataTableScan;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerTableRead;
+import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.ReadOnceTableScan;
+import org.apache.paimon.table.source.SingletonSplit;
 import org.apache.paimon.table.source.Split;
-import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.TableRead;
-import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.BigIntType;
-import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.types.VarCharType;
-import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.IteratorRecordReader;
-import org.apache.paimon.utils.SnapshotManager;
-import org.apache.paimon.utils.TagManager;
+import org.apache.paimon.utils.ProjectedRow;
 
-import javax.annotation.Nullable;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
-import java.io.IOException;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.OptionalLong;
 
-import static org.apache.paimon.utils.SerializationUtils.newBytesType;
-import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
+import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
-/**
- * A table to produce modified partitions and buckets for each snapshot.
- *
- * <p>Only used internally by dedicated compact job sources.
- */
-public class BucketsTable implements DataTable, ReadonlyTable {
+/** A {@link Table} for showing partitions info. */
+public class BucketsTable implements ReadonlyTable {
 
     private static final long serialVersionUID = 1L;
 
-    private final FileStoreTable wrapped;
-    private final boolean isContinuous;
+    public static final String BUCKETS = "buckets";
 
-    @Nullable private final String databaseName;
+    public static final RowType TABLE_TYPE =
+            new RowType(
+                    Arrays.asList(
+                            new DataField(0, "bucket", new IntType(true)),
+                            new DataField(1, "record_count", new BigIntType(false)),
+                            new DataField(2, "file_size_in_bytes", new BigIntType(false)),
+                            new DataField(3, "file_count", new BigIntType(false)),
+                            new DataField(4, "level0_file_count", new BigIntType(false)),
+                            new DataField(5, "compaction_score", new BigIntType(false)),
+                            new DataField(6, "last_update_time", DataTypes.TIMESTAMP_MILLIS())));
 
-    private static final RowType ROW_TYPE =
-            RowType.of(
-                    new DataType[] {
-                        new BigIntType(false),
-                        newBytesType(false),
-                        new IntType(false),
-                        newBytesType(false),
-                        new VarCharType(true, Integer.MAX_VALUE),
-                        new VarCharType(false, Integer.MAX_VALUE)
-                    },
-                    new String[] {
-                        "_SNAPSHOT_ID",
-                        "_PARTITION",
-                        "_BUCKET",
-                        "_FILES",
-                        "_DATABASE_NAME",
-                        "_TABLE_NAME"
-                    });
+    private final FileStoreTable storeTable;
 
-    public BucketsTable(FileStoreTable wrapped, boolean isContinuous) {
-        this(wrapped, isContinuous, null);
-    }
-
-    // if need to specify the database of a table, use this method
-    public BucketsTable(FileStoreTable wrapped, boolean isContinuous, String databaseName) {
-        this.wrapped = wrapped;
-        this.isContinuous = isContinuous;
-        this.databaseName = databaseName;
-    }
-
-    @Override
-    public OptionalLong latestSnapshotId() {
-        return wrapped.latestSnapshotId();
-    }
-
-    @Override
-    public Path location() {
-        return wrapped.location();
-    }
-
-    @Override
-    public SnapshotManager snapshotManager() {
-        return wrapped.snapshotManager();
-    }
-
-    @Override
-    public TagManager tagManager() {
-        return wrapped.tagManager();
-    }
-
-    @Override
-    public BranchManager branchManager() {
-        return wrapped.branchManager();
+    public BucketsTable(FileStoreTable storeTable) {
+        this.storeTable = storeTable;
     }
 
     @Override
     public String name() {
-        return "__internal_buckets_" + wrapped.location().getName();
+        return storeTable.name() + SYSTEM_TABLE_SPLITTER + BUCKETS;
     }
 
     @Override
     public RowType rowType() {
-        return ROW_TYPE;
-    }
-
-    @Override
-    public Map<String, String> options() {
-        return wrapped.options();
+        return TABLE_TYPE;
     }
 
     @Override
     public List<String> primaryKeys() {
-        return Collections.emptyList();
+        return Collections.singletonList("buckets");
     }
 
     @Override
-    public SnapshotReader newSnapshotReader() {
-        return wrapped.newSnapshotReader();
-    }
-
-    @Override
-    public DataTableScan newScan() {
-        return wrapped.newScan();
-    }
-
-    @Override
-    public StreamDataTableScan newStreamScan() {
-        return wrapped.newStreamScan();
-    }
-
-    @Override
-    public CoreOptions coreOptions() {
-        return wrapped.coreOptions();
+    public InnerTableScan newScan() {
+        return new BucketsScan();
     }
 
     @Override
     public InnerTableRead newRead() {
-        return new BucketsRead();
+        return new BucketsRead(storeTable);
     }
 
     @Override
-    public BucketsTable copy(Map<String, String> dynamicOptions) {
-        return new BucketsTable(wrapped.copy(dynamicOptions), isContinuous, databaseName);
+    public Table copy(Map<String, String> dynamicOptions) {
+        return new BucketsTable(storeTable.copy(dynamicOptions));
     }
 
-    @Override
-    public FileIO fileIO() {
-        return wrapped.fileIO();
+    private static class BucketsScan extends ReadOnceTableScan {
+
+        @Override
+        public InnerTableScan withFilter(Predicate predicate) {
+            // TODO
+            return this;
+        }
+
+        @Override
+        public Plan innerPlan() {
+            return () -> Collections.singletonList(new BucketsSplit());
+        }
     }
 
-    public static RowType getRowType() {
-        return ROW_TYPE;
+    private static class BucketsSplit extends SingletonSplit {
+
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            return o != null && getClass() == o.getClass();
+        }
+
+        @Override
+        public int hashCode() {
+            return 1;
+        }
     }
 
-    private class BucketsRead implements InnerTableRead {
+    private static class BucketsRead implements InnerTableRead {
 
-        private final DataFileMetaSerializer dataFileMetaSerializer = new DataFileMetaSerializer();
+        private final FileStoreTable fileStoreTable;
+
+        private int[][] projection;
+
+        public BucketsRead(FileStoreTable table) {
+            this.fileStoreTable = table;
+        }
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
-            // filter is done by scan
+            // TODO
             return this;
         }
 
         @Override
         public InnerTableRead withProjection(int[][] projection) {
-            throw new UnsupportedOperationException("BucketsRead does not support projection");
+            this.projection = projection;
+            return this;
         }
 
         @Override
@@ -209,30 +170,39 @@ public class BucketsTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public RecordReader<InternalRow> createReader(Split split) throws IOException {
-            if (!(split instanceof DataSplit)) {
+        public RecordReader<InternalRow> createReader(Split split) {
+            if (!(split instanceof BucketsSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
 
-            DataSplit dataSplit = (DataSplit) split;
+            List<BucketEntry> partitions = fileStoreTable.newSnapshotReader().bucketEntries();
 
-            List<DataFileMeta> files = Collections.emptyList();
-            if (isContinuous) {
-                // Serialized files are only useful in streaming jobs.
-                // Batch compact jobs only run once, so they only need to know what buckets should
-                // be compacted and don't need to concern incremental new files.
-                files = dataSplit.dataFiles();
+            List<InternalRow> results = new ArrayList<>(partitions.size());
+            for (BucketEntry entry : partitions) {
+                results.add(toRow(entry));
             }
-            InternalRow row =
-                    GenericRow.of(
-                            dataSplit.snapshotId(),
-                            serializeBinaryRow(dataSplit.partition()),
-                            dataSplit.bucket(),
-                            dataFileMetaSerializer.serializeList(files),
-                            BinaryString.fromString(databaseName),
-                            BinaryString.fromString(wrapped.name()));
 
-            return new IteratorRecordReader<>(Collections.singletonList(row).iterator());
+            Iterator<InternalRow> iterator = results.iterator();
+            if (projection != null) {
+                iterator =
+                        Iterators.transform(
+                                iterator, row -> ProjectedRow.from(projection).replaceRow(row));
+            }
+            return new IteratorRecordReader<>(iterator);
+        }
+
+        private GenericRow toRow(BucketEntry entry) {
+            return GenericRow.of(
+                    entry.bucket(),
+                    entry.recordCount(),
+                    entry.fileSizeInBytes(),
+                    entry.fileCount(),
+                    entry.level0FileCount(),
+                    entry.level0FileCount() / entry.triggerNum(),
+                    Timestamp.fromLocalDateTime(
+                            LocalDateTime.ofInstant(
+                                    Instant.ofEpochMilli(entry.lastFileCreationTime()),
+                                    ZoneId.systemDefault())));
         }
     }
 }

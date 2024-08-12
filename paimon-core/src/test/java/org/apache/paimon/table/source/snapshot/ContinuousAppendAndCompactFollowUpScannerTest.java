@@ -33,7 +33,7 @@ import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
-import org.apache.paimon.table.system.BucketsTable;
+import org.apache.paimon.table.system.ModifiedPartitionBucketTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -88,7 +88,7 @@ public class ContinuousAppendAndCompactFollowUpScannerTest extends ScannerTestBa
         write.close();
         commit.close();
 
-        BucketsTable bucketsTable = new BucketsTable(table, true);
+        ModifiedPartitionBucketTable bucketsTable = new ModifiedPartitionBucketTable(table, true);
         TableRead read = bucketsTable.newRead();
         ContinuousAppendAndCompactFollowUpScanner scanner =
                 new ContinuousAppendAndCompactFollowUpScanner();

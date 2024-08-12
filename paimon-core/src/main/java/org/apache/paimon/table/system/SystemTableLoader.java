@@ -42,6 +42,7 @@ import static org.apache.paimon.table.system.AggregationFieldsTable.AGGREGATION_
 import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
 import static org.apache.paimon.table.system.AuditLogTable.AUDIT_LOG;
 import static org.apache.paimon.table.system.BranchesTable.BRANCHES;
+import static org.apache.paimon.table.system.BucketsTable.BUCKETS;
 import static org.apache.paimon.table.system.CatalogOptionsTable.CATALOG_OPTIONS;
 import static org.apache.paimon.table.system.ConsumersTable.CONSUMERS;
 import static org.apache.paimon.table.system.FilesTable.FILES;
@@ -67,6 +68,7 @@ public class SystemTableLoader {
                     .put(OPTIONS, OptionsTable::new)
                     .put(SCHEMAS, SchemasTable::new)
                     .put(PARTITIONS, PartitionsTable::new)
+                    .put(BUCKETS, BucketsTable::new)
                     .put(AUDIT_LOG, AuditLogTable::new)
                     .put(FILES, FilesTable::new)
                     .put(TAGS, TagsTable::new)

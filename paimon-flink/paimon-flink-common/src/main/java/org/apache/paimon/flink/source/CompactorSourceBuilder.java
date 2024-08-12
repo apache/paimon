@@ -25,7 +25,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.ReadBuilder;
-import org.apache.paimon.table.system.BucketsTable;
+import org.apache.paimon.table.system.ModifiedPartitionBucketTable;
 import org.apache.paimon.types.RowType;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -68,7 +68,7 @@ public class CompactorSourceBuilder {
         return this;
     }
 
-    private Source<RowData, ?, ?> buildSource(BucketsTable bucketsTable) {
+    private Source<RowData, ?, ?> buildSource(ModifiedPartitionBucketTable bucketsTable) {
 
         if (isContinuous) {
             bucketsTable = bucketsTable.copy(streamingCompactOptions());
@@ -93,7 +93,8 @@ public class CompactorSourceBuilder {
             throw new IllegalArgumentException("StreamExecutionEnvironment should not be null.");
         }
 
-        BucketsTable bucketsTable = new BucketsTable(table, isContinuous);
+        ModifiedPartitionBucketTable bucketsTable =
+                new ModifiedPartitionBucketTable(table, isContinuous);
         RowType produceType = bucketsTable.rowType();
         DataStreamSource<RowData> dataStream =
                 env.fromSource(

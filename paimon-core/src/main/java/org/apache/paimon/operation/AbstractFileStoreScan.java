@@ -21,6 +21,7 @@ package org.apache.paimon.operation;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -270,6 +271,26 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                                 PartitionEntry.merge(readManifestFileMeta(m)), partitions);
         randomlyOnlyExecute(executor, processor, manifests);
         return partitions.values().stream()
+                .filter(p -> p.fileCount() > 0)
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    public List<BucketEntry> readBucketEntries() {
+        List<ManifestFileMeta> manifests = readManifests().getRight();
+        Map<Integer, BucketEntry> buckets = new ConcurrentHashMap<>();
+        // Can be executed in disorder
+        ThreadPoolExecutor executor = getExecutorService(scanManifestParallelism);
+        Consumer<ManifestFileMeta> processor =
+                m ->
+                        BucketEntry.merge(
+                                BucketEntry.merge(
+                                        readManifestFileMeta(m),
+                                        CoreOptions.fromMap(schema.options())
+                                                .numSortedRunCompactionTrigger()),
+                                buckets);
+        randomlyOnlyExecute(executor, processor, manifests);
+        return buckets.values().stream()
                 .filter(p -> p.fileCount() > 0)
                 .collect(Collectors.toList());
     }
