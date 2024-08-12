@@ -160,7 +160,7 @@ public class DeletionVectorsIndexFileTest {
         List<IndexFileMeta> indexFiles = deletionVectorsIndexFile.write(fileToDV);
 
         // assert 1
-        assertThat(indexFiles.size()).isEqualTo(5);
+        assertThat(indexFiles.size()).isEqualTo(3);
         Map<String, DeletionVector> dvs =
                 deletionVectorsIndexFile.readAllDeletionVectors(indexFiles);
         for (String file : dvs.keySet()) {

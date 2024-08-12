@@ -288,7 +288,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 PartitionExpireStrategy.createPartitionExpireStrategy(options, partitionType()),
                 newScan(),
                 newCommit(commitUser),
-                metastoreClient);
+                metastoreClient,
+                options.endInputCheckPartitionExpire());
     }
 
     @Override

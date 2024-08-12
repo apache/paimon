@@ -54,7 +54,9 @@ public class BranchSqlITCase extends CatalogITCaseBase {
                         + " (2, 10, 'cat'),"
                         + " (2, 20, 'dog')");
 
-        sql("CALL sys.create_branch('default.T', 'test', 1)");
+        sql("CALL sys.create_tag('default.T', 'tag1', 1)");
+
+        sql("CALL sys.create_branch('default.T', 'test', 'tag1')");
 
         FileStoreTable branchTable = paimonTable("T$branch_test");
         assertThat(branchTable.schema().fields().size()).isEqualTo(3);
@@ -135,37 +137,6 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testCreateBranchFromSnapshot() throws Exception {
-        sql(
-                "CREATE TABLE T ("
-                        + " pt INT"
-                        + ", k INT"
-                        + ", v STRING"
-                        + ", PRIMARY KEY (pt, k) NOT ENFORCED"
-                        + " ) PARTITIONED BY (pt) WITH ("
-                        + " 'bucket' = '2'"
-                        + " )");
-
-        // snapshot 1.
-        sql("INSERT INTO T VALUES(1, 10, 'apple')");
-
-        // snapshot 2.
-        sql("INSERT INTO T VALUES(1, 20, 'dog')");
-
-        sql("CALL sys.create_branch('default.T', 'test', 1)");
-        sql("CALL sys.create_branch('default.T', 'test2', 2)");
-
-        assertThat(collectResult("SELECT created_from_snapshot FROM `T$branches`"))
-                .containsExactlyInAnyOrder("+I[1]", "+I[2]");
-
-        assertThat(paimonTable("T$branch_test").snapshotManager().snapshotExists(1))
-                .isEqualTo(true);
-
-        assertThat(paimonTable("T$branch_test2").snapshotManager().snapshotExists(2))
-                .isEqualTo(true);
-    }
-
-    @Test
     public void testCreateEmptyBranch() throws Exception {
         sql(
                 "CREATE TABLE T ("
@@ -213,8 +184,12 @@ public class BranchSqlITCase extends CatalogITCaseBase {
         // snapshot 2.
         sql("INSERT INTO T VALUES(1, 20, 'dog')");
 
-        sql("CALL sys.create_branch('default.T', 'test', 1)");
-        sql("CALL sys.create_branch('default.T', 'test2', 2)");
+        sql("CALL sys.create_tag('default.T', 'tag1', 1)");
+
+        sql("CALL sys.create_tag('default.T', 'tag2', 2)");
+
+        sql("CALL sys.create_branch('default.T', 'test', 'tag1')");
+        sql("CALL sys.create_branch('default.T', 'test2', 'tag2')");
 
         assertThat(collectResult("SELECT branch_name, created_from_snapshot FROM `T$branches`"))
                 .containsExactlyInAnyOrder("+I[test, 1]", "+I[test2, 2]");
@@ -244,9 +219,13 @@ public class BranchSqlITCase extends CatalogITCaseBase {
         FileStoreTable table = paimonTable("T");
         checkSnapshots(table.snapshotManager(), 1, 3);
 
-        sql("CALL sys.create_branch('default.T', 'test1', 1)");
-        sql("CALL sys.create_branch('default.T', 'test2', 2)");
-        sql("CALL sys.create_branch('default.T', 'test3', 3)");
+        sql("CALL sys.create_tag('default.T', 'tag1', 1)");
+        sql("CALL sys.create_tag('default.T', 'tag2', 2)");
+        sql("CALL sys.create_tag('default.T', 'tag3', 3)");
+
+        sql("CALL sys.create_branch('default.T', 'test1', 'tag1')");
+        sql("CALL sys.create_branch('default.T', 'test2', 'tag2')");
+        sql("CALL sys.create_branch('default.T', 'test3', 'tag3')");
 
         assertThat(collectResult("SELECT created_from_snapshot FROM `T$branches`"))
                 .containsExactlyInAnyOrder("+I[1]", "+I[2]", "+I[3]");
@@ -277,7 +256,9 @@ public class BranchSqlITCase extends CatalogITCaseBase {
                 .containsExactlyInAnyOrder(
                         "+I[1, 10, hunter]", "+I[1, 20, hunter]", "+I[1, 30, hunter]");
 
-        sql("CALL sys.create_branch('default.T', 'test', 1)");
+        sql("CALL sys.create_tag('default.T', 'tag1', 1)");
+
+        sql("CALL sys.create_branch('default.T', 'test', 'tag1')");
 
         sql("INSERT INTO `T$branch_test` VALUES (2, 10, 'hunterX')");
 

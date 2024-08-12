@@ -26,7 +26,6 @@ import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 
-import static org.apache.spark.sql.types.DataTypes.LongType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /** Spark procedure to create a branch. */
@@ -36,8 +35,7 @@ public class CreateBranchProcedure extends BaseProcedure {
             new ProcedureParameter[] {
                 ProcedureParameter.required("table", StringType),
                 ProcedureParameter.required("branch", StringType),
-                ProcedureParameter.optional("tag", StringType),
-                ProcedureParameter.optional("snapshot", LongType)
+                ProcedureParameter.optional("tag", StringType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -65,15 +63,12 @@ public class CreateBranchProcedure extends BaseProcedure {
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
         String branch = args.getString(1);
         String tag = args.isNullAt(2) ? null : args.getString(2);
-        Long snapshot = args.isNullAt(3) ? null : args.getLong(3);
 
         return modifyPaimonTable(
                 tableIdent,
                 table -> {
                     if (tag != null) {
                         table.createBranch(branch, tag);
-                    } else if (snapshot != null) {
-                        table.createBranch(branch, snapshot);
                     } else {
                         table.createBranch(branch);
                     }

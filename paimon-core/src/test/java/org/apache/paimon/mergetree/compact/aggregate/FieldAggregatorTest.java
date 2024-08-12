@@ -18,6 +18,7 @@
 
 package org.apache.paimon.mergetree.compact.aggregate;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
@@ -42,6 +43,8 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.RoaringBitmap32;
 import org.apache.paimon.utils.RoaringBitmap64;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import org.junit.jupiter.api.Test;
 
@@ -123,12 +126,28 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldListaggAgg() {
-        FieldListaggAgg fieldListaggAgg = new FieldListaggAgg(new VarCharType());
+    public void testFieldListAggWithDefaultDelimiter() {
+        FieldListaggAgg fieldListaggAgg =
+                new FieldListaggAgg(
+                        new VarCharType(), new CoreOptions(new HashMap<>()), "fieldName");
         BinaryString accumulator = BinaryString.fromString("user1");
         BinaryString inputField = BinaryString.fromString("user2");
         assertThat(fieldListaggAgg.agg(accumulator, inputField).toString())
                 .isEqualTo("user1,user2");
+    }
+
+    @Test
+    public void testFieldListAggWithCustomDelimiter() {
+        FieldListaggAgg fieldListaggAgg =
+                new FieldListaggAgg(
+                        new VarCharType(),
+                        CoreOptions.fromMap(
+                                ImmutableMap.of("fields.fieldName.list-agg-delimiter", "-")),
+                        "fieldName");
+        BinaryString accumulator = BinaryString.fromString("user1");
+        BinaryString inputField = BinaryString.fromString("user2");
+        assertThat(fieldListaggAgg.agg(accumulator, inputField).toString())
+                .isEqualTo("user1-user2");
     }
 
     @Test

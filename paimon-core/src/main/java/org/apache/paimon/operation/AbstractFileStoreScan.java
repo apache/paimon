@@ -149,7 +149,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     @Override
     public FileStoreScan withPartitionBucket(BinaryRow partition, int bucket) {
-        if (manifestCacheFilter != null) {
+        if (manifestCacheFilter != null && manifestFileFactory.isCacheEnabled()) {
             checkArgument(
                     manifestCacheFilter.test(partition, bucket),
                     String.format(

@@ -153,7 +153,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
                     "Snapshot expire range is [" + beginInclusiveId + ", " + endExclusiveId + ")");
         }
 
-        List<Snapshot> referencedSnapshots = tagManager.taggedSnapshots();
+        List<Snapshot> taggedSnapshots = tagManager.taggedSnapshots();
 
         // delete merge tree files
         // deleted merge tree files in a snapshot are not used by the next snapshot, so the range of
@@ -166,7 +166,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             // expire merge tree files and collect changed buckets
             Predicate<ManifestEntry> skipper;
             try {
-                skipper = snapshotDeletion.dataFileSkipper(referencedSnapshots, id);
+                skipper = snapshotDeletion.createDataFileSkipperForTags(taggedSnapshots, id);
             } catch (Exception e) {
                 LOG.info(
                         String.format(
@@ -199,7 +199,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         // delete manifests and indexFiles
         List<Snapshot> skippingSnapshots =
                 SnapshotManager.findOverlappedSnapshots(
-                        referencedSnapshots, beginInclusiveId, endExclusiveId);
+                        taggedSnapshots, beginInclusiveId, endExclusiveId);
         skippingSnapshots.add(snapshotManager.snapshot(endExclusiveId));
         Set<String> skippingSet = snapshotDeletion.manifestSkippingSet(skippingSnapshots);
         for (long id = beginInclusiveId; id < endExclusiveId; id++) {

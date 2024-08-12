@@ -45,10 +45,27 @@ public class PartitionExpire {
     private final FileStoreScan scan;
     private final FileStoreCommit commit;
     private final MetastoreClient metastoreClient;
-
     private LocalDateTime lastCheck;
-
     private final PartitionExpireStrategy strategy;
+    private final boolean endInputCheckPartitionExpire;
+
+    public PartitionExpire(
+            Duration expirationTime,
+            Duration checkInterval,
+            PartitionExpireStrategy strategy,
+            FileStoreScan scan,
+            FileStoreCommit commit,
+            @Nullable MetastoreClient metastoreClient,
+            boolean endInputCheckPartitionExpire) {
+        this.expirationTime = expirationTime;
+        this.checkInterval = checkInterval;
+        this.strategy = strategy;
+        this.scan = scan;
+        this.commit = commit;
+        this.metastoreClient = metastoreClient;
+        this.lastCheck = LocalDateTime.now();
+        this.endInputCheckPartitionExpire = endInputCheckPartitionExpire;
+    }
 
     public PartitionExpire(
             Duration expirationTime,
@@ -57,13 +74,7 @@ public class PartitionExpire {
             FileStoreScan scan,
             FileStoreCommit commit,
             @Nullable MetastoreClient metastoreClient) {
-        this.expirationTime = expirationTime;
-        this.checkInterval = checkInterval;
-        this.strategy = strategy;
-        this.scan = scan;
-        this.commit = commit;
-        this.metastoreClient = metastoreClient;
-        this.lastCheck = LocalDateTime.now();
+        this(expirationTime, checkInterval, strategy, scan, commit, metastoreClient, false);
     }
 
     public PartitionExpire withLock(Lock lock) {
@@ -82,7 +93,9 @@ public class PartitionExpire {
 
     @VisibleForTesting
     List<Map<String, String>> expire(LocalDateTime now, long commitIdentifier) {
-        if (checkInterval.isZero() || now.isAfter(lastCheck.plus(checkInterval))) {
+        if (checkInterval.isZero()
+                || now.isAfter(lastCheck.plus(checkInterval))
+                || (endInputCheckPartitionExpire && Long.MAX_VALUE == commitIdentifier)) {
             List<Map<String, String>> expired =
                     doExpire(now.minus(expirationTime), commitIdentifier);
             lastCheck = now;

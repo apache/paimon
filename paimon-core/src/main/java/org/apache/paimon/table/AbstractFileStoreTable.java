@@ -381,9 +381,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 catalogEnvironment.lockFactory().create(),
                 CoreOptions.fromMap(options()).consumerExpireTime(),
                 new ConsumerManager(fileIO, path, snapshotManager().branch()),
-                coreOptions().snapshotExpireExecutionMode(),
+                options.snapshotExpireExecutionMode(),
                 name(),
-                coreOptions().forceCreatingSnapshot());
+                options.forceCreatingSnapshot());
     }
 
     private List<CommitCallback> createCommitCallbacks(String commitUser) {
@@ -567,11 +567,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public void createBranch(String branchName) {
         branchManager().createBranch(branchName);
-    }
-
-    @Override
-    public void createBranch(String branchName, long snapshotId) {
-        branchManager().createBranch(branchName, snapshotId);
     }
 
     @Override
