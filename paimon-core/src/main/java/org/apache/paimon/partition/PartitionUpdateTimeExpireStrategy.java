@@ -33,8 +33,11 @@ import java.util.stream.Collectors;
  */
 public class PartitionUpdateTimeExpireStrategy extends PartitionExpireStrategy {
 
+    private final RowType partitionType;
+
     public PartitionUpdateTimeExpireStrategy(RowType partitionType) {
         super(partitionType);
+        this.partitionType = partitionType;
     }
 
     @Override

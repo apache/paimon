@@ -24,11 +24,15 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.TableCommitImpl;
@@ -55,6 +59,8 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
+import static java.util.Collections.emptyList;
+import static java.util.Collections.singletonList;
 import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_CHECK_INTERVAL;
 import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_TIME;
 import static org.apache.paimon.CoreOptions.PARTITION_TIMESTAMP_FORMATTER;
@@ -83,8 +89,8 @@ public class PartitionExpireTest {
                                 schemaManager.createTable(
                                         new Schema(
                                                 RowType.of(VarCharType.STRING_TYPE).getFields(),
-                                                Collections.emptyList(),
-                                                Collections.emptyList(),
+                                                emptyList(),
+                                                emptyList(),
                                                 Collections.singletonMap(
                                                         PARTITION_EXPIRATION_TIME.key(), "1 d"),
                                                 "")))
@@ -98,8 +104,8 @@ public class PartitionExpireTest {
         schemaManager.createTable(
                 new Schema(
                         RowType.of(VarCharType.STRING_TYPE, VarCharType.STRING_TYPE).getFields(),
-                        Collections.singletonList("f0"),
-                        Collections.emptyList(),
+                        singletonList("f0"),
+                        emptyList(),
                         Collections.emptyMap(),
                         ""));
         table = FileStoreTableFactory.create(LocalFileIO.create(), path);
@@ -121,8 +127,8 @@ public class PartitionExpireTest {
         schemaManager.createTable(
                 new Schema(
                         RowType.of(VarCharType.STRING_TYPE, VarCharType.STRING_TYPE).getFields(),
-                        Collections.singletonList("f0"),
-                        Collections.emptyList(),
+                        singletonList("f0"),
+                        emptyList(),
                         Collections.emptyMap(),
                         ""));
         table = FileStoreTableFactory.create(LocalFileIO.create(), path);
@@ -158,8 +164,8 @@ public class PartitionExpireTest {
         schemaManager.createTable(
                 new Schema(
                         RowType.of(VarCharType.STRING_TYPE, VarCharType.STRING_TYPE).getFields(),
-                        Collections.singletonList("f0"),
-                        Collections.emptyList(),
+                        singletonList("f0"),
+                        emptyList(),
                         Collections.emptyMap(),
                         ""));
 
@@ -227,6 +233,40 @@ public class PartitionExpireTest {
                 .isEqualTo(allCommits.size() - 1);
     }
 
+    @Test
+    public void testDeleteExpiredPartition() throws Exception {
+        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), path);
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(VarCharType.STRING_TYPE, VarCharType.STRING_TYPE).getFields(),
+                        singletonList("f0"),
+                        emptyList(),
+                        Collections.emptyMap(),
+                        ""));
+        table = FileStoreTableFactory.create(LocalFileIO.create(), path);
+        table = newExpireTable();
+
+        List<CommitMessage> commitMessages = write("20230101", "11");
+
+        PartitionExpire expire = newExpire();
+        expire.setLastCheck(date(1));
+        expire.expire(date(5), Long.MAX_VALUE);
+        assertThat(read()).isEmpty();
+
+        TableCommitImpl commit = table.newCommit("");
+        CommitMessageImpl message = (CommitMessageImpl) commitMessages.get(0);
+        DataFileMeta file = message.newFilesIncrement().newFiles().get(0);
+        CommitMessageImpl newMessage =
+                new CommitMessageImpl(
+                        message.partition(),
+                        message.bucket(),
+                        new DataIncrement(emptyList(), emptyList(), emptyList()),
+                        new CompactIncrement(singletonList(file), emptyList(), emptyList()));
+
+        // should no exception
+        commit.commit(0L, singletonList(newMessage));
+    }
+
     private List<String> read() throws IOException {
         List<String> ret = new ArrayList<>();
         table.newRead()
@@ -239,21 +279,28 @@ public class PartitionExpireTest {
         return LocalDateTime.of(LocalDate.of(2023, 1, day), LocalTime.MIN);
     }
 
-    private void write(String f0, String f1) throws Exception {
+    private List<CommitMessage> write(String f0, String f1) throws Exception {
         StreamTableWrite write =
                 table.copy(Collections.singletonMap(WRITE_ONLY.key(), "true")).newWrite("");
         write.write(GenericRow.of(BinaryString.fromString(f0), BinaryString.fromString(f1)));
         TableCommitImpl commit = table.newCommit("");
-        commit.commit(0, write.prepareCommit(true, 0));
+        List<CommitMessage> commitMessages = write.prepareCommit(true, 0);
+        commit.commit(0, commitMessages);
         write.close();
         commit.close();
+
+        return commitMessages;
     }
 
     private PartitionExpire newExpire() {
+        return newExpireTable().store().newPartitionExpire("");
+    }
+
+    private FileStoreTable newExpireTable() {
         Map<String, String> options = new HashMap<>();
         options.put(PARTITION_EXPIRATION_TIME.key(), "2 d");
         options.put(CoreOptions.PARTITION_EXPIRATION_CHECK_INTERVAL.key(), "1 d");
         options.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), "yyyyMMdd");
-        return table.copy(options).store().newPartitionExpire("");
+        return table.copy(options);
     }
 }

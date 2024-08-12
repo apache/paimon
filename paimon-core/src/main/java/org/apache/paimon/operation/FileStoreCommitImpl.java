@@ -125,15 +125,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final String branchName;
     @Nullable private final Integer manifestReadParallelism;
     private final List<CommitCallback> commitCallbacks;
+    private final StatsFileHandler statsFileHandler;
+    private final BucketMode bucketMode;
 
     @Nullable private Lock lock;
     private boolean ignoreEmptyCommit;
-
     private CommitMetrics commitMetrics;
-
-    private final StatsFileHandler statsFileHandler;
-
-    private final BucketMode bucketMode;
+    @Nullable private PartitionExpire partitionExpire;
 
     public FileStoreCommitImpl(
             FileIO fileIO,
@@ -195,6 +193,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     @Override
     public FileStoreCommit ignoreEmptyCommit(boolean ignoreEmptyCommit) {
         this.ignoreEmptyCommit = ignoreEmptyCommit;
+        return this;
+    }
+
+    @Override
+    public FileStoreCommit withPartitionExpire(PartitionExpire partitionExpire) {
+        this.partitionExpire = partitionExpire;
         return this;
     }
 
@@ -1055,23 +1059,29 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         List<SimpleFileEntry> allEntries = new ArrayList<>(baseEntries);
         allEntries.addAll(changes);
 
-        Collection<SimpleFileEntry> mergedEntries;
+        java.util.function.Consumer<Throwable> conflictHandler =
+                e -> {
+                    Pair<RuntimeException, RuntimeException> conflictException =
+                            createConflictException(
+                                    "File deletion conflicts detected! Give up committing.",
+                                    baseCommitUser,
+                                    baseEntries,
+                                    changes,
+                                    e,
+                                    50);
+                    LOG.warn("", conflictException.getLeft());
+                    throw conflictException.getRight();
+                };
+
+        Collection<SimpleFileEntry> mergedEntries = null;
         try {
             // merge manifest entries and also check if the files we want to delete are still there
             mergedEntries = FileEntry.mergeEntries(allEntries);
-            FileEntry.assertNoDelete(mergedEntries);
         } catch (Throwable e) {
-            Pair<RuntimeException, RuntimeException> conflictException =
-                    createConflictException(
-                            "File deletion conflicts detected! Give up committing.",
-                            baseCommitUser,
-                            baseEntries,
-                            changes,
-                            e,
-                            50);
-            LOG.warn("", conflictException.getLeft());
-            throw conflictException.getRight();
+            conflictHandler.accept(e);
         }
+
+        assertNoDelete(mergedEntries, conflictHandler);
 
         // fast exit for file store without keys
         if (keyComparator == null) {
@@ -1113,6 +1123,33 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     throw conflictException.getRight();
                 }
             }
+        }
+    }
+
+    private void assertNoDelete(
+            Collection<SimpleFileEntry> mergedEntries,
+            java.util.function.Consumer<Throwable> conflictHandler) {
+        try {
+            for (SimpleFileEntry entry : mergedEntries) {
+                Preconditions.checkState(
+                        entry.kind() != FileKind.DELETE,
+                        "Trying to delete file %s which is not previously added.",
+                        entry.fileName());
+            }
+        } catch (Throwable e) {
+            if (partitionExpire != null && partitionExpire.isValueExpiration()) {
+                Set<BinaryRow> deletedPartitions = new HashSet<>();
+                for (SimpleFileEntry entry : mergedEntries) {
+                    if (entry.kind() == FileKind.DELETE) {
+                        deletedPartitions.add(entry.partition());
+                    }
+                }
+                if (partitionExpire.isValueAllExpired(deletedPartitions)) {
+                    // partitions are all expired, ignore them
+                    return;
+                }
+            }
+            conflictHandler.accept(e);
         }
     }
 

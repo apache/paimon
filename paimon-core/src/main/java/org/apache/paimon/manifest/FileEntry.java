@@ -161,13 +161,4 @@ public interface FileEntry {
                 manifestFiles,
                 manifestReadParallelism);
     }
-
-    static <T extends FileEntry> void assertNoDelete(Collection<T> entries) {
-        for (T entry : entries) {
-            Preconditions.checkState(
-                    entry.kind() != FileKind.DELETE,
-                    "Trying to delete file %s which is not previously added.",
-                    entry.fileName());
-        }
-    }
 }
