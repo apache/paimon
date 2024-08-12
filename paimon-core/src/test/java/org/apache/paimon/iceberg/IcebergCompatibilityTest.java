@@ -174,6 +174,7 @@ public class IcebergCompatibilityTest {
                         },
                         new String[] {"pt", "k", "v1", "v2"});
 
+        List<TestRecord> testRecords = new ArrayList<>();
         Function<Timestamp, BinaryRow> binaryRow =
                 (pt) -> {
                     BinaryRow b = new BinaryRow(2);
@@ -184,10 +185,11 @@ public class IcebergCompatibilityTest {
                 };
 
         int numRecords = 1000;
+        int[] precisions = {3, 6};
         ThreadLocalRandom random = ThreadLocalRandom.current();
-        List<TestRecord> testRecords = new ArrayList<>();
         for (int i = 0; i < numRecords; i++) {
-            Timestamp pt = Timestamp.fromEpochMillis(random.nextInt(0, 99999));
+            Timestamp pt =
+                    generateRandomTimestamp(random, precisions[random.nextInt(precisions.length)]);
             String k = String.valueOf(random.nextInt(0, 100));
             int v1 = random.nextInt();
             long v2 = random.nextLong();
@@ -206,6 +208,23 @@ public class IcebergCompatibilityTest {
                 testRecords,
                 r -> String.format("%s|%s", r.get(0), r.get(1)),
                 r -> String.format("%d|%d", r.get(2, Integer.class), r.get(3, Long.class)));
+    }
+
+    private Timestamp generateRandomTimestamp(ThreadLocalRandom random, int precision) {
+        long milliseconds = random.nextLong(0, 10_000_000_000_000L);
+        int nanoAdjustment;
+        switch (precision) {
+            case 3:
+                nanoAdjustment = 0;
+                break;
+            case 6:
+                nanoAdjustment = random.nextInt(0, 1_000) * 1000;
+                break;
+            default:
+                throw new IllegalArgumentException("Unsupported precision: " + precision);
+        }
+
+        return Timestamp.fromEpochMillis(milliseconds, nanoAdjustment);
     }
 
     @Test

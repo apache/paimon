@@ -86,7 +86,7 @@ public class IcebergConversions {
                 return convertTimestampWithPrecisionToBuffer(
                         (Timestamp) value, localTimestampType.getPrecision());
             case TIME_WITHOUT_TIME_ZONE:
-                long microsecondsFromMidnight = (Integer) value / 1_000;
+                long microsecondsFromMidnight = (Long) value / 1_000;
                 return ByteBuffer.allocate(8)
                         .order(ByteOrder.LITTLE_ENDIAN)
                         .putLong(0, microsecondsFromMidnight);
@@ -98,12 +98,11 @@ public class IcebergConversions {
     private static ByteBuffer convertTimestampWithPrecisionToBuffer(
             Timestamp timestamp, int precision) {
         long timestampValue;
-        long secondsSinceEpoch = timestamp.toInstant().getEpochSecond();
-        if (precision <= 6) {
-            timestampValue =
-                    secondsSinceEpoch * 1_000_000 + timestamp.getNanoOfMillisecond() / 1_000;
+        if (precision <= 3) {
+            timestampValue = timestamp.getMillisecond() * 1_000_000;
         } else {
-            timestampValue = secondsSinceEpoch * 1_000_000_000 + timestamp.getNanoOfMillisecond();
+            timestampValue =
+                    timestamp.getMillisecond() * 1_000_000 + timestamp.getNanoOfMillisecond();
         }
         return ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putLong(timestampValue);
     }
