@@ -72,14 +72,14 @@ public abstract class UnawareBucketSink<T> extends FlinkWriteSink<T> {
         if (enableCompaction && isStreamingMode && !boundedInput) {
             written =
                     written.transform(
-                                    "Compact Bypass Coordinator",
+                                    "Compact Coordinator: " + table.name(),
                                     new EitherTypeInfo<>(
                                             new CommittableTypeInfo(),
                                             new CompactionTaskTypeInfo()),
                                     new AppendBypassCoordinateOperator<>(table))
                             .forceNonParallel()
                             .transform(
-                                    "Compact Worker",
+                                    "Compact Worker: " + table.name(),
                                     new CommittableTypeInfo(),
                                     new AppendBypassCompactWorkerOperator(table, initialCommitUser))
                             .setParallelism(written.getParallelism());
