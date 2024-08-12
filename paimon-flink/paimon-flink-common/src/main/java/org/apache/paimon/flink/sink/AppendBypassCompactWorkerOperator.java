@@ -24,9 +24,9 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.types.Either;
 
-/** A {@link CompactWorkerOperator} to bypass Committable inputs. */
+/** A {@link AppendCompactWorkerOperator} to bypass Committable inputs. */
 public class AppendBypassCompactWorkerOperator
-        extends CompactWorkerOperator<Either<Committable, AppendOnlyCompactionTask>> {
+        extends AppendCompactWorkerOperator<Either<Committable, AppendOnlyCompactionTask>> {
 
     public AppendBypassCompactWorkerOperator(FileStoreTable table, String commitUser) {
         super(table, commitUser);

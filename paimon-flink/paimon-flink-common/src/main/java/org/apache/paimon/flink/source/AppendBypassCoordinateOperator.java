@@ -85,9 +85,4 @@ public class AppendBypassCoordinateOperator<CommitT>
     public void processElement(StreamRecord<CommitT> record) throws Exception {
         output.collect(new StreamRecord<>(Either.Left(record.getValue())));
     }
-
-    @Override
-    public void close() throws Exception {
-        super.close();
-    }
 }

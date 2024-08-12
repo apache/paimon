@@ -29,7 +29,7 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
  * BucketUnawareCompactSource} for compacting single unaware bucket tables in divided mode.
  */
 public class AppendOnlySingleTableCompactionWorkerOperator
-        extends CompactWorkerOperator<AppendOnlyCompactionTask> {
+        extends AppendCompactWorkerOperator<AppendOnlyCompactionTask> {
 
     public AppendOnlySingleTableCompactionWorkerOperator(FileStoreTable table, String commitUser) {
         super(table, commitUser);

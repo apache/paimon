@@ -41,9 +41,10 @@ import java.util.concurrent.TimeUnit;
  * An abstract Operator to execute {@link AppendOnlyCompactionTask} passed from {@link
  * BucketUnawareCompactSource} for compacting table. This operator is always in async mode.
  */
-public abstract class CompactWorkerOperator<IN> extends PrepareCommitOperator<IN, Committable> {
+public abstract class AppendCompactWorkerOperator<IN>
+        extends PrepareCommitOperator<IN, Committable> {
 
-    private static final Logger LOG = LoggerFactory.getLogger(CompactWorkerOperator.class);
+    private static final Logger LOG = LoggerFactory.getLogger(AppendCompactWorkerOperator.class);
 
     private final FileStoreTable table;
     private final String commitUser;
@@ -52,7 +53,7 @@ public abstract class CompactWorkerOperator<IN> extends PrepareCommitOperator<IN
 
     private transient ExecutorService lazyCompactExecutor;
 
-    public CompactWorkerOperator(FileStoreTable table, String commitUser) {
+    public AppendCompactWorkerOperator(FileStoreTable table, String commitUser) {
         super(Options.fromMap(table.options()));
         this.table = table;
         this.commitUser = commitUser;
