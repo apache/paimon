@@ -560,6 +560,21 @@ public class CastExecutorTest {
                 "12345678".getBytes());
     }
 
+    @Test
+    public void testBinaryToString() {
+        // binary(5) to string(10)
+        compareCastResult(
+                CastExecutors.resolve(new VarBinaryType(5), new VarCharType(10)),
+                "12345".getBytes(),
+                BinaryString.fromString("12345"));
+
+        // binary(20) to string(10)
+        compareCastResult(
+                CastExecutors.resolve(new VarBinaryType(20), new VarCharType(10)),
+                "12345678".getBytes(),
+                BinaryString.fromString("12345678"));
+    }
+
     // To binary rules
 
     @Test

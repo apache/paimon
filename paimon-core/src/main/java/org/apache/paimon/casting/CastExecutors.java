@@ -72,7 +72,8 @@ public class CastExecutors {
                 .addRule(TimeToTimestampCastRule.INSTANCE)
                 .addRule(TimestampToNumericPrimitiveCastRule.INSTANCE)
                 // To binary rules
-                .addRule(BinaryToBinaryCastRule.INSTANCE);
+                .addRule(BinaryToBinaryCastRule.INSTANCE)
+                .addRule(BinaryToStringCastRule.INSTANCE);
     }
 
     /* ------- Entrypoint ------- */
