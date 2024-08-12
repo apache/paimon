@@ -56,7 +56,7 @@ public class AppendBypassCoordinateOperator<CommitT>
     public void open() throws Exception {
         super.open();
         checkArgument(
-                getRuntimeContext().getTaskInfo().getNumberOfParallelSubtasks() == 1,
+                getRuntimeContext().getNumberOfParallelSubtasks() == 1,
                 "Compaction Coordinator parallelism in paimon MUST be one.");
         this.coordinator = new AppendOnlyTableCompactionCoordinator(table, true, null);
         this.intervalMs = table.coreOptions().continuousDiscoveryInterval().toMillis();
