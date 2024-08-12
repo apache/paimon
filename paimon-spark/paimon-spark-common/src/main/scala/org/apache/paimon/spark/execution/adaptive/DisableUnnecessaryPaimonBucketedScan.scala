@@ -160,7 +160,10 @@ object DisableUnnecessaryPaimonBucketedScan extends Rule[SparkPlan] {
       case _ => false
     }
 
-    if (!conf.v2BucketingEnabled || !conf.autoBucketedScanEnabled || !hasBucketedScan) {
+    // TODO: replace it with `conf.v2BucketingEnabled` after dropping Spark3.1
+    val v2BucketingEnabled =
+      conf.getConfString("spark.sql.sources.v2.bucketing.enabled", "false").toBoolean
+    if (!v2BucketingEnabled || !conf.autoBucketedScanEnabled || !hasBucketedScan) {
       plan
     } else {
       disableBucketScan(plan, hashInterestingPartition = false, hasExchange = false)
