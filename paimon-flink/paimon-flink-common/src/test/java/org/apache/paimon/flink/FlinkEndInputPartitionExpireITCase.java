@@ -19,6 +19,7 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.flink.sink.FlinkSinkBuilder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -49,21 +50,25 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.extension.ExtendWith;
 
+import java.time.Duration;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
+import static org.apache.paimon.CoreOptions.END_INPUT_CHECK_PARTITION_EXPIRE;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
+import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_CHECK_INTERVAL;
+import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_TIME;
+import static org.apache.paimon.CoreOptions.PARTITION_TIMESTAMP_FORMATTER;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
 import static org.apache.paimon.utils.FailingFileIO.retryArtificialException;
 
-/** ITCase for user define watermark when end input. */
+/** ITCase for partition expire when end input. */
 @ExtendWith(ParameterizedTestExtension.class)
-public class FlinkEndInputWatermarkITCase extends CatalogITCaseBase {
+public class FlinkEndInputPartitionExpireITCase extends CatalogITCaseBase {
 
     private static final RowType TABLE_TYPE =
             new RowType(
@@ -75,23 +80,19 @@ public class FlinkEndInputWatermarkITCase extends CatalogITCaseBase {
 
     private static final List<RowData> SOURCE_DATA =
             Arrays.asList(
-                    wrap(GenericRowData.of(0, StringData.fromString("p1"), 1)),
-                    wrap(GenericRowData.of(0, StringData.fromString("p1"), 2)),
-                    wrap(GenericRowData.of(0, StringData.fromString("p1"), 1)),
-                    wrap(GenericRowData.of(5, StringData.fromString("p1"), 1)),
-                    wrap(GenericRowData.of(6, StringData.fromString("p2"), 1)),
-                    wrap(GenericRowData.of(3, StringData.fromString("p2"), 5)),
-                    wrap(GenericRowData.of(5, StringData.fromString("p2"), 1)));
+                    wrap(GenericRowData.of(0, StringData.fromString("20240101"), 1)),
+                    wrap(GenericRowData.of(0, StringData.fromString("20240101"), 2)),
+                    wrap(GenericRowData.of(0, StringData.fromString("20240103"), 1)),
+                    wrap(GenericRowData.of(5, StringData.fromString("20240103"), 1)),
+                    wrap(GenericRowData.of(6, StringData.fromString("20240105"), 1)));
 
     private static SerializableRowData wrap(RowData row) {
         return new SerializableRowData(row, InternalSerializers.create(TABLE_TYPE));
     }
 
-    private static final long END_INPUT_WATERMARK = 11111;
-
     private final StreamExecutionEnvironment env;
 
-    public FlinkEndInputWatermarkITCase() {
+    public FlinkEndInputPartitionExpireITCase() {
         this.env = streamExecutionEnvironmentBuilder().batchMode().parallelism(2).build();
     }
 
@@ -100,26 +101,8 @@ public class FlinkEndInputWatermarkITCase extends CatalogITCaseBase {
         return Arrays.asList(true, false);
     }
 
-    @Override
-    protected List<String> ddl() {
-        return Collections.singletonList("CREATE TABLE IF NOT EXISTS T (a INT, b INT, c INT)");
-    }
-
     @TestTemplate
-    public void testEndInputWatermarkBySQL() throws Exception {
-        batchSql(
-                "INSERT INTO T /*+ OPTIONS('end-input.watermark'= '%s') */ VALUES (1, 11, 111), (2, 22, 222)",
-                String.valueOf(END_INPUT_WATERMARK));
-
-        FileStoreTable table = paimonTable("T");
-        Assertions.assertEquals(1, table.snapshotManager().snapshotCount());
-        Long waterMark = table.snapshotManager().latestSnapshot().watermark();
-        Assertions.assertNotNull(waterMark);
-        Assertions.assertEquals(END_INPUT_WATERMARK, waterMark);
-    }
-
-    @TestTemplate
-    public void testEndInputWatermark() throws Exception {
+    public void testEndInputPartitionExpire() throws Exception {
         FileStoreTable table = buildFileStoreTable(new int[] {1}, new int[] {1, 2});
 
         // write
@@ -142,10 +125,9 @@ public class FlinkEndInputWatermarkITCase extends CatalogITCaseBase {
         new FlinkSinkBuilder(table).forRow(input, inputType).build();
         env.execute();
 
-        Assertions.assertEquals(1, table.snapshotManager().snapshotCount());
-        Long waterMark = table.snapshotManager().latestSnapshot().watermark();
-        Assertions.assertNotNull(waterMark);
-        Assertions.assertEquals(END_INPUT_WATERMARK, waterMark);
+        Assertions.assertEquals(2, table.snapshotManager().snapshotCount());
+        Assertions.assertEquals(
+                Snapshot.CommitKind.OVERWRITE, table.snapshotManager().snapshot(2).commitKind());
     }
 
     private FileStoreTable buildFileStoreTable(int[] partitions, int[] primaryKey)
@@ -154,9 +136,10 @@ public class FlinkEndInputWatermarkITCase extends CatalogITCaseBase {
         options.set(BUCKET, 3);
         options.set(PATH, getTempDirPath());
         options.set(FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
-        options.set(
-                FlinkConnectorOptions.END_INPUT_WATERMARK.key(),
-                String.valueOf(END_INPUT_WATERMARK));
+        options.set(PARTITION_EXPIRATION_TIME, Duration.ofDays(2));
+        options.set(PARTITION_EXPIRATION_CHECK_INTERVAL, Duration.ofHours(1));
+        options.set(PARTITION_TIMESTAMP_FORMATTER, "yyyyMMdd");
+        options.set(END_INPUT_CHECK_PARTITION_EXPIRE, true);
 
         Path tablePath = new CoreOptions(options.toMap()).path();
         if (primaryKey.length == 0) {
