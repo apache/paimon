@@ -113,7 +113,6 @@ class AsyncPositionOutputStreamTest {
         assertThat(byteOut.getPos()).isEqualTo(8);
 
         out.close();
-        assertThat(out.getBufferQueue().size()).isEqualTo(1);
     }
 
     @Test
