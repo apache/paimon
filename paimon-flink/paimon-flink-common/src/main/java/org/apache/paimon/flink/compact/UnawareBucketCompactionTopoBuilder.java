@@ -20,7 +20,6 @@ package org.apache.paimon.flink.compact;
 
 import org.apache.paimon.append.AppendOnlyCompactionTask;
 import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.UnawareBucketCompactionSink;
 import org.apache.paimon.flink.source.BucketUnawareCompactSource;
 import org.apache.paimon.options.Options;
@@ -71,27 +70,17 @@ public class UnawareBucketCompactionTopoBuilder {
 
     public void build() {
         // build source from UnawareSourceFunction
-        DataStreamSource<AppendOnlyCompactionTask> source = buildSource(false);
+        DataStreamSource<AppendOnlyCompactionTask> source = buildSource();
 
         // from source, construct the full flink job
         sinkFromSource(source);
     }
 
-    public DataStream<Committable> fetchUncommitted(String commitUser) {
-        DataStreamSource<AppendOnlyCompactionTask> source = buildSource(true);
-
-        // rebalance input to default or assigned parallelism
-        DataStream<AppendOnlyCompactionTask> rebalanced = rebalanceInput(source);
-
-        return new UnawareBucketCompactionSink(table)
-                .doWrite(rebalanced, commitUser, rebalanced.getParallelism());
-    }
-
-    private DataStreamSource<AppendOnlyCompactionTask> buildSource(boolean emitMaxWatermark) {
+    private DataStreamSource<AppendOnlyCompactionTask> buildSource() {
         long scanInterval = table.coreOptions().continuousDiscoveryInterval().toMillis();
         BucketUnawareCompactSource source =
                 new BucketUnawareCompactSource(
-                        table, isContinuous, scanInterval, partitionPredicate, emitMaxWatermark);
+                        table, isContinuous, scanInterval, partitionPredicate);
 
         return BucketUnawareCompactSource.buildSource(env, source, isContinuous, tableIdentifier);
     }

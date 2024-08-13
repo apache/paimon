@@ -19,24 +19,31 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.append.AppendOnlyCompactionTask;
-import org.apache.paimon.flink.source.BucketUnawareCompactSource;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+import org.apache.flink.types.Either;
 
-/**
- * Operator to execute {@link AppendOnlyCompactionTask} passed from {@link
- * BucketUnawareCompactSource} for compacting single unaware bucket tables in divided mode.
- */
-public class AppendOnlySingleTableCompactionWorkerOperator
-        extends AppendCompactWorkerOperator<AppendOnlyCompactionTask> {
+/** A {@link AppendCompactWorkerOperator} to bypass Committable inputs. */
+public class AppendBypassCompactWorkerOperator
+        extends AppendCompactWorkerOperator<Either<Committable, AppendOnlyCompactionTask>> {
 
-    public AppendOnlySingleTableCompactionWorkerOperator(FileStoreTable table, String commitUser) {
+    public AppendBypassCompactWorkerOperator(FileStoreTable table, String commitUser) {
         super(table, commitUser);
     }
 
     @Override
-    public void processElement(StreamRecord<AppendOnlyCompactionTask> element) throws Exception {
-        this.unawareBucketCompactor.processElement(element.getValue());
+    public void open() throws Exception {
+        super.open();
+    }
+
+    @Override
+    public void processElement(StreamRecord<Either<Committable, AppendOnlyCompactionTask>> element)
+            throws Exception {
+        if (element.getValue().isLeft()) {
+            output.collect(new StreamRecord<>(element.getValue().left()));
+        } else {
+            unawareBucketCompactor.processElement(element.getValue().right());
+        }
     }
 }
