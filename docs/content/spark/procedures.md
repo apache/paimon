@@ -97,6 +97,19 @@ This section introduce all available spark procedures about paimon.
       </td>
     </tr>
     <tr>
+      <td>create_tag_from_timestamp</td>
+      <td>
+         To create a tag based on given timestamp. Arguments:
+            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>tag: name of the new tag.</li>
+            <li>timestamp (Long): Find the first snapshot whose commit-time is greater than this timestamp.</li>
+            <li>time_retained : The maximum time retained for newly created tags.</li>
+      </td>
+      <td>
+         CALL sys.create_tag_from_timestamp(`table` => 'default.T', `tag` => 'my_tag', `timestamp` => 1724404318750, time_retained => '1 d')
+      </td>
+    </tr>
+    <tr>
       <td>delete_tag</td>
       <td>
          To delete a tag. Arguments:

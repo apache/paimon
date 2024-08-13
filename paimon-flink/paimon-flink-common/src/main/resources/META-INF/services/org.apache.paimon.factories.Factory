@@ -41,6 +41,7 @@ org.apache.paimon.flink.procedure.CompactDatabaseProcedure
 org.apache.paimon.flink.procedure.CompactProcedure
 org.apache.paimon.flink.procedure.RewriteFileIndexProcedure
 org.apache.paimon.flink.procedure.CreateTagProcedure
+org.apache.paimon.flink.procedure.CreateTagFromTimestampProcedure
 org.apache.paimon.flink.procedure.DeleteTagProcedure
 org.apache.paimon.flink.procedure.CreateBranchProcedure
 org.apache.paimon.flink.procedure.DeleteBranchProcedure
