@@ -69,7 +69,10 @@ import static org.apache.paimon.CoreOptions.STREAMING_READ_OVERWRITE;
 import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.SEQUENCE_GROUP;
 import static org.apache.paimon.schema.SystemColumns.KEY_FIELD_PREFIX;
 import static org.apache.paimon.schema.SystemColumns.SYSTEM_FIELD_NAMES;
-import static org.apache.paimon.types.DataTypeRoot.*;
+import static org.apache.paimon.types.DataTypeRoot.ARRAY;
+import static org.apache.paimon.types.DataTypeRoot.MAP;
+import static org.apache.paimon.types.DataTypeRoot.MULTISET;
+import static org.apache.paimon.types.DataTypeRoot.ROW;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
