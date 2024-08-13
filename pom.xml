@@ -82,7 +82,7 @@ under the License.
         <scala.version>2.12.15</scala.version>
         <scala.binary.version>2.12</scala.binary.version>
         <snappy.version>1.1.8.3</snappy.version>
-        <airlift.version>0.21</airlift.version>
+        <airlift.version>0.27</airlift.version>
         <lz4.version>1.8.0</lz4.version>
         <slf4j.version>1.7.32</slf4j.version>
         <log4j.version>2.17.1</log4j.version>
