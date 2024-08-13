@@ -96,19 +96,6 @@ public class DeletionVectorsIndexFile extends IndexFile {
         return deletionVectors;
     }
 
-    public Map<String, DeletionVector> readAllDeletionVectors(
-            Map<String, DeletionFile> deletionFiles) {
-        Map<String, DeletionVector> deletionVectors = new HashMap<>();
-        for (Map.Entry<String, DeletionFile> entry : deletionFiles.entrySet()) {
-            try {
-                deletionVectors.put(entry.getKey(), DeletionVector.read(fileIO, entry.getValue()));
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
-        }
-        return deletionVectors;
-    }
-
     /** Reads deletion vectors from a list of DeletionFile which belong to a same index file. */
     public Map<String, DeletionVector> readDeletionVector(
             Map<String, DeletionFile> dataFileToDeletionFiles) {

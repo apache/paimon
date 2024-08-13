@@ -279,11 +279,6 @@ public class IndexFileHandler {
         return deletionVectorsIndex.readAllDeletionVectors(fileMetas);
     }
 
-    public Map<String, DeletionVector> readAllDeletionVectors(
-            Map<String, DeletionFile> deletionFiles) {
-        return deletionVectorsIndex.readAllDeletionVectors(deletionFiles);
-    }
-
     public List<IndexFileMeta> writeDeletionVectorsIndex(
             Map<String, DeletionVector> deletionVectors) {
         return deletionVectorsIndex.write(deletionVectors);
