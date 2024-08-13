@@ -44,7 +44,7 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.END_INPUT_WATERMARK;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_OPERATOR_CHAINING;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_MANAGED_WRITER_BUFFER_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
-import static org.apache.paimon.flink.sink.FlinkSink.assertBatchConfiguration;
+import static org.apache.paimon.flink.sink.FlinkSink.assertBatchAdaptiveParallelism;
 import static org.apache.paimon.flink.sink.FlinkSink.assertStreamingConfiguration;
 import static org.apache.paimon.flink.utils.ManagedMemoryUtils.declareManagedMemory;
 
@@ -117,8 +117,8 @@ public class CombinedTableCompactorSink implements Serializable {
                         .setParallelism(unawareBucketTableSource.getParallelism());
 
         if (!isStreaming) {
-            assertBatchConfiguration(env, multiBucketTableRewriter.getParallelism());
-            assertBatchConfiguration(env, unawareBucketTableRewriter.getParallelism());
+            assertBatchAdaptiveParallelism(env, multiBucketTableRewriter.getParallelism());
+            assertBatchAdaptiveParallelism(env, unawareBucketTableRewriter.getParallelism());
         }
 
         if (options.get(SINK_USE_MANAGED_MEMORY)) {

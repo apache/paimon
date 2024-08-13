@@ -222,8 +222,8 @@ public abstract class FlinkSink<T> implements Serializable {
                                         commitUser))
                         .setParallelism(parallelism == null ? input.getParallelism() : parallelism);
 
-        if (!isStreaming) {
-            assertBatchConfiguration(env, written.getParallelism());
+        if (!isStreaming && table.coreOptions().writeManifestCache().getBytes() > 0) {
+            assertBatchAdaptiveParallelism(env, written.getParallelism());
         }
 
         Options options = Options.fromMap(table.options());
@@ -314,7 +314,7 @@ public abstract class FlinkSink<T> implements Serializable {
                         + " to exactly-once");
     }
 
-    public static void assertBatchConfiguration(
+    public static void assertBatchAdaptiveParallelism(
             StreamExecutionEnvironment env, int sinkParallelism) {
         try {
             checkArgument(
