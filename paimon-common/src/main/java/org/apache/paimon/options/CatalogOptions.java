@@ -57,7 +57,7 @@ public class CatalogOptions {
     public static final ConfigOption<Boolean> LOCK_ENABLED =
             ConfigOptions.key("lock.enabled")
                     .booleanType()
-                    .defaultValue(false)
+                    .noDefaultValue()
                     .withDescription("Enable Catalog Lock.");
 
     public static final ConfigOption<String> LOCK_TYPE =
