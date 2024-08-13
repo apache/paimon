@@ -76,6 +76,22 @@ public class DeletionVectorsMaintainer {
     }
 
     /**
+     * Merge a new deletion which marks the specified deletion vector with the given file name, if
+     * the previous deletion vector exist, merge the old one.
+     *
+     * @param fileName The name of the file where the deletion occurred.
+     * @param deletionVector The deletion vector
+     */
+    public void mergeNewDeletion(String fileName, DeletionVector deletionVector) {
+        DeletionVector old = deletionVectors.get(fileName);
+        if (old != null) {
+            deletionVector.merge(old);
+        }
+        deletionVectors.put(fileName, deletionVector);
+        modified = true;
+    }
+
+    /**
      * Removes the specified file's deletion vector, this method is typically used for remove before
      * files' deletion vector in compaction.
      *

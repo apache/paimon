@@ -57,5 +57,7 @@ public enum BucketMode {
      * Ignoring bucket concept, although all data is written to bucket-0, the parallelism of reads
      * and writes is unrestricted. This mode only works for append-only table.
      */
-    BUCKET_UNAWARE
+    BUCKET_UNAWARE;
+
+    public static final int UNAWARE_BUCKET = 0;
 }
