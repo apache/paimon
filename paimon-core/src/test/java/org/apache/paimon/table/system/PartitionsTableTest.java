@@ -65,7 +65,7 @@ public class PartitionsTableTest extends TableTestBase {
                         .partitionKeys("pt")
                         .primaryKey("pk", "pt")
                         .option(CoreOptions.CHANGELOG_PRODUCER.key(), "input")
-                        .option("bucket", "1")
+                        .option("bucket", "2")
                         .build();
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(new SchemaManager(fileIO, tablePath), schema);
@@ -96,10 +96,20 @@ public class PartitionsTableTest extends TableTestBase {
     public void testPartitionValue() throws Exception {
         write(table, GenericRow.of(2, 1, 3), GenericRow.of(3, 1, 4));
         List<InternalRow> expectedRow = new ArrayList<>();
-        expectedRow.add(GenericRow.of(BinaryString.fromString("[1]"), 4L, 3L));
+        expectedRow.add(GenericRow.of(BinaryString.fromString("[1]"), 4L, 4L));
         expectedRow.add(GenericRow.of(BinaryString.fromString("[2]"), 2L, 2L));
 
-        List<InternalRow> result = read(partitionsTable, new int[][] {{0}, {1}, {3}});
+        List<InternalRow> result = read(partitionsTable, new int[][] {{0}, {2}, {4}});
+        assertThat(result).containsExactlyInAnyOrderElementsOf(expectedRow);
+    }
+
+    @Test
+    public void testPartitionBucketsValue() throws Exception {
+        List<InternalRow> expectedRow = new ArrayList<>();
+        expectedRow.add(GenericRow.of(BinaryString.fromString("[1]"), 2L));
+        expectedRow.add(GenericRow.of(BinaryString.fromString("[2]"), 2L));
+
+        List<InternalRow> result = read(partitionsTable, new int[][] {{0}, {1}});
         assertThat(result).containsExactlyInAnyOrderElementsOf(expectedRow);
     }
 }

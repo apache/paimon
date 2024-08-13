@@ -31,6 +31,7 @@ import static org.apache.paimon.manifest.FileKind.DELETE;
 public class PartitionEntry {
 
     private final BinaryRow partition;
+    private final long buckets;
     private final long recordCount;
     private final long fileSizeInBytes;
     private final long fileCount;
@@ -38,11 +39,13 @@ public class PartitionEntry {
 
     public PartitionEntry(
             BinaryRow partition,
+            long buckets,
             long recordCount,
             long fileSizeInBytes,
             long fileCount,
             long lastFileCreationTime) {
         this.partition = partition;
+        this.buckets = buckets;
         this.recordCount = recordCount;
         this.fileSizeInBytes = fileSizeInBytes;
         this.fileCount = fileCount;
@@ -69,9 +72,14 @@ public class PartitionEntry {
         return lastFileCreationTime;
     }
 
+    public long buckets() {
+        return buckets;
+    }
+
     public PartitionEntry merge(PartitionEntry entry) {
         return new PartitionEntry(
                 partition,
+                buckets,
                 recordCount + entry.recordCount,
                 fileSizeInBytes + entry.fileSizeInBytes,
                 fileCount + entry.fileCount,
@@ -89,6 +97,7 @@ public class PartitionEntry {
         }
         return new PartitionEntry(
                 entry.partition(),
+                entry.totalBuckets(),
                 recordCount,
                 fileSizeInBytes,
                 fileCount,
@@ -125,12 +134,13 @@ public class PartitionEntry {
                 && fileSizeInBytes == that.fileSizeInBytes
                 && fileCount == that.fileCount
                 && lastFileCreationTime == that.lastFileCreationTime
+                && buckets == that.buckets
                 && Objects.equals(partition, that.partition);
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(
-                partition, recordCount, fileSizeInBytes, fileCount, lastFileCreationTime);
+                partition, buckets, recordCount, fileSizeInBytes, fileCount, lastFileCreationTime);
     }
 }
