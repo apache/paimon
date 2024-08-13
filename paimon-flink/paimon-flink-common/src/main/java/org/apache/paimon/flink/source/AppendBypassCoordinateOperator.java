@@ -44,7 +44,6 @@ public class AppendBypassCoordinateOperator<CommitT>
 
     private final FileStoreTable table;
 
-    private transient long intervalMs;
     private transient AppendOnlyTableCompactionCoordinator coordinator;
 
     public AppendBypassCoordinateOperator(FileStoreTable table) {
@@ -59,10 +58,8 @@ public class AppendBypassCoordinateOperator<CommitT>
                 getRuntimeContext().getNumberOfParallelSubtasks() == 1,
                 "Compaction Coordinator parallelism in paimon MUST be one.");
         this.coordinator = new AppendOnlyTableCompactionCoordinator(table, true, null);
-        this.intervalMs = table.coreOptions().continuousDiscoveryInterval().toMillis();
-
-        long now = getProcessingTimeService().getCurrentProcessingTime();
-        getProcessingTimeService().registerTimer(now, this);
+        long intervalMs = table.coreOptions().continuousDiscoveryInterval().toMillis();
+        getProcessingTimeService().scheduleWithFixedDelay(this, 0, intervalMs);
     }
 
     @Override
@@ -77,8 +74,6 @@ public class AppendBypassCoordinateOperator<CommitT>
                 break;
             }
         }
-
-        getProcessingTimeService().registerTimer(time + this.intervalMs, this);
     }
 
     @Override

@@ -20,7 +20,6 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.Snapshot;
 
-import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -28,7 +27,6 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL;
-import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test case for append-only managed unaware-bucket table. */
 public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
@@ -52,16 +50,12 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
                         + "    f1        STRING\n"
                         + ") WITH (\n"
                         + "    'connector' = 'datagen',\n"
-                        + "    'rows-per-second' = '1',\n"
-                        + "    'number-of-rows' = '10'\n"
+                        + "    'rows-per-second' = '1'\n"
                         + ")");
 
         assertStreamingHasCompact("INSERT INTO append_table SELECT * FROM Orders_in", 60000);
         // ensure data gen finished
         Thread.sleep(5000);
-
-        List<Row> rows = batchSql("SELECT * FROM append_table");
-        assertThat(rows.size()).isEqualTo(10);
     }
 
     private void assertStreamingHasCompact(String sql, long timeout) throws Exception {

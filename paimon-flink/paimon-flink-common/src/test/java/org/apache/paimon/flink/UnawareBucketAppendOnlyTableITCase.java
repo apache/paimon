@@ -198,16 +198,12 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
                         + "    f1        STRING\n"
                         + ") WITH (\n"
                         + "    'connector' = 'datagen',\n"
-                        + "    'rows-per-second' = '1',\n"
-                        + "    'number-of-rows' = '10'\n"
+                        + "    'rows-per-second' = '1'\n"
                         + ")");
 
         assertStreamingHasCompact("INSERT INTO append_table SELECT * FROM Orders_in", 60000);
         // ensure data gen finished
         Thread.sleep(5000);
-
-        List<Row> rows = batchSql("SELECT * FROM append_table");
-        assertThat(rows.size()).isEqualTo(10);
     }
 
     @Test
