@@ -45,9 +45,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  *
  * <ul>
  *   <li>{@link #notifyDeletionFiles}: Mark the deletion of data files, create new deletion vectors.
- *   <li>{@link #persist}:
- *   <li>Version 3: Introduced in paimon 0.4. Add "baseRecordCount" field, "deltaRecordCount" field
- *       and "changelogRecordCount" field.
+ *   <li>{@link #persist}: persist deletion files to commit.
  * </ul>
  */
 public class AppendDeletionFileMaintainer {
