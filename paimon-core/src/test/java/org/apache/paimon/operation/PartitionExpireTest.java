@@ -247,11 +247,12 @@ public class PartitionExpireTest {
         table = newExpireTable();
 
         List<CommitMessage> commitMessages = write("20230101", "11");
+        write("20230105", "51");
 
         PartitionExpire expire = newExpire();
         expire.setLastCheck(date(1));
         expire.expire(date(5), Long.MAX_VALUE);
-        assertThat(read()).isEmpty();
+        assertThat(read()).containsExactlyInAnyOrder("20230105:51");
 
         TableCommitImpl commit = table.newCommit("");
         CommitMessageImpl message = (CommitMessageImpl) commitMessages.get(0);
@@ -265,6 +266,9 @@ public class PartitionExpireTest {
 
         // should no exception
         commit.commit(0L, singletonList(newMessage));
+
+        // read is ok
+        assertThat(read()).containsExactlyInAnyOrder("20230105:51");
     }
 
     private List<String> read() throws IOException {

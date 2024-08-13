@@ -27,6 +27,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.FileEntry;
+import org.apache.paimon.manifest.FileEntry.Identifier;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
@@ -288,8 +289,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     baseEntries.addAll(
                             readAllEntriesFromChangedPartitions(
                                     latestSnapshot, appendTableFiles, compactTableFiles));
-                    noConflictsOrFail(
-                            latestSnapshot.commitUser(), baseEntries, appendSimpleEntries);
+                    noConflictsOrFail(latestSnapshot.commitUser(), baseEntries, appendTableFiles);
                     safeLatestSnapshotId = latestSnapshot.id();
                 }
 
@@ -320,10 +320,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 // files.
                 if (safeLatestSnapshotId != null) {
                     baseEntries.addAll(appendSimpleEntries);
-                    noConflictsOrFail(
-                            latestSnapshot.commitUser(),
-                            baseEntries,
-                            SimpleFileEntry.from(compactTableFiles));
+                    noConflictsOrFail(latestSnapshot.commitUser(), baseEntries, compactTableFiles);
                     // assume this compact commit follows just after the append commit created above
                     safeLatestSnapshotId += 1;
                 }
@@ -1049,14 +1046,15 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         noConflictsOrFail(
                 baseCommitUser,
                 readAllEntriesFromChangedPartitions(latestSnapshot, changes),
-                SimpleFileEntry.from(changes));
+                changes);
     }
 
     private void noConflictsOrFail(
             String baseCommitUser,
             List<SimpleFileEntry> baseEntries,
-            List<SimpleFileEntry> changes) {
+            List<ManifestEntry> originalChanges) {
         List<SimpleFileEntry> allEntries = new ArrayList<>(baseEntries);
+        List<SimpleFileEntry> changes = SimpleFileEntry.from(originalChanges);
         allEntries.addAll(changes);
 
         java.util.function.Consumer<Throwable> conflictHandler =
@@ -1081,7 +1079,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             conflictHandler.accept(e);
         }
 
-        assertNoDelete(mergedEntries, conflictHandler);
+        assertNoDelete(originalChanges, mergedEntries, conflictHandler);
 
         // fast exit for file store without keys
         if (keyComparator == null) {
@@ -1127,6 +1125,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     private void assertNoDelete(
+            List<ManifestEntry> originalChanges,
             Collection<SimpleFileEntry> mergedEntries,
             java.util.function.Consumer<Throwable> conflictHandler) {
         try {
@@ -1139,13 +1138,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         } catch (Throwable e) {
             if (partitionExpire != null && partitionExpire.isValueExpiration()) {
                 Set<BinaryRow> deletedPartitions = new HashSet<>();
+                Set<Identifier> deletedFiles = new HashSet<>();
                 for (SimpleFileEntry entry : mergedEntries) {
                     if (entry.kind() == FileKind.DELETE) {
                         deletedPartitions.add(entry.partition());
+                        deletedFiles.add(entry.identifier());
                     }
                 }
                 if (partitionExpire.isValueAllExpired(deletedPartitions)) {
                     // partitions are all expired, ignore them
+                    originalChanges.removeIf(entry -> deletedFiles.contains(entry.identifier()));
                     return;
                 }
             }
