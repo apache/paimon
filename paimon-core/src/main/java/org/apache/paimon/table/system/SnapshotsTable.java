@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.system;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -52,6 +53,7 @@ import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.SerializationUtils;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
@@ -111,7 +113,11 @@ public class SnapshotsTable implements ReadonlyTable {
     private final FileStoreTable dataTable;
 
     public SnapshotsTable(FileStoreTable dataTable) {
-        this(dataTable.fileIO(), dataTable.location(), dataTable);
+        this(
+                dataTable.fileIO(),
+                dataTable.location(),
+                dataTable,
+                CoreOptions.branch(dataTable.schema().options()));
     }
 
     public SnapshotsTable(FileIO fileIO, Path location, FileStoreTable dataTable) {
@@ -123,7 +129,7 @@ public class SnapshotsTable implements ReadonlyTable {
         this.fileIO = fileIO;
         this.location = location;
         this.dataTable = dataTable;
-        this.branch = branchName;
+        this.branch = StringUtils.isBlank(branchName) ? DEFAULT_MAIN_BRANCH : branchName;
     }
 
     @Override

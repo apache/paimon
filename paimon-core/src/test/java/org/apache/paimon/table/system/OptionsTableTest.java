@@ -42,7 +42,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.catalog.Catalog.BRANCH_PREFIX;
+import static org.apache.paimon.catalog.Catalog.SYSTEM_BRANCH_PREFIX;
+import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unit tests for {@link OptionsTableTest}. */
@@ -97,7 +98,13 @@ public class OptionsTableTest extends TableTestBase {
                         .build());
         OptionsTable branchOptionsTable =
                 (OptionsTable)
-                        catalog.getTable(identifier(tableName + BRANCH_PREFIX + "b1" + "$options"));
+                        catalog.getTable(
+                                identifier(
+                                        tableName
+                                                + SYSTEM_TABLE_SPLITTER
+                                                + SYSTEM_BRANCH_PREFIX
+                                                + "b1"
+                                                + "$options"));
         List<InternalRow> expectRow = getExceptedResult(schemaManagerBranch);
         List<InternalRow> result = read(branchOptionsTable);
         assertThat(result).containsExactlyElementsOf(expectRow);

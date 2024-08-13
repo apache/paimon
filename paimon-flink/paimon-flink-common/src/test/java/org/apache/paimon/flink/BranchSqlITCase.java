@@ -373,29 +373,6 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testBranchSnapshotsTable() {
-        sql("CREATE TABLE t (a INT, b INT)");
-        sql("INSERT INTO t VALUES (1, 2)");
-        sql("CALL sys.create_branch('default.t', 'b1',1)");
-        List<Row> result1 = sql("SELECT snapshot_id, schema_id, commit_kind FROM t$snapshots");
-        assertThat(result1).containsExactly(Row.of(1L, 0L, "APPEND"));
-        List<Row> result2 =
-                sql("SELECT snapshot_id, schema_id, commit_kind FROM t$branch_b1$snapshots");
-        assertThat(result2).containsExactly(Row.of(1L, 0L, "APPEND"));
-
-        sql("INSERT INTO t$branch_b1 VALUES (3, 4)");
-        sql("INSERT INTO t$branch_b1 VALUES (5, 6)");
-
-        List<Row> result3 =
-                sql("SELECT snapshot_id, schema_id, commit_kind FROM t$branch_b1$snapshots");
-        assertThat(result3)
-                .containsExactly(
-                        Row.of(1L, 0L, "APPEND"),
-                        Row.of(2L, 0L, "APPEND"),
-                        Row.of(3L, 0L, "APPEND"));
-    }
-
-    @Test
     public void testBranchSchemasTable() {
         sql("CREATE TABLE t (a INT, b INT)");
         sql("INSERT INTO t VALUES (1, 2)");
@@ -412,9 +389,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     public void testBranchAuditLogTable() {
         sql("CREATE TABLE t (a INT, b INT)");
         sql("INSERT INTO t VALUES (1, 2)");
-        //        sql("INSERT INTO t VALUES (3, 4)");
         List<Row> res = sql("SELECT * FROM t$audit_log");
-        //        assertThat(res.toString()).isEqualTo("[+I[+I, 1, 2]]");
         assertThat(res).containsExactlyInAnyOrder(Row.ofKind(RowKind.INSERT, "+I", 1, 2));
 
         sql("CALL sys.create_branch('default.t', 'b1')");
@@ -428,7 +403,6 @@ public class BranchSqlITCase extends CatalogITCaseBase {
         sql("CREATE TABLE t (a INT, b INT)");
         sql("INSERT INTO t VALUES (1, 2)");
         List<Row> res = sql("SELECT * FROM t$ro");
-        //        assertThat(res.toString()).isEqualTo("[+I[+I, 1, 2]]");
         assertThat(res).containsExactly(Row.of(1, 2));
 
         sql("CALL sys.create_branch('default.t', 'b1')");
@@ -441,17 +415,15 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     public void testBranchFilesTable() {
         sql("CREATE TABLE t (a INT, b INT)");
         sql("INSERT INTO t VALUES (1, 2)");
-        List<Row> res = sql("SELECT min_value_stats FROM t$files");
-        //        assertThat(res.toString()).isEqualTo("[+I[+I, 1, 2]]");
-        //        assertThat(res).containsExactly(Row.of(1, 2));
 
-        sql("CALL sys.create_branch('default.t', 'b1',1)");
+        sql("CALL sys.create_branch('default.t', 'b1')");
         sql("INSERT INTO t$branch_b1 VALUES (3, 4)");
         sql("INSERT INTO t$branch_b1 VALUES (5, 6)");
+
+        List<Row> res = sql("SELECT min_value_stats FROM t$files");
+        assertThat(res.toString()).isEqualTo("[+I[{a=1, b=2}]]");
         List<Row> result = sql("SELECT min_value_stats FROM t$branch_b1$files");
-        assertThat(result)
-                .containsExactly(Row.of("{a=1, b=2}"), Row.of("{a=3, b=4}"), Row.of("{a=5, b=6}"));
-        //        assertThat(result.toString()).isEqualTo("[+I[3, 4]]");
+        assertThat(result).containsExactly(Row.of("{a=3, b=4}"), Row.of("{a=5, b=6}"));
     }
 
     @Test
@@ -459,14 +431,16 @@ public class BranchSqlITCase extends CatalogITCaseBase {
         sql("CREATE TABLE t (a INT, b INT)");
         sql("INSERT INTO t VALUES (1, 2)");
         paimonTable("t").createTag("tag1", 1);
+
+        sql("CALL sys.create_branch('default.t', 'b1','tag1')");
+        sql("INSERT INTO t$branch_b1 VALUES (3, 4)");
+        paimonTable("t$branch_b1").createTag("tag2", 2);
+
         List<Row> res = sql("SELECT tag_name,snapshot_id,record_count FROM t$tags");
         assertThat(res.toString()).isEqualTo("[+I[tag1, 1, 1]]");
 
-        sql("CALL sys.create_branch('default.t', 'b1',1)");
-        sql("INSERT INTO t$branch_b1 VALUES (3, 4)");
-        paimonTable("t$branch_b1").createTag("tag2", 2);
         List<Row> result = sql("SELECT tag_name,snapshot_id,record_count FROM t$branch_b1$tags");
-        assertThat(result.toString()).isEqualTo("[+I[tag2, 2, 2]]");
+        assertThat(result.toString()).isEqualTo("[+I[tag1, 1, 1], +I[tag2, 2, 2]]");
     }
 
     @Test
@@ -474,17 +448,19 @@ public class BranchSqlITCase extends CatalogITCaseBase {
         sql("CREATE TABLE t (a INT, b INT)");
         sql("INSERT INTO t VALUES (1, 2), (3,4)");
 
-        sql("CALL sys.create_branch('default.t', 'b1',1)");
+        sql("CALL sys.create_branch('default.t', 'b1')");
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(
                         streamSqlIter(
                                 "SELECT * FROM t$branch_b1 /*+ OPTIONS('consumer-id'='id1','consumer.expiration-time'='3h') */"));
-        assertThat(iterator.collect(2)).containsExactlyInAnyOrder(Row.of(1, 2), Row.of(3, 4));
         sql("INSERT INTO t$branch_b1 VALUES (5, 6), (7, 8)");
         assertThat(iterator.collect(2)).containsExactlyInAnyOrder(Row.of(5, 6), Row.of(7, 8));
         iterator.close();
+
+        List<Row> res = sql("SELECT * FROM t$consumers");
+        assertThat(res).isEmpty();
         List<Row> result = sql("SELECT * FROM t$branch_b1$consumers");
-        assertThat(result.toString()).isEqualTo("[+I[id1, 3]]");
+        assertThat(result.toString()).isEqualTo("[+I[id1, 2]]");
     }
 
     @Test
@@ -492,8 +468,13 @@ public class BranchSqlITCase extends CatalogITCaseBase {
         sql("CREATE TABLE t (a INT, b INT)");
         sql("INSERT INTO t VALUES (1, 2)");
 
-        sql("CALL sys.create_branch('default.t', 'b1',1)");
+        sql("CALL sys.create_branch('default.t', 'b1')");
         sql("INSERT INTO t$branch_b1 VALUES (3, 4)");
+        sql("INSERT INTO t$branch_b1 VALUES (5, 6)");
+
+        List<Row> res = sql("SELECT schema_id, file_name, file_size FROM t$manifests");
+        assertThat(res.size()).isEqualTo(1);
+
         List<Row> result = sql("SELECT schema_id, file_name, file_size FROM t$branch_b1$manifests");
         assertThat(result.size()).isEqualTo(2);
         result.forEach(

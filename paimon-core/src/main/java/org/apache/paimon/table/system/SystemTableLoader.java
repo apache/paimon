@@ -80,42 +80,6 @@ public class SystemTableLoader {
     public static final List<String> SYSTEM_TABLES = new ArrayList<>(SYSTEM_TABLE_LOADERS.keySet());
 
     @Nullable
-    public static Table load(
-            String type, FileIO fileIO, FileStoreTable dataTable, String branchName) {
-        Path location = dataTable.location();
-        switch (type.toLowerCase()) {
-            case MANIFESTS:
-                return new ManifestsTable(dataTable);
-            case SNAPSHOTS:
-                return new SnapshotsTable(fileIO, location, dataTable, branchName);
-            case OPTIONS:
-                return new OptionsTable(fileIO, location, branchName);
-            case SCHEMAS:
-                return new SchemasTable(fileIO, location, branchName);
-            case PARTITIONS:
-                return new PartitionsTable(dataTable);
-            case AUDIT_LOG:
-                return new AuditLogTable(dataTable);
-            case FILES:
-                return new FilesTable(dataTable);
-            case TAGS:
-                return new TagsTable(fileIO, location, branchName);
-            case BRANCHES:
-                return new BranchesTable(fileIO, location);
-            case CONSUMERS:
-                return new ConsumersTable(fileIO, location, branchName);
-            case READ_OPTIMIZED:
-                return new ReadOptimizedTable(dataTable);
-            case AGGREGATION_FIELDS:
-                return new AggregationFieldsTable(fileIO, location, branchName);
-            case STATISTICS:
-                return new StatisticTable(fileIO, location, dataTable);
-            default:
-                return null;
-        }
-    }
-
-    @Nullable
     public static Table load(String type, FileStoreTable dataTable) {
         return Optional.ofNullable(SYSTEM_TABLE_LOADERS.get(type.toLowerCase()))
                 .map(f -> f.apply(dataTable))

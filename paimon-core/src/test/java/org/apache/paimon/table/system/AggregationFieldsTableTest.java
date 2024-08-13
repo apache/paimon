@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.system;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -41,11 +40,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.catalog.Catalog.BRANCH_PREFIX;
+import static org.apache.paimon.catalog.Catalog.SYSTEM_BRANCH_PREFIX;
+import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 import static org.apache.paimon.table.system.AggregationFieldsTable.extractFieldMultimap;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -95,8 +94,6 @@ public class AggregationFieldsTableTest extends TableTestBase {
         assertThat(branchManager.branchExists("b1")).isTrue();
 
         SchemaManager schemaManagerBranch = schemaManager.copyWithBranch("b1");
-        Map<String, String> newOptions = new HashMap<>();
-        newOptions.put(CoreOptions.IGNORE_DELETE.key(), "true");
         SchemaUtils.forceCommit(
                 schemaManagerBranch,
                 Schema.newBuilder()
@@ -113,7 +110,11 @@ public class AggregationFieldsTableTest extends TableTestBase {
                 (AggregationFieldsTable)
                         catalog.getTable(
                                 identifier(
-                                        tableName + BRANCH_PREFIX + "b1" + "$aggregation_fields"));
+                                        tableName
+                                                + SYSTEM_TABLE_SPLITTER
+                                                + SYSTEM_BRANCH_PREFIX
+                                                + "b1"
+                                                + "$aggregation_fields"));
         List<InternalRow> expectRow = getExceptedResult();
         List<InternalRow> result = read(aggregationFieldsTable);
         assertThat(result).containsExactlyElementsOf(expectRow);
