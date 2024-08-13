@@ -76,7 +76,6 @@ public class FlinkSinkBuilder {
     private DataStream<RowData> input;
     @Nullable protected Map<String, String> overwritePartition;
     @Nullable protected Integer parallelism;
-    private Boolean boundedInput = null;
     @Nullable private TableSortInfo tableSortInfo;
 
     // ============== for extension ==============
@@ -131,15 +130,6 @@ public class FlinkSinkBuilder {
         return this;
     }
 
-    /**
-     * Set input bounded, if it is bounded, append table sink does not generate a topology for
-     * merging small files.
-     */
-    public FlinkSinkBuilder inputBounded(boolean bounded) {
-        this.boundedInput = bounded;
-        return this;
-    }
-
     /** Clustering the input data if possible. */
     public FlinkSinkBuilder clusteringIfPossible(
             String clusteringColumns,
@@ -152,10 +142,7 @@ public class FlinkSinkBuilder {
             return this;
         }
         checkState(input != null, "The input stream should be specified earlier.");
-        if (boundedInput == null) {
-            boundedInput = !FlinkSink.isStreaming(input);
-        }
-        if (!boundedInput || !table.bucketMode().equals(BUCKET_UNAWARE)) {
+        if (FlinkSink.isStreaming(input) || !table.bucketMode().equals(BUCKET_UNAWARE)) {
             LOG.warn(
                     "Clustering is enabled; however, it has been skipped as "
                             + "it only supports the bucket unaware table without primary keys and "
@@ -282,11 +269,7 @@ public class FlinkSinkBuilder {
         checkArgument(
                 table.primaryKeys().isEmpty(),
                 "Unaware bucket mode only works with append-only table for now.");
-        if (boundedInput == null) {
-            boundedInput = !FlinkSink.isStreaming(input);
-        }
-        return new RowUnawareBucketSink(
-                        table, overwritePartition, logSinkFunction, parallelism, boundedInput)
+        return new RowUnawareBucketSink(table, overwritePartition, logSinkFunction, parallelism)
                 .sinkFrom(input);
     }
 

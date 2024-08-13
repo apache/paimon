@@ -42,19 +42,16 @@ public abstract class UnawareBucketSink<T> extends FlinkWriteSink<T> {
     protected final LogSinkFunction logSinkFunction;
 
     @Nullable protected final Integer parallelism;
-    protected final boolean boundedInput;
 
     public UnawareBucketSink(
             FileStoreTable table,
             @Nullable Map<String, String> overwritePartitions,
             LogSinkFunction logSinkFunction,
-            @Nullable Integer parallelism,
-            boolean boundedInput) {
+            @Nullable Integer parallelism) {
         super(table, overwritePartitions);
         this.table = table;
         this.logSinkFunction = logSinkFunction;
         this.parallelism = parallelism;
-        this.boundedInput = boundedInput;
     }
 
     @Override
@@ -69,7 +66,7 @@ public abstract class UnawareBucketSink<T> extends FlinkWriteSink<T> {
                                 .get(ExecutionOptions.RUNTIME_MODE)
                         == RuntimeExecutionMode.STREAMING;
         // if enable compaction, we need to add compaction topology to this job
-        if (enableCompaction && isStreamingMode && !boundedInput) {
+        if (enableCompaction && isStreamingMode) {
             written =
                     written.transform(
                                     "Compact Coordinator: " + table.name(),
