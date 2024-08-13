@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.table.source.DeletionFile;
 
 import javax.annotation.Nullable;
 
@@ -139,6 +140,12 @@ public class DeletionVectorsMaintainer {
                             : handler.scan(snapshotId, DELETION_VECTORS_INDEX, partition, bucket);
             Map<String, DeletionVector> deletionVectors =
                     new HashMap<>(handler.readAllDeletionVectors(indexFiles));
+            return createOrRestore(deletionVectors);
+        }
+
+        public DeletionVectorsMaintainer restore(Map<String, DeletionFile> deletionFiles) {
+            Map<String, DeletionVector> deletionVectors =
+                    new HashMap<>(handler.readAllDeletionVectors(deletionFiles));
             return createOrRestore(deletionVectors);
         }
 

@@ -27,6 +27,8 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.table.source.DeletionFile;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -35,8 +37,20 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-/** DeletionVectorIndexFileMaintainer. */
-public class DeletionVectorIndexFileMaintainer {
+import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
+/**
+ * A maintainer to maintain deletion files for append table, the core methods:
+ *
+ * <ul>
+ *   <li>{@link #notifyDeletionFiles}: Mark the deletion of data files, create new deletion vectors.
+ *   <li>{@link #persist}:
+ *   <li>Version 3: Introduced in paimon 0.4. Add "baseRecordCount" field, "deltaRecordCount" field
+ *       and "changelogRecordCount" field.
+ * </ul>
+ */
+public class AppendDeletionFileMaintainer {
 
     private final IndexFileHandler indexFileHandler;
 
@@ -52,25 +66,45 @@ public class DeletionVectorIndexFileMaintainer {
     private final DeletionVectorsMaintainer maintainer;
 
     // the key of dataFileToDeletionFiles is the relative path again table's location.
-    public DeletionVectorIndexFileMaintainer(
+    private AppendDeletionFileMaintainer(
             IndexFileHandler indexFileHandler,
-            Long snapshotId,
             BinaryRow partition,
             int bucket,
-            boolean restore) {
+            Map<String, DeletionFile> deletionFiles,
+            DeletionVectorsMaintainer maintainer) {
         this.indexFileHandler = indexFileHandler;
         this.partition = partition;
         this.bucket = bucket;
-        if (restore) {
-            this.maintainer =
-                    new DeletionVectorsMaintainer.Factory(indexFileHandler)
-                            .createOrRestore(snapshotId, partition, bucket);
-        } else {
-            this.maintainer = new DeletionVectorsMaintainer.Factory(indexFileHandler).create();
-        }
-        Map<String, DeletionFile> dataFileToDeletionFiles =
+        this.maintainer = maintainer;
+        init(deletionFiles);
+    }
+
+    public static AppendDeletionFileMaintainer forBucketedAppend(
+            IndexFileHandler indexFileHandler,
+            @Nullable Long snapshotId,
+            BinaryRow partition,
+            int bucket) {
+        Map<String, DeletionFile> deletionFiles =
                 indexFileHandler.scanDVIndex(snapshotId, partition, bucket);
-        init(dataFileToDeletionFiles);
+        checkArgument(deletionFiles.size() <= 1, "bucket should only have one deletion file.");
+        // bucket should have only one deletion file, so here we should read old deletion vectors,
+        // overwrite the entire deletion file of the bucket when writing deletes.
+        DeletionVectorsMaintainer maintainer =
+                new DeletionVectorsMaintainer.Factory(indexFileHandler).restore(deletionFiles);
+        return new AppendDeletionFileMaintainer(
+                indexFileHandler, partition, bucket, deletionFiles, maintainer);
+    }
+
+    public static AppendDeletionFileMaintainer forUnawareAppend(
+            IndexFileHandler indexFileHandler, @Nullable Long snapshotId, BinaryRow partition) {
+        Map<String, DeletionFile> deletionFiles =
+                indexFileHandler.scanDVIndex(snapshotId, partition, UNAWARE_BUCKET);
+        // the deletion of data files is independent
+        // just create an empty maintainer
+        DeletionVectorsMaintainer maintainer =
+                new DeletionVectorsMaintainer.Factory(indexFileHandler).create();
+        return new AppendDeletionFileMaintainer(
+                indexFileHandler, partition, UNAWARE_BUCKET, deletionFiles, maintainer);
     }
 
     @VisibleForTesting
@@ -122,17 +156,6 @@ public class DeletionVectorIndexFileMaintainer {
         maintainer.notifyNewDeletion(dataFile, deletionVector);
     }
 
-    public void notifyDeletionFiles(Map<String, DeletionFile> dataFileToDeletionFiles) {
-        for (String dataFile : dataFileToDeletionFiles.keySet()) {
-            DeletionFile deletionFile = dataFileToDeletionFiles.get(dataFile);
-            String indexFileName = new Path(deletionFile.path()).getName();
-            touchedIndexFiles.add(indexFileName);
-            if (indexFileToDeletionFiles.containsKey(indexFileName)) {
-                indexFileToDeletionFiles.get(indexFileName).remove(dataFile);
-            }
-        }
-    }
-
     public List<IndexManifestEntry> persist() {
         List<IndexManifestEntry> result = writeUnchangedDeletionVector();
         List<IndexManifestEntry> newIndexFileEntries =
@@ -146,7 +169,8 @@ public class DeletionVectorIndexFileMaintainer {
         return result;
     }
 
-    public List<IndexManifestEntry> writeUnchangedDeletionVector() {
+    @VisibleForTesting
+    List<IndexManifestEntry> writeUnchangedDeletionVector() {
         DeletionVectorsIndexFile deletionVectorsIndexFile = indexFileHandler.deletionVectorsIndex();
         List<IndexManifestEntry> newIndexEntries = new ArrayList<>();
         for (String indexFile : indexFileToDeletionFiles.keySet()) {
@@ -162,14 +186,13 @@ public class DeletionVectorIndexFileMaintainer {
                                     deletionVectorsIndexFile.readDeletionVector(
                                             dataFileToDeletionFiles));
                     newIndexFiles.forEach(
-                            newIndexFile -> {
-                                newIndexEntries.add(
-                                        new IndexManifestEntry(
-                                                FileKind.ADD,
-                                                oldEntry.partition(),
-                                                oldEntry.bucket(),
-                                                newIndexFile));
-                            });
+                            newIndexFile ->
+                                    newIndexEntries.add(
+                                            new IndexManifestEntry(
+                                                    FileKind.ADD,
+                                                    oldEntry.partition(),
+                                                    oldEntry.bucket(),
+                                                    newIndexFile)));
                 }
 
                 // mark the touched index file as removed.

@@ -20,6 +20,8 @@ package org.apache.paimon.deletionvectors;
 
 import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -40,7 +42,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for DeletionVectorIndexFileMaintainer. */
-public class DeletionVectorIndexFileMaintainerTest {
+public class AppendDeletionFileMaintainerTest {
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -68,8 +70,8 @@ public class DeletionVectorIndexFileMaintainerTest {
                 createDeletionFileMapFromIndexFileMetas(
                         indexPathFactory, commitMessage2.indexIncrement().newIndexFiles()));
 
-        DeletionVectorIndexFileMaintainer dvIFMaintainer =
-                store.createDVIFMaintainer(BinaryRow.EMPTY_ROW, 1, dataFileToDeletionFiles);
+        AppendDeletionFileMaintainer dvIFMaintainer =
+                store.createDVIFMaintainer(BinaryRow.EMPTY_ROW, dataFileToDeletionFiles);
 
         // no dv should be rewritten, because nothing is changed.
         List<IndexManifestEntry> res = dvIFMaintainer.writeUnchangedDeletionVector();
@@ -77,8 +79,9 @@ public class DeletionVectorIndexFileMaintainerTest {
 
         // the dv of f3 is updated, and the index file that contains the dv of f3 should be marked
         // as REMOVE.
+        FileIO fileIO = LocalFileIO.create();
         dvIFMaintainer.notifyDeletionFiles(
-                Collections.singletonMap("f3", dataFileToDeletionFiles.get("f3")));
+                "f3", DeletionVector.read(fileIO, dataFileToDeletionFiles.get("f3")));
         res = dvIFMaintainer.writeUnchangedDeletionVector();
         assertThat(res.size()).isEqualTo(1);
         assertThat(res.get(0).kind()).isEqualTo(FileKind.DELETE);
@@ -86,7 +89,7 @@ public class DeletionVectorIndexFileMaintainerTest {
         // the dv of f1 and f2 are in one index file, and the dv of f1 is updated.
         // the dv of f2 need to be rewritten, and this index file should be marked as REMOVE.
         dvIFMaintainer.notifyDeletionFiles(
-                Collections.singletonMap("f1", dataFileToDeletionFiles.get("f1")));
+                "f1", DeletionVector.read(fileIO, dataFileToDeletionFiles.get("f1")));
         res = dvIFMaintainer.writeUnchangedDeletionVector();
         assertThat(res.size()).isEqualTo(3);
         IndexManifestEntry entry =

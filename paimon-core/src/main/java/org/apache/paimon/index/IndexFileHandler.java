@@ -21,7 +21,6 @@ package org.apache.paimon.index;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.DeletionVector;
-import org.apache.paimon.deletionvectors.DeletionVectorIndexFileMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -271,11 +270,6 @@ public class IndexFileHandler {
         indexManifestFile.delete(indexManifest);
     }
 
-    public DeletionVectorIndexFileMaintainer createDVIndexFileMaintainer(
-            Long snapshotId, BinaryRow partition, int bucket, boolean restore) {
-        return new DeletionVectorIndexFileMaintainer(this, snapshotId, partition, bucket, restore);
-    }
-
     public Map<String, DeletionVector> readAllDeletionVectors(List<IndexFileMeta> fileMetas) {
         for (IndexFileMeta indexFile : fileMetas) {
             checkArgument(
@@ -283,6 +277,11 @@ public class IndexFileHandler {
                     "Input file is not deletion vectors index " + indexFile.indexType());
         }
         return deletionVectorsIndex.readAllDeletionVectors(fileMetas);
+    }
+
+    public Map<String, DeletionVector> readAllDeletionVectors(
+            Map<String, DeletionFile> deletionFiles) {
+        return deletionVectorsIndex.readAllDeletionVectors(deletionFiles);
     }
 
     public List<IndexFileMeta> writeDeletionVectorsIndex(
