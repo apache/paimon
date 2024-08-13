@@ -103,7 +103,7 @@ under the License.
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-compress</artifactId>
-            <version>1.21</version>
+            <version>1.26.0</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
