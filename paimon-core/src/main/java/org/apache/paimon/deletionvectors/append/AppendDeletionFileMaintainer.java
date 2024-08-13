@@ -21,21 +21,14 @@ package org.apache.paimon.deletionvectors.append;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
-import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.table.source.DeletionFile;
 
 import javax.annotation.Nullable;
 
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
 
@@ -48,109 +41,22 @@ import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
  *   <li>{@link #persist}: persist deletion files to commit.
  * </ul>
  */
-public abstract class AppendDeletionFileMaintainer {
+public interface AppendDeletionFileMaintainer {
 
-    protected final IndexFileHandler indexFileHandler;
+    BinaryRow getPartition();
 
-    protected final BinaryRow partition;
-    protected final Map<String, DeletionFile> dataFileToDeletionFile;
-    protected final Map<String, IndexManifestEntry> indexNameToEntry = new HashMap<>();
+    int getBucket();
 
-    protected final Map<String, Map<String, DeletionFile>> indexFileToDeletionFiles =
-            new HashMap<>();
-    protected final Map<String, String> dataFileToIndexFile = new HashMap<>();
+    DeletionFile getDeletionFile(String dataFile);
 
-    protected final Set<String> touchedIndexFiles = new HashSet<>();
-
-    protected final DeletionVectorsMaintainer maintainer;
-
-    AppendDeletionFileMaintainer(
-            IndexFileHandler indexFileHandler,
-            BinaryRow partition,
-            Map<String, DeletionFile> deletionFiles,
-            DeletionVectorsMaintainer maintainer) {
-        this.indexFileHandler = indexFileHandler;
-        this.partition = partition;
-        this.dataFileToDeletionFile = deletionFiles;
-        this.maintainer = maintainer;
-        init(this.dataFileToDeletionFile);
-    }
-
-    public void init(Map<String, DeletionFile> dataFileToDeletionFile) {
-        List<String> touchedIndexFileNames =
-                dataFileToDeletionFile.values().stream()
-                        .map(deletionFile -> new Path(deletionFile.path()).getName())
-                        .distinct()
-                        .collect(Collectors.toList());
-        indexFileHandler.scanEntries().stream()
-                .filter(
-                        indexManifestEntry ->
-                                touchedIndexFileNames.contains(
-                                        indexManifestEntry.indexFile().fileName()))
-                .forEach(entry -> indexNameToEntry.put(entry.indexFile().fileName(), entry));
-
-        for (String dataFile : dataFileToDeletionFile.keySet()) {
-            DeletionFile deletionFile = dataFileToDeletionFile.get(dataFile);
-            String indexFileName = new Path(deletionFile.path()).getName();
-            if (!indexFileToDeletionFiles.containsKey(indexFileName)) {
-                indexFileToDeletionFiles.put(indexFileName, new HashMap<>());
-            }
-            indexFileToDeletionFiles.get(indexFileName).put(dataFile, deletionFile);
-            dataFileToIndexFile.put(dataFile, indexFileName);
-        }
-    }
-
-    public BinaryRow getPartition() {
-        return this.partition;
-    }
-
-    public DeletionFile getDeletionFile(String dataFile) {
-        return this.dataFileToDeletionFile.get(dataFile);
-    }
+    void notifyNewDeletionVector(String dataFile, DeletionVector deletionVector);
 
     /** In compaction operation, notify that a deletion file of a data file is dropped. */
-    public DeletionFile notify(String dataFile) {
-        if (dataFileToIndexFile.containsKey(dataFile)) {
-            String indexFileName = dataFileToIndexFile.get(dataFile);
-            touchedIndexFiles.add(indexFileName);
-            if (indexFileToDeletionFiles.containsKey(indexFileName)) {
-                return indexFileToDeletionFiles.get(indexFileName).remove(dataFile);
-            }
-        }
-        return null;
-    }
+    void notify(String dataFile);
 
-    public IndexFileMeta getIndexFile(String dataFile) {
-        DeletionFile deletionFile = getDeletionFile(dataFile);
-        if (deletionFile == null) {
-            return null;
-        } else {
-            IndexManifestEntry entry =
-                    this.indexNameToEntry.get(new Path(deletionFile.path()).getName());
-            return entry == null ? null : entry.indexFile();
-        }
-    }
+    List<IndexManifestEntry> persist();
 
-    public List<IndexManifestEntry> persist() {
-        List<IndexManifestEntry> result = writeUnchangedDeletionVector();
-        List<IndexManifestEntry> newIndexFileEntries =
-                maintainer.writeDeletionVectorsIndex().stream()
-                        .map(
-                                fileMeta ->
-                                        new IndexManifestEntry(
-                                                FileKind.ADD, partition, getBucket(), fileMeta))
-                        .collect(Collectors.toList());
-        result.addAll(newIndexFileEntries);
-        return result;
-    }
-
-    public abstract int getBucket();
-
-    public abstract void notifyNewDeletionVector(String dataFile, DeletionVector deletionVector);
-
-    abstract List<IndexManifestEntry> writeUnchangedDeletionVector();
-
-    public static AppendDeletionFileMaintainer forBucketedAppend(
+    static AppendDeletionFileMaintainer forBucketedAppend(
             IndexFileHandler indexFileHandler,
             @Nullable Long snapshotId,
             BinaryRow partition,
@@ -163,18 +69,13 @@ public abstract class AppendDeletionFileMaintainer {
         Map<String, DeletionFile> deletionFiles =
                 indexFileHandler.scanDVIndex(snapshotId, partition, bucket);
         return new BucketedAppendDeletionFileMaintainer(
-                indexFileHandler, partition, bucket, deletionFiles, maintainer);
+                partition, bucket, deletionFiles, maintainer);
     }
 
-    public static AppendDeletionFileMaintainer forUnawareAppend(
+    static AppendDeletionFileMaintainer forUnawareAppend(
             IndexFileHandler indexFileHandler, @Nullable Long snapshotId, BinaryRow partition) {
-        // the deletion of data files is independent
-        // just create an empty maintainer
-        DeletionVectorsMaintainer maintainer =
-                new DeletionVectorsMaintainer.Factory(indexFileHandler).create();
         Map<String, DeletionFile> deletionFiles =
                 indexFileHandler.scanDVIndex(snapshotId, partition, UNAWARE_BUCKET);
-        return new UnawareAppendDeletionFileMaintainer(
-                indexFileHandler, partition, deletionFiles, maintainer);
+        return new UnawareAppendDeletionFileMaintainer(indexFileHandler, partition, deletionFiles);
     }
 }

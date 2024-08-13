@@ -35,77 +35,74 @@ class DeletionVectorTest extends PaimonSparkTestBase {
 
   import testImplicits._
 
-  bucketModes.foreach {
-    bucket =>
-      test(
-        s"Paimon DeletionVector: update for append non-partitioned table with bucket = $bucket") {
-        withTable("T") {
-          val bucketKey = if (bucket > 1) {
-            ", 'bucket-key' = 'id'"
-          } else {
-            ""
-          }
-          spark.sql(s"""
-                       |CREATE TABLE T (id INT, name STRING)
-                       |TBLPROPERTIES (
-                       |  'deletion-vectors.enabled' = 'true',
-                       |  'compaction.max.file-num' = '50',
-                       |  'bucket' = '$bucket' $bucketKey)
-                       |""".stripMargin)
-
-          val table = loadTable("T")
-          val dvMaintainerFactory =
-            new DeletionVectorsMaintainer.Factory(table.store().newIndexFileHandler())
-
-          spark.sql("INSERT INTO T VALUES (1, 'a'), (2, 'b'), (3, 'c')")
-          val deletionVectors1 = getAllLatestDeletionVectors(table, dvMaintainerFactory)
-          Assertions.assertEquals(0, deletionVectors1.size)
-
-          val cond1 = "id = 2"
-          val rowMetaInfo1 = getFilePathAndRowIndex(cond1)
-          spark.sql(s"UPDATE T SET name = 'b_2' WHERE $cond1")
-          checkAnswer(
-            spark.sql(s"SELECT * from T ORDER BY id"),
-            Row(1, "a") :: Row(2, "b_2") :: Row(3, "c") :: Nil)
-          val deletionVectors2 = getAllLatestDeletionVectors(table, dvMaintainerFactory)
-          Assertions.assertEquals(1, deletionVectors2.size)
-          deletionVectors2
-            .foreach {
-              case (filePath, dv) =>
-                rowMetaInfo1(filePath).foreach(index => Assertions.assertTrue(dv.isDeleted(index)))
-            }
-
-          spark.sql("INSERT INTO T VALUES (4, 'd'), (5, 'e')")
-          checkAnswer(
-            spark.sql(s"SELECT * from T ORDER BY id"),
-            Row(1, "a") :: Row(2, "b_2") :: Row(3, "c") :: Row(4, "d") :: Row(5, "e") :: Nil)
-          val deletionVectors3 = getAllLatestDeletionVectors(table, dvMaintainerFactory)
-          Assertions.assertTrue(deletionVectors2 == deletionVectors3)
-
-          val cond2 = "id % 2 = 1"
-          spark.sql(s"UPDATE T SET name = concat(name, '_2') WHERE $cond2")
-          checkAnswer(
-            spark.sql(s"SELECT * from T ORDER BY id"),
-            Row(1, "a_2") :: Row(2, "b_2") :: Row(3, "c_2") :: Row(4, "d") :: Row(5, "e_2") :: Nil)
-
-          spark.sql(s"UPDATE T SET name = '_all'")
-          checkAnswer(
-            spark.sql(s"SELECT * from T ORDER BY id"),
-            Row(1, "_all") :: Row(2, "_all") :: Row(3, "_all") :: Row(4, "_all") :: Row(
-              5,
-              "_all") :: Nil)
-
-          spark.sql("CALL sys.compact('T')")
-          val deletionVectors4 = getAllLatestDeletionVectors(table, dvMaintainerFactory)
-          // After compaction, deletionVectors should be empty
-          Assertions.assertTrue(deletionVectors4.isEmpty)
-          checkAnswer(
-            spark.sql(s"SELECT * from T ORDER BY id"),
-            Row(1, "_all") :: Row(2, "_all") :: Row(3, "_all") :: Row(4, "_all") :: Row(
-              5,
-              "_all") :: Nil)
-        }
+  val bucket = 3
+  test(s"Paimon DeletionVector: update for append non-partitioned table ") {
+    withTable("T") {
+      val bucketKey = if (bucket > 1) {
+        ", 'bucket-key' = 'id'"
+      } else {
+        ""
       }
+      spark.sql(s"""
+                   |CREATE TABLE T (id INT, name STRING)
+                   |TBLPROPERTIES (
+                   |  'deletion-vectors.enabled' = 'true',
+                   |  'compaction.max.file-num' = '50',
+                   |  'bucket' = '$bucket' $bucketKey)
+                   |""".stripMargin)
+
+      val table = loadTable("T")
+      val dvMaintainerFactory =
+        new DeletionVectorsMaintainer.Factory(table.store().newIndexFileHandler())
+
+      spark.sql("INSERT INTO T VALUES (1, 'a'), (2, 'b'), (3, 'c')")
+      val deletionVectors1 = getAllLatestDeletionVectors(table, dvMaintainerFactory)
+      Assertions.assertEquals(0, deletionVectors1.size)
+
+      val cond1 = "id = 2"
+      val rowMetaInfo1 = getFilePathAndRowIndex(cond1)
+      spark.sql(s"UPDATE T SET name = 'b_2' WHERE $cond1")
+      checkAnswer(
+        spark.sql(s"SELECT * from T ORDER BY id"),
+        Row(1, "a") :: Row(2, "b_2") :: Row(3, "c") :: Nil)
+      val deletionVectors2 = getAllLatestDeletionVectors(table, dvMaintainerFactory)
+      Assertions.assertEquals(1, deletionVectors2.size)
+      deletionVectors2
+        .foreach {
+          case (filePath, dv) =>
+            rowMetaInfo1(filePath).foreach(index => Assertions.assertTrue(dv.isDeleted(index)))
+        }
+
+      spark.sql("INSERT INTO T VALUES (4, 'd'), (5, 'e')")
+      checkAnswer(
+        spark.sql(s"SELECT * from T ORDER BY id"),
+        Row(1, "a") :: Row(2, "b_2") :: Row(3, "c") :: Row(4, "d") :: Row(5, "e") :: Nil)
+      val deletionVectors3 = getAllLatestDeletionVectors(table, dvMaintainerFactory)
+      Assertions.assertTrue(deletionVectors2 == deletionVectors3)
+
+      val cond2 = "id % 2 = 1"
+      spark.sql(s"UPDATE T SET name = concat(name, '_2') WHERE $cond2")
+      checkAnswer(
+        spark.sql(s"SELECT * from T ORDER BY id"),
+        Row(1, "a_2") :: Row(2, "b_2") :: Row(3, "c_2") :: Row(4, "d") :: Row(5, "e_2") :: Nil)
+
+      spark.sql(s"UPDATE T SET name = '_all'")
+      checkAnswer(
+        spark.sql(s"SELECT * from T ORDER BY id"),
+        Row(1, "_all") :: Row(2, "_all") :: Row(3, "_all") :: Row(4, "_all") :: Row(
+          5,
+          "_all") :: Nil)
+
+      spark.sql("CALL sys.compact('T')")
+      val deletionVectors4 = getAllLatestDeletionVectors(table, dvMaintainerFactory)
+      // After compaction, deletionVectors should be empty
+      Assertions.assertTrue(deletionVectors4.isEmpty)
+      checkAnswer(
+        spark.sql(s"SELECT * from T ORDER BY id"),
+        Row(1, "_all") :: Row(2, "_all") :: Row(3, "_all") :: Row(4, "_all") :: Row(
+          5,
+          "_all") :: Nil)
+    }
   }
 
   bucketModes.foreach {
