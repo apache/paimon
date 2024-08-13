@@ -329,7 +329,7 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
                 deletionFiles.add(dvIndexFileMaintainer.getDeletionFile(dataFile.fileName()));
             }
             List<DataFileMeta> compactAfter = rewriter.rewrite(toCompact, deletionFiles);
-            toCompact.forEach(f -> dvIndexFileMaintainer.notify(f.fileName()));
+            toCompact.forEach(f -> dvIndexFileMaintainer.notifyRemovedDeletionVector(f.fileName()));
 
             List<IndexManifestEntry> indexManifestEntries = dvIndexFileMaintainer.persist();
             if (indexManifestEntries.isEmpty()) {

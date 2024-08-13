@@ -52,7 +52,7 @@ public interface AppendDeletionFileMaintainer {
     void notifyNewDeletionVector(String dataFile, DeletionVector deletionVector);
 
     /** In compaction operation, notify that a deletion file of a data file is dropped. */
-    void notify(String dataFile);
+    void notifyRemovedDeletionVector(String dataFile);
 
     List<IndexManifestEntry> persist();
 

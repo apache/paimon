@@ -91,7 +91,7 @@ public class AppendOnlyCompactionTask {
 
             compactBefore.forEach(
                     f -> {
-                        dvIndexFileMaintainer.notify(f.fileName());
+                        dvIndexFileMaintainer.notifyRemovedDeletionVector(f.fileName());
                     });
             List<IndexManifestEntry> indexEntries = dvIndexFileMaintainer.persist();
             Preconditions.checkArgument(
