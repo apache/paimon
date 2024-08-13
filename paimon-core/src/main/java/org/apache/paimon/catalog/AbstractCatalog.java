@@ -198,7 +198,13 @@ public abstract class AbstractCatalog implements Catalog {
             throw new DatabaseNotExistException(databaseName);
         }
 
-        return listTablesImpl(databaseName).stream().sorted().collect(Collectors.toList());
+        List<String> tables =
+                listTablesImpl(databaseName).stream().sorted().collect(Collectors.toList());
+        SupportsFormatTables formatCatalog = toFormatTableCatalog();
+        if (formatCatalog != null) {
+            tables.addAll(formatCatalog.listFormatTables(databaseName));
+        }
+        return tables;
     }
 
     protected abstract List<String> listTablesImpl(String databaseName);
@@ -336,8 +342,25 @@ public abstract class AbstractCatalog implements Catalog {
             }
             return table;
         } else {
-            return getDataTable(identifier);
+            try {
+                return getDataTable(identifier);
+            } catch (TableNotExistException e) {
+                SupportsFormatTables formatCatalog = toFormatTableCatalog();
+                if (formatCatalog != null) {
+                    return formatCatalog.getFormatTable(identifier);
+                }
+                throw e;
+            }
         }
+    }
+
+    @Nullable
+    private SupportsFormatTables toFormatTableCatalog() {
+        if (this instanceof SupportsFormatTables
+                && ((SupportsFormatTables) this).formatTableEnabled()) {
+            return (SupportsFormatTables) this;
+        }
+        return null;
     }
 
     private FileStoreTable getDataTable(Identifier identifier) throws TableNotExistException {

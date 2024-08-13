@@ -26,6 +26,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.SupportsFormatTables;
 import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
@@ -41,6 +42,7 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.TableType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -85,6 +87,7 @@ import java.util.stream.Collectors;
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTOREWAREHOUSE;
 import static org.apache.paimon.hive.HiveCatalogLock.acquireTimeout;
 import static org.apache.paimon.hive.HiveCatalogLock.checkMaxSleep;
+import static org.apache.paimon.hive.HiveCatalogOptions.FORMAT_TABLE_ENABLED;
 import static org.apache.paimon.hive.HiveCatalogOptions.HADOOP_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.HIVE_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.IDENTIFIER;
@@ -98,7 +101,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
 
 /** A catalog implementation for Hive. */
-public class HiveCatalog extends AbstractCatalog {
+public class HiveCatalog extends AbstractCatalog implements SupportsFormatTables {
 
     private static final Logger LOG = LoggerFactory.getLogger(HiveCatalog.class);
 
@@ -154,6 +157,38 @@ public class HiveCatalog extends AbstractCatalog {
         }
 
         this.clients = new CachedClientPool(hiveConf, options, clientClassName);
+    }
+
+    @Override
+    public boolean formatTableEnabled() {
+        return options.get(FORMAT_TABLE_ENABLED);
+    }
+
+    @Override
+    public List<String> listFormatTables(String databaseName) throws DatabaseNotExistException {
+        if (!databaseExists(databaseName)) {
+            throw new DatabaseNotExistException(databaseName);
+        }
+
+        List<String> allTables;
+        try {
+            allTables = clients.run(client -> client.getAllTables(databaseName));
+        } catch (TException e) {
+            throw new RuntimeException("Failed to list all tables in database " + databaseName, e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted in call to listTables " + databaseName, e);
+        }
+
+        List<String> formatTables = new ArrayList<>();
+        for (String table : allTables) {
+            try {
+                getFormatTable(new Identifier(databaseName, table));
+                formatTables.add(table);
+            } catch (TableNotExistException ignored) {
+            }
+        }
+        return formatTables;
     }
 
     @Override
@@ -437,6 +472,31 @@ public class HiveCatalog extends AbstractCatalog {
         return tableSchemaInFileSystem(
                         getTableLocation(identifier), identifier.getBranchNameOrDefault())
                 .orElseThrow(() -> new TableNotExistException(identifier));
+    }
+
+    @Override
+    public FormatTable getFormatTable(Identifier identifier) throws TableNotExistException {
+        Table table;
+        try {
+            table =
+                    clients.run(
+                            client ->
+                                    client.getTable(
+                                            identifier.getDatabaseName(),
+                                            identifier.getTableName()));
+        } catch (NoSuchObjectException e) {
+            throw new TableNotExistException(identifier);
+        } catch (TException e) {
+            throw new RuntimeException(e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        }
+        try {
+            return HiveFormatTableUtils.convertToFormatTable(table);
+        } catch (UnsupportedOperationException e) {
+            throw new TableNotExistException(identifier);
+        }
     }
 
     private boolean usingExternalTable() {
