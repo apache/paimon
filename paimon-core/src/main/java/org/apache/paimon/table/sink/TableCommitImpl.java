@@ -106,6 +106,7 @@ public class TableCommitImpl implements InnerTableCommit {
         commit.withLock(lock);
         if (partitionExpire != null) {
             partitionExpire.withLock(lock);
+            commit.withPartitionExpire(partitionExpire);
         }
 
         this.commit = commit;

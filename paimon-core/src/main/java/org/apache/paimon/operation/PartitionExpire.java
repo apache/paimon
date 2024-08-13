@@ -19,9 +19,11 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.partition.PartitionExpireStrategy;
+import org.apache.paimon.partition.PartitionValuesTimeExpireStrategy;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,6 +33,7 @@ import javax.annotation.Nullable;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -84,6 +87,22 @@ public class PartitionExpire {
 
     public List<Map<String, String>> expire(long commitIdentifier) {
         return expire(LocalDateTime.now(), commitIdentifier);
+    }
+
+    public boolean isValueExpiration() {
+        return strategy instanceof PartitionValuesTimeExpireStrategy;
+    }
+
+    public boolean isValueAllExpired(Collection<BinaryRow> partitions) {
+        PartitionValuesTimeExpireStrategy valuesStrategy =
+                (PartitionValuesTimeExpireStrategy) strategy;
+        LocalDateTime expireDateTime = LocalDateTime.now().minus(expirationTime);
+        for (BinaryRow partition : partitions) {
+            if (!valuesStrategy.isExpired(expireDateTime, partition)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     @VisibleForTesting

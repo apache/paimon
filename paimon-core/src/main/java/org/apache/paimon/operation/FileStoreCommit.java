@@ -37,6 +37,8 @@ public interface FileStoreCommit extends AutoCloseable {
 
     FileStoreCommit ignoreEmptyCommit(boolean ignoreEmptyCommit);
 
+    FileStoreCommit withPartitionExpire(PartitionExpire partitionExpire);
+
     /** Find out which committables need to be retried when recovering from the failure. */
     List<ManifestCommittable> filterCommitted(List<ManifestCommittable> committables);
 
