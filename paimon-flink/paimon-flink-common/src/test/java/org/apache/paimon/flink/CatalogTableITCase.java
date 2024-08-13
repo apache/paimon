@@ -603,7 +603,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         for (Row row : rows1) {
             assertThat(StringUtils.endsWith((String) row.getField(2), ".parquet"))
                     .isTrue(); // check file name
-            assertThat((long) row.getField(7)).isGreaterThan(0L); // check file size
+            assertThat(row.getField(7)).isNotEqualTo("0B");
         }
         assertThat(getRowStringList(rows1))
                 .containsExactlyInAnyOrder(
@@ -648,7 +648,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         for (Row row : rows2) {
             assertThat(StringUtils.endsWith((String) row.getField(2), ".parquet"))
                     .isTrue(); // check file name
-            assertThat((long) row.getField(7)).isGreaterThan(0L); // check file size
+            assertThat(row.getField(7)).isNotEqualTo("0B");
         }
         assertThat(getRowStringList(rows2))
                 .containsExactlyInAnyOrder(

@@ -42,6 +42,7 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.FileSizeFormatterUtils;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -197,7 +198,8 @@ public class FilesTableTest extends TableTestBase {
                             file.schemaId(),
                             file.level(),
                             file.rowCount(),
-                            file.fileSize(),
+                            BinaryString.fromString(
+                                    FileSizeFormatterUtils.formatFileSize(file.fileSize())),
                             BinaryString.fromString(Arrays.toString(new String[] {minKey})),
                             BinaryString.fromString(Arrays.toString(new String[] {maxKey})),
                             BinaryString.fromString(

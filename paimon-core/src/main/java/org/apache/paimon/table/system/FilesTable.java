@@ -53,6 +53,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FileSizeFormatterUtils;
 import org.apache.paimon.utils.InternalRowUtils;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.ProjectedRow;
@@ -96,7 +97,7 @@ public class FilesTable implements ReadonlyTable {
                             new DataField(4, "schema_id", new BigIntType(false)),
                             new DataField(5, "level", new IntType(false)),
                             new DataField(6, "record_count", new BigIntType(false)),
-                            new DataField(7, "file_size_in_bytes", new BigIntType(false)),
+                            new DataField(7, "data_size", SerializationUtils.newStringType(false)),
                             new DataField(8, "min_key", SerializationUtils.newStringType(true)),
                             new DataField(9, "max_key", SerializationUtils.newStringType(true)),
                             new DataField(
@@ -379,7 +380,10 @@ public class FilesTable implements ReadonlyTable {
                         dataFileMeta::schemaId,
                         dataFileMeta::level,
                         dataFileMeta::rowCount,
-                        dataFileMeta::fileSize,
+                        () ->
+                                BinaryString.fromString(
+                                        FileSizeFormatterUtils.formatFileSize(
+                                                dataFileMeta.fileSize())),
                         () ->
                                 dataFileMeta.minKey().getFieldCount() <= 0
                                         ? null
