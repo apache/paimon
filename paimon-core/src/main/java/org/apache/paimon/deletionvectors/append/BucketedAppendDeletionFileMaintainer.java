@@ -25,7 +25,9 @@ import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.table.source.DeletionFile;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 
 /** A {@link AppendDeletionFileMaintainer} of bucketed append table. */
 public class BucketedAppendDeletionFileMaintainer extends AppendDeletionFileMaintainer {

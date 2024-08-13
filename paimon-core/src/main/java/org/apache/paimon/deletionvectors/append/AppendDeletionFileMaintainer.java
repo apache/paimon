@@ -30,7 +30,11 @@ import org.apache.paimon.table.source.DeletionFile;
 
 import javax.annotation.Nullable;
 
-import java.util.*;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
