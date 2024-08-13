@@ -16,10 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.deletionvectors;
+package org.apache.paimon.deletionvectors.append;
 
 import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.IndexFileMeta;
@@ -41,8 +42,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for DeletionVectorIndexFileMaintainer. */
-public class AppendDeletionFileMaintainerTest {
+class AppendDeletionFileMaintainerTest {
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -70,7 +70,7 @@ public class AppendDeletionFileMaintainerTest {
                 createDeletionFileMapFromIndexFileMetas(
                         indexPathFactory, commitMessage2.indexIncrement().newIndexFiles()));
 
-        AppendDeletionFileMaintainer dvIFMaintainer =
+        UnawareAppendDeletionFileMaintainer dvIFMaintainer =
                 store.createDVIFMaintainer(BinaryRow.EMPTY_ROW, dataFileToDeletionFiles);
 
         // no dv should be rewritten, because nothing is changed.

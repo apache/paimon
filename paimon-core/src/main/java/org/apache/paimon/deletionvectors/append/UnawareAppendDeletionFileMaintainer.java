@@ -16,18 +16,19 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.deletionvectors;
+package org.apache.paimon.deletionvectors.append;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.deletionvectors.DeletionVector;
+import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
+import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.table.source.DeletionFile;
-
-import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -38,22 +39,13 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/**
- * A maintainer to maintain deletion files for append table, the core methods:
- *
- * <ul>
- *   <li>{@link #notifyDeletionFiles}: Mark the deletion of data files, create new deletion vectors.
- *   <li>{@link #persist}: persist deletion files to commit.
- * </ul>
- */
-public class AppendDeletionFileMaintainer {
+/** A {@link AppendDeletionFileMaintainer} of unaware bucket append table. */
+public class UnawareAppendDeletionFileMaintainer implements AppendDeletionFileMaintainer {
 
     private final IndexFileHandler indexFileHandler;
 
     private final BinaryRow partition;
-    private final int bucket;
     private final Map<String, IndexManifestEntry> indexNameToEntry = new HashMap<>();
 
     private final Map<String, Map<String, DeletionFile>> indexFileToDeletionFiles = new HashMap<>();
@@ -63,46 +55,16 @@ public class AppendDeletionFileMaintainer {
 
     private final DeletionVectorsMaintainer maintainer;
 
-    // the key of dataFileToDeletionFiles is the relative path again table's location.
-    private AppendDeletionFileMaintainer(
+    UnawareAppendDeletionFileMaintainer(
             IndexFileHandler indexFileHandler,
             BinaryRow partition,
-            int bucket,
-            Map<String, DeletionFile> deletionFiles,
-            DeletionVectorsMaintainer maintainer) {
+            Map<String, DeletionFile> deletionFiles) {
         this.indexFileHandler = indexFileHandler;
         this.partition = partition;
-        this.bucket = bucket;
-        this.maintainer = maintainer;
-        init(deletionFiles);
-    }
-
-    public static AppendDeletionFileMaintainer forBucketedAppend(
-            IndexFileHandler indexFileHandler,
-            @Nullable Long snapshotId,
-            BinaryRow partition,
-            int bucket) {
-        Map<String, DeletionFile> deletionFiles =
-                indexFileHandler.scanDVIndex(snapshotId, partition, bucket);
-        checkArgument(deletionFiles.size() <= 1, "bucket should only have one deletion file.");
-        // bucket should have only one deletion file, so here we should read old deletion vectors,
-        // overwrite the entire deletion file of the bucket when writing deletes.
-        DeletionVectorsMaintainer maintainer =
-                new DeletionVectorsMaintainer.Factory(indexFileHandler).restore(deletionFiles);
-        return new AppendDeletionFileMaintainer(
-                indexFileHandler, partition, bucket, deletionFiles, maintainer);
-    }
-
-    public static AppendDeletionFileMaintainer forUnawareAppend(
-            IndexFileHandler indexFileHandler, @Nullable Long snapshotId, BinaryRow partition) {
-        Map<String, DeletionFile> deletionFiles =
-                indexFileHandler.scanDVIndex(snapshotId, partition, UNAWARE_BUCKET);
         // the deletion of data files is independent
         // just create an empty maintainer
-        DeletionVectorsMaintainer maintainer =
-                new DeletionVectorsMaintainer.Factory(indexFileHandler).create();
-        return new AppendDeletionFileMaintainer(
-                indexFileHandler, partition, UNAWARE_BUCKET, deletionFiles, maintainer);
+        this.maintainer = new DeletionVectorsMaintainer.Factory(indexFileHandler).create();
+        init(deletionFiles);
     }
 
     @VisibleForTesting
@@ -130,14 +92,17 @@ public class AppendDeletionFileMaintainer {
         }
     }
 
+    @Override
     public BinaryRow getPartition() {
         return this.partition;
     }
 
+    @Override
     public int getBucket() {
-        return this.bucket;
+        return UNAWARE_BUCKET;
     }
 
+    @Override
     public void notifyDeletionFiles(String dataFile, DeletionVector deletionVector) {
         DeletionVectorsIndexFile deletionVectorsIndexFile = indexFileHandler.deletionVectorsIndex();
         DeletionFile previous = null;
@@ -154,6 +119,7 @@ public class AppendDeletionFileMaintainer {
         maintainer.notifyNewDeletion(dataFile, deletionVector);
     }
 
+    @Override
     public List<IndexManifestEntry> persist() {
         List<IndexManifestEntry> result = writeUnchangedDeletionVector();
         List<IndexManifestEntry> newIndexFileEntries =
@@ -161,7 +127,7 @@ public class AppendDeletionFileMaintainer {
                         .map(
                                 fileMeta ->
                                         new IndexManifestEntry(
-                                                FileKind.ADD, partition, bucket, fileMeta))
+                                                FileKind.ADD, partition, UNAWARE_BUCKET, fileMeta))
                         .collect(Collectors.toList());
         result.addAll(newIndexFileEntries);
         return result;

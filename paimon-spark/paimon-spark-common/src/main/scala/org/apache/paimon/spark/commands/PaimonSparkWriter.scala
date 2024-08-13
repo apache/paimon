@@ -19,7 +19,8 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.CoreOptions.WRITE_ONLY
-import org.apache.paimon.deletionvectors.{AppendDeletionFileMaintainer, DeletionVector}
+import org.apache.paimon.deletionvectors.DeletionVector
+import org.apache.paimon.deletionvectors.append.{AppendDeletionFileMaintainer, UnawareAppendDeletionFileMaintainer}
 import org.apache.paimon.index.{BucketAssigner, SimpleHashBucketAssigner}
 import org.apache.paimon.io.{CompactIncrement, DataIncrement, IndexIncrement}
 import org.apache.paimon.manifest.{FileKind, IndexManifestEntry}

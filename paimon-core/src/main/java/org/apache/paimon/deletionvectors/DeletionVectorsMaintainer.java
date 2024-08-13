@@ -23,7 +23,6 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
-import org.apache.paimon.table.source.DeletionFile;
 
 import javax.annotation.Nullable;
 
@@ -72,6 +71,22 @@ public class DeletionVectorsMaintainer {
      * @param deletionVector The deletion vector
      */
     public void notifyNewDeletion(String fileName, DeletionVector deletionVector) {
+        deletionVectors.put(fileName, deletionVector);
+        modified = true;
+    }
+
+    /**
+     * Merge a new deletion which marks the specified deletion vector with the given file name, if
+     * the previous deletion vector exist, merge the old one.
+     *
+     * @param fileName The name of the file where the deletion occurred.
+     * @param deletionVector The deletion vector
+     */
+    public void mergeNewDeletion(String fileName, DeletionVector deletionVector) {
+        DeletionVector old = deletionVectors.get(fileName);
+        if (old != null) {
+            deletionVector.merge(old);
+        }
         deletionVectors.put(fileName, deletionVector);
         modified = true;
     }
@@ -140,12 +155,6 @@ public class DeletionVectorsMaintainer {
                             : handler.scan(snapshotId, DELETION_VECTORS_INDEX, partition, bucket);
             Map<String, DeletionVector> deletionVectors =
                     new HashMap<>(handler.readAllDeletionVectors(indexFiles));
-            return createOrRestore(deletionVectors);
-        }
-
-        public DeletionVectorsMaintainer restore(Map<String, DeletionFile> deletionFiles) {
-            Map<String, DeletionVector> deletionVectors =
-                    new HashMap<>(handler.readAllDeletionVectors(deletionFiles));
             return createOrRestore(deletionVectors);
         }
 
