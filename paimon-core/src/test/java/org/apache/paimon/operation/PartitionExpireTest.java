@@ -264,11 +264,11 @@ public class PartitionExpireTest {
                         new DataIncrement(emptyList(), emptyList(), emptyList()),
                         new CompactIncrement(singletonList(file), emptyList(), emptyList()));
 
-        // should no exception
-        commit.commit(0L, singletonList(newMessage));
-
-        // read is ok
-        assertThat(read()).containsExactlyInAnyOrder("20230105:51");
+        assertThatThrownBy(() -> commit.commit(0L, singletonList(newMessage)))
+                .hasMessage(
+                        "You are writing data to expired partitions, and you can filter "
+                                + "this data to avoid job failover. Otherwise, continuous expired records will cause the"
+                                + " job to failover restart continuously. Expired partitions are: [20230101]");
     }
 
     private List<String> read() throws IOException {

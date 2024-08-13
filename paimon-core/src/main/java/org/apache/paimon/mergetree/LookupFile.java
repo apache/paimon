@@ -40,7 +40,7 @@ import java.io.UncheckedIOException;
 import java.time.Duration;
 
 import static org.apache.paimon.mergetree.LookupUtils.fileKibiBytes;
-import static org.apache.paimon.utils.InternalRowPartitionComputer.toSimpleString;
+import static org.apache.paimon.utils.InternalRowPartitionComputer.partToSimpleString;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Lookup file for cache remote file to local. */
@@ -130,7 +130,7 @@ public class LookupFile {
         if (partition.getFieldCount() == 0) {
             return String.format("%s-%s", bucket, remoteFileName);
         } else {
-            String partitionString = toSimpleString(partitionType, partition, "-", 20);
+            String partitionString = partToSimpleString(partitionType, partition, "-", 20);
             return String.format("%s-%s-%s", partitionString, bucket, remoteFileName);
         }
     }

@@ -27,7 +27,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.FileEntry;
-import org.apache.paimon.manifest.FileEntry.Identifier;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
@@ -81,6 +80,7 @@ import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETIO
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
+import static org.apache.paimon.utils.InternalRowPartitionComputer.partToSimpleString;
 
 /**
  * Default implementation of {@link FileStoreCommit}.
@@ -289,7 +289,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     baseEntries.addAll(
                             readAllEntriesFromChangedPartitions(
                                     latestSnapshot, appendTableFiles, compactTableFiles));
-                    noConflictsOrFail(latestSnapshot.commitUser(), baseEntries, appendTableFiles);
+                    noConflictsOrFail(
+                            latestSnapshot.commitUser(), baseEntries, appendSimpleEntries);
                     safeLatestSnapshotId = latestSnapshot.id();
                 }
 
@@ -320,7 +321,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 // files.
                 if (safeLatestSnapshotId != null) {
                     baseEntries.addAll(appendSimpleEntries);
-                    noConflictsOrFail(latestSnapshot.commitUser(), baseEntries, compactTableFiles);
+                    noConflictsOrFail(
+                            latestSnapshot.commitUser(),
+                            baseEntries,
+                            SimpleFileEntry.from(compactTableFiles));
                     // assume this compact commit follows just after the append commit created above
                     safeLatestSnapshotId += 1;
                 }
@@ -1046,15 +1050,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         noConflictsOrFail(
                 baseCommitUser,
                 readAllEntriesFromChangedPartitions(latestSnapshot, changes),
-                changes);
+                SimpleFileEntry.from(changes));
     }
 
     private void noConflictsOrFail(
             String baseCommitUser,
             List<SimpleFileEntry> baseEntries,
-            List<ManifestEntry> originalChanges) {
+            List<SimpleFileEntry> changes) {
         List<SimpleFileEntry> allEntries = new ArrayList<>(baseEntries);
-        List<SimpleFileEntry> changes = SimpleFileEntry.from(originalChanges);
         allEntries.addAll(changes);
 
         java.util.function.Consumer<Throwable> conflictHandler =
@@ -1079,7 +1082,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             conflictHandler.accept(e);
         }
 
-        assertNoDelete(originalChanges, mergedEntries, conflictHandler);
+        assertNoDelete(mergedEntries, conflictHandler);
 
         // fast exit for file store without keys
         if (keyComparator == null) {
@@ -1125,7 +1128,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     private void assertNoDelete(
-            List<ManifestEntry> originalChanges,
             Collection<SimpleFileEntry> mergedEntries,
             java.util.function.Consumer<Throwable> conflictHandler) {
         try {
@@ -1138,17 +1140,24 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         } catch (Throwable e) {
             if (partitionExpire != null && partitionExpire.isValueExpiration()) {
                 Set<BinaryRow> deletedPartitions = new HashSet<>();
-                Set<Identifier> deletedFiles = new HashSet<>();
                 for (SimpleFileEntry entry : mergedEntries) {
                     if (entry.kind() == FileKind.DELETE) {
                         deletedPartitions.add(entry.partition());
-                        deletedFiles.add(entry.identifier());
                     }
                 }
                 if (partitionExpire.isValueAllExpired(deletedPartitions)) {
-                    // partitions are all expired, ignore them
-                    originalChanges.removeIf(entry -> deletedFiles.contains(entry.identifier()));
-                    return;
+                    List<String> expiredPartitions =
+                            deletedPartitions.stream()
+                                    .map(
+                                            partition ->
+                                                    partToSimpleString(
+                                                            partitionType, partition, "-", 200))
+                                    .collect(Collectors.toList());
+                    throw new RuntimeException(
+                            "You are writing data to expired partitions, and you can filter this data to avoid job failover."
+                                    + " Otherwise, continuous expired records will cause the job to failover restart continuously."
+                                    + " Expired partitions are: "
+                                    + expiredPartitions);
                 }
             }
             conflictHandler.accept(e);
@@ -1173,19 +1182,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         "Don't panic!",
                         "Conflicts during commits are normal and this failure is intended to resolve the conflicts.",
                         "Conflicts are mainly caused by the following scenarios:",
-                        "1. Your job is suffering from back-pressuring.",
-                        "   There are too many snapshots waiting to be committed "
-                                + "and an exception occurred during the commit procedure "
-                                + "(most probably due to checkpoint timeout).",
-                        "   See https://paimon.apache.org/docs/master/maintenance/write-performance/ "
-                                + "for how to improve writing performance.",
-                        "2. Multiple jobs are writing into the same partition at the same time, "
+                        "1. Multiple jobs are writing into the same partition at the same time, "
                                 + "or you use STATEMENT SET to execute multiple INSERT statements into the same Paimon table.",
                         "   You'll probably see different base commit user and current commit user below.",
                         "   You can use "
                                 + "https://paimon.apache.org/docs/master/maintenance/dedicated-compaction#dedicated-compaction-job"
                                 + " to support multiple writing.",
-                        "3. You're recovering from an old savepoint, or you're creating multiple jobs from a savepoint.",
+                        "2. You're recovering from an old savepoint, or you're creating multiple jobs from a savepoint.",
                         "   The job will fail continuously in this scenario to protect metadata from corruption.",
                         "   You can either recover from the latest savepoint, "
                                 + "or you can revert the table to the snapshot corresponding to the old savepoint.");
