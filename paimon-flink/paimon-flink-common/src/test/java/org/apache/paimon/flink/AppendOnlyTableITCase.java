@@ -35,6 +35,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Test case for append-only managed table. */
 public class AppendOnlyTableITCase extends CatalogITCaseBase {
@@ -228,6 +229,16 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     public void testComplexType() {
         batchSql("INSERT INTO complex_table VALUES (1, CAST(NULL AS MAP<INT, INT>))");
         assertThat(batchSql("SELECT * FROM complex_table")).containsExactly(Row.of(1, null));
+    }
+
+    @Test
+    public void testNestedTypeDDL() {
+        assertThrows(
+                RuntimeException.class,
+                () ->
+                        batchSql(
+                                "CREATE TABLE IF NOT EXISTS nested_table (id INT, data MAP<INT, INT>) WITH ('bucket' = '1', 'bucket-key'='id,data')"),
+                "nested type can not in bucket-key, in your table these key are [data]");
     }
 
     @Test
