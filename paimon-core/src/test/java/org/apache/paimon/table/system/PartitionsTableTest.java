@@ -65,7 +65,7 @@ public class PartitionsTableTest extends TableTestBase {
                         .partitionKeys("pt")
                         .primaryKey("pk", "pt")
                         .option(CoreOptions.CHANGELOG_PRODUCER.key(), "input")
-                        .option("bucket", "1")
+                        .option("bucket", "2")
                         .build();
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(new SchemaManager(fileIO, tablePath), schema);

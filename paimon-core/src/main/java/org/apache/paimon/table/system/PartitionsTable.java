@@ -70,10 +70,11 @@ public class PartitionsTable implements ReadonlyTable {
             new RowType(
                     Arrays.asList(
                             new DataField(0, "partition", SerializationUtils.newStringType(true)),
-                            new DataField(1, "record_count", new BigIntType(false)),
-                            new DataField(2, "file_size_in_bytes", new BigIntType(false)),
-                            new DataField(3, "file_count", new BigIntType(false)),
-                            new DataField(4, "last_update_time", DataTypes.TIMESTAMP_MILLIS())));
+                            new DataField(1, "buckets", new BigIntType(false)),
+                            new DataField(2, "record_count", new BigIntType(false)),
+                            new DataField(3, "file_size_in_bytes", new BigIntType(false)),
+                            new DataField(4, "file_count", new BigIntType(false)),
+                            new DataField(5, "last_update_time", DataTypes.TIMESTAMP_MILLIS())));
 
     private final FileStoreTable storeTable;
 
@@ -203,6 +204,7 @@ public class PartitionsTable implements ReadonlyTable {
                             Arrays.toString(partitionConverter.convert(entry.partition())));
             return GenericRow.of(
                     partitionId,
+                    entry.buckets(),
                     entry.recordCount(),
                     entry.fileSizeInBytes(),
                     entry.fileCount(),
