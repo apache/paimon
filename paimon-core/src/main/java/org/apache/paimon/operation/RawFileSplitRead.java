@@ -130,36 +130,18 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
 
     @Override
     public RecordReader<InternalRow> createReader(DataSplit split) throws IOException {
-        DataFilePathFactory dataFilePathFactory =
-                pathFactory.createDataFilePathFactory(split.partition(), split.bucket());
-        List<ReaderSupplier<InternalRow>> suppliers = new ArrayList<>();
         if (split.beforeFiles().size() > 0) {
-            LOG.info("Ignore split before files: " + split.beforeFiles());
+            LOG.info("Ignore split before files: {}", split.beforeFiles());
         }
 
+        List<DataFileMeta> files = split.dataFiles();
         DeletionVector.Factory dvFactory =
-                DeletionVector.factory(
-                        fileIO, split.dataFiles(), split.deletionFiles().orElse(null));
-
-        for (DataFileMeta file : split.dataFiles()) {
-            String formatIdentifier = DataFilePathFactory.formatIdentifier(file.fileName());
-            RawFileBulkFormatMapping bulkFormatMapping =
-                    bulkFormatMappings.computeIfAbsent(
-                            new FormatKey(file.schemaId(), formatIdentifier),
-                            this::createBulkFormatMapping);
-
-            BinaryRow partition = split.partition();
-            suppliers.add(
-                    () ->
-                            createFileReader(
-                                    partition,
-                                    file,
-                                    dataFilePathFactory,
-                                    bulkFormatMapping,
-                                    dvFactory));
+                DeletionVector.factory(fileIO, files, split.deletionFiles().orElse(null));
+        List<IOExceptionSupplier<DeletionVector>> dvFactories = new ArrayList<>();
+        for (DataFileMeta file : files) {
+            dvFactories.add(() -> dvFactory.create(file.fileName()).orElse(null));
         }
-
-        return ConcatRecordReader.create(suppliers);
+        return createReader(split.partition(), split.bucket(), split.dataFiles(), dvFactories);
     }
 
     public RecordReader<InternalRow> createReader(
