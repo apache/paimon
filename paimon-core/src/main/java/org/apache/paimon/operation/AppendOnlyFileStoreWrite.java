@@ -170,6 +170,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                 options.asyncFileWrite());
     }
 
+    /** TODO remove this, and pass deletion vectors. */
     public List<DataFileMeta> compactRewrite(
             BinaryRow partition, int bucket, List<DataFileMeta> toCompact) throws Exception {
         return compactRewrite(partition, bucket, toCompact, null);
