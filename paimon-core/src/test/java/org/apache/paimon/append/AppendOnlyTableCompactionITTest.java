@@ -49,13 +49,13 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link AppendOnlyTableCompactionCoordinator}. */
+/** Test for {@link UnawareAppendTableCompactionCoordinator}. */
 public class AppendOnlyTableCompactionITTest {
 
     @TempDir private Path tempDir;
     private FileStoreTable appendOnlyFileStoreTable;
     private SnapshotManager snapshotManager;
-    private AppendOnlyTableCompactionCoordinator compactionCoordinator;
+    private UnawareAppendTableCompactionCoordinator compactionCoordinator;
     private AppendOnlyFileStoreWrite write;
     private final String commitUser = UUID.randomUUID().toString();
 
@@ -77,9 +77,9 @@ public class AppendOnlyTableCompactionITTest {
 
         // first compact, six files left after commit compact and update restored files
         // test run method invoke scan and compactPlan
-        List<AppendOnlyCompactionTask> tasks = compactionCoordinator.run();
+        List<UnawareAppendCompactionTask> tasks = compactionCoordinator.run();
         assertThat(tasks.size()).isEqualTo(1);
-        AppendOnlyCompactionTask task = tasks.get(0);
+        UnawareAppendCompactionTask task = tasks.get(0);
         assertThat(task.compactBefore().size()).isEqualTo(6);
         List<CommitMessage> result = doCompact(tasks);
         assertThat(result.size()).isEqualTo(1);
@@ -123,7 +123,7 @@ public class AppendOnlyTableCompactionITTest {
         assertThat(appendOnlyFileStoreTable.store().newScan().plan().files().size())
                 .isEqualTo(compactionCoordinator.listRestoredFiles().size());
 
-        List<AppendOnlyCompactionTask> tasks = compactionCoordinator.compactPlan();
+        List<UnawareAppendCompactionTask> tasks = compactionCoordinator.compactPlan();
         while (tasks.size() != 0) {
             commit(doCompact(tasks));
             tasks = compactionCoordinator.run();
@@ -162,9 +162,10 @@ public class AppendOnlyTableCompactionITTest {
         return messages;
     }
 
-    private List<CommitMessage> doCompact(List<AppendOnlyCompactionTask> tasks) throws Exception {
+    private List<CommitMessage> doCompact(List<UnawareAppendCompactionTask> tasks)
+            throws Exception {
         List<CommitMessage> result = new ArrayList<>();
-        for (AppendOnlyCompactionTask task : tasks) {
+        for (UnawareAppendCompactionTask task : tasks) {
             result.add(task.doCompact(write));
         }
         return result;
@@ -190,7 +191,8 @@ public class AppendOnlyTableCompactionITTest {
         appendOnlyFileStoreTable =
                 FileStoreTableFactory.create(
                         fileIO, new org.apache.paimon.fs.Path(tempDir.toString()), tableSchema);
-        compactionCoordinator = new AppendOnlyTableCompactionCoordinator(appendOnlyFileStoreTable);
+        compactionCoordinator =
+                new UnawareAppendTableCompactionCoordinator(appendOnlyFileStoreTable);
         write = (AppendOnlyFileStoreWrite) appendOnlyFileStoreTable.store().newWrite(commitUser);
     }
 }

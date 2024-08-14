@@ -47,6 +47,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BulkFormatMapping;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.IOExceptionSupplier;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Projection;
 
@@ -61,7 +62,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 import static org.apache.paimon.predicate.PredicateBuilder.excludePredicateWithFields;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
@@ -162,6 +162,39 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         return ConcatRecordReader.create(suppliers);
     }
 
+    public RecordReader<InternalRow> createReader(
+            BinaryRow partition,
+            int bucket,
+            List<DataFileMeta> files,
+            @Nullable List<IOExceptionSupplier<DeletionVector>> dvFactories)
+            throws IOException {
+        DataFilePathFactory dataFilePathFactory =
+                pathFactory.createDataFilePathFactory(partition, bucket);
+        List<ReaderSupplier<InternalRow>> suppliers = new ArrayList<>();
+
+        for (int i = 0; i < files.size(); i++) {
+            DataFileMeta file = files.get(i);
+            String formatIdentifier = DataFilePathFactory.formatIdentifier(file.fileName());
+            RawFileBulkFormatMapping bulkFormatMapping =
+                    bulkFormatMappings.computeIfAbsent(
+                            new FormatKey(file.schemaId(), formatIdentifier),
+                            this::createBulkFormatMapping);
+
+            IOExceptionSupplier<DeletionVector> dvFactory =
+                    dvFactories == null ? null : dvFactories.get(i);
+            suppliers.add(
+                    () ->
+                            createFileReader(
+                                    partition,
+                                    file,
+                                    dataFilePathFactory,
+                                    bulkFormatMapping,
+                                    dvFactory));
+        }
+
+        return ConcatRecordReader.create(suppliers);
+    }
+
     private RawFileBulkFormatMapping createBulkFormatMapping(FormatKey key) {
         TableSchema tableSchema = schema;
         TableSchema dataSchema =
@@ -223,6 +256,21 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             RawFileBulkFormatMapping bulkFormatMapping,
             DeletionVector.Factory dvFactory)
             throws IOException {
+        return createFileReader(
+                partition,
+                file,
+                dataFilePathFactory,
+                bulkFormatMapping,
+                () -> dvFactory.create(file.fileName()).orElse(null));
+    }
+
+    private RecordReader<InternalRow> createFileReader(
+            BinaryRow partition,
+            DataFileMeta file,
+            DataFilePathFactory dataFilePathFactory,
+            RawFileBulkFormatMapping bulkFormatMapping,
+            IOExceptionSupplier<DeletionVector> dvFactory)
+            throws IOException {
         if (fileIndexReadEnabled) {
             boolean skip =
                     FileIndexSkipper.skip(
@@ -247,9 +295,9 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                         bulkFormatMapping.getCastMapping(),
                         PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition));
 
-        Optional<DeletionVector> deletionVector = dvFactory.create(file.fileName());
-        if (deletionVector.isPresent() && !deletionVector.get().isEmpty()) {
-            return new ApplyDeletionVectorReader(fileRecordReader, deletionVector.get());
+        DeletionVector deletionVector = dvFactory.get();
+        if (deletionVector != null && !deletionVector.isEmpty()) {
+            return new ApplyDeletionVectorReader(fileRecordReader, deletionVector);
         }
         return fileRecordReader;
     }

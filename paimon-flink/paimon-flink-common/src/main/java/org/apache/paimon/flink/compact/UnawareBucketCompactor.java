@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.compact;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.append.AppendOnlyCompactionTask;
+import org.apache.paimon.append.UnawareAppendCompactionTask;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
 import org.apache.paimon.table.FileStoreTable;
@@ -36,7 +36,7 @@ import java.util.concurrent.Future;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
-/** The Compactor of unaware bucket table to execute {@link AppendOnlyCompactionTask}. */
+/** The Compactor of unaware bucket table to execute {@link UnawareAppendCompactionTask}. */
 public class UnawareBucketCompactor {
 
     private final FileStoreTable table;
@@ -59,7 +59,7 @@ public class UnawareBucketCompactor {
         this.compactExecutorsupplier = lazyCompactExecutor;
     }
 
-    public void processElement(AppendOnlyCompactionTask task) throws Exception {
+    public void processElement(UnawareAppendCompactionTask task) throws Exception {
         result.add(compactExecutorsupplier.get().submit(() -> task.doCompact(write)));
     }
 

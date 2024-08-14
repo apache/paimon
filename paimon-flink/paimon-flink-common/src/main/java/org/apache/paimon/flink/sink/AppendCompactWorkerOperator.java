@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.append.AppendOnlyCompactionTask;
+import org.apache.paimon.append.UnawareAppendCompactionTask;
 import org.apache.paimon.flink.compact.UnawareBucketCompactor;
 import org.apache.paimon.flink.source.BucketUnawareCompactSource;
 import org.apache.paimon.options.Options;
@@ -38,7 +38,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 /**
- * An abstract Operator to execute {@link AppendOnlyCompactionTask} passed from {@link
+ * An abstract Operator to execute {@link UnawareAppendCompactionTask} passed from {@link
  * BucketUnawareCompactSource} for compacting table. This operator is always in async mode.
  */
 public abstract class AppendCompactWorkerOperator<IN>

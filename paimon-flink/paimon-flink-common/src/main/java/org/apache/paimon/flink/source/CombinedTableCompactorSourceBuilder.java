@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.source;
 
-import org.apache.paimon.append.MultiTableAppendOnlyCompactionTask;
+import org.apache.paimon.append.MultiTableUnawareAppendCompactionTask;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.flink.source.operator.CombinedAwareBatchSourceFunction;
@@ -98,7 +98,7 @@ public class CombinedTableCompactorSourceBuilder {
         }
     }
 
-    public DataStream<MultiTableAppendOnlyCompactionTask> buildForUnawareBucketsTableSource() {
+    public DataStream<MultiTableUnawareAppendCompactionTask> buildForUnawareBucketsTableSource() {
         Preconditions.checkArgument(env != null, "StreamExecutionEnvironment should not be null.");
         if (isContinuous) {
             return CombinedUnawareStreamingSourceFunction.buildSource(

@@ -18,8 +18,8 @@
 
 package org.apache.paimon.flink.source;
 
-import org.apache.paimon.append.AppendOnlyCompactionTask;
-import org.apache.paimon.append.AppendOnlyTableCompactionCoordinator;
+import org.apache.paimon.append.UnawareAppendCompactionTask;
+import org.apache.paimon.append.UnawareAppendTableCompactionCoordinator;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.api.common.operators.ProcessingTimeService;
@@ -38,13 +38,13 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * compact task to downstream operators.
  */
 public class AppendBypassCoordinateOperator<CommitT>
-        extends AbstractStreamOperator<Either<CommitT, AppendOnlyCompactionTask>>
-        implements OneInputStreamOperator<CommitT, Either<CommitT, AppendOnlyCompactionTask>>,
+        extends AbstractStreamOperator<Either<CommitT, UnawareAppendCompactionTask>>
+        implements OneInputStreamOperator<CommitT, Either<CommitT, UnawareAppendCompactionTask>>,
                 ProcessingTimeService.ProcessingTimeCallback {
 
     private final FileStoreTable table;
 
-    private transient AppendOnlyTableCompactionCoordinator coordinator;
+    private transient UnawareAppendTableCompactionCoordinator coordinator;
 
     public AppendBypassCoordinateOperator(FileStoreTable table) {
         this.table = table;
@@ -57,7 +57,7 @@ public class AppendBypassCoordinateOperator<CommitT>
         checkArgument(
                 getRuntimeContext().getNumberOfParallelSubtasks() == 1,
                 "Compaction Coordinator parallelism in paimon MUST be one.");
-        this.coordinator = new AppendOnlyTableCompactionCoordinator(table, true, null);
+        this.coordinator = new UnawareAppendTableCompactionCoordinator(table, true, null);
         long intervalMs = table.coreOptions().continuousDiscoveryInterval().toMillis();
         getProcessingTimeService().scheduleWithFixedDelay(this, 0, intervalMs);
     }
@@ -65,8 +65,8 @@ public class AppendBypassCoordinateOperator<CommitT>
     @Override
     public void onProcessingTime(long time) {
         while (true) {
-            List<AppendOnlyCompactionTask> tasks = coordinator.run();
-            for (AppendOnlyCompactionTask task : tasks) {
+            List<UnawareAppendCompactionTask> tasks = coordinator.run();
+            for (UnawareAppendCompactionTask task : tasks) {
                 output.collect(new StreamRecord<>(Either.Right(task)));
             }
 

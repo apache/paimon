@@ -43,7 +43,7 @@ import java.util.stream.Collectors;
 /**
  * Compact coordinator for append only tables.
  *
- * <p>Note: {@link AppendOnlyTableCompactionCoordinator} scan files in snapshot, read APPEND and
+ * <p>Note: {@link UnawareAppendTableCompactionCoordinator} scan files in snapshot, read APPEND and
  * COMPACT snapshot then load those new files. It will try it best to generate compaction task for
  * the restored files scanned in snapshot, but to reduce memory usage, it won't remain single file
  * for a long time. After ten times scan, single file with one partition will be ignored and removed
@@ -55,7 +55,7 @@ import java.util.stream.Collectors;
  * compaction job will fail in commit stage, and fail-over to rescan the restored files in latest
  * snapshot.
  */
-public class AppendOnlyTableCompactionCoordinator {
+public class UnawareAppendTableCompactionCoordinator {
 
     protected static final int REMOVE_AGE = 10;
     protected static final int COMPACT_AGE = 5;
@@ -70,15 +70,15 @@ public class AppendOnlyTableCompactionCoordinator {
     final Map<BinaryRow, PartitionCompactCoordinator> partitionCompactCoordinators =
             new HashMap<>();
 
-    public AppendOnlyTableCompactionCoordinator(FileStoreTable table) {
+    public UnawareAppendTableCompactionCoordinator(FileStoreTable table) {
         this(table, true);
     }
 
-    public AppendOnlyTableCompactionCoordinator(FileStoreTable table, boolean isStreaming) {
+    public UnawareAppendTableCompactionCoordinator(FileStoreTable table, boolean isStreaming) {
         this(table, isStreaming, null);
     }
 
-    public AppendOnlyTableCompactionCoordinator(
+    public UnawareAppendTableCompactionCoordinator(
             FileStoreTable table, boolean isStreaming, @Nullable Predicate filter) {
         Preconditions.checkArgument(table.primaryKeys().isEmpty());
         FileStoreTable tableCopy = table.copy(compactScanType());
@@ -99,7 +99,7 @@ public class AppendOnlyTableCompactionCoordinator {
         this.maxFileNum = coreOptions.compactionMaxFileNum().orElse(50);
     }
 
-    public List<AppendOnlyCompactionTask> run() {
+    public List<UnawareAppendCompactionTask> run() {
         // scan files in snapshot
         if (scan()) {
             // do plan compact tasks
@@ -140,9 +140,9 @@ public class AppendOnlyTableCompactionCoordinator {
 
     @VisibleForTesting
     // generate compaction task to the next stage
-    List<AppendOnlyCompactionTask> compactPlan() {
+    List<UnawareAppendCompactionTask> compactPlan() {
         // first loop to found compaction tasks
-        List<AppendOnlyCompactionTask> tasks =
+        List<UnawareAppendCompactionTask> tasks =
                 partitionCompactCoordinators.values().stream()
                         .flatMap(s -> s.plan().stream())
                         .collect(Collectors.toList());
@@ -189,7 +189,7 @@ public class AppendOnlyTableCompactionCoordinator {
             this.partition = partition;
         }
 
-        public List<AppendOnlyCompactionTask> plan() {
+        public List<UnawareAppendCompactionTask> plan() {
             return pickCompact();
         }
 
@@ -197,10 +197,10 @@ public class AppendOnlyTableCompactionCoordinator {
             return partition;
         }
 
-        private List<AppendOnlyCompactionTask> pickCompact() {
+        private List<UnawareAppendCompactionTask> pickCompact() {
             List<List<DataFileMeta>> waitCompact = agePack();
             return waitCompact.stream()
-                    .map(files -> new AppendOnlyCompactionTask(partition, files))
+                    .map(files -> new UnawareAppendCompactionTask(partition, files))
                     .collect(Collectors.toList());
         }
 

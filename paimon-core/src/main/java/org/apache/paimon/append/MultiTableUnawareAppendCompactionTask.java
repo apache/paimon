@@ -26,11 +26,11 @@ import java.util.List;
 import java.util.Objects;
 
 /** Compaction task for multi table . */
-public class MultiTableAppendOnlyCompactionTask extends AppendOnlyCompactionTask {
+public class MultiTableUnawareAppendCompactionTask extends UnawareAppendCompactionTask {
 
     private final Identifier tableIdentifier;
 
-    public MultiTableAppendOnlyCompactionTask(
+    public MultiTableUnawareAppendCompactionTask(
             BinaryRow partition, List<DataFileMeta> files, Identifier identifier) {
         super(partition, files);
         this.tableIdentifier = identifier;
@@ -53,7 +53,7 @@ public class MultiTableAppendOnlyCompactionTask extends AppendOnlyCompactionTask
             return false;
         }
 
-        MultiTableAppendOnlyCompactionTask that = (MultiTableAppendOnlyCompactionTask) o;
+        MultiTableUnawareAppendCompactionTask that = (MultiTableUnawareAppendCompactionTask) o;
         return Objects.equals(partition(), that.partition())
                 && Objects.equals(compactBefore(), that.compactBefore())
                 && Objects.equals(compactAfter(), that.compactAfter())

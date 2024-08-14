@@ -18,8 +18,8 @@
 
 package org.apache.paimon.flink.source;
 
-import org.apache.paimon.append.AppendOnlyCompactionTask;
-import org.apache.paimon.append.AppendOnlyTableCompactionCoordinator;
+import org.apache.paimon.append.UnawareAppendCompactionTask;
+import org.apache.paimon.append.UnawareAppendTableCompactionCoordinator;
 import org.apache.paimon.flink.sink.CompactionTaskTypeInfo;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
@@ -48,7 +48,7 @@ import java.util.List;
  * write-combined). Besides, we don't need to save state in this function, it will invoke a full
  * scan when starting up, and scan continuously for the following snapshot.
  */
-public class BucketUnawareCompactSource extends RichSourceFunction<AppendOnlyCompactionTask> {
+public class BucketUnawareCompactSource extends RichSourceFunction<UnawareAppendCompactionTask> {
 
     private static final Logger LOG = LoggerFactory.getLogger(BucketUnawareCompactSource.class);
     private static final String COMPACTION_COORDINATOR_NAME = "Compaction Coordinator";
@@ -57,8 +57,8 @@ public class BucketUnawareCompactSource extends RichSourceFunction<AppendOnlyCom
     private final boolean streaming;
     private final long scanInterval;
     private final Predicate filter;
-    private transient AppendOnlyTableCompactionCoordinator compactionCoordinator;
-    private transient SourceContext<AppendOnlyCompactionTask> ctx;
+    private transient UnawareAppendTableCompactionCoordinator compactionCoordinator;
+    private transient SourceContext<UnawareAppendCompactionTask> ctx;
     private volatile boolean isRunning = true;
 
     public BucketUnawareCompactSource(
@@ -74,14 +74,15 @@ public class BucketUnawareCompactSource extends RichSourceFunction<AppendOnlyCom
 
     @Override
     public void open(Configuration parameters) throws Exception {
-        compactionCoordinator = new AppendOnlyTableCompactionCoordinator(table, streaming, filter);
+        compactionCoordinator =
+                new UnawareAppendTableCompactionCoordinator(table, streaming, filter);
         Preconditions.checkArgument(
                 this.getRuntimeContext().getNumberOfParallelSubtasks() == 1,
                 "Compaction Operator parallelism in paimon MUST be one.");
     }
 
     @Override
-    public void run(SourceContext<AppendOnlyCompactionTask> sourceContext) throws Exception {
+    public void run(SourceContext<UnawareAppendCompactionTask> sourceContext) throws Exception {
         this.ctx = sourceContext;
         while (isRunning) {
             boolean isEmpty;
@@ -91,7 +92,7 @@ public class BucketUnawareCompactSource extends RichSourceFunction<AppendOnlyCom
                 }
                 try {
                     // do scan and plan action, emit append-only compaction tasks.
-                    List<AppendOnlyCompactionTask> tasks = compactionCoordinator.run();
+                    List<UnawareAppendCompactionTask> tasks = compactionCoordinator.run();
                     isEmpty = tasks.isEmpty();
                     tasks.forEach(ctx::collect);
                 } catch (EndOfScanException esf) {
@@ -117,14 +118,14 @@ public class BucketUnawareCompactSource extends RichSourceFunction<AppendOnlyCom
         }
     }
 
-    public static DataStreamSource<AppendOnlyCompactionTask> buildSource(
+    public static DataStreamSource<UnawareAppendCompactionTask> buildSource(
             StreamExecutionEnvironment env,
             BucketUnawareCompactSource source,
             boolean streaming,
             String tableIdentifier) {
-        final StreamSource<AppendOnlyCompactionTask, BucketUnawareCompactSource> sourceOperator =
+        final StreamSource<UnawareAppendCompactionTask, BucketUnawareCompactSource> sourceOperator =
                 new StreamSource<>(source);
-        return (DataStreamSource<AppendOnlyCompactionTask>)
+        return (DataStreamSource<UnawareAppendCompactionTask>)
                 new DataStreamSource<>(
                                 env,
                                 new CompactionTaskTypeInfo(),

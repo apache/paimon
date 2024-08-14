@@ -20,12 +20,13 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.append.AppendOnlyCompactManager;
 import org.apache.paimon.append.AppendOnlyWriter;
+import org.apache.paimon.append.BucketedAppendCompactManager;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compact.NoopCompactManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
@@ -38,11 +39,11 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.table.BucketMode;
-import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.IOExceptionSupplier;
 import org.apache.paimon.utils.LongCounter;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
@@ -134,13 +135,13 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
         CompactManager compactManager =
                 skipCompaction
                         ? new NoopCompactManager()
-                        : new AppendOnlyCompactManager(
+                        : new BucketedAppendCompactManager(
                                 compactExecutor,
                                 restoredFiles,
                                 compactionMinFileNum,
                                 compactionMaxFileNum,
                                 targetFileSize,
-                                compactRewriter(partition, bucket),
+                                toCompact -> compactRewrite(partition, bucket, toCompact),
                                 compactionMetrics == null
                                         ? null
                                         : compactionMetrics.createReporter(partition, bucket));
@@ -154,7 +155,8 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                 rowType,
                 restoredMaxSeqNumber,
                 compactManager,
-                bucketReader(partition, bucket),
+                // it is only for new files, no dv
+                files -> createFilesIterator(partition, bucket, files, null),
                 commitForceCompact,
                 factory,
                 restoreIncrement,
@@ -168,60 +170,69 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                 options.asyncFileWrite());
     }
 
-    public AppendOnlyCompactManager.CompactRewriter compactRewriter(
-            BinaryRow partition, int bucket) {
-        return toCompact -> {
-            if (toCompact.isEmpty()) {
-                return Collections.emptyList();
-            }
-            Exception collectedExceptions = null;
-            RowDataRollingFileWriter rewriter =
-                    new RowDataRollingFileWriter(
-                            fileIO,
-                            schemaId,
-                            fileFormat,
-                            targetFileSize,
-                            rowType,
-                            pathFactory.createDataFilePathFactory(partition, bucket),
-                            new LongCounter(toCompact.get(0).minSequenceNumber()),
-                            fileCompression,
-                            statsCollectors,
-                            fileIndexOptions,
-                            FileSource.COMPACT,
-                            options.asyncFileWrite());
-            try {
-                rewriter.write(bucketReader(partition, bucket).read(toCompact));
-            } catch (Exception e) {
-                collectedExceptions = e;
-            } finally {
-                try {
-                    rewriter.close();
-                } catch (Exception e) {
-                    collectedExceptions = ExceptionUtils.firstOrSuppressed(e, collectedExceptions);
-                }
-            }
-
-            if (collectedExceptions != null) {
-                throw collectedExceptions;
-            }
-            return rewriter.result();
-        };
+    public List<DataFileMeta> compactRewrite(
+            BinaryRow partition, int bucket, List<DataFileMeta> toCompact) throws Exception {
+        return compactRewrite(partition, bucket, toCompact, null);
     }
 
-    public BucketFileRead bucketReader(BinaryRow partition, int bucket) {
-        return files ->
-                new RecordReaderIterator<>(
-                        read.createReader(
-                                DataSplit.builder()
-                                        .withPartition(partition)
-                                        .withBucket(bucket)
-                                        .withDataFiles(files)
-                                        .rawConvertible(true)
-                                        .withBucketPath(
-                                                pathFactory
-                                                        .bucketPath(partition, bucket)
-                                                        .toString())
-                                        .build()));
+    public List<DataFileMeta> compactRewrite(
+            BinaryRow partition,
+            int bucket,
+            List<DataFileMeta> toCompact,
+            @Nullable List<IOExceptionSupplier<DeletionVector>> dvFactories)
+            throws Exception {
+        if (toCompact.isEmpty()) {
+            return Collections.emptyList();
+        }
+        Exception collectedExceptions = null;
+        RowDataRollingFileWriter rewriter =
+                createRollingFileWriter(
+                        partition,
+                        bucket,
+                        new LongCounter(toCompact.get(0).minSequenceNumber()),
+                        FileSource.COMPACT);
+        try {
+            rewriter.write(createFilesIterator(partition, bucket, toCompact, dvFactories));
+        } catch (Exception e) {
+            collectedExceptions = e;
+        } finally {
+            try {
+                rewriter.close();
+            } catch (Exception e) {
+                collectedExceptions = ExceptionUtils.firstOrSuppressed(e, collectedExceptions);
+            }
+        }
+
+        if (collectedExceptions != null) {
+            throw collectedExceptions;
+        }
+        return rewriter.result();
+    }
+
+    private RowDataRollingFileWriter createRollingFileWriter(
+            BinaryRow partition, int bucket, LongCounter seqNumCounter, FileSource fileSource) {
+        return new RowDataRollingFileWriter(
+                fileIO,
+                schemaId,
+                fileFormat,
+                targetFileSize,
+                rowType,
+                pathFactory.createDataFilePathFactory(partition, bucket),
+                seqNumCounter,
+                fileCompression,
+                statsCollectors,
+                fileIndexOptions,
+                fileSource,
+                options.asyncFileWrite());
+    }
+
+    private RecordReaderIterator<InternalRow> createFilesIterator(
+            BinaryRow partition,
+            int bucket,
+            List<DataFileMeta> files,
+            @Nullable List<IOExceptionSupplier<DeletionVector>> dvFactories)
+            throws IOException {
+        return new RecordReaderIterator<>(read.createReader(partition, bucket, files, dvFactories));
     }
 
     public AppendOnlyFileStoreWrite withBucketMode(BucketMode bucketMode) {
@@ -255,10 +266,5 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                 ((AppendOnlyWriter) writerContainer.writer).toBufferedWriter();
             }
         }
-    }
-
-    /** Read for one bucket. */
-    public interface BucketFileRead {
-        RecordReaderIterator<InternalRow> read(List<DataFileMeta> files) throws IOException;
     }
 }

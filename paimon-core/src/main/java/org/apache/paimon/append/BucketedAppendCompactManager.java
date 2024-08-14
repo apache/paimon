@@ -45,9 +45,9 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 
 /** Compact manager for {@link AppendOnlyFileStore}. */
-public class AppendOnlyCompactManager extends CompactFutureManager {
+public class BucketedAppendCompactManager extends CompactFutureManager {
 
-    private static final Logger LOG = LoggerFactory.getLogger(AppendOnlyCompactManager.class);
+    private static final Logger LOG = LoggerFactory.getLogger(BucketedAppendCompactManager.class);
 
     private static final int FULL_COMPACT_MIN_FILE = 3;
 
@@ -62,7 +62,7 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
 
     @Nullable private final CompactionMetrics.Reporter metricsReporter;
 
-    public AppendOnlyCompactManager(
+    public BucketedAppendCompactManager(
             ExecutorService executor,
             List<DataFileMeta> restored,
             int minFileNum,

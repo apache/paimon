@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.source.operator;
 
-import org.apache.paimon.append.MultiTableAppendOnlyCompactionTask;
+import org.apache.paimon.append.MultiTableUnawareAppendCompactionTask;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.compact.MultiTableScanBase;
 import org.apache.paimon.flink.compact.MultiUnawareBucketTableScan;
@@ -40,10 +40,10 @@ import static org.apache.paimon.flink.compact.MultiTableScanBase.ScanResult.IS_E
  * It is responsible for monitoring compactor source in stream mode for the table of unaware bucket.
  */
 public class CombinedUnawareStreamingSourceFunction
-        extends CombinedCompactorSourceFunction<MultiTableAppendOnlyCompactionTask> {
+        extends CombinedCompactorSourceFunction<MultiTableUnawareAppendCompactionTask> {
 
     private final long monitorInterval;
-    private MultiTableScanBase<MultiTableAppendOnlyCompactionTask> tableScan;
+    private MultiTableScanBase<MultiTableUnawareAppendCompactionTask> tableScan;
 
     public CombinedUnawareStreamingSourceFunction(
             Catalog.Loader catalogLoader,
@@ -82,7 +82,7 @@ public class CombinedUnawareStreamingSourceFunction
         }
     }
 
-    public static DataStream<MultiTableAppendOnlyCompactionTask> buildSource(
+    public static DataStream<MultiTableUnawareAppendCompactionTask> buildSource(
             StreamExecutionEnvironment env,
             String name,
             Catalog.Loader catalogLoader,
@@ -98,7 +98,7 @@ public class CombinedUnawareStreamingSourceFunction
                         excludingPattern,
                         databasePattern,
                         monitorInterval);
-        StreamSource<MultiTableAppendOnlyCompactionTask, CombinedUnawareStreamingSourceFunction>
+        StreamSource<MultiTableUnawareAppendCompactionTask, CombinedUnawareStreamingSourceFunction>
                 sourceOperator = new StreamSource<>(function);
         boolean isParallel = false;
         MultiTableCompactionTaskTypeInfo compactionTaskTypeInfo =

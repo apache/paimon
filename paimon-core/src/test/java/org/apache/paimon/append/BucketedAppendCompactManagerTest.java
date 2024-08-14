@@ -30,8 +30,8 @@ import java.util.Optional;
 import static org.apache.paimon.io.DataFileTestUtils.newFile;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link AppendOnlyCompactManager}. */
-public class AppendOnlyCompactManagerTest {
+/** Test for {@link BucketedAppendCompactManager}. */
+public class BucketedAppendCompactManagerTest {
 
     @Test
     public void testPickEmptyAndNotRelease() {
@@ -199,8 +199,8 @@ public class AppendOnlyCompactManagerTest {
         int minFileNum = 4;
         int maxFileNum = 12;
         long targetFileSize = 1024;
-        AppendOnlyCompactManager manager =
-                new AppendOnlyCompactManager(
+        BucketedAppendCompactManager manager =
+                new BucketedAppendCompactManager(
                         null, // not used
                         toCompactBeforePick,
                         minFileNum,

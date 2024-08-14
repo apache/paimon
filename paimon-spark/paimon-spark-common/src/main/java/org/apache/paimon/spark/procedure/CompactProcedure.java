@@ -20,8 +20,8 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.append.AppendOnlyCompactionTask;
-import org.apache.paimon.append.AppendOnlyTableCompactionCoordinator;
+import org.apache.paimon.append.UnawareAppendCompactionTask;
+import org.apache.paimon.append.UnawareAppendTableCompactionCoordinator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
@@ -330,8 +330,8 @@ public class CompactProcedure extends BaseProcedure {
 
     private void compactUnAwareBucketTable(
             FileStoreTable table, @Nullable Predicate filter, JavaSparkContext javaSparkContext) {
-        List<AppendOnlyCompactionTask> compactionTasks =
-                new AppendOnlyTableCompactionCoordinator(table, false, filter).run();
+        List<UnawareAppendCompactionTask> compactionTasks =
+                new UnawareAppendTableCompactionCoordinator(table, false, filter).run();
         if (compactionTasks.isEmpty()) {
             return;
         }
@@ -339,7 +339,7 @@ public class CompactProcedure extends BaseProcedure {
         CompactionTaskSerializer serializer = new CompactionTaskSerializer();
         List<byte[]> serializedTasks = new ArrayList<>();
         try {
-            for (AppendOnlyCompactionTask compactionTask : compactionTasks) {
+            for (UnawareAppendCompactionTask compactionTask : compactionTasks) {
                 serializedTasks.add(serializer.serialize(compactionTask));
             }
         } catch (IOException e) {
@@ -363,7 +363,7 @@ public class CompactProcedure extends BaseProcedure {
                                                 CommitMessageSerializer messageSer =
                                                         new CommitMessageSerializer();
                                                 while (taskIterator.hasNext()) {
-                                                    AppendOnlyCompactionTask task =
+                                                    UnawareAppendCompactionTask task =
                                                             ser.deserialize(
                                                                     ser.getVersion(),
                                                                     taskIterator.next());

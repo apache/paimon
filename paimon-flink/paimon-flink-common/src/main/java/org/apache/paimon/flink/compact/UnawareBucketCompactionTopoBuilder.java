@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.compact;
 
-import org.apache.paimon.append.AppendOnlyCompactionTask;
+import org.apache.paimon.append.UnawareAppendCompactionTask;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.sink.UnawareBucketCompactionSink;
 import org.apache.paimon.flink.source.BucketUnawareCompactSource;
@@ -70,13 +70,13 @@ public class UnawareBucketCompactionTopoBuilder {
 
     public void build() {
         // build source from UnawareSourceFunction
-        DataStreamSource<AppendOnlyCompactionTask> source = buildSource();
+        DataStreamSource<UnawareAppendCompactionTask> source = buildSource();
 
         // from source, construct the full flink job
         sinkFromSource(source);
     }
 
-    private DataStreamSource<AppendOnlyCompactionTask> buildSource() {
+    private DataStreamSource<UnawareAppendCompactionTask> buildSource() {
         long scanInterval = table.coreOptions().continuousDiscoveryInterval().toMillis();
         BucketUnawareCompactSource source =
                 new BucketUnawareCompactSource(
@@ -85,18 +85,18 @@ public class UnawareBucketCompactionTopoBuilder {
         return BucketUnawareCompactSource.buildSource(env, source, isContinuous, tableIdentifier);
     }
 
-    private void sinkFromSource(DataStreamSource<AppendOnlyCompactionTask> input) {
-        DataStream<AppendOnlyCompactionTask> rebalanced = rebalanceInput(input);
+    private void sinkFromSource(DataStreamSource<UnawareAppendCompactionTask> input) {
+        DataStream<UnawareAppendCompactionTask> rebalanced = rebalanceInput(input);
 
         UnawareBucketCompactionSink.sink(table, rebalanced);
     }
 
-    private DataStream<AppendOnlyCompactionTask> rebalanceInput(
-            DataStreamSource<AppendOnlyCompactionTask> input) {
+    private DataStream<UnawareAppendCompactionTask> rebalanceInput(
+            DataStreamSource<UnawareAppendCompactionTask> input) {
         Options conf = Options.fromMap(table.options());
         Integer compactionWorkerParallelism =
                 conf.get(FlinkConnectorOptions.UNAWARE_BUCKET_COMPACTION_PARALLELISM);
-        PartitionTransformation<AppendOnlyCompactionTask> transformation =
+        PartitionTransformation<UnawareAppendCompactionTask> transformation =
                 new PartitionTransformation<>(
                         input.getTransformation(), new RebalancePartitioner<>());
         if (compactionWorkerParallelism != null) {

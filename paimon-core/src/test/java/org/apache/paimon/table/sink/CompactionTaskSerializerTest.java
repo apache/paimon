@@ -18,8 +18,8 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.paimon.append.AppendOnlyCompactionTask;
-import org.apache.paimon.append.MultiTableAppendOnlyCompactionTask;
+import org.apache.paimon.append.MultiTableUnawareAppendCompactionTask;
+import org.apache.paimon.append.UnawareAppendCompactionTask;
 import org.apache.paimon.catalog.Identifier;
 
 import org.junit.jupiter.api.Test;
@@ -36,25 +36,25 @@ public class CompactionTaskSerializerTest {
     @Test
     public void testCompactionTaskSerializer() throws IOException {
         CompactionTaskSerializer serializer = new CompactionTaskSerializer();
-        AppendOnlyCompactionTask task =
-                new AppendOnlyCompactionTask(row(0), randomNewFilesIncrement().newFiles());
+        UnawareAppendCompactionTask task =
+                new UnawareAppendCompactionTask(row(0), randomNewFilesIncrement().newFiles());
 
         byte[] bytes = serializer.serialize(task);
-        AppendOnlyCompactionTask task1 = serializer.deserialize(serializer.getVersion(), bytes);
+        UnawareAppendCompactionTask task1 = serializer.deserialize(serializer.getVersion(), bytes);
         assertThat(task).isEqualTo(task1);
     }
 
     @Test
     public void testMultiTableCompactionTaskSerializer() throws IOException {
         MultiTableCompactionTaskSerializer serializer = new MultiTableCompactionTaskSerializer();
-        MultiTableAppendOnlyCompactionTask task =
-                new MultiTableAppendOnlyCompactionTask(
+        MultiTableUnawareAppendCompactionTask task =
+                new MultiTableUnawareAppendCompactionTask(
                         row(0),
                         randomNewFilesIncrement().newFiles(),
                         Identifier.create("db", "table"));
 
         byte[] bytes = serializer.serialize(task);
-        MultiTableAppendOnlyCompactionTask task1 =
+        MultiTableUnawareAppendCompactionTask task1 =
                 serializer.deserialize(serializer.getVersion(), bytes);
         assertThat(task).isEqualTo(task1);
     }

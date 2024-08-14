@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.append.AppendOnlyCompactionTask;
+import org.apache.paimon.append.UnawareAppendCompactionTask;
 import org.apache.paimon.table.sink.CompactionTaskSerializer;
 
 import org.apache.flink.core.io.SimpleVersionedSerializer;
@@ -26,9 +26,9 @@ import org.apache.flink.core.io.SimpleVersionedSerializer;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-/** {@link SimpleVersionedSerializer} for {@link AppendOnlyCompactionTask}. */
+/** {@link SimpleVersionedSerializer} for {@link UnawareAppendCompactionTask}. */
 public class CompactionTaskSimpleSerializer
-        implements SimpleVersionedSerializer<AppendOnlyCompactionTask> {
+        implements SimpleVersionedSerializer<UnawareAppendCompactionTask> {
 
     private final CompactionTaskSerializer compactionTaskSerializer;
 
@@ -42,7 +42,7 @@ public class CompactionTaskSimpleSerializer
     }
 
     @Override
-    public byte[] serialize(AppendOnlyCompactionTask compactionTask) throws IOException {
+    public byte[] serialize(UnawareAppendCompactionTask compactionTask) throws IOException {
         byte[] wrapped = compactionTaskSerializer.serialize(compactionTask);
         int version = compactionTaskSerializer.getVersion();
 
@@ -50,7 +50,7 @@ public class CompactionTaskSimpleSerializer
     }
 
     @Override
-    public AppendOnlyCompactionTask deserialize(int compactionTaskVersion, byte[] bytes)
+    public UnawareAppendCompactionTask deserialize(int compactionTaskVersion, byte[] bytes)
             throws IOException {
         if (compactionTaskVersion != getVersion()) {
             throw new RuntimeException("Can not deserialize version: " + compactionTaskVersion);
