@@ -76,7 +76,7 @@ public class FlinkSourceBuilder {
 
     private final Table table;
     private final Options conf;
-
+    private final BucketMode bucketMode;
     private String sourceName;
     private Boolean sourceBounded;
     private StreamExecutionEnvironment env;
@@ -90,6 +90,10 @@ public class FlinkSourceBuilder {
 
     public FlinkSourceBuilder(Table table) {
         this.table = table;
+        this.bucketMode =
+                table instanceof FileStoreTable
+                        ? ((FileStoreTable) table).bucketMode()
+                        : BucketMode.HASH_FIXED;
         this.sourceName = table.name();
         this.conf = Options.fromMap(table.options());
     }
@@ -187,24 +191,14 @@ public class FlinkSourceBuilder {
     private DataStream<RowData> buildContinuousFileSource() {
         return toDataStream(
                 new ContinuousFileStoreSource(
-                        createReadBuilder(),
-                        table.options(),
-                        limit,
-                        table instanceof FileStoreTable
-                                ? ((FileStoreTable) table).bucketMode()
-                                : BucketMode.HASH_FIXED));
+                        createReadBuilder(), table.options(), limit, bucketMode));
     }
 
     private DataStream<RowData> buildAlignedContinuousFileSource() {
         assertStreamingConfigurationForAlignMode(env);
         return toDataStream(
                 new AlignedContinuousFileStoreSource(
-                        createReadBuilder(),
-                        table.options(),
-                        limit,
-                        table instanceof FileStoreTable
-                                ? ((FileStoreTable) table).bucketMode()
-                                : BucketMode.HASH_FIXED));
+                        createReadBuilder(), table.options(), limit, bucketMode));
     }
 
     private DataStream<RowData> toDataStream(Source<RowData, ?, ?> source) {
@@ -306,7 +300,9 @@ public class FlinkSourceBuilder {
                         createReadBuilder(),
                         conf.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL).toMillis(),
                         watermarkStrategy == null,
-                        conf.get(FlinkConnectorOptions.STREAMING_READ_SHUFFLE_BY_PARTITION));
+                        conf.get(
+                                FlinkConnectorOptions.STREAMING_READ_SHUFFLE_BUCKET_WITH_PARTITION),
+                        bucketMode);
         if (parallelism != null) {
             dataStream.getTransformation().setParallelism(parallelism);
         }

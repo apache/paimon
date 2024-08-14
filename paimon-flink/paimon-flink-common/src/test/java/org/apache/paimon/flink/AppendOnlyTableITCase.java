@@ -87,6 +87,22 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testReadUnwareBucketTableWithRebalanceShuffle() throws Exception {
+        batchSql(
+                "CREATE TABLE append_scalable_table (id INT, data STRING) "
+                        + "WITH ('bucket' = '-1', 'consumer-id' = 'test', 'consumer.expiration-time' = '365 d', 'target-file-size' = '1 B', 'source.split.target-size' = '1 B', 'scan.parallelism' = '4')");
+        batchSql("INSERT INTO append_scalable_table VALUES (1, 'AAA'), (2, 'BBB')");
+        batchSql("INSERT INTO append_scalable_table VALUES (1, 'AAA'), (2, 'BBB')");
+        batchSql("INSERT INTO append_scalable_table VALUES (1, 'AAA'), (2, 'BBB')");
+        batchSql("INSERT INTO append_scalable_table VALUES (1, 'AAA'), (2, 'BBB')");
+
+        BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(streamSqlIter(("SELECT id FROM append_scalable_table")));
+        assertThat(iterator.collect(2)).containsExactlyInAnyOrder(Row.of(1), Row.of(2));
+        iterator.close();
+    }
+
+    @Test
     public void testReadPartitionOrder() {
         setParallelism(1);
         batchSql("INSERT INTO part_table VALUES (1, 'AAA', 'part-1')");
