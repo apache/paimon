@@ -71,7 +71,7 @@ public class PartitionsTable implements ReadonlyTable {
                     Arrays.asList(
                             new DataField(0, "partition", SerializationUtils.newStringType(true)),
                             new DataField(1, "record_count", new BigIntType(false)),
-                            new DataField(2, "file_size_in_bytes", new BigIntType(false)),
+                            new DataField(2, "total_file_size_in_bytes", new BigIntType(false)),
                             new DataField(3, "file_count", new BigIntType(false)),
                             new DataField(4, "last_update_time", DataTypes.TIMESTAMP_MILLIS())));
 
