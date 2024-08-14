@@ -41,7 +41,7 @@ public abstract class VersionedObjectSerializer<T> extends ObjectSerializer<T> {
         List<DataField> fields = new ArrayList<>();
         fields.add(new DataField(-1, "_VERSION", new IntType(false)));
         fields.addAll(rowType.getFields());
-        return new RowType(fields);
+        return new RowType(false, fields);
     }
 
     /**

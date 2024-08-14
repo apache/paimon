@@ -91,7 +91,7 @@ public class IndexManifestEntry {
                                         newStringType(false),
                                         new IntType(false),
                                         new IntType(false)))));
-        return new RowType(fields);
+        return new RowType(false, fields);
     }
 
     @Override
