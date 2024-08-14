@@ -236,21 +236,6 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             DataFileMeta file,
             DataFilePathFactory dataFilePathFactory,
             RawFileBulkFormatMapping bulkFormatMapping,
-            DeletionVector.Factory dvFactory)
-            throws IOException {
-        return createFileReader(
-                partition,
-                file,
-                dataFilePathFactory,
-                bulkFormatMapping,
-                () -> dvFactory.create(file.fileName()).orElse(null));
-    }
-
-    private RecordReader<InternalRow> createFileReader(
-            BinaryRow partition,
-            DataFileMeta file,
-            DataFilePathFactory dataFilePathFactory,
-            RawFileBulkFormatMapping bulkFormatMapping,
             IOExceptionSupplier<DeletionVector> dvFactory)
             throws IOException {
         if (fileIndexReadEnabled) {
@@ -277,7 +262,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                         bulkFormatMapping.getCastMapping(),
                         PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition));
 
-        DeletionVector deletionVector = dvFactory.get();
+        DeletionVector deletionVector = dvFactory == null ? null : dvFactory.get();
         if (deletionVector != null && !deletionVector.isEmpty()) {
             return new ApplyDeletionVectorReader(fileRecordReader, deletionVector);
         }
