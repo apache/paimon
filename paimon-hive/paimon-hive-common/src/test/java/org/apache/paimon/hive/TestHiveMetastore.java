@@ -98,8 +98,9 @@ public class TestHiveMetastore {
                                         }
                                         String errMsg = "Failed to delete " + localDirPath;
                                         try {
-                                            Assert.assertTrue(
-                                                    errMsg, fs.delete(localDirPath, true));
+                                            if (!fs.delete(localDirPath, true)) {
+                                                Assert.assertFalse(errMsg, fs.exists(localDirPath));
+                                            }
                                         } catch (IOException e) {
                                             throw new RuntimeException(errMsg, e);
                                         }
