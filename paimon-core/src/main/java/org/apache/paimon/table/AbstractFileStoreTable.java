@@ -60,6 +60,7 @@ import org.apache.paimon.tag.TagPreview;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.SnapshotNotExistException;
 import org.apache.paimon.utils.TagManager;
 
 import javax.annotation.Nullable;
@@ -79,7 +80,6 @@ import java.util.function.BiConsumer;
 
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Abstract {@link FileStoreTable}. */
 abstract class AbstractFileStoreTable implements FileStoreTable {
@@ -502,7 +502,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         rollbackHelper().cleanLargerThan(snapshotManager.snapshot(snapshotId));
     }
 
-    public Snapshot createTagInternal(long fromSnapshotId) {
+    public Snapshot findSnapshot(long fromSnapshotId) throws SnapshotNotExistException {
         SnapshotManager snapshotManager = snapshotManager();
         Snapshot snapshot = null;
         if (snapshotManager.snapshotExists(fromSnapshotId)) {
@@ -518,35 +518,39 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 }
             }
         }
-        checkArgument(
-                snapshot != null,
-                "Cannot create tag because given snapshot #%s doesn't exist.",
-                fromSnapshotId);
+
+        SnapshotNotExistException.checkNotNull(
+                snapshot,
+                String.format(
+                        "Cannot create tag because given snapshot #%s doesn't exist.",
+                        fromSnapshotId));
+
         return snapshot;
     }
 
     @Override
     public void createTag(String tagName, long fromSnapshotId) {
-        createTag(
-                tagName, createTagInternal(fromSnapshotId), coreOptions().tagDefaultTimeRetained());
+        createTag(tagName, findSnapshot(fromSnapshotId), coreOptions().tagDefaultTimeRetained());
     }
 
     @Override
     public void createTag(String tagName, long fromSnapshotId, Duration timeRetained) {
-        createTag(tagName, createTagInternal(fromSnapshotId), timeRetained);
+        createTag(tagName, findSnapshot(fromSnapshotId), timeRetained);
     }
 
     @Override
     public void createTag(String tagName) {
         Snapshot latestSnapshot = snapshotManager().latestSnapshot();
-        checkNotNull(latestSnapshot, "Cannot create tag because latest snapshot doesn't exist.");
+        SnapshotNotExistException.checkNotNull(
+                latestSnapshot, "Cannot create tag because latest snapshot doesn't exist.");
         createTag(tagName, latestSnapshot, coreOptions().tagDefaultTimeRetained());
     }
 
     @Override
     public void createTag(String tagName, Duration timeRetained) {
         Snapshot latestSnapshot = snapshotManager().latestSnapshot();
-        checkNotNull(latestSnapshot, "Cannot create tag because latest snapshot doesn't exist.");
+        SnapshotNotExistException.checkNotNull(
+                latestSnapshot, "Cannot create tag because latest snapshot doesn't exist.");
         createTag(tagName, latestSnapshot, timeRetained);
     }
 
