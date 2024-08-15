@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.append.AppendOnlyCompactionTask;
+import org.apache.paimon.append.UnawareAppendCompactionTask;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.FileStoreTable;
 
@@ -27,7 +27,7 @@ import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 
 /** Compaction Sink for unaware-bucket table. */
-public class UnawareBucketCompactionSink extends FlinkSink<AppendOnlyCompactionTask> {
+public class UnawareBucketCompactionSink extends FlinkSink<UnawareAppendCompactionTask> {
 
     private final FileStoreTable table;
 
@@ -37,12 +37,12 @@ public class UnawareBucketCompactionSink extends FlinkSink<AppendOnlyCompactionT
     }
 
     public static DataStreamSink<?> sink(
-            FileStoreTable table, DataStream<AppendOnlyCompactionTask> input) {
+            FileStoreTable table, DataStream<UnawareAppendCompactionTask> input) {
         return new UnawareBucketCompactionSink(table).sinkFrom(input);
     }
 
     @Override
-    protected OneInputStreamOperator<AppendOnlyCompactionTask, Committable> createWriteOperator(
+    protected OneInputStreamOperator<UnawareAppendCompactionTask, Committable> createWriteOperator(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
         return new AppendOnlySingleTableCompactionWorkerOperator(table, commitUser);
     }

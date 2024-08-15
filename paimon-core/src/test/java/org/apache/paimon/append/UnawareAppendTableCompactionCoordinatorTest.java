@@ -45,12 +45,12 @@ import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.ro
 import static org.apache.paimon.stats.StatsTestUtils.newSimpleStats;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link AppendOnlyTableCompactionCoordinator}. */
-public class AppendOnlyTableCompactionCoordinatorTest {
+/** Tests for {@link UnawareAppendTableCompactionCoordinator}. */
+public class UnawareAppendTableCompactionCoordinatorTest {
 
     @TempDir Path tempDir;
     private FileStoreTable appendOnlyFileStoreTable;
-    private AppendOnlyTableCompactionCoordinator compactionCoordinator;
+    private UnawareAppendTableCompactionCoordinator compactionCoordinator;
     private BinaryRow partition;
 
     @Test
@@ -86,7 +86,7 @@ public class AppendOnlyTableCompactionCoordinatorTest {
         List<DataFileMeta> files = generateNewFiles(1, 0);
         compactionCoordinator.notifyNewFiles(partition, files);
 
-        for (int i = 0; i < AppendOnlyTableCompactionCoordinator.REMOVE_AGE; i++) {
+        for (int i = 0; i < UnawareAppendTableCompactionCoordinator.REMOVE_AGE; i++) {
             assertThat(compactionCoordinator.compactPlan().size()).isEqualTo(0);
             assertThat(compactionCoordinator.partitionCompactCoordinators.size()).isEqualTo(1);
         }
@@ -101,13 +101,13 @@ public class AppendOnlyTableCompactionCoordinatorTest {
         List<DataFileMeta> files = generateNewFiles(2, 0);
         compactionCoordinator.notifyNewFiles(partition, files);
 
-        for (int i = 0; i < AppendOnlyTableCompactionCoordinator.COMPACT_AGE; i++) {
+        for (int i = 0; i < UnawareAppendTableCompactionCoordinator.COMPACT_AGE; i++) {
             assertThat(compactionCoordinator.compactPlan().size()).isEqualTo(0);
             assertThat(compactionCoordinator.partitionCompactCoordinators.size()).isEqualTo(1);
         }
 
         // age enough, generate less file compaction
-        List<AppendOnlyCompactionTask> tasks = compactionCoordinator.compactPlan();
+        List<UnawareAppendCompactionTask> tasks = compactionCoordinator.compactPlan();
         assertThat(tasks.size()).isEqualTo(1);
         assertThat(new HashSet<>(files))
                 .containsExactlyInAnyOrderElementsOf(tasks.get(0).compactBefore());
@@ -119,7 +119,7 @@ public class AppendOnlyTableCompactionCoordinatorTest {
         List<DataFileMeta> files = generateNewFiles(1, 0);
         compactionCoordinator.notifyNewFiles(partition, files);
 
-        for (int i = 0; i < AppendOnlyTableCompactionCoordinator.REMOVE_AGE; i++) {
+        for (int i = 0; i < UnawareAppendTableCompactionCoordinator.REMOVE_AGE; i++) {
             compactionCoordinator.compactPlan();
             assertThat(compactionCoordinator.partitionCompactCoordinators.size()).isEqualTo(1);
             assertThat(compactionCoordinator.partitionCompactCoordinators.get(partition).age)
@@ -137,7 +137,7 @@ public class AppendOnlyTableCompactionCoordinatorTest {
 
     private void assertTasks(List<DataFileMeta> files, int taskNum) {
         compactionCoordinator.notifyNewFiles(partition, files);
-        List<AppendOnlyCompactionTask> tasks = compactionCoordinator.compactPlan();
+        List<UnawareAppendCompactionTask> tasks = compactionCoordinator.compactPlan();
         assertThat(tasks.size()).isEqualTo(taskNum);
     }
 
@@ -162,7 +162,8 @@ public class AppendOnlyTableCompactionCoordinatorTest {
         appendOnlyFileStoreTable =
                 FileStoreTableFactory.create(
                         fileIO, new org.apache.paimon.fs.Path(tempDir.toString()), tableSchema);
-        compactionCoordinator = new AppendOnlyTableCompactionCoordinator(appendOnlyFileStoreTable);
+        compactionCoordinator =
+                new UnawareAppendTableCompactionCoordinator(appendOnlyFileStoreTable);
         partition = BinaryRow.EMPTY_ROW;
     }
 

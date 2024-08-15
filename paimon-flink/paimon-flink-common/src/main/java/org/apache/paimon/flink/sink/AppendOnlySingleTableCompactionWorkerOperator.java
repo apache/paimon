@@ -18,25 +18,25 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.append.AppendOnlyCompactionTask;
+import org.apache.paimon.append.UnawareAppendCompactionTask;
 import org.apache.paimon.flink.source.BucketUnawareCompactSource;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
 /**
- * Operator to execute {@link AppendOnlyCompactionTask} passed from {@link
+ * Operator to execute {@link UnawareAppendCompactionTask} passed from {@link
  * BucketUnawareCompactSource} for compacting single unaware bucket tables in divided mode.
  */
 public class AppendOnlySingleTableCompactionWorkerOperator
-        extends AppendCompactWorkerOperator<AppendOnlyCompactionTask> {
+        extends AppendCompactWorkerOperator<UnawareAppendCompactionTask> {
 
     public AppendOnlySingleTableCompactionWorkerOperator(FileStoreTable table, String commitUser) {
         super(table, commitUser);
     }
 
     @Override
-    public void processElement(StreamRecord<AppendOnlyCompactionTask> element) throws Exception {
+    public void processElement(StreamRecord<UnawareAppendCompactionTask> element) throws Exception {
         this.unawareBucketCompactor.processElement(element.getValue());
     }
 }

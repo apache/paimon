@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.append.MultiTableAppendOnlyCompactionTask;
+import org.apache.paimon.append.MultiTableUnawareAppendCompactionTask;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
@@ -209,7 +209,7 @@ public class CompactDatabaseAction extends ActionBase {
                         tableOptions.get(FlinkConnectorOptions.SINK_PARALLELISM));
 
         // unaware bucket table
-        DataStream<MultiTableAppendOnlyCompactionTask> unawareBucketTableSource =
+        DataStream<MultiTableUnawareAppendCompactionTask> unawareBucketTableSource =
                 sourceBuilder
                         .withEnv(env)
                         .withContinuousMode(isStreaming)

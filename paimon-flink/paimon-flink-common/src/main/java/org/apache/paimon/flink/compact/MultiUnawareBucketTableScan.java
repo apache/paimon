@@ -18,8 +18,8 @@
 
 package org.apache.paimon.flink.compact;
 
-import org.apache.paimon.append.AppendOnlyTableCompactionCoordinator;
-import org.apache.paimon.append.MultiTableAppendOnlyCompactionTask;
+import org.apache.paimon.append.MultiTableUnawareAppendCompactionTask;
+import org.apache.paimon.append.UnawareAppendTableCompactionCoordinator;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.table.BucketMode;
@@ -37,9 +37,9 @@ import java.util.regex.Pattern;
  * table with fix single bucket such as unaware bucket table.
  */
 public class MultiUnawareBucketTableScan
-        extends MultiTableScanBase<MultiTableAppendOnlyCompactionTask> {
+        extends MultiTableScanBase<MultiTableUnawareAppendCompactionTask> {
 
-    protected transient Map<Identifier, AppendOnlyTableCompactionCoordinator> tablesMap;
+    protected transient Map<Identifier, UnawareAppendTableCompactionCoordinator> tablesMap;
 
     public MultiUnawareBucketTableScan(
             Catalog.Loader catalogLoader,
@@ -59,18 +59,18 @@ public class MultiUnawareBucketTableScan
     }
 
     @Override
-    List<MultiTableAppendOnlyCompactionTask> doScan() {
+    List<MultiTableUnawareAppendCompactionTask> doScan() {
         // do scan and plan action, emit append-only compaction tasks.
-        List<MultiTableAppendOnlyCompactionTask> tasks = new ArrayList<>();
-        for (Map.Entry<Identifier, AppendOnlyTableCompactionCoordinator> tableIdAndCoordinator :
+        List<MultiTableUnawareAppendCompactionTask> tasks = new ArrayList<>();
+        for (Map.Entry<Identifier, UnawareAppendTableCompactionCoordinator> tableIdAndCoordinator :
                 tablesMap.entrySet()) {
             Identifier tableId = tableIdAndCoordinator.getKey();
-            AppendOnlyTableCompactionCoordinator compactionCoordinator =
+            UnawareAppendTableCompactionCoordinator compactionCoordinator =
                     tableIdAndCoordinator.getValue();
             compactionCoordinator.run().stream()
                     .map(
                             task ->
-                                    new MultiTableAppendOnlyCompactionTask(
+                                    new MultiTableUnawareAppendCompactionTask(
                                             task.partition(), task.compactBefore(), tableId))
                     .forEach(tasks::add);
         }
@@ -87,7 +87,7 @@ public class MultiUnawareBucketTableScan
         if (fileStoreTable.bucketMode() == BucketMode.BUCKET_UNAWARE) {
             tablesMap.put(
                     identifier,
-                    new AppendOnlyTableCompactionCoordinator(fileStoreTable, isStreaming));
+                    new UnawareAppendTableCompactionCoordinator(fileStoreTable, isStreaming));
         }
     }
 }
