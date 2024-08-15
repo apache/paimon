@@ -197,6 +197,9 @@ public class AsyncPositionOutputStream extends PositionOutputStream {
 
     @Override
     public void close() throws IOException {
+        if (closed) {
+            return;
+        }
         checkException();
         flushBuffer();
         sendEndEvent();
