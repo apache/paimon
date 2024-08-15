@@ -342,7 +342,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
         sql("ALTER TABLE `t$branch_pk` ADD (v2 INT)");
         sql("ALTER TABLE t SET ( 'scan.fallback-branch' = 'pk' )");
 
-        assertThatThrownBy(() -> sql("INSERT INTO t VALUES (1, 10, 'apple')"))
+        assertThatThrownBy(() -> sql("SELECT * FROM t"))
                 .hasMessageContaining("Branch main and pk does not have the same row type");
     }
 

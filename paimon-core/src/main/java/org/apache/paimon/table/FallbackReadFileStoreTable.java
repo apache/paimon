@@ -63,60 +63,6 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
 
         Preconditions.checkArgument(!(main instanceof FallbackReadFileStoreTable));
         Preconditions.checkArgument(!(fallback instanceof FallbackReadFileStoreTable));
-
-        String mainBranch = main.coreOptions().branch();
-        String fallbackBranch = fallback.coreOptions().branch();
-        RowType mainRowType = main.schema().logicalRowType();
-        RowType fallbackRowType = fallback.schema().logicalRowType();
-        Preconditions.checkArgument(
-                sameRowTypeIgnoreNullable(mainRowType, fallbackRowType),
-                "Branch %s and %s does not have the same row type.\n"
-                        + "Row type of branch %s is %s.\n"
-                        + "Row type of branch %s is %s.",
-                mainBranch,
-                fallbackBranch,
-                mainBranch,
-                mainRowType,
-                fallbackBranch,
-                fallbackRowType);
-
-        List<String> mainPrimaryKeys = main.schema().primaryKeys();
-        List<String> fallbackPrimaryKeys = fallback.schema().primaryKeys();
-        if (!mainPrimaryKeys.isEmpty()) {
-            if (fallbackPrimaryKeys.isEmpty()) {
-                throw new IllegalArgumentException(
-                        "Branch "
-                                + mainBranch
-                                + " has primary keys while fallback branch "
-                                + fallbackBranch
-                                + " does not. This is not allowed.");
-            }
-            Preconditions.checkArgument(
-                    mainPrimaryKeys.equals(fallbackPrimaryKeys),
-                    "Branch %s and %s both have primary keys but are not the same.\n"
-                            + "Primary keys of %s are %s.\n"
-                            + "Primary keys of %s are %s.",
-                    mainBranch,
-                    fallbackBranch,
-                    mainBranch,
-                    mainPrimaryKeys,
-                    fallbackBranch,
-                    fallbackPrimaryKeys);
-        }
-    }
-
-    private boolean sameRowTypeIgnoreNullable(RowType mainRowType, RowType fallbackRowType) {
-        if (mainRowType.getFieldCount() != fallbackRowType.getFieldCount()) {
-            return false;
-        }
-        for (int i = 0; i < mainRowType.getFieldCount(); i++) {
-            DataType mainType = mainRowType.getFields().get(i).type();
-            DataType fallbackType = fallbackRowType.getFields().get(i).type();
-            if (!mainType.equalsIgnoreNullable(fallbackType)) {
-                return false;
-            }
-        }
-        return true;
     }
 
     @Override
@@ -176,7 +122,64 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
 
     @Override
     public DataTableScan newScan() {
+        validateSchema();
         return new Scan();
+    }
+
+    private void validateSchema() {
+        String mainBranch = wrapped.coreOptions().branch();
+        String fallbackBranch = fallback.coreOptions().branch();
+        RowType mainRowType = wrapped.schema().logicalRowType();
+        RowType fallbackRowType = fallback.schema().logicalRowType();
+        Preconditions.checkArgument(
+                sameRowTypeIgnoreNullable(mainRowType, fallbackRowType),
+                "Branch %s and %s does not have the same row type.\n"
+                        + "Row type of branch %s is %s.\n"
+                        + "Row type of branch %s is %s.",
+                mainBranch,
+                fallbackBranch,
+                mainBranch,
+                mainRowType,
+                fallbackBranch,
+                fallbackRowType);
+
+        List<String> mainPrimaryKeys = wrapped.schema().primaryKeys();
+        List<String> fallbackPrimaryKeys = fallback.schema().primaryKeys();
+        if (!mainPrimaryKeys.isEmpty()) {
+            if (fallbackPrimaryKeys.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "Branch "
+                                + mainBranch
+                                + " has primary keys while fallback branch "
+                                + fallbackBranch
+                                + " does not. This is not allowed.");
+            }
+            Preconditions.checkArgument(
+                    mainPrimaryKeys.equals(fallbackPrimaryKeys),
+                    "Branch %s and %s both have primary keys but are not the same.\n"
+                            + "Primary keys of %s are %s.\n"
+                            + "Primary keys of %s are %s.",
+                    mainBranch,
+                    fallbackBranch,
+                    mainBranch,
+                    mainPrimaryKeys,
+                    fallbackBranch,
+                    fallbackPrimaryKeys);
+        }
+    }
+
+    private boolean sameRowTypeIgnoreNullable(RowType mainRowType, RowType fallbackRowType) {
+        if (mainRowType.getFieldCount() != fallbackRowType.getFieldCount()) {
+            return false;
+        }
+        for (int i = 0; i < mainRowType.getFieldCount(); i++) {
+            DataType mainType = mainRowType.getFields().get(i).type();
+            DataType fallbackType = fallbackRowType.getFields().get(i).type();
+            if (!mainType.equalsIgnoreNullable(fallbackType)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private class Scan implements DataTableScan {
