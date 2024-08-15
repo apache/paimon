@@ -174,7 +174,7 @@ public class AsyncPositionOutputStream extends PositionOutputStream {
     @Override
     public void flush() throws IOException {
         if (closed) {
-            throw new RuntimeException("Already closed");
+            throw new IOException("Already closed");
         }
         checkException();
         flushBuffer();
