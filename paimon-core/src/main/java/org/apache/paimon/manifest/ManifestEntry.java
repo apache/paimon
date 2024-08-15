@@ -111,7 +111,7 @@ public class ManifestEntry implements FileEntry {
         fields.add(new DataField(2, "_BUCKET", new IntType(false)));
         fields.add(new DataField(3, "_TOTAL_BUCKETS", new IntType(false)));
         fields.add(new DataField(4, "_FILE", DataFileMeta.schema()));
-        return new RowType(fields);
+        return new RowType(false, fields);
     }
 
     @Override

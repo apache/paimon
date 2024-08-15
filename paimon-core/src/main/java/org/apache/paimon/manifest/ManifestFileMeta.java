@@ -105,7 +105,7 @@ public class ManifestFileMeta {
         fields.add(new DataField(3, "_NUM_DELETED_FILES", new BigIntType(false)));
         fields.add(new DataField(4, "_PARTITION_STATS", SimpleStatsConverter.schema()));
         fields.add(new DataField(5, "_SCHEMA_ID", new BigIntType(false)));
-        return new RowType(fields);
+        return new RowType(false, fields);
     }
 
     @Override
