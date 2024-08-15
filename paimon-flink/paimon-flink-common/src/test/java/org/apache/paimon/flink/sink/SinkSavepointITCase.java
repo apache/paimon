@@ -69,7 +69,7 @@ public class SinkSavepointITCase extends AbstractTestBase {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         boolean enableFailure = random.nextBoolean();
         if (enableFailure) {
-            FailingFileIO.reset(failingName, 100, 500);
+            FailingFileIO.reset(failingName, 5, 500);
         } else {
             FailingFileIO.reset(failingName, 0, 1);
         }
