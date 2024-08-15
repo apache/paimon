@@ -27,8 +27,8 @@ import org.apache.paimon.flink.action.cdc.schema.JdbcSchemasInfo;
 import org.apache.paimon.flink.action.cdc.schema.JdbcTableInfo;
 import org.apache.paimon.schema.Schema;
 
-import com.ververica.cdc.connectors.base.source.jdbc.JdbcIncrementalSource;
-import com.ververica.cdc.connectors.postgres.source.config.PostgresSourceOptions;
+import org.apache.flink.cdc.connectors.base.source.jdbc.JdbcIncrementalSource;
+import org.apache.flink.cdc.connectors.postgres.source.config.PostgresSourceOptions;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -45,7 +45,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * An {@link Action} which synchronize one or multiple PostgreSQL tables into one Paimon table.
  *
  * <p>You should specify PostgreSQL source table in {@code postgresConfig}. See <a
- * href="https://ververica.github.io/flink-cdc-connectors/master/content/connectors/postgres-cdc.html#connector-options">document
+ * href="https://nightlies.apache.org/flink/flink-cdc-docs-release-3.1/docs/connectors/flink-sources/postgres-cdc/#connector-options">document
  * of flink-cdc-connectors</a> for detailed keys and values.
  *
  * <p>If the specified Paimon table does not exist, this action will automatically create the table.
