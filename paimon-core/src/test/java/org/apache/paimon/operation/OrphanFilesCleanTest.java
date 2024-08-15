@@ -361,6 +361,9 @@ public class OrphanFilesCleanTest {
         SnapshotManager snapshotManager = table.snapshotManager();
         writeData(snapshotManager, committedData, snapshotData, changelogData, commitTimes);
 
+        // create empty branch with same schema
+        table.createBranch("branch1");
+
         // generate non used files
         int shouldBeDeleted = generateUnUsedFile();
         assertThat(manuallyAddedFiles.size()).isEqualTo(shouldBeDeleted);
