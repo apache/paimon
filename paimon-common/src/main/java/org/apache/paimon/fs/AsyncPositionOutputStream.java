@@ -52,6 +52,7 @@ public class AsyncPositionOutputStream extends PositionOutputStream {
 
     private int totalBuffers;
     private long position;
+    private boolean closed = false;
 
     public AsyncPositionOutputStream(PositionOutputStream out) {
         this.out = out;
@@ -172,6 +173,9 @@ public class AsyncPositionOutputStream extends PositionOutputStream {
 
     @Override
     public void flush() throws IOException {
+        if (closed) {
+            throw new RuntimeException("Already closed");
+        }
         checkException();
         flushBuffer();
         FlushEvent event = new FlushEvent();
@@ -204,6 +208,7 @@ public class AsyncPositionOutputStream extends PositionOutputStream {
         } catch (ExecutionException e) {
             throw new RuntimeException(e);
         }
+        this.closed = true;
     }
 
     private void sendEndEvent() {

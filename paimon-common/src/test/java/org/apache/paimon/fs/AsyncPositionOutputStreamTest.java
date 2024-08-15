@@ -25,6 +25,7 @@ import java.io.IOException;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class AsyncPositionOutputStreamTest {
@@ -171,6 +172,14 @@ class AsyncPositionOutputStreamTest {
         asyncOut.write(new byte[] {1, 2, 3});
         assertThatThrownBy(asyncOut::close).hasMessageContaining(msg);
         assertThat(out.closed).isTrue();
+    }
+
+    @Test
+    public void testCloseFlushThrowsException() throws Exception {
+        AsyncPositionOutputStream asyncPositionOutputStream =
+                new AsyncPositionOutputStream(new ByteArrayPositionOutputStream());
+        asyncPositionOutputStream.close();
+        assertThatCode(asyncPositionOutputStream::flush).hasMessage("Already closed");
     }
 
     private static class ByteArrayPositionOutputStream extends PositionOutputStream {
