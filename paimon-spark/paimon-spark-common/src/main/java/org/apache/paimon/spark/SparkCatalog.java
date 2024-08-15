@@ -356,7 +356,7 @@ public class SparkCatalog extends SparkBaseCatalog {
             TableChange.UpdateColumnType update = (TableChange.UpdateColumnType) change;
             validateAlterNestedField(update.fieldNames());
             return SchemaChange.updateColumnType(
-                    update.fieldNames()[0], toPaimonType(update.newDataType()));
+                    update.fieldNames()[0], toPaimonType(update.newDataType()), true);
         } else if (change instanceof TableChange.UpdateColumnNullability) {
             TableChange.UpdateColumnNullability update =
                     (TableChange.UpdateColumnNullability) change;
