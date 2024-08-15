@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.arrow;
+package org.apache.paimon.arrow.writer;
 
 import org.apache.paimon.data.DataGetters;
 import org.apache.paimon.data.InternalArray;

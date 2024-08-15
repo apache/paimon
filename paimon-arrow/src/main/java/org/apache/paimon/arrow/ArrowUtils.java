@@ -18,12 +18,15 @@
 
 package org.apache.paimon.arrow;
 
+import org.apache.paimon.arrow.writer.ArrowFieldWriter;
+import org.apache.paimon.arrow.writer.ArrowFieldWriterFactoryVisitor;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 
 import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.complex.ListVector;
 import org.apache.arrow.vector.complex.MapVector;
@@ -90,5 +93,20 @@ public class ArrowUtils {
                             .collect(Collectors.toList());
         }
         return new Field(fieldName, fieldType, children);
+    }
+
+    public static ArrowFieldWriter[] createArrowFieldWriters(
+            VectorSchemaRoot vectorSchemaRoot, RowType rowType) {
+        ArrowFieldWriter[] fieldWriters = new ArrowFieldWriter[rowType.getFieldCount()];
+        List<FieldVector> vectors = vectorSchemaRoot.getFieldVectors();
+
+        for (int i = 0; i < rowType.getFieldCount(); i++) {
+            fieldWriters[i] =
+                    rowType.getTypeAt(i)
+                            .accept(ArrowFieldWriterFactoryVisitor.INSTANCE)
+                            .create(vectors.get(i));
+        }
+
+        return fieldWriters;
     }
 }
