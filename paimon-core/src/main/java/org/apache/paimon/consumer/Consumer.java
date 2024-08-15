@@ -26,6 +26,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCre
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.exc.MismatchedInputException;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -58,10 +59,24 @@ public class Consumer {
     }
 
     public static Optional<Consumer> fromPath(FileIO fileIO, Path path) {
-        try {
-            return fileIO.readOverwrittenFileUtf8(path).map(Consumer::fromJson);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
+        int retryNumber = 0;
+        MismatchedInputException exception = null;
+        while (retryNumber++ < 5) {
+            try {
+                return fileIO.readOverwrittenFileUtf8(path).map(Consumer::fromJson);
+            } catch (MismatchedInputException e) {
+                // retry
+                exception = e;
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException(ie);
+                }
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
         }
+        throw new UncheckedIOException(exception);
     }
 }
