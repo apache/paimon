@@ -20,6 +20,7 @@ package org.apache.paimon.arrow;
 
 import org.apache.paimon.arrow.writer.ArrowFieldWriter;
 import org.apache.paimon.arrow.writer.ArrowFieldWriterFactoryVisitor;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.MapType;
@@ -35,6 +36,10 @@ import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.FieldType;
 import org.apache.arrow.vector.types.pojo.Schema;
 
+import javax.annotation.Nullable;
+
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -62,7 +67,7 @@ public class ArrowUtils {
     }
 
     private static Field toArrowField(String fieldName, DataType dataType) {
-        FieldType fieldType = dataType.accept(ToFieldTypeVisitor.INSTANCE);
+        FieldType fieldType = dataType.accept(ArrowFieldTypeConversion.ARROW_FIELD_TYPE_VISITOR);
         List<Field> children = null;
         if (dataType instanceof ArrayType) {
             children =
@@ -108,5 +113,38 @@ public class ArrowUtils {
         }
 
         return fieldWriters;
+    }
+
+    public static long timestampToEpoch(
+            Timestamp timestamp, int precision, @Nullable ZoneId castZoneId) {
+        return castZoneId == null
+                ? nonCastedTimestampToEpoch(timestamp, precision)
+                : zoneCastedTimestampZoneCastToEpoch(timestamp, precision, castZoneId);
+    }
+
+    private static long nonCastedTimestampToEpoch(Timestamp timestamp, int precision) {
+        if (precision == 0) {
+            return timestamp.getMillisecond() / 1000;
+        } else if (precision >= 1 && precision <= 3) {
+            return timestamp.getMillisecond();
+        } else if (precision >= 4 && precision <= 6) {
+            return timestamp.toMicros();
+        } else {
+            return timestamp.getMillisecond() * 1_000_000 + timestamp.getNanoOfMillisecond();
+        }
+    }
+
+    private static long zoneCastedTimestampZoneCastToEpoch(
+            Timestamp timestamp, int precision, ZoneId castZoneId) {
+        Instant instant = timestamp.toLocalDateTime().atZone(castZoneId).toInstant();
+        if (precision == 0) {
+            return instant.getEpochSecond();
+        } else if (precision >= 1 && precision <= 3) {
+            return instant.getEpochSecond() * 1_000 + instant.getNano() / 1_000_000;
+        } else if (precision >= 4 && precision <= 6) {
+            return instant.getEpochSecond() * 1_000_000 + instant.getNano() / 1_000;
+        } else {
+            return instant.getEpochSecond() * 1_000_000_000 + instant.getNano();
+        }
     }
 }

@@ -31,10 +31,11 @@ under the License.
     <artifactId>paimon-arrow</artifactId>
     <name>Paimon : Arrow</name>
 
+    <packaging>jar</packaging>
+
     <properties>
         <arrow.version>14.0.0</arrow.version>
     </properties>
-
 
     <dependencies>
 

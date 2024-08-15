@@ -16,12 +16,10 @@
  * limitations under the License.
  */
 
+package org.apache.paimon.arrow.writer;
+
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.arrow.ArrowUtils;
-import org.apache.paimon.arrow.writer.ArrowBatchWriter;
-import org.apache.paimon.arrow.writer.ArrowFieldWriter;
-import org.apache.paimon.arrow.writer.ArrowRowWriter;
-import org.apache.paimon.arrow.writer.ArrowWriter;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
@@ -47,6 +45,7 @@ import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtensio
 import org.apache.paimon.testutils.junit.parameterized.Parameters;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DateTimeUtils;
@@ -970,10 +969,11 @@ public class ArrowWriterTest {
                             DateTimeUtils.toLocalDateTime(
                                     (int) value, DateTimeUtils.UTC_ZONE.toZoneId()));
                     continue;
-                case TIMESTAMP_WITHOUT_TIME_ZONE:
                 case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                    // transfer Timestamp to LocalDateTime string
-                    sb.append(((Timestamp) value).toLocalDateTime());
+                    // transfer Timestamp to epoch value
+                    Timestamp timestamp = (Timestamp) value;
+                    LocalZonedTimestampType type = (LocalZonedTimestampType) rowType.getTypeAt(i);
+                    sb.append(ArrowUtils.timestampToEpoch(timestamp, type.getPrecision(), null));
                     continue;
                 default:
                     sb.append(value);

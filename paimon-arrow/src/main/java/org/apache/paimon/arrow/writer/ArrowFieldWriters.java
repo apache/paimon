@@ -18,6 +18,7 @@
 
 package org.apache.paimon.arrow.writer;
 
+import org.apache.paimon.arrow.ArrowUtils;
 import org.apache.paimon.data.DataGetters;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -50,7 +51,7 @@ import org.apache.arrow.vector.Float8Vector;
 import org.apache.arrow.vector.IntVector;
 import org.apache.arrow.vector.SmallIntVector;
 import org.apache.arrow.vector.TimeMilliVector;
-import org.apache.arrow.vector.TimeStampNanoVector;
+import org.apache.arrow.vector.TimeStampVector;
 import org.apache.arrow.vector.TinyIntVector;
 import org.apache.arrow.vector.VarBinaryVector;
 import org.apache.arrow.vector.VarCharVector;
@@ -61,7 +62,6 @@ import org.apache.arrow.vector.complex.StructVector;
 import javax.annotation.Nullable;
 
 import java.math.BigDecimal;
-import java.time.Instant;
 import java.time.ZoneId;
 
 /** Registry of {@link ArrowFieldWriter}s. */
@@ -464,35 +464,26 @@ public class ArrowFieldWriters {
                 @Nullable int[] pickedInColumn,
                 int startIndex,
                 int batchRows) {
-            TimeStampNanoVector timeStampNanoVector = (TimeStampNanoVector) fieldVector;
+            TimeStampVector timeStampVector = (TimeStampVector) fieldVector;
             for (int i = 0; i < batchRows; i++) {
                 int row = getRowNumber(startIndex, i, pickedInColumn);
                 if (columnVector.isNullAt(row)) {
-                    timeStampNanoVector.setNull(i);
+                    timeStampVector.setNull(i);
                 } else {
                     Timestamp timestamp =
                             ((TimestampColumnVector) columnVector).getTimestamp(row, precision);
-                    long value = timestampToEpochNano(timestamp);
-                    timeStampNanoVector.setSafe(i, value);
+                    long value = ArrowUtils.timestampToEpoch(timestamp, precision, castZoneId);
+                    timeStampVector.setSafe(i, value);
                 }
             }
         }
 
         @Override
         protected void doWrite(int rowIndex, DataGetters getters, int pos) {
-            TimeStampNanoVector timeStampNanoVector = (TimeStampNanoVector) fieldVector;
+            TimeStampVector timeStampNanoVector = (TimeStampVector) fieldVector;
             Timestamp timestamp = getters.getTimestamp(pos, precision);
-            long value = timestampToEpochNano(timestamp);
+            long value = ArrowUtils.timestampToEpoch(timestamp, precision, castZoneId);
             timeStampNanoVector.setSafe(rowIndex, value);
-        }
-
-        private long timestampToEpochNano(Timestamp timestamp) {
-            if (castZoneId != null) {
-                Instant instant = timestamp.toLocalDateTime().atZone(castZoneId).toInstant();
-                return instant.getEpochSecond() * 1_000_000_000 + instant.getNano();
-            } else {
-                return timestamp.getMillisecond() * 1_000_000 + timestamp.getNanoOfMillisecond();
-            }
         }
     }
 
