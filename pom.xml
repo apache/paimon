@@ -81,7 +81,7 @@ under the License.
         <hadoop.version>2.8.5</hadoop.version>
         <scala.version>2.12.15</scala.version>
         <scala.binary.version>2.12</scala.binary.version>
-        <snappy.version>1.1.8.3</snappy.version>
+        <snappy.version>1.1.8.4</snappy.version>
         <airlift.version>0.27</airlift.version>
         <lz4.version>1.8.0</lz4.version>
         <slf4j.version>1.7.32</slf4j.version>
