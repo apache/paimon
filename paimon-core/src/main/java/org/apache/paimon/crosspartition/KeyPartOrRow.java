@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink.index;
+package org.apache.paimon.crosspartition;
 
 /** Type of record, key or full row. */
 public enum KeyPartOrRow {

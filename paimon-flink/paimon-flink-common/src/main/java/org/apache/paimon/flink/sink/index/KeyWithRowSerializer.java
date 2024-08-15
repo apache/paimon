@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink.index;
 
+import org.apache.paimon.crosspartition.KeyPartOrRow;
 import org.apache.paimon.flink.utils.InternalTypeSerializer;
 
 import org.apache.flink.api.common.typeutils.TypeSerializer;
@@ -28,7 +29,7 @@ import org.apache.flink.core.memory.DataOutputView;
 import java.io.IOException;
 import java.util.Objects;
 
-import static org.apache.paimon.flink.sink.index.KeyPartOrRow.KEY_PART;
+import static org.apache.paimon.crosspartition.KeyPartOrRow.KEY_PART;
 
 /** A {@link InternalTypeSerializer} to serialize KeyPartOrRow with T. */
 public class KeyWithRowSerializer<T> extends InternalTypeSerializer<Tuple2<KeyPartOrRow, T>> {

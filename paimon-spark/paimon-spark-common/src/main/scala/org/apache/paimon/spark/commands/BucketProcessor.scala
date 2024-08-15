@@ -18,21 +18,29 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.crosspartition.{GlobalIndexAssigner, KeyPartOrRow}
+import org.apache.paimon.data.{GenericRow, JoinedRow}
 import org.apache.paimon.data.{InternalRow => PaimonInternalRow}
+import org.apache.paimon.disk.IOManager
 import org.apache.paimon.index.HashBucketAssigner
-import org.apache.paimon.spark.SparkRow
+import org.apache.paimon.spark.{SparkInternalRow, SparkRow}
+import org.apache.paimon.spark.SparkUtils.createIOManager
 import org.apache.paimon.spark.util.EncoderUtils
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.RowPartitionKeyExtractor
+import org.apache.paimon.types.RowType
+import org.apache.paimon.utils.SerializationUtils
 
 import org.apache.spark.TaskContext
 import org.apache.spark.sql.Row
-import org.apache.spark.sql.catalyst.{InternalRow => SparkInternalRow}
+import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder.{Deserializer, Serializer}
 import org.apache.spark.sql.types.StructType
 
 import java.util.UUID
+
+import scala.collection.mutable
 
 case class EncoderSerDeGroup(schema: StructType) {
 
@@ -42,24 +50,24 @@ case class EncoderSerDeGroup(schema: StructType) {
 
   private val deserializer: Deserializer[Row] = encoder.createDeserializer()
 
-  def rowToInternal(row: Row): SparkInternalRow = {
+  def rowToInternal(row: Row): InternalRow = {
     serializer(row)
   }
 
-  def internalToRow(internalRow: SparkInternalRow): Row = {
+  def internalToRow(internalRow: InternalRow): Row = {
     deserializer(internalRow)
   }
 }
 
-sealed trait BucketProcessor {
-  def processPartition(rowIterator: Iterator[Row]): Iterator[Row]
+sealed trait BucketProcessor[In] {
+  def processPartition(rowIterator: Iterator[In]): Iterator[Row]
 }
 
 case class CommonBucketProcessor(
     table: FileStoreTable,
     bucketColIndex: Int,
     encoderGroup: EncoderSerDeGroup)
-  extends BucketProcessor {
+  extends BucketProcessor[Row] {
 
   def processPartition(rowIterator: Iterator[Row]): Iterator[Row] = {
     val rowType = table.rowType()
@@ -89,7 +97,7 @@ case class DynamicBucketProcessor(
     numSparkPartitions: Int,
     numAssigners: Int,
     encoderGroup: EncoderSerDeGroup
-) extends BucketProcessor {
+) extends BucketProcessor[Row] {
 
   private val targetBucketRowNumber = fileStoreTable.coreOptions.dynamicBucketTargetRowNum
   private val rowType = fileStoreTable.rowType
@@ -120,6 +128,108 @@ case class DynamicBucketProcessor(
         sparkInternalRow.setInt(bucketColIndex, bucket)
         encoderGroup.internalToRow(sparkInternalRow)
       }
+    }
+  }
+}
+
+case class GlobalDynamicBucketProcessor(
+    fileStoreTable: FileStoreTable,
+    rowType: RowType,
+    numAssigners: Integer,
+    encoderGroup: EncoderSerDeGroup)
+  extends BucketProcessor[(KeyPartOrRow, Array[Byte])] {
+
+  override def processPartition(
+      rowIterator: Iterator[(KeyPartOrRow, Array[Byte])]): Iterator[Row] = {
+    new GlobalIndexAssignerIterator(
+      rowIterator,
+      fileStoreTable,
+      rowType,
+      numAssigners,
+      encoderGroup)
+  }
+}
+
+class GlobalIndexAssignerIterator(
+    rowIterator: Iterator[(KeyPartOrRow, Array[Byte])],
+    fileStoreTable: FileStoreTable,
+    rowType: RowType,
+    numAssigners: Integer,
+    encoderGroup: EncoderSerDeGroup)
+  extends Iterator[Row]
+  with AutoCloseable {
+
+  private val queue = mutable.Queue[Row]()
+
+  val ioManager: IOManager = createIOManager
+
+  var currentResult: Row = _
+
+  var advanced = false
+
+  val assigner: GlobalIndexAssigner = {
+    val _assigner = new GlobalIndexAssigner(fileStoreTable)
+    _assigner.open(
+      0,
+      ioManager,
+      numAssigners,
+      TaskContext.getPartitionId(),
+      (row, bucket) => {
+        val extraRow: GenericRow = new GenericRow(2)
+        extraRow.setField(0, row.getRowKind.toByteValue)
+        extraRow.setField(1, bucket)
+        queue.enqueue(
+          encoderGroup.internalToRow(
+            SparkInternalRow.fromPaimon(new JoinedRow(row, extraRow), rowType)))
+      }
+    )
+    _assigner
+  }
+
+  override def hasNext: Boolean = {
+    advanceIfNeeded()
+    currentResult != null
+  }
+
+  override def next(): Row = {
+    if (!hasNext) {
+      throw new NoSuchElementException
+    }
+    advanced = false
+    currentResult
+  }
+
+  def advanceIfNeeded(): Unit = {
+    if (!advanced) {
+      advanced = true
+      currentResult = null
+      var stop = false
+      while (!stop) {
+        if (queue.nonEmpty) {
+          currentResult = queue.dequeue()
+          stop = true
+        } else if (rowIterator.hasNext) {
+          val tuple: (KeyPartOrRow, Array[Byte]) = rowIterator.next()
+          val internalRow = SerializationUtils.deserializeBinaryRow(tuple._2)
+          tuple._1 match {
+            case KeyPartOrRow.KEY_PART => assigner.bootstrapKey(internalRow)
+            case KeyPartOrRow.ROW => assigner.processInput(internalRow)
+            case _ =>
+              throw new UnsupportedOperationException(s"unknown kind ${tuple._1}")
+          }
+        } else if (assigner.inBoostrap()) {
+          assigner.endBoostrap(true)
+        } else {
+          stop = true
+        }
+      }
+    }
+  }
+
+  override def close(): Unit = {
+    assigner.close()
+    if (ioManager != null) {
+      ioManager.close()
     }
   }
 }

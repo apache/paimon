@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink.index;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.crosspartition.IndexBootstrap;
+import org.apache.paimon.crosspartition.KeyPartOrRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.DynamicBucketRowWriteOperator;
