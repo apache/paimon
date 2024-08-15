@@ -32,7 +32,6 @@ import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.RowDataRollingFileWriter;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.options.MemorySize;
@@ -129,9 +128,6 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
             @Nullable CommitIncrement restoreIncrement,
             ExecutorService compactExecutor,
             @Nullable DeletionVectorsMaintainer ignore) {
-        // let writer and compact manager hold the same reference
-        // and make restore files mutable to update
-        DataFilePathFactory factory = pathFactory.createDataFilePathFactory(partition, bucket);
         CompactManager compactManager =
                 skipCompaction
                         ? new NoopCompactManager()
@@ -158,7 +154,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                 // it is only for new files, no dv
                 files -> createFilesIterator(partition, bucket, files, null),
                 commitForceCompact,
-                factory,
+                pathFactory.createDataFilePathFactory(partition, bucket),
                 restoreIncrement,
                 useWriteBuffer || forceBufferSpill,
                 spillable || forceBufferSpill,
