@@ -48,7 +48,6 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
@@ -214,21 +213,6 @@ public class ManifestsTable implements ReadonlyTable {
                                 fileStorePathFactory,
                                 null)
                         .create();
-        return allManifests(snapshot, manifestList);
-    }
-
-    /**
-     * Return all {@link ManifestFileMeta} instances for either data or changelog manifests in this
-     * snapshot.
-     *
-     * @param manifestList a {@link ManifestList} instance used for reading files at snapshot.
-     * @return a list of ManifestFileMeta.
-     */
-    public static List<ManifestFileMeta> allManifests(
-            Snapshot snapshot, ManifestList manifestList) {
-        List<ManifestFileMeta> result = new ArrayList<>();
-        result.addAll(manifestList.readDataManifests(snapshot));
-        result.addAll(manifestList.readChangelogManifests(snapshot));
-        return result;
+        return manifestList.readAllManifests(snapshot);
     }
 }
