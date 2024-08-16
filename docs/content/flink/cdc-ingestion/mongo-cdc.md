@@ -31,7 +31,7 @@ under the License.
 ```
 flink-sql-connector-mongodb-cdc-*.jar
 ```
-only cdc 2.4+ is supported
+only cdc 3.1+ is supported
 
 ## Synchronizing Tables
 
