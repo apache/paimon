@@ -263,7 +263,7 @@ public class KeyValueFileStoreScanTest {
         ManifestList manifestList = store.manifestListFactory().create();
         long wantedSnapshotId = random.nextLong(snapshotManager.latestSnapshotId()) + 1;
         Snapshot wantedSnapshot = snapshotManager.snapshot(wantedSnapshotId);
-        List<ManifestFileMeta> wantedManifests = wantedSnapshot.dataManifests(manifestList);
+        List<ManifestFileMeta> wantedManifests = manifestList.readDataManifests(wantedSnapshot);
 
         FileStoreScan scan = store.newScan();
         scan.withManifestList(wantedManifests);

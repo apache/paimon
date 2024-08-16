@@ -395,8 +395,8 @@ public class OrphanFilesCleanTest {
         List<Path> manifests = new ArrayList<>();
         ManifestList manifestList = table.store().manifestListFactory().create();
         FileStorePathFactory pathFactory = table.store().pathFactory();
-        snapshot1
-                .allManifests(manifestList)
+        manifestList
+                .readAllManifests(snapshot1)
                 .forEach(m -> manifests.add(pathFactory.toManifestFilePath(m.fileName())));
 
         Path manifest = manifests.get(RANDOM.nextInt(manifests.size()));

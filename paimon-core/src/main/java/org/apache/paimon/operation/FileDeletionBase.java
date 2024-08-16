@@ -347,7 +347,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
      * It is possible that a job was killed during expiration and some manifest files have been
      * deleted, so if the clean methods need to get manifests of a snapshot to be cleaned, we should
      * try to read manifests and return empty list if failed instead of calling {@link
-     * Snapshot#dataManifests} directly.
+     * ManifestList#readDataManifests} directly.
      */
     protected List<ManifestFileMeta> tryReadManifestList(String manifestListName) {
         try {
@@ -424,7 +424,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
             // data manifests
             skippingSet.add(skippingSnapshot.baseManifestList());
             skippingSet.add(skippingSnapshot.deltaManifestList());
-            skippingSnapshot.dataManifests(manifestList).stream()
+            manifestList.readDataManifests(skippingSnapshot).stream()
                     .map(ManifestFileMeta::fileName)
                     .forEach(skippingSet::add);
 

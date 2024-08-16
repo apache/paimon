@@ -407,9 +407,9 @@ public class SnapshotManager implements Serializable {
 
         List<Snapshot> snapshots = new ArrayList<>();
         for (Path path : paths) {
-            Snapshot snapshot = Snapshot.safelyFromPath(fileIO, path);
-            if (snapshot != null) {
-                snapshots.add(snapshot);
+            try {
+                snapshots.add(Snapshot.fromJson(fileIO.readFileUtf8(path)));
+            } catch (FileNotFoundException ignored) {
             }
         }
 

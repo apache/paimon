@@ -78,6 +78,9 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
+import static org.apache.paimon.manifest.ManifestEntry.recordCount;
+import static org.apache.paimon.manifest.ManifestEntry.recordCountAdd;
+import static org.apache.paimon.manifest.ManifestEntry.recordCountDelete;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.InternalRowPartitionComputer.partToSimpleString;
@@ -839,9 +842,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Long currentWatermark = watermark;
             String previousIndexManifest = null;
             if (latestSnapshot != null) {
-                previousTotalRecordCount = latestSnapshot.totalRecordCount(scan);
+                previousTotalRecordCount = scan.totalRecordCount(latestSnapshot);
                 List<ManifestFileMeta> previousManifests =
-                        latestSnapshot.dataManifests(manifestList);
+                        manifestList.readDataManifests(latestSnapshot);
                 // read all previous manifest files
                 oldMetas.addAll(previousManifests);
                 // read the last snapshot to complete the bucket's offsets when logOffsets does not
@@ -872,8 +875,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             previousChangesListName = manifestList.write(newMetas);
 
             // the added records subtract the deleted records from
-            long deltaRecordCount =
-                    Snapshot.recordCountAdd(tableFiles) - Snapshot.recordCountDelete(tableFiles);
+            long deltaRecordCount = recordCountAdd(tableFiles) - recordCountDelete(tableFiles);
             long totalRecordCount = previousTotalRecordCount + deltaRecordCount;
 
             // write new changes into manifest files
@@ -928,7 +930,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             logOffsets,
                             totalRecordCount,
                             deltaRecordCount,
-                            Snapshot.recordCount(changelogFiles),
+                            recordCount(changelogFiles),
                             currentWatermark,
                             statsFileName);
         } catch (Throwable e) {

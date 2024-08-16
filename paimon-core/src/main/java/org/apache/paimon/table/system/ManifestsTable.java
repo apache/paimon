@@ -213,6 +213,6 @@ public class ManifestsTable implements ReadonlyTable {
                                 fileStorePathFactory,
                                 null)
                         .create();
-        return snapshot.allManifests(manifestList);
+        return manifestList.readAllManifests(snapshot);
     }
 }

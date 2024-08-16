@@ -33,6 +33,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -303,9 +304,10 @@ public class TagManager {
                 }
                 // If the tag file is not found, it might be deleted by
                 // other processes, so just skip this tag
-                Snapshot snapshot = Snapshot.safelyFromPath(fileIO, path);
-                if (snapshot != null) {
+                try {
+                    Snapshot snapshot = Snapshot.fromJson(fileIO.readFileUtf8(path));
                     tags.computeIfAbsent(snapshot, s -> new ArrayList<>()).add(tagName);
+                } catch (FileNotFoundException ignored) {
                 }
             }
         } catch (IOException e) {

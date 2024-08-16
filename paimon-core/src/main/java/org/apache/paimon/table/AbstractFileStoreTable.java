@@ -122,6 +122,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public Snapshot snapshot(long snapshotId) {
+        return store().snapshotManager().snapshot(snapshotId);
+    }
+
+    @Override
     public String name() {
         return identifier().getObjectName();
     }
