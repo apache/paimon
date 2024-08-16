@@ -19,8 +19,7 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.crosspartition.{GlobalIndexAssigner, KeyPartOrRow}
-import org.apache.paimon.data.{GenericRow, JoinedRow}
-import org.apache.paimon.data.{InternalRow => PaimonInternalRow}
+import org.apache.paimon.data.{BinaryRow, GenericRow, InternalRow => PaimonInternalRow, JoinedRow}
 import org.apache.paimon.disk.IOManager
 import org.apache.paimon.index.HashBucketAssigner
 import org.apache.paimon.spark.{SparkInternalRow, SparkRow}
@@ -29,7 +28,7 @@ import org.apache.paimon.spark.util.EncoderUtils
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.RowPartitionKeyExtractor
 import org.apache.paimon.types.RowType
-import org.apache.paimon.utils.SerializationUtils
+import org.apache.paimon.utils.{CloseableIterator, SerializationUtils}
 
 import org.apache.spark.TaskContext
 import org.apache.spark.sql.Row
@@ -183,8 +182,22 @@ class GlobalIndexAssignerIterator(
             SparkInternalRow.fromPaimon(new JoinedRow(row, extraRow), rowType)))
       }
     )
+    rowIterator.foreach {
+      row =>
+        {
+          val internalRow = SerializationUtils.deserializeBinaryRow(row._2)
+          row._1 match {
+            case KeyPartOrRow.KEY_PART => _assigner.bootstrapKey(internalRow)
+            case KeyPartOrRow.ROW => _assigner.processInput(internalRow)
+            case _ =>
+              throw new UnsupportedOperationException(s"unknown kind ${row._1}")
+          }
+        }
+    }
     _assigner
   }
+
+  private val emitIterator: CloseableIterator[BinaryRow] = assigner.endBoostrapWithoutEmit(true)
 
   override def hasNext: Boolean = {
     advanceIfNeeded()
@@ -208,17 +221,8 @@ class GlobalIndexAssignerIterator(
         if (queue.nonEmpty) {
           currentResult = queue.dequeue()
           stop = true
-        } else if (rowIterator.hasNext) {
-          val tuple: (KeyPartOrRow, Array[Byte]) = rowIterator.next()
-          val internalRow = SerializationUtils.deserializeBinaryRow(tuple._2)
-          tuple._1 match {
-            case KeyPartOrRow.KEY_PART => assigner.bootstrapKey(internalRow)
-            case KeyPartOrRow.ROW => assigner.processInput(internalRow)
-            case _ =>
-              throw new UnsupportedOperationException(s"unknown kind ${tuple._1}")
-          }
-        } else if (assigner.inBoostrap()) {
-          assigner.endBoostrap(true)
+        } else if (emitIterator.hasNext) {
+          assigner.processInput(emitIterator.next())
         } else {
           stop = true
         }
@@ -227,6 +231,7 @@ class GlobalIndexAssignerIterator(
   }
 
   override def close(): Unit = {
+    emitIterator.close()
     assigner.close()
     if (ioManager != null) {
       ioManager.close()

@@ -325,7 +325,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
     }
   }
 
-  /** Boostrap and repartition for dynamic bucket mode. */
+  /** Boostrap and repartition for cross partition mode. */
   private def bootstrapAndRepartitionByKeyHash(
       data: DataFrame,
       parallelism: Int,
