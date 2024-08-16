@@ -67,6 +67,7 @@ under the License.
         <module>paimon-spark</module>
         <module>paimon-service</module>
         <module>paimon-test-utils</module>
+        <module>paimon-arrow</module>
         <module>tools/ci/paimon-ci-tools</module>
     </modules>
 
