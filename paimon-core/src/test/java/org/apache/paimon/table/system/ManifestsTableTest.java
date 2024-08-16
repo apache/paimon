@@ -128,7 +128,7 @@ public class ManifestsTableTest extends TableTestBase {
         }
 
         Snapshot snapshot = snapshotManager.snapshot(snapshotId);
-        List<ManifestFileMeta> allManifestMeta = snapshot.allManifests(manifestList);
+        List<ManifestFileMeta> allManifestMeta = manifestList.readAllManifests(snapshot);
 
         List<InternalRow> expectedRow = new ArrayList<>();
         for (ManifestFileMeta manifestFileMeta : allManifestMeta) {

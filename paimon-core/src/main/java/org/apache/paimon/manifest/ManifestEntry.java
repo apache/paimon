@@ -197,4 +197,22 @@ public class ManifestEntry implements FileEntry {
             return true;
         };
     }
+
+    public static long recordCount(List<ManifestEntry> manifestEntries) {
+        return manifestEntries.stream().mapToLong(manifest -> manifest.file().rowCount()).sum();
+    }
+
+    public static long recordCountAdd(List<ManifestEntry> manifestEntries) {
+        return manifestEntries.stream()
+                .filter(manifestEntry -> FileKind.ADD.equals(manifestEntry.kind()))
+                .mapToLong(manifest -> manifest.file().rowCount())
+                .sum();
+    }
+
+    public static long recordCountDelete(List<ManifestEntry> manifestEntries) {
+        return manifestEntries.stream()
+                .filter(manifestEntry -> FileKind.DELETE.equals(manifestEntry.kind()))
+                .mapToLong(manifest -> manifest.file().rowCount())
+                .sum();
+    }
 }

@@ -107,6 +107,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     }
 
     @Override
+    public Snapshot snapshot(long snapshotId) {
+        return wrapped.snapshot(snapshotId);
+    }
+
+    @Override
     public String name() {
         return wrapped.name() + SYSTEM_TABLE_SPLITTER + AUDIT_LOG;
     }

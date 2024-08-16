@@ -403,18 +403,18 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private List<ManifestFileMeta> readManifests(Snapshot snapshot) {
         switch (scanMode) {
             case ALL:
-                return snapshot.dataManifests(manifestList);
+                return manifestList.readDataManifests(snapshot);
             case DELTA:
-                return snapshot.deltaManifests(manifestList);
+                return manifestList.readDeltaManifests(snapshot);
             case CHANGELOG:
                 if (snapshot.version() > Snapshot.TABLE_STORE_02_VERSION) {
-                    return snapshot.changelogManifests(manifestList);
+                    return manifestList.readChangelogManifests(snapshot);
                 }
 
                 // compatible with Paimon 0.2, we'll read extraFiles in DataFileMeta
                 // see comments on DataFileMeta#extraFiles
                 if (snapshot.commitKind() == Snapshot.CommitKind.APPEND) {
-                    return snapshot.deltaManifests(manifestList);
+                    return manifestList.readDeltaManifests(snapshot);
                 }
                 throw new IllegalStateException(
                         String.format(

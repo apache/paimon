@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.stats.Statistics;
@@ -77,6 +78,10 @@ public interface Table extends Serializable {
     /** Get the latest snapshot id for this table, or empty if there are no snapshots. */
     @Experimental
     OptionalLong latestSnapshotId();
+
+    /** Get the {@link Snapshot} from snapshot id. */
+    @Experimental
+    Snapshot snapshot(long snapshotId);
 
     /** Rollback table's state to a specific snapshot. */
     @Experimental

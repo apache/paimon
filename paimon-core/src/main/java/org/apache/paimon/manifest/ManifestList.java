@@ -18,6 +18,7 @@
 
 package org.apache.paimon.manifest;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
@@ -32,6 +33,8 @@ import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -58,6 +61,51 @@ public class ManifestList extends ObjectsFile<ManifestFileMeta> {
                 compression,
                 pathFactory,
                 cache);
+    }
+
+    /**
+     * Return all {@link ManifestFileMeta} instances for either data or changelog manifests in this
+     * snapshot.
+     *
+     * @return a list of ManifestFileMeta.
+     */
+    public List<ManifestFileMeta> readAllManifests(Snapshot snapshot) {
+        List<ManifestFileMeta> result = new ArrayList<>();
+        result.addAll(readDataManifests(snapshot));
+        result.addAll(readChangelogManifests(snapshot));
+        return result;
+    }
+
+    /**
+     * Return a {@link ManifestFileMeta} for each data manifest in this snapshot.
+     *
+     * @return a list of ManifestFileMeta.
+     */
+    public List<ManifestFileMeta> readDataManifests(Snapshot snapshot) {
+        List<ManifestFileMeta> result = new ArrayList<>();
+        result.addAll(read(snapshot.baseManifestList()));
+        result.addAll(readDeltaManifests(snapshot));
+        return result;
+    }
+
+    /**
+     * Return a {@link ManifestFileMeta} for each delta manifest in this snapshot.
+     *
+     * @return a list of ManifestFileMeta.
+     */
+    public List<ManifestFileMeta> readDeltaManifests(Snapshot snapshot) {
+        return read(snapshot.deltaManifestList());
+    }
+
+    /**
+     * Return a {@link ManifestFileMeta} for each changelog manifest in this snapshot.
+     *
+     * @return a list of ManifestFileMeta.
+     */
+    public List<ManifestFileMeta> readChangelogManifests(Snapshot snapshot) {
+        return snapshot.changelogManifestList() == null
+                ? Collections.emptyList()
+                : read(snapshot.changelogManifestList());
     }
 
     /**
