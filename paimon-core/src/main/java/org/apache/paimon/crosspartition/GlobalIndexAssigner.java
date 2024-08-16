@@ -379,22 +379,31 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
         RowBuffer.RowBufferIterator iterator = bootstrapRecords.newIterator();
         return new CloseableIterator<BinaryRow>() {
 
-            boolean hasNext = iterator.advanceNext();
+            boolean hasNext = false;
+            boolean advanced = false;
+
+            private void advanceIfNeeded() {
+                if (!advanced) {
+                    hasNext = iterator.advanceNext();
+                    advanced = true;
+                }
+            }
 
             @Override
             public boolean hasNext() {
+                advanceIfNeeded();
                 return hasNext;
             }
 
             @Override
             public BinaryRow next() {
+                advanceIfNeeded();
                 if (!hasNext) {
                     throw new NoSuchElementException();
                 }
 
-                BinaryRow row = iterator.getRow();
-                hasNext = iterator.advanceNext();
-                return row;
+                advanced = false;
+                return iterator.getRow();
             }
 
             @Override
