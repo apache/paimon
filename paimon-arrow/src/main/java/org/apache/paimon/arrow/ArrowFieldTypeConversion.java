@@ -54,6 +54,7 @@ public class ArrowFieldTypeConversion {
     public static final ArrowFieldTypeVisitor ARROW_FIELD_TYPE_VISITOR =
             new ArrowFieldTypeVisitor();
 
+    /** Convert {@link DataType} to {@link FieldType}. */
     public static class ArrowFieldTypeVisitor implements DataTypeVisitor<FieldType> {
 
         @Override
