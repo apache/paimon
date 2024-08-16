@@ -54,7 +54,7 @@ public class ArrowFieldTypeConversion {
     public static final ArrowFieldTypeVisitor ARROW_FIELD_TYPE_VISITOR =
             new ArrowFieldTypeVisitor();
 
-    private static class ArrowFieldTypeVisitor implements DataTypeVisitor<FieldType> {
+    public static class ArrowFieldTypeVisitor implements DataTypeVisitor<FieldType> {
 
         @Override
         public FieldType visit(CharType charType) {
