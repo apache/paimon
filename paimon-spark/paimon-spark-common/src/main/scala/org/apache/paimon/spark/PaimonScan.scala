@@ -37,13 +37,13 @@ case class PaimonScan(
     filters: Seq[Predicate],
     reservedFilters: Seq[Filter],
     pushDownLimit: Option[Int],
-    disableBucketedScan: Boolean = false)
+    bucketedScanDisabled: Boolean = false)
   extends PaimonBaseScan(table, requiredSchema, filters, reservedFilters, pushDownLimit)
   with SupportsRuntimeFiltering
   with SupportsReportPartitioning {
 
-  def withDisabledBucketedScan(): PaimonScan = {
-    copy(disableBucketedScan = true)
+  def disableBucketedScan(): PaimonScan = {
+    copy(bucketedScanDisabled = true)
   }
 
   @transient
@@ -80,7 +80,7 @@ case class PaimonScan(
 
   override def getInputPartitions(splits: Array[Split]): Seq[PaimonInputPartition] = {
     if (
-      disableBucketedScan || !conf.v2BucketingEnabled || extractBucketTransform.isEmpty ||
+      bucketedScanDisabled || !conf.v2BucketingEnabled || extractBucketTransform.isEmpty ||
       splits.exists(!_.isInstanceOf[DataSplit])
     ) {
       return super.getInputPartitions(splits)
