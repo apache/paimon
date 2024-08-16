@@ -114,11 +114,6 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public BucketMode bucketMode() {
-        return wrapped.bucketMode();
-    }
-
-    @Override
     public CatalogEnvironment catalogEnvironment() {
         return wrapped.catalogEnvironment();
     }
@@ -171,11 +166,6 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     @Override
     public void createBranch(String branchName) {
         wrapped.createBranch(branchName);
-    }
-
-    @Override
-    public void createBranch(String branchName, long snapshotId) {
-        wrapped.createBranch(branchName, snapshotId);
     }
 
     @Override

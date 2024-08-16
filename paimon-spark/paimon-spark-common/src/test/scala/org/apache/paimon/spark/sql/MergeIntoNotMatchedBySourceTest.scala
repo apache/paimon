@@ -18,11 +18,11 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.spark.{PaimonSparkTestBase, PaimonTableTest}
 
 import org.apache.spark.sql.Row
 
-trait MergeIntoNotMatchedBySourceTest extends PaimonSparkTestBase {
+trait MergeIntoNotMatchedBySourceTest extends PaimonSparkTestBase with PaimonTableTest {
 
   import testImplicits._
 
@@ -31,10 +31,7 @@ trait MergeIntoNotMatchedBySourceTest extends PaimonSparkTestBase {
 
       Seq((1, 100, "c11"), (3, 300, "c33")).toDF("a", "b", "c").createOrReplaceTempView("source")
 
-      spark.sql(s"""
-                   |CREATE TABLE target (a INT, b INT, c STRING)
-                   |TBLPROPERTIES ('primary-key'='a', 'bucket'='2')
-                   |""".stripMargin)
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
       spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2'), (5, 50, 'c5')")
 
       spark.sql(s"""
@@ -58,10 +55,7 @@ trait MergeIntoNotMatchedBySourceTest extends PaimonSparkTestBase {
 
       Seq((1, 100, "c11"), (3, 300, "c33")).toDF("a", "b", "c").createOrReplaceTempView("source")
 
-      spark.sql(s"""
-                   |CREATE TABLE target (a INT, b INT, c STRING)
-                   |TBLPROPERTIES ('primary-key'='a', 'bucket'='2')
-                   |""".stripMargin)
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
       spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
 
       spark.sql(s"""
@@ -89,10 +83,7 @@ trait MergeIntoNotMatchedBySourceTest extends PaimonSparkTestBase {
         .toDF("a", "b", "c1", "c2")
         .createOrReplaceTempView("source")
 
-      spark.sql(s"""
-                   |CREATE TABLE target (a INT, b INT, c STRUCT<c1:STRING, c2:STRING>)
-                   |TBLPROPERTIES ('primary-key'='a', 'bucket'='2')
-                   |""".stripMargin)
+      createTable("target", "a INT, b INT, c STRUCT<c1:STRING, c2:STRING>", Seq("a"))
       spark.sql("INSERT INTO target values (1, 10, struct('x', 'y')), (2, 20, struct('x', 'y'))")
 
       spark.sql(s"""
@@ -118,10 +109,7 @@ trait MergeIntoNotMatchedBySourceTest extends PaimonSparkTestBase {
         .toDF("a", "b", "c")
         .createOrReplaceTempView("source")
 
-      spark.sql(s"""
-                   |CREATE TABLE target (a INT, b INT, c STRING)
-                   |TBLPROPERTIES ('primary-key'='a', 'bucket'='2')
-                   |""".stripMargin)
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
       spark.sql(
         "INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2'), (3, 30, 'c3'), (4, 40, 'c4'), (5, 50, 'c5')")
 

@@ -26,6 +26,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMap
 
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.configuration.Configuration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -41,6 +42,10 @@ public class CdcJsonDeserializationSchema implements DeserializationSchema<CdcSo
     private static final Logger LOG = LoggerFactory.getLogger(CdcJsonDeserializationSchema.class);
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    public CdcJsonDeserializationSchema(Configuration cdcSourceConfig) {
+        this();
+    }
 
     public CdcJsonDeserializationSchema() {
         objectMapper

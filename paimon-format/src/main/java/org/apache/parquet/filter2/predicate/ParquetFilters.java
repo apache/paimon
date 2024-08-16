@@ -147,6 +147,11 @@ public class ParquetFilters {
         }
 
         @Override
+        public FilterPredicate visitContains(FieldRef fieldRef, Object literal) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
         public FilterPredicate visitIn(FieldRef fieldRef, List<Object> literals) {
             throw new UnsupportedOperationException();
         }

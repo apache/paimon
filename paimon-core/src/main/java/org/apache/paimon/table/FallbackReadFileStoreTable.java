@@ -63,10 +63,84 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
 
         Preconditions.checkArgument(!(main instanceof FallbackReadFileStoreTable));
         Preconditions.checkArgument(!(fallback instanceof FallbackReadFileStoreTable));
+    }
 
-        String mainBranch = main.coreOptions().branch();
+    @Override
+    public FileStoreTable copy(Map<String, String> dynamicOptions) {
+        return new FallbackReadFileStoreTable(
+                wrapped.copy(dynamicOptions),
+                fallback.copy(rewriteFallbackOptions(dynamicOptions)));
+    }
+
+    @Override
+    public FileStoreTable copy(TableSchema newTableSchema) {
+        return new FallbackReadFileStoreTable(
+                wrapped.copy(newTableSchema),
+                fallback.copy(
+                        newTableSchema.copy(rewriteFallbackOptions(newTableSchema.options()))));
+    }
+
+    @Override
+    public FileStoreTable copyWithoutTimeTravel(Map<String, String> dynamicOptions) {
+        return new FallbackReadFileStoreTable(
+                wrapped.copyWithoutTimeTravel(dynamicOptions),
+                fallback.copyWithoutTimeTravel(rewriteFallbackOptions(dynamicOptions)));
+    }
+
+    @Override
+    public FileStoreTable copyWithLatestSchema() {
+        return new FallbackReadFileStoreTable(
+                wrapped.copyWithLatestSchema(), fallback.copyWithLatestSchema());
+    }
+
+    @Override
+    public FileStoreTable switchToBranch(String branchName) {
+        return new FallbackReadFileStoreTable(wrapped.switchToBranch(branchName), fallback);
+    }
+
+    private Map<String, String> rewriteFallbackOptions(Map<String, String> options) {
+        Map<String, String> result = new HashMap<>(options);
+
+        // branch of fallback table should never change
+        String branchKey = CoreOptions.BRANCH.key();
+        if (options.containsKey(branchKey)) {
+            result.put(branchKey, fallback.options().get(branchKey));
+        }
+
+        // snapshot ids may be different between the main branch and the fallback branch,
+        // so we need to convert main branch snapshot id to millisecond,
+        // then convert millisecond to fallback branch snapshot id
+        String scanSnapshotIdOptionKey = CoreOptions.SCAN_SNAPSHOT_ID.key();
+        if (options.containsKey(scanSnapshotIdOptionKey)) {
+            long id = Long.parseLong(options.get(scanSnapshotIdOptionKey));
+            long millis = wrapped.snapshotManager().snapshot(id).timeMillis();
+            Snapshot fallbackSnapshot = fallback.snapshotManager().earlierOrEqualTimeMills(millis);
+            long fallbackId;
+            if (fallbackSnapshot == null) {
+                fallbackId = Snapshot.FIRST_SNAPSHOT_ID;
+            } else {
+                fallbackId = fallbackSnapshot.id();
+            }
+            result.put(scanSnapshotIdOptionKey, String.valueOf(fallbackId));
+        }
+
+        // bucket number of main branch and fallback branch are very likely different,
+        // so we remove bucket in options to use fallback branch's bucket number
+        result.remove(CoreOptions.BUCKET.key());
+
+        return result;
+    }
+
+    @Override
+    public DataTableScan newScan() {
+        validateSchema();
+        return new Scan();
+    }
+
+    private void validateSchema() {
+        String mainBranch = wrapped.coreOptions().branch();
         String fallbackBranch = fallback.coreOptions().branch();
-        RowType mainRowType = main.schema().logicalRowType();
+        RowType mainRowType = wrapped.schema().logicalRowType();
         RowType fallbackRowType = fallback.schema().logicalRowType();
         Preconditions.checkArgument(
                 sameRowTypeIgnoreNullable(mainRowType, fallbackRowType),
@@ -80,7 +154,7 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
                 fallbackBranch,
                 fallbackRowType);
 
-        List<String> mainPrimaryKeys = main.schema().primaryKeys();
+        List<String> mainPrimaryKeys = wrapped.schema().primaryKeys();
         List<String> fallbackPrimaryKeys = fallback.schema().primaryKeys();
         if (!mainPrimaryKeys.isEmpty()) {
             if (fallbackPrimaryKeys.isEmpty()) {
@@ -117,66 +191,6 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
             }
         }
         return true;
-    }
-
-    @Override
-    public FileStoreTable copy(Map<String, String> dynamicOptions) {
-        return new FallbackReadFileStoreTable(
-                wrapped.copy(dynamicOptions),
-                fallback.copy(rewriteFallbackOptions(dynamicOptions)));
-    }
-
-    @Override
-    public FileStoreTable copy(TableSchema newTableSchema) {
-        return new FallbackReadFileStoreTable(
-                wrapped.copy(newTableSchema),
-                fallback.copy(
-                        newTableSchema.copy(rewriteFallbackOptions(newTableSchema.options()))));
-    }
-
-    @Override
-    public FileStoreTable copyWithoutTimeTravel(Map<String, String> dynamicOptions) {
-        return new FallbackReadFileStoreTable(
-                wrapped.copyWithoutTimeTravel(dynamicOptions),
-                fallback.copyWithoutTimeTravel(rewriteFallbackOptions(dynamicOptions)));
-    }
-
-    @Override
-    public FileStoreTable copyWithLatestSchema() {
-        return new FallbackReadFileStoreTable(
-                wrapped.copyWithLatestSchema(), fallback.copyWithLatestSchema());
-    }
-
-    private Map<String, String> rewriteFallbackOptions(Map<String, String> options) {
-        Map<String, String> result = new HashMap<>(options);
-
-        // snapshot ids may be different between the main branch and the fallback branch,
-        // so we need to convert main branch snapshot id to millisecond,
-        // then convert millisecond to fallback branch snapshot id
-        String scanSnapshotIdOptionKey = CoreOptions.SCAN_SNAPSHOT_ID.key();
-        if (options.containsKey(scanSnapshotIdOptionKey)) {
-            long id = Long.parseLong(options.get(scanSnapshotIdOptionKey));
-            long millis = wrapped.snapshotManager().snapshot(id).timeMillis();
-            Snapshot fallbackSnapshot = fallback.snapshotManager().earlierOrEqualTimeMills(millis);
-            long fallbackId;
-            if (fallbackSnapshot == null) {
-                fallbackId = Snapshot.FIRST_SNAPSHOT_ID;
-            } else {
-                fallbackId = fallbackSnapshot.id();
-            }
-            result.put(scanSnapshotIdOptionKey, String.valueOf(fallbackId));
-        }
-
-        // bucket number of main branch and fallback branch are very likely different,
-        // so we remove bucket in options to use fallback branch's bucket number
-        result.remove(CoreOptions.BUCKET.key());
-
-        return result;
-    }
-
-    @Override
-    public DataTableScan newScan() {
-        return new Scan();
     }
 
     private class Scan implements DataTableScan {

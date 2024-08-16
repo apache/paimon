@@ -71,8 +71,14 @@ Current supported aggregate functions and data types are:
   It supports DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, and DOUBLE data types.
 
 ### count
-  The count function counts the values across multiple rows.
-  It supports INTEGER, BIGINT data types.
+  In scenarios where counting rows that match a specific condition is required, you can use the SUM function to achieve this. By expressing a condition as a Boolean value (TRUE or FALSE) and converting it into a numerical value, you can effectively count the rows. In this approach, TRUE is converted to 1, and FALSE is converted to 0.
+
+  For example, if you have a table orders and want to count the number of rows that meet a specific condition, you can use the following query:
+  ```sql
+  SELECT SUM(CASE WHEN condition THEN 1 ELSE 0 END) AS count
+  FROM orders;
+  ```
+
 
 ### max
   The max function identifies and retains the maximum value.
@@ -93,6 +99,7 @@ Current supported aggregate functions and data types are:
 ### listagg
   The listagg function concatenates multiple string values into a single string.
   It supports STRING data type.
+  Each field not part of the primary keys can be given a list agg delimiter, specified by the fields.<field-name>.list-agg-delimiter table property, otherwise it will use "," as default.
 
 ### bool_and
   The bool_and function evaluates whether all values in a boolean set are true.
@@ -260,7 +267,7 @@ For streaming queries, `aggregation` merge engine must be used together with `lo
 
 ## Retraction
 
-Only `sum`, `product`, `count`, `collect`, `merge_map`, `nested_update`, `last_value` and `last_non_null_value` supports retraction (`UPDATE_BEFORE` and `DELETE`), others aggregate functions do not support retraction.
+Only `sum`, `product`, `collect`, `merge_map`, `nested_update`, `last_value` and `last_non_null_value` supports retraction (`UPDATE_BEFORE` and `DELETE`), others aggregate functions do not support retraction.
 If you allow some functions to ignore retraction messages, you can configure:
 `'fields.${field_name}.ignore-retract'='true'`.
 

@@ -192,6 +192,10 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             this.cache = cache;
         }
 
+        public boolean isCacheEnabled() {
+            return cache != null;
+        }
+
         public ManifestFile create() {
             RowType entryType = VersionedObjectSerializer.versionType(ManifestEntry.schema());
             return new ManifestFile(

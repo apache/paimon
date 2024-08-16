@@ -19,7 +19,8 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.CoreOptions.WRITE_ONLY
-import org.apache.paimon.deletionvectors.{DeletionVector, DeletionVectorIndexFileMaintainer}
+import org.apache.paimon.deletionvectors.DeletionVector
+import org.apache.paimon.deletionvectors.append.{AppendDeletionFileMaintainer, UnawareAppendDeletionFileMaintainer}
 import org.apache.paimon.index.{BucketAssigner, SimpleHashBucketAssigner}
 import org.apache.paimon.io.{CompactIncrement, DataIncrement, IndexIncrement}
 import org.apache.paimon.manifest.{FileKind, IndexManifestEntry}
@@ -27,6 +28,7 @@ import org.apache.paimon.spark.{SparkRow, SparkTableWrite}
 import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
 import org.apache.paimon.spark.util.SparkRowUtils
 import org.apache.paimon.table.{BucketMode, FileStoreTable}
+import org.apache.paimon.table.BucketMode.BUCKET_UNAWARE
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageImpl, CommitMessageSerializer, RowPartitionKeyExtractor}
 import org.apache.paimon.utils.SerializationUtils
 
@@ -80,7 +82,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
             val write = newWrite()
             try {
               iter.foreach(row => write.write(row))
-              write.finish().asScala
+              write.finish()
             } finally {
               write.close()
             }
@@ -99,7 +101,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
             val write = newWrite()
             try {
               iter.foreach(row => write.write(row, row.getInt(bucketColIdx)))
-              write.finish().asScala
+              write.finish()
             } finally {
               write.close()
             }
@@ -117,7 +119,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
             val write = newWrite()
             try {
               iter.foreach(row => write.write(row, assigner.apply(row)))
-              write.finish().asScala
+              write.finish()
             } finally {
               write.close()
             }
@@ -179,7 +181,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
               numAssigners,
               encoderGroupWithBucketCol))
         }
-      case BucketMode.BUCKET_UNAWARE =>
+      case BUCKET_UNAWARE =>
         // Topology: input ->
         writeWithoutBucket()
       case BucketMode.HASH_FIXED =>
@@ -211,17 +213,20 @@ case class PaimonSparkWriter(table: FileStoreTable) {
       .mapGroups {
         case (_, iter: Iterator[SparkDeletionVectors]) =>
           val indexHandler = table.store().newIndexFileHandler()
-          var dvIndexFileMaintainer: DeletionVectorIndexFileMaintainer = null
+          var dvIndexFileMaintainer: AppendDeletionFileMaintainer = null
           while (iter.hasNext) {
             val sdv: SparkDeletionVectors = iter.next()
             if (dvIndexFileMaintainer == null) {
               val partition = SerializationUtils.deserializeBinaryRow(sdv.partition)
-              dvIndexFileMaintainer = indexHandler
-                .createDVIndexFileMaintainer(
+              dvIndexFileMaintainer = if (bucketMode == BUCKET_UNAWARE) {
+                AppendDeletionFileMaintainer.forUnawareAppend(indexHandler, snapshotId, partition)
+              } else {
+                AppendDeletionFileMaintainer.forBucketedAppend(
+                  indexHandler,
                   snapshotId,
                   partition,
-                  sdv.bucket,
-                  bucketMode != BucketMode.BUCKET_UNAWARE)
+                  sdv.bucket)
+              }
             }
             if (dvIndexFileMaintainer == null) {
               throw new RuntimeException("can't create the dv maintainer.")

@@ -130,6 +130,11 @@ public class BucketsTable implements DataTable, ReadonlyTable {
     }
 
     @Override
+    public DataTable switchToBranch(String branchName) {
+        return new BucketsTable(wrapped.switchToBranch(branchName), isContinuous, databaseName);
+    }
+
+    @Override
     public String name() {
         return "__internal_buckets_" + wrapped.location().getName();
     }

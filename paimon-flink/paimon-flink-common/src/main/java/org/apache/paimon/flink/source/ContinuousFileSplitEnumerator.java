@@ -76,7 +76,7 @@ public class ContinuousFileSplitEnumerator
 
     private final int splitMaxNum;
 
-    private final boolean shuffleByPartition;
+    private final boolean shuffleBucketWithPartition;
 
     @Nullable protected Long nextSnapshotId;
 
@@ -92,7 +92,7 @@ public class ContinuousFileSplitEnumerator
             StreamTableScan scan,
             BucketMode bucketMode,
             int splitMaxPerTask,
-            boolean shuffleByPartition) {
+            boolean shuffleBucketWithPartition) {
         checkArgument(discoveryInterval > 0L);
         this.context = checkNotNull(context);
         this.nextSnapshotId = nextSnapshotId;
@@ -102,7 +102,7 @@ public class ContinuousFileSplitEnumerator
         this.scan = scan;
         this.splitAssigner = createSplitAssigner(bucketMode);
         this.splitMaxNum = context.currentParallelism() * splitMaxPerTask;
-        this.shuffleByPartition = shuffleByPartition;
+        this.shuffleBucketWithPartition = shuffleBucketWithPartition;
         addSplits(remainSplits);
 
         this.consumerProgressCalculator =
@@ -281,7 +281,7 @@ public class ContinuousFileSplitEnumerator
 
     protected int assignSuggestedTask(FileStoreSourceSplit split) {
         DataSplit dataSplit = ((DataSplit) split.split());
-        if (shuffleByPartition) {
+        if (shuffleBucketWithPartition) {
             return ChannelComputer.select(
                     dataSplit.partition(), dataSplit.bucket(), context.currentParallelism());
         }

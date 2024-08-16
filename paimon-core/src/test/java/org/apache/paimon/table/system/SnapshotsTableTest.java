@@ -90,12 +90,12 @@ public class SnapshotsTableTest extends TableTestBase {
 
     @Test
     public void testReadSnapshotsFromLatest() throws Exception {
-        List<InternalRow> expectedRow = getExceptedResult(new long[] {1, 2});
+        List<InternalRow> expectedRow = getExpectedResult(new long[] {1, 2});
         List<InternalRow> result = read(snapshotsTable);
         assertThat(result).containsExactlyInAnyOrderElementsOf(expectedRow);
     }
 
-    private List<InternalRow> getExceptedResult(long[] snapshotIds) {
+    private List<InternalRow> getExpectedResult(long[] snapshotIds) {
         List<InternalRow> expectedRow = new ArrayList<>();
         for (long snapshotId : snapshotIds) {
             Snapshot snapshot = snapshotManager.snapshot(snapshotId);

@@ -19,9 +19,11 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.partition.PartitionExpireStrategy;
+import org.apache.paimon.partition.PartitionValuesTimeExpireStrategy;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,6 +33,7 @@ import javax.annotation.Nullable;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -45,10 +48,27 @@ public class PartitionExpire {
     private final FileStoreScan scan;
     private final FileStoreCommit commit;
     private final MetastoreClient metastoreClient;
-
     private LocalDateTime lastCheck;
-
     private final PartitionExpireStrategy strategy;
+    private final boolean endInputCheckPartitionExpire;
+
+    public PartitionExpire(
+            Duration expirationTime,
+            Duration checkInterval,
+            PartitionExpireStrategy strategy,
+            FileStoreScan scan,
+            FileStoreCommit commit,
+            @Nullable MetastoreClient metastoreClient,
+            boolean endInputCheckPartitionExpire) {
+        this.expirationTime = expirationTime;
+        this.checkInterval = checkInterval;
+        this.strategy = strategy;
+        this.scan = scan;
+        this.commit = commit;
+        this.metastoreClient = metastoreClient;
+        this.lastCheck = LocalDateTime.now();
+        this.endInputCheckPartitionExpire = endInputCheckPartitionExpire;
+    }
 
     public PartitionExpire(
             Duration expirationTime,
@@ -57,13 +77,7 @@ public class PartitionExpire {
             FileStoreScan scan,
             FileStoreCommit commit,
             @Nullable MetastoreClient metastoreClient) {
-        this.expirationTime = expirationTime;
-        this.checkInterval = checkInterval;
-        this.strategy = strategy;
-        this.scan = scan;
-        this.commit = commit;
-        this.metastoreClient = metastoreClient;
-        this.lastCheck = LocalDateTime.now();
+        this(expirationTime, checkInterval, strategy, scan, commit, metastoreClient, false);
     }
 
     public PartitionExpire withLock(Lock lock) {
@@ -75,6 +89,22 @@ public class PartitionExpire {
         return expire(LocalDateTime.now(), commitIdentifier);
     }
 
+    public boolean isValueExpiration() {
+        return strategy instanceof PartitionValuesTimeExpireStrategy;
+    }
+
+    public boolean isValueAllExpired(Collection<BinaryRow> partitions) {
+        PartitionValuesTimeExpireStrategy valuesStrategy =
+                (PartitionValuesTimeExpireStrategy) strategy;
+        LocalDateTime expireDateTime = LocalDateTime.now().minus(expirationTime);
+        for (BinaryRow partition : partitions) {
+            if (!valuesStrategy.isExpired(expireDateTime, partition)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     @VisibleForTesting
     void setLastCheck(LocalDateTime time) {
         lastCheck = time;
@@ -82,7 +112,9 @@ public class PartitionExpire {
 
     @VisibleForTesting
     List<Map<String, String>> expire(LocalDateTime now, long commitIdentifier) {
-        if (checkInterval.isZero() || now.isAfter(lastCheck.plus(checkInterval))) {
+        if (checkInterval.isZero()
+                || now.isAfter(lastCheck.plus(checkInterval))
+                || (endInputCheckPartitionExpire && Long.MAX_VALUE == commitIdentifier)) {
             List<Map<String, String>> expired =
                     doExpire(now.minus(expirationTime), commitIdentifier);
             lastCheck = now;

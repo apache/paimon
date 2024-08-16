@@ -201,6 +201,11 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
     </thead>
     <tbody>
         <tr>
+            <td>numWriters</td>
+            <td>Gauge</td>
+            <td>Number of writers in this parallelism.</td>
+        </tr>
+        <tr>
             <td>bufferPreemptCount</td>
             <td>Gauge</td>
             <td>The total number of memory preempted.</td>

@@ -43,6 +43,12 @@ public interface DataTable extends InnerTable {
 
     BranchManager branchManager();
 
+    /**
+     * Get {@link DataTable} with branch identified by {@code branchName}. Note that this method
+     * does not keep dynamic options in current table.
+     */
+    DataTable switchToBranch(String branchName);
+
     Path location();
 
     FileIO fileIO();

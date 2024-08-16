@@ -57,7 +57,7 @@ public class CatalogOptions {
     public static final ConfigOption<Boolean> LOCK_ENABLED =
             ConfigOptions.key("lock.enabled")
                     .booleanType()
-                    .defaultValue(false)
+                    .noDefaultValue()
                     .withDescription("Enable Catalog Lock.");
 
     public static final ConfigOption<String> LOCK_TYPE =
@@ -150,4 +150,10 @@ public class CatalogOptions {
                     .withDescription(
                             "Indicates whether this catalog allow upper case, "
                                     + "its default value depends on the implementation of the specific catalog.");
+
+    public static final ConfigOption<Boolean> SYNC_ALL_PROPERTIES =
+            ConfigOptions.key("sync-all-properties")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Sync all table properties to hive metastore");
 }

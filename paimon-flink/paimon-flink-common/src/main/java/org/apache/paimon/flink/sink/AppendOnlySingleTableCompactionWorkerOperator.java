@@ -18,93 +18,25 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.append.AppendOnlyCompactionTask;
-import org.apache.paimon.flink.compact.UnawareBucketCompactor;
+import org.apache.paimon.append.UnawareAppendCompactionTask;
 import org.apache.paimon.flink.source.BucketUnawareCompactSource;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.utils.ExecutorThreadFactory;
 
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.io.IOException;
-import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 
 /**
- * Operator to execute {@link AppendOnlyCompactionTask} passed from {@link
+ * Operator to execute {@link UnawareAppendCompactionTask} passed from {@link
  * BucketUnawareCompactSource} for compacting single unaware bucket tables in divided mode.
  */
 public class AppendOnlySingleTableCompactionWorkerOperator
-        extends PrepareCommitOperator<AppendOnlyCompactionTask, Committable> {
-
-    private static final Logger LOG =
-            LoggerFactory.getLogger(AppendOnlySingleTableCompactionWorkerOperator.class);
-
-    private final FileStoreTable table;
-    private final String commitUser;
-
-    private transient UnawareBucketCompactor unawareBucketCompactor;
-
-    private transient ExecutorService lazyCompactExecutor;
+        extends AppendCompactWorkerOperator<UnawareAppendCompactionTask> {
 
     public AppendOnlySingleTableCompactionWorkerOperator(FileStoreTable table, String commitUser) {
-        super(Options.fromMap(table.options()));
-        this.table = table;
-        this.commitUser = commitUser;
-    }
-
-    @VisibleForTesting
-    Iterable<Future<CommitMessage>> result() {
-        return unawareBucketCompactor.result();
+        super(table, commitUser);
     }
 
     @Override
-    public void open() throws Exception {
-        LOG.debug("Opened a append-only table compaction worker.");
-        this.unawareBucketCompactor =
-                new UnawareBucketCompactor(table, commitUser, this::workerExecutor);
-    }
-
-    @Override
-    protected List<Committable> prepareCommit(boolean waitCompaction, long checkpointId)
-            throws IOException {
-        return this.unawareBucketCompactor.prepareCommit(waitCompaction, checkpointId);
-    }
-
-    @Override
-    public void processElement(StreamRecord<AppendOnlyCompactionTask> element) throws Exception {
+    public void processElement(StreamRecord<UnawareAppendCompactionTask> element) throws Exception {
         this.unawareBucketCompactor.processElement(element.getValue());
-    }
-
-    private ExecutorService workerExecutor() {
-        if (lazyCompactExecutor == null) {
-            lazyCompactExecutor =
-                    Executors.newSingleThreadScheduledExecutor(
-                            new ExecutorThreadFactory(
-                                    Thread.currentThread().getName()
-                                            + "-append-only-compact-worker"));
-        }
-        return lazyCompactExecutor;
-    }
-
-    @Override
-    public void close() throws Exception {
-        if (lazyCompactExecutor != null) {
-            // ignore runnable tasks in queue
-            lazyCompactExecutor.shutdownNow();
-            if (!lazyCompactExecutor.awaitTermination(120, TimeUnit.SECONDS)) {
-                LOG.warn(
-                        "Executors shutdown timeout, there may be some files aren't deleted correctly");
-            }
-            this.unawareBucketCompactor.close();
-        }
     }
 }

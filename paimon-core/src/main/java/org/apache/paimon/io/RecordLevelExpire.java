@@ -69,7 +69,7 @@ public class RecordLevelExpire {
         return new RecordLevelExpire(fieldIndex, (int) expireTime.getSeconds());
     }
 
-    public RecordLevelExpire(int timeField, int expireTime) {
+    private RecordLevelExpire(int timeField, int expireTime) {
         this.timeField = timeField;
         this.expireTime = expireTime;
     }
@@ -78,7 +78,7 @@ public class RecordLevelExpire {
         return file -> wrap(readerFactory.createRecordReader(file));
     }
 
-    public RecordReader<KeyValue> wrap(RecordReader<KeyValue> reader) {
+    private RecordReader<KeyValue> wrap(RecordReader<KeyValue> reader) {
         int currentTime = (int) (System.currentTimeMillis() / 1000);
         return reader.filter(
                 kv -> {

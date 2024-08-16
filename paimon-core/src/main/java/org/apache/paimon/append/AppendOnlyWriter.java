@@ -35,12 +35,12 @@ import org.apache.paimon.io.RowDataRollingFileWriter;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.memory.MemorySegmentPool;
-import org.apache.paimon.operation.AppendOnlyFileStoreWrite.BucketFileRead;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
+import org.apache.paimon.utils.IOFunction;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.LongCounter;
 import org.apache.paimon.utils.Preconditions;
@@ -68,7 +68,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     private final RowType writeSchema;
     private final DataFilePathFactory pathFactory;
     private final CompactManager compactManager;
-    private final BucketFileRead bucketFileRead;
+    private final IOFunction<List<DataFileMeta>, RecordReaderIterator<InternalRow>> bucketFileRead;
     private final boolean forceCompact;
     private final boolean asyncFileWrite;
     private final List<DataFileMeta> newFiles;
@@ -84,7 +84,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     private final FileIndexOptions fileIndexOptions;
 
     private MemorySegmentPool memorySegmentPool;
-    private MemorySize maxDiskSize;
+    private final MemorySize maxDiskSize;
 
     public AppendOnlyWriter(
             FileIO fileIO,
@@ -95,7 +95,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             RowType writeSchema,
             long maxSequenceNumber,
             CompactManager compactManager,
-            BucketFileRead bucketFileRead,
+            IOFunction<List<DataFileMeta>, RecordReaderIterator<InternalRow>> bucketFileRead,
             boolean forceCompact,
             DataFilePathFactory pathFactory,
             @Nullable CommitIncrement increment,
@@ -239,7 +239,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             sinkWriter.setMemoryPool(memorySegmentPool);
 
             // rewrite small files
-            try (RecordReaderIterator<InternalRow> reader = bucketFileRead.read(files)) {
+            try (RecordReaderIterator<InternalRow> reader = bucketFileRead.apply(files)) {
                 while (reader.hasNext()) {
                     sinkWriter.write(reader.next());
                 }

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.paimon.append.MultiTableAppendOnlyCompactionTask;
+import org.apache.paimon.append.MultiTableUnawareAppendCompactionTask;
 import org.apache.paimon.data.serializer.VersionedSerializer;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.io.DataInputDeserializer;
@@ -35,9 +35,9 @@ import java.util.List;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
-/** Serializer for {@link MultiTableAppendOnlyCompactionTask}. */
+/** Serializer for {@link MultiTableUnawareAppendCompactionTask}. */
 public class MultiTableCompactionTaskSerializer
-        implements VersionedSerializer<MultiTableAppendOnlyCompactionTask> {
+        implements VersionedSerializer<MultiTableUnawareAppendCompactionTask> {
 
     private static final int CURRENT_VERSION = 1;
 
@@ -56,14 +56,14 @@ public class MultiTableCompactionTaskSerializer
     }
 
     @Override
-    public byte[] serialize(MultiTableAppendOnlyCompactionTask task) throws IOException {
+    public byte[] serialize(MultiTableUnawareAppendCompactionTask task) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(out);
         serialize(task, view);
         return out.toByteArray();
     }
 
-    private void serialize(MultiTableAppendOnlyCompactionTask task, DataOutputView view)
+    private void serialize(MultiTableUnawareAppendCompactionTask task, DataOutputView view)
             throws IOException {
         serializeBinaryRow(task.partition(), view);
         dataFileSerializer.serializeList(task.compactBefore(), view);
@@ -71,35 +71,36 @@ public class MultiTableCompactionTaskSerializer
     }
 
     @Override
-    public MultiTableAppendOnlyCompactionTask deserialize(int version, byte[] serialized)
+    public MultiTableUnawareAppendCompactionTask deserialize(int version, byte[] serialized)
             throws IOException {
         checkVersion(version);
         DataInputDeserializer view = new DataInputDeserializer(serialized);
         return deserialize(view);
     }
 
-    private MultiTableAppendOnlyCompactionTask deserialize(DataInputView view) throws IOException {
-        return new MultiTableAppendOnlyCompactionTask(
+    private MultiTableUnawareAppendCompactionTask deserialize(DataInputView view)
+            throws IOException {
+        return new MultiTableUnawareAppendCompactionTask(
                 deserializeBinaryRow(view),
                 dataFileSerializer.deserializeList(view),
                 identifierSerializer.deserialize(view));
     }
 
-    public List<MultiTableAppendOnlyCompactionTask> deserializeList(int version, DataInputView view)
-            throws IOException {
+    public List<MultiTableUnawareAppendCompactionTask> deserializeList(
+            int version, DataInputView view) throws IOException {
         checkVersion(version);
         int length = view.readInt();
-        List<MultiTableAppendOnlyCompactionTask> list = new ArrayList<>(length);
+        List<MultiTableUnawareAppendCompactionTask> list = new ArrayList<>(length);
         for (int i = 0; i < length; i++) {
             list.add(deserialize(view));
         }
         return list;
     }
 
-    public void serializeList(List<MultiTableAppendOnlyCompactionTask> list, DataOutputView view)
+    public void serializeList(List<MultiTableUnawareAppendCompactionTask> list, DataOutputView view)
             throws IOException {
         view.writeInt(list.size());
-        for (MultiTableAppendOnlyCompactionTask commitMessage : list) {
+        for (MultiTableUnawareAppendCompactionTask commitMessage : list) {
             serialize(commitMessage, view);
         }
     }

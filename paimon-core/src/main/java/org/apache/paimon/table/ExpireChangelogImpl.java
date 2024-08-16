@@ -134,11 +134,11 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
             LOG.debug("Changelog expire range is [" + earliestId + ", " + endExclusiveId + ")");
         }
 
-        List<Snapshot> referencedSnapshots = tagManager.taggedSnapshots();
+        List<Snapshot> taggedSnapshots = tagManager.taggedSnapshots();
 
         List<Snapshot> skippingSnapshots =
                 SnapshotManager.findOverlappedSnapshots(
-                        referencedSnapshots, earliestId, endExclusiveId);
+                        taggedSnapshots, earliestId, endExclusiveId);
         skippingSnapshots.add(snapshotManager.changelog(endExclusiveId));
         Set<String> manifestSkippSet = changelogDeletion.manifestSkippingSet(skippingSnapshots);
         for (long id = earliestId; id < endExclusiveId; id++) {
@@ -148,7 +148,7 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
             Changelog changelog = snapshotManager.longLivedChangelog(id);
             Predicate<ManifestEntry> skipper;
             try {
-                skipper = changelogDeletion.dataFileSkipper(referencedSnapshots, id);
+                skipper = changelogDeletion.createDataFileSkipperForTags(taggedSnapshots, id);
             } catch (Exception e) {
                 LOG.info(
                         String.format(

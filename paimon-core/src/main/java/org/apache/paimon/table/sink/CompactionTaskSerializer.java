@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.paimon.append.AppendOnlyCompactionTask;
+import org.apache.paimon.append.UnawareAppendCompactionTask;
 import org.apache.paimon.data.serializer.VersionedSerializer;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.io.DataInputDeserializer;
@@ -34,8 +34,8 @@ import java.util.List;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
-/** Serializer for {@link AppendOnlyCompactionTask}. */
-public class CompactionTaskSerializer implements VersionedSerializer<AppendOnlyCompactionTask> {
+/** Serializer for {@link UnawareAppendCompactionTask}. */
+public class CompactionTaskSerializer implements VersionedSerializer<UnawareAppendCompactionTask> {
 
     private static final int CURRENT_VERSION = 2;
 
@@ -51,38 +51,40 @@ public class CompactionTaskSerializer implements VersionedSerializer<AppendOnlyC
     }
 
     @Override
-    public byte[] serialize(AppendOnlyCompactionTask obj) throws IOException {
+    public byte[] serialize(UnawareAppendCompactionTask obj) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(out);
         serialize(obj, view);
         return out.toByteArray();
     }
 
-    public void serializeList(List<AppendOnlyCompactionTask> list, DataOutputView view)
+    public void serializeList(List<UnawareAppendCompactionTask> list, DataOutputView view)
             throws IOException {
         view.writeInt(list.size());
-        for (AppendOnlyCompactionTask commitMessage : list) {
+        for (UnawareAppendCompactionTask commitMessage : list) {
             serialize(commitMessage, view);
         }
     }
 
-    private void serialize(AppendOnlyCompactionTask task, DataOutputView view) throws IOException {
+    private void serialize(UnawareAppendCompactionTask task, DataOutputView view)
+            throws IOException {
         serializeBinaryRow(task.partition(), view);
         dataFileSerializer.serializeList(task.compactBefore(), view);
     }
 
     @Override
-    public AppendOnlyCompactionTask deserialize(int version, byte[] serialized) throws IOException {
+    public UnawareAppendCompactionTask deserialize(int version, byte[] serialized)
+            throws IOException {
         checkVersion(version);
         DataInputDeserializer view = new DataInputDeserializer(serialized);
         return deserialize(view);
     }
 
-    public List<AppendOnlyCompactionTask> deserializeList(int version, DataInputView view)
+    public List<UnawareAppendCompactionTask> deserializeList(int version, DataInputView view)
             throws IOException {
         checkVersion(version);
         int length = view.readInt();
-        List<AppendOnlyCompactionTask> list = new ArrayList<>(length);
+        List<UnawareAppendCompactionTask> list = new ArrayList<>(length);
         for (int i = 0; i < length; i++) {
             list.add(deserialize(view));
         }
@@ -101,8 +103,8 @@ public class CompactionTaskSerializer implements VersionedSerializer<AppendOnlyC
         }
     }
 
-    private AppendOnlyCompactionTask deserialize(DataInputView view) throws IOException {
-        return new AppendOnlyCompactionTask(
+    private UnawareAppendCompactionTask deserialize(DataInputView view) throws IOException {
+        return new UnawareAppendCompactionTask(
                 deserializeBinaryRow(view), dataFileSerializer.deserializeList(view));
     }
 }

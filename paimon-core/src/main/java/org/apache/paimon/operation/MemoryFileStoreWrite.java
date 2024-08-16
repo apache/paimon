@@ -27,6 +27,7 @@ import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.metrics.WriterBufferMetric;
+import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -38,6 +39,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -110,6 +112,7 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
                             + " but this is: "
                             + writer.getClass());
         }
+
         if (writeBufferPool == null) {
             LOG.debug("Use default heap memory segment pool for write buffer.");
             writeBufferPool =
@@ -119,6 +122,10 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
                             .addOwners(this::memoryOwners);
         }
         writeBufferPool.notifyNewOwner((MemoryOwner) writer);
+
+        if (writerBufferMetric != null) {
+            writerBufferMetric.increaseNumWriters();
+        }
     }
 
     @Override
@@ -133,6 +140,16 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
             writerBufferMetric =
                     new WriterBufferMetric(() -> writeBufferPool, metricRegistry, tableName);
         }
+    }
+
+    @Override
+    public List<CommitMessage> prepareCommit(boolean waitCompaction, long commitIdentifier)
+            throws Exception {
+        List<CommitMessage> result = super.prepareCommit(waitCompaction, commitIdentifier);
+        if (writerBufferMetric != null) {
+            writerBufferMetric.setNumWriters(writers.values().stream().mapToInt(Map::size).sum());
+        }
+        return result;
     }
 
     @Override

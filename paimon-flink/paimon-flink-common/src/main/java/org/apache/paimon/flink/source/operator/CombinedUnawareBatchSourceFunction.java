@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.source.operator;
 
-import org.apache.paimon.append.MultiTableAppendOnlyCompactionTask;
+import org.apache.paimon.append.MultiTableUnawareAppendCompactionTask;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.compact.MultiTableScanBase;
 import org.apache.paimon.flink.compact.MultiUnawareBucketTableScan;
@@ -46,11 +46,11 @@ import static org.apache.paimon.flink.compact.MultiTableScanBase.ScanResult.IS_E
  * mode.
  */
 public class CombinedUnawareBatchSourceFunction
-        extends CombinedCompactorSourceFunction<MultiTableAppendOnlyCompactionTask> {
+        extends CombinedCompactorSourceFunction<MultiTableUnawareAppendCompactionTask> {
 
     private static final Logger LOGGER =
             LoggerFactory.getLogger(CombinedUnawareBatchSourceFunction.class);
-    private transient MultiTableScanBase<MultiTableAppendOnlyCompactionTask> tableScan;
+    private transient MultiTableScanBase<MultiTableUnawareAppendCompactionTask> tableScan;
 
     public CombinedUnawareBatchSourceFunction(
             Catalog.Loader catalogLoader,
@@ -90,7 +90,7 @@ public class CombinedUnawareBatchSourceFunction
         }
     }
 
-    public static DataStream<MultiTableAppendOnlyCompactionTask> buildSource(
+    public static DataStream<MultiTableUnawareAppendCompactionTask> buildSource(
             StreamExecutionEnvironment env,
             String name,
             Catalog.Loader catalogLoader,
@@ -100,12 +100,12 @@ public class CombinedUnawareBatchSourceFunction
         CombinedUnawareBatchSourceFunction function =
                 new CombinedUnawareBatchSourceFunction(
                         catalogLoader, includingPattern, excludingPattern, databasePattern);
-        StreamSource<MultiTableAppendOnlyCompactionTask, CombinedUnawareBatchSourceFunction>
+        StreamSource<MultiTableUnawareAppendCompactionTask, CombinedUnawareBatchSourceFunction>
                 sourceOperator = new StreamSource<>(function);
         MultiTableCompactionTaskTypeInfo compactionTaskTypeInfo =
                 new MultiTableCompactionTaskTypeInfo();
 
-        SingleOutputStreamOperator<MultiTableAppendOnlyCompactionTask> source =
+        SingleOutputStreamOperator<MultiTableUnawareAppendCompactionTask> source =
                 new DataStreamSource<>(
                                 env,
                                 compactionTaskTypeInfo,
@@ -115,7 +115,7 @@ public class CombinedUnawareBatchSourceFunction
                                 Boundedness.BOUNDED)
                         .forceNonParallel();
 
-        PartitionTransformation<MultiTableAppendOnlyCompactionTask> transformation =
+        PartitionTransformation<MultiTableUnawareAppendCompactionTask> transformation =
                 new PartitionTransformation<>(
                         source.getTransformation(), new RebalancePartitioner<>());
 

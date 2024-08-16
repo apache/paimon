@@ -70,6 +70,6 @@ case object MergeInto extends RowLevelOp {
   override val supportedMergeEngine: Seq[MergeEngine] =
     Seq(MergeEngine.DEDUPLICATE, MergeEngine.PARTIAL_UPDATE)
 
-  override val supportAppendOnlyTable: Boolean = false
+  override val supportAppendOnlyTable: Boolean = true
 
 }

@@ -296,27 +296,26 @@ public class SchemaManager implements Serializable {
                             newFields,
                             update.fieldName(),
                             (field) -> {
+                                DataType targetType = update.newDataType();
+                                if (update.keepNullability()) {
+                                    targetType = targetType.copy(field.type().isNullable());
+                                }
                                 checkState(
-                                        DataTypeCasts.supportsExplicitCast(
-                                                        field.type(), update.newDataType())
-                                                && CastExecutors.resolve(
-                                                                field.type(), update.newDataType())
+                                        DataTypeCasts.supportsExplicitCast(field.type(), targetType)
+                                                && CastExecutors.resolve(field.type(), targetType)
                                                         != null,
                                         String.format(
                                                 "Column type %s[%s] cannot be converted to %s without loosing information.",
-                                                field.name(), field.type(), update.newDataType()));
+                                                field.name(), field.type(), targetType));
                                 AtomicInteger dummyId = new AtomicInteger(0);
                                 if (dummyId.get() != 0) {
                                     throw new RuntimeException(
                                             String.format(
                                                     "Update column to nested row type '%s' is not supported.",
-                                                    update.newDataType()));
+                                                    targetType));
                                 }
                                 return new DataField(
-                                        field.id(),
-                                        field.name(),
-                                        update.newDataType(),
-                                        field.description());
+                                        field.id(), field.name(), targetType, field.description());
                             });
                 } else if (change instanceof UpdateColumnNullability) {
                     UpdateColumnNullability update = (UpdateColumnNullability) change;

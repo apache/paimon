@@ -59,6 +59,14 @@ public interface FileStoreTable extends DataTable {
         return schema().primaryKeys();
     }
 
+    default BucketSpec bucketSpec() {
+        return new BucketSpec(bucketMode(), schema().bucketKeys(), schema().numBuckets());
+    }
+
+    default BucketMode bucketMode() {
+        return store().bucketMode();
+    }
+
     @Override
     default Map<String, String> options() {
         return schema().options();
@@ -72,8 +80,6 @@ public interface FileStoreTable extends DataTable {
     TableSchema schema();
 
     FileStore<?> store();
-
-    BucketMode bucketMode();
 
     CatalogEnvironment catalogEnvironment();
 
@@ -105,4 +111,11 @@ public interface FileStoreTable extends DataTable {
     boolean supportStreamingReadOverwrite();
 
     RowKeyExtractor createRowKeyExtractor();
+
+    /**
+     * Get {@link DataTable} with branch identified by {@code branchName}. Note that this method
+     * does not keep dynamic options in current table.
+     */
+    @Override
+    FileStoreTable switchToBranch(String branchName);
 }

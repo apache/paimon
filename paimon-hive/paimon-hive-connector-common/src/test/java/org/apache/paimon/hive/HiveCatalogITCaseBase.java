@@ -364,6 +364,58 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
+    public void testCreateCatalogWithSyncTblProperties() throws Exception {
+        tEnv.executeSql(
+                        String.join(
+                                "\n",
+                                "CREATE CATALOG paimon_catalog_sync WITH (",
+                                "  'type' = 'paimon',",
+                                "  'metastore' = 'hive',",
+                                "  'uri' = '',",
+                                "  'warehouse' = '" + path + "',",
+                                "  'lock.enabled' = 'true',",
+                                "  'table.type' = 'EXTERNAL',",
+                                "  'sync-all-properties' = 'true'",
+                                ")"))
+                .await();
+        tEnv.executeSql("USE CATALOG paimon_catalog_sync").await();
+        tEnv.executeSql("USE test_db").await();
+        tEnv.executeSql("CREATE TABLE t01 ( aa INT, bb STRING ) WITH ( 'file.format' = 'avro' )")
+                .await();
+        // assert contain properties
+        assertThat(
+                        hiveShell
+                                .executeQuery("DESC FORMATTED t01")
+                                .contains("\tfile.format         \tavro                "))
+                .isTrue();
+
+        tEnv.executeSql(
+                        String.join(
+                                "\n",
+                                "CREATE CATALOG paimon_catalog_sync01 WITH (",
+                                "  'type' = 'paimon',",
+                                "  'metastore' = 'hive',",
+                                "  'uri' = '',",
+                                "  'warehouse' = '" + path + "',",
+                                "  'lock.enabled' = 'true',",
+                                "  'table.type' = 'EXTERNAL',",
+                                "  'sync-all-properties' = 'false'",
+                                ")"))
+                .await();
+        tEnv.executeSql("USE CATALOG paimon_catalog_sync01").await();
+        tEnv.executeSql("USE test_db").await();
+        tEnv.executeSql("CREATE TABLE t02 ( aa INT, bb STRING ) WITH ( 'file.format' = 'avro' )")
+                .await();
+
+        // assert not contain properties
+        assertThat(
+                        hiveShell
+                                .executeQuery("DESC FORMATTED t02")
+                                .contains("\tfile.format         \tavro                "))
+                .isFalse();
+    }
+
+    @Test
     public void testCreateInsensitiveTable() throws Exception {
         tEnv.executeSql(
                         String.join(

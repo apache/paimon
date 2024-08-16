@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.system;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -57,7 +58,7 @@ import static org.apache.paimon.utils.SerializationUtils.newStringType;
 /** A {@link Table} for showing options of table. */
 public class OptionsTable implements ReadonlyTable {
 
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
 
     public static final String OPTIONS = "options";
 
@@ -69,14 +70,19 @@ public class OptionsTable implements ReadonlyTable {
 
     private final FileIO fileIO;
     private final Path location;
+    private final String branch;
 
     public OptionsTable(FileStoreTable dataTable) {
-        this(dataTable.fileIO(), dataTable.location());
+        this(
+                dataTable.fileIO(),
+                dataTable.location(),
+                CoreOptions.branch(dataTable.schema().options()));
     }
 
-    public OptionsTable(FileIO fileIO, Path location) {
+    public OptionsTable(FileIO fileIO, Path location, String branchName) {
         this.fileIO = fileIO;
         this.location = location;
+        this.branch = branchName;
     }
 
     @Override
@@ -106,7 +112,7 @@ public class OptionsTable implements ReadonlyTable {
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new OptionsTable(fileIO, location);
+        return new OptionsTable(fileIO, location, branch);
     }
 
     private class OptionsScan extends ReadOnceTableScan {
@@ -150,7 +156,7 @@ public class OptionsTable implements ReadonlyTable {
         }
     }
 
-    private static class OptionsRead implements InnerTableRead {
+    private class OptionsRead implements InnerTableRead {
 
         private final FileIO fileIO;
         private int[][] projection;
@@ -183,7 +189,7 @@ public class OptionsTable implements ReadonlyTable {
             Path location = ((OptionsSplit) split).location;
             Iterator<InternalRow> rows =
                     Iterators.transform(
-                            options(fileIO, location).entrySet().iterator(), this::toRow);
+                            options(fileIO, location, branch).entrySet().iterator(), this::toRow);
             if (projection != null) {
                 rows =
                         Iterators.transform(
@@ -199,8 +205,8 @@ public class OptionsTable implements ReadonlyTable {
         }
     }
 
-    private static Map<String, String> options(FileIO fileIO, Path location) {
-        return new SchemaManager(fileIO, location)
+    private static Map<String, String> options(FileIO fileIO, Path location, String branchName) {
+        return new SchemaManager(fileIO, location, branchName)
                 .latest()
                 .orElseThrow(() -> new RuntimeException("Table not exists."))
                 .options();

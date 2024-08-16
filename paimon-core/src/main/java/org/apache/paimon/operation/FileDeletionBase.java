@@ -77,12 +77,11 @@ public abstract class FileDeletionBase<T extends Snapshot> {
 
     protected boolean changelogDecoupled;
 
-    /** Used to record which snapshot is cached. */
-    private long cachedSnapshotId = 0;
+    /** Used to record which tag is cached. */
+    private long cachedTag = 0;
 
-    /** Used to cache data files used by current snapshot. */
-    private final Map<BinaryRow, Map<Integer, Set<String>>> cachedSnapshotDataFiles =
-            new HashMap<>();
+    /** Used to cache data files used by current tag. */
+    private final Map<BinaryRow, Map<Integer, Set<String>>> cachedTagDataFiles = new HashMap<>();
 
     public FileDeletionBase(
             FileIO fileIO,
@@ -328,18 +327,18 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         cleanUnusedStatisticsManifests(snapshot, skippingSet);
     }
 
-    public Predicate<ManifestEntry> dataFileSkipper(
-            List<Snapshot> skippingSnapshots, long expiringSnapshotId) throws Exception {
-        int index = SnapshotManager.findPreviousSnapshot(skippingSnapshots, expiringSnapshotId);
-        // refresh snapshot data files
+    public Predicate<ManifestEntry> createDataFileSkipperForTags(
+            List<Snapshot> taggedSnapshots, long expiringSnapshotId) throws Exception {
+        int index = SnapshotManager.findPreviousSnapshot(taggedSnapshots, expiringSnapshotId);
+        // refresh tag data files
         if (index >= 0) {
-            Snapshot previousSnapshot = skippingSnapshots.get(index);
-            if (previousSnapshot.id() != cachedSnapshotId) {
-                cachedSnapshotId = previousSnapshot.id();
-                cachedSnapshotDataFiles.clear();
-                addMergedDataFiles(cachedSnapshotDataFiles, previousSnapshot);
+            Snapshot previousTag = taggedSnapshots.get(index);
+            if (previousTag.id() != cachedTag) {
+                cachedTag = previousTag.id();
+                cachedTagDataFiles.clear();
+                addMergedDataFiles(cachedTagDataFiles, previousTag);
             }
-            return entry -> containsDataFile(cachedSnapshotDataFiles, entry);
+            return entry -> containsDataFile(cachedTagDataFiles, entry);
         }
         return entry -> false;
     }

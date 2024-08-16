@@ -33,7 +33,6 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static org.apache.paimon.utils.FileUtils.listOriginalVersionedFiles;
 import static org.apache.paimon.utils.FileUtils.listVersionedDirectories;
 import static org.apache.paimon.utils.FileUtils.listVersionedFileStatus;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -68,16 +67,6 @@ public class BranchManager {
     /** Return the root Directory of branch. */
     public Path branchDirectory() {
         return new Path(tablePath + "/branch");
-    }
-
-    /** Return the root Directory of branch by given tablePath. */
-    public static Path branchDirectory(Path tablePath) {
-        return new Path(tablePath + "/branch");
-    }
-
-    public static List<String> branchNames(FileIO fileIO, Path tablePath) throws IOException {
-        return listOriginalVersionedFiles(fileIO, branchDirectory(tablePath), BRANCH_PREFIX)
-                .collect(Collectors.toList());
     }
 
     public static boolean isMainBranch(String branch) {
@@ -115,40 +104,6 @@ public class BranchManager {
             fileIO.copyFile(
                     schemaManager.toSchemaPath(latestSchema.id()),
                     schemaManager.copyWithBranch(branchName).toSchemaPath(latestSchema.id()),
-                    true);
-        } catch (IOException e) {
-            throw new RuntimeException(
-                    String.format(
-                            "Exception occurs when create branch '%s' (directory in %s).",
-                            branchName, branchPath(tablePath, branchName)),
-                    e);
-        }
-    }
-
-    public void createBranch(String branchName, long snapshotId) {
-        checkArgument(
-                !isMainBranch(branchName),
-                String.format(
-                        "Branch name '%s' is the default branch and cannot be used.",
-                        DEFAULT_MAIN_BRANCH));
-        checkArgument(!StringUtils.isBlank(branchName), "Branch name '%s' is blank.", branchName);
-        checkArgument(!branchExists(branchName), "Branch name '%s' already exists.", branchName);
-        checkArgument(
-                !branchName.chars().allMatch(Character::isDigit),
-                "Branch name cannot be pure numeric string but is '%s'.",
-                branchName);
-
-        Snapshot snapshot = snapshotManager.snapshot(snapshotId);
-
-        try {
-            // Copy the corresponding snapshot and schema files into the branch directory
-            fileIO.copyFile(
-                    snapshotManager.snapshotPath(snapshotId),
-                    snapshotManager.copyWithBranch(branchName).snapshotPath(snapshot.id()),
-                    true);
-            fileIO.copyFile(
-                    schemaManager.toSchemaPath(snapshot.schemaId()),
-                    schemaManager.copyWithBranch(branchName).toSchemaPath(snapshot.schemaId()),
                     true);
         } catch (IOException e) {
             throw new RuntimeException(

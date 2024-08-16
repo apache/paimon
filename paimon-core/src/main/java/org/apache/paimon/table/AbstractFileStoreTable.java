@@ -58,8 +58,10 @@ import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanne
 import org.apache.paimon.table.source.snapshot.StaticFromWatermarkStartingScanner;
 import org.apache.paimon.tag.TagPreview;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.SnapshotNotExistException;
 import org.apache.paimon.utils.TagManager;
 
 import javax.annotation.Nullable;
@@ -79,7 +81,6 @@ import java.util.function.BiConsumer;
 
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Abstract {@link FileStoreTable}. */
 abstract class AbstractFileStoreTable implements FileStoreTable {
@@ -148,11 +149,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             return store().newStatsFileHandler().readStats(latestSnapshot);
         }
         return Optional.empty();
-    }
-
-    @Override
-    public BucketMode bucketMode() {
-        return store().bucketMode();
     }
 
     @Override
@@ -275,15 +271,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         CoreOptions.setDefaultValues(newOptions);
 
         // copy a new table schema to contain dynamic options
-        TableSchema newTableSchema = tableSchema;
-        if (newOptions.contains(CoreOptions.BRANCH)) {
-            newTableSchema =
-                    schemaManager()
-                            .copyWithBranch(new CoreOptions(newOptions).branch())
-                            .latest()
-                            .get();
-        }
-        newTableSchema = newTableSchema.copy(newOptions.toMap());
+        TableSchema newTableSchema = tableSchema.copy(newOptions.toMap());
 
         if (tryTimeTravel) {
             // see if merged options contain time travel option
@@ -386,9 +374,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 catalogEnvironment.lockFactory().create(),
                 CoreOptions.fromMap(options()).consumerExpireTime(),
                 new ConsumerManager(fileIO, path, snapshotManager().branch()),
-                coreOptions().snapshotExpireExecutionMode(),
+                options.snapshotExpireExecutionMode(),
                 name(),
-                coreOptions().forceCreatingSnapshot());
+                options.forceCreatingSnapshot());
     }
 
     private List<CommitCallback> createCommitCallbacks(String commitUser) {
@@ -507,7 +495,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         rollbackHelper().cleanLargerThan(snapshotManager.snapshot(snapshotId));
     }
 
-    public Snapshot createTagInternal(long fromSnapshotId) {
+    public Snapshot findSnapshot(long fromSnapshotId) throws SnapshotNotExistException {
         SnapshotManager snapshotManager = snapshotManager();
         Snapshot snapshot = null;
         if (snapshotManager.snapshotExists(fromSnapshotId)) {
@@ -523,35 +511,39 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 }
             }
         }
-        checkArgument(
-                snapshot != null,
-                "Cannot create tag because given snapshot #%s doesn't exist.",
-                fromSnapshotId);
+
+        SnapshotNotExistException.checkNotNull(
+                snapshot,
+                String.format(
+                        "Cannot create tag because given snapshot #%s doesn't exist.",
+                        fromSnapshotId));
+
         return snapshot;
     }
 
     @Override
     public void createTag(String tagName, long fromSnapshotId) {
-        createTag(
-                tagName, createTagInternal(fromSnapshotId), coreOptions().tagDefaultTimeRetained());
+        createTag(tagName, findSnapshot(fromSnapshotId), coreOptions().tagDefaultTimeRetained());
     }
 
     @Override
     public void createTag(String tagName, long fromSnapshotId, Duration timeRetained) {
-        createTag(tagName, createTagInternal(fromSnapshotId), timeRetained);
+        createTag(tagName, findSnapshot(fromSnapshotId), timeRetained);
     }
 
     @Override
     public void createTag(String tagName) {
         Snapshot latestSnapshot = snapshotManager().latestSnapshot();
-        checkNotNull(latestSnapshot, "Cannot create tag because latest snapshot doesn't exist.");
+        SnapshotNotExistException.checkNotNull(
+                latestSnapshot, "Cannot create tag because latest snapshot doesn't exist.");
         createTag(tagName, latestSnapshot, coreOptions().tagDefaultTimeRetained());
     }
 
     @Override
     public void createTag(String tagName, Duration timeRetained) {
         Snapshot latestSnapshot = snapshotManager().latestSnapshot();
-        checkNotNull(latestSnapshot, "Cannot create tag because latest snapshot doesn't exist.");
+        SnapshotNotExistException.checkNotNull(
+                latestSnapshot, "Cannot create tag because latest snapshot doesn't exist.");
         createTag(tagName, latestSnapshot, timeRetained);
     }
 
@@ -572,11 +564,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public void createBranch(String branchName) {
         branchManager().createBranch(branchName);
-    }
-
-    @Override
-    public void createBranch(String branchName, long snapshotId) {
-        branchManager().createBranch(branchName, snapshotId);
     }
 
     @Override
@@ -628,6 +615,21 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public BranchManager branchManager() {
         return new BranchManager(fileIO, path, snapshotManager(), tagManager(), schemaManager());
+    }
+
+    @Override
+    public FileStoreTable switchToBranch(String branchName) {
+        Optional<TableSchema> optionalSchema =
+                new SchemaManager(fileIO(), location(), branchName).latest();
+        Preconditions.checkArgument(
+                optionalSchema.isPresent(), "Branch " + branchName + " does not exist");
+
+        TableSchema branchSchema = optionalSchema.get();
+        Options branchOptions = new Options(branchSchema.options());
+        branchOptions.set(CoreOptions.BRANCH, branchName);
+        branchSchema = branchSchema.copy(branchOptions.toMap());
+        return FileStoreTableFactory.create(
+                fileIO(), location(), branchSchema, new Options(), catalogEnvironment());
     }
 
     private RollbackHelper rollbackHelper() {

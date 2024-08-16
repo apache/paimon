@@ -217,8 +217,8 @@ public class FlinkConnectorOptions {
                                     + " Note: This is dangerous and is likely to cause data errors if downstream"
                                     + " is used to calculate aggregation and the input is not complete changelog.");
 
-    public static final ConfigOption<Boolean> STREAMING_READ_SHUFFLE_BY_PARTITION =
-            key("streaming-read.shuffle-by-partition")
+    public static final ConfigOption<Boolean> STREAMING_READ_SHUFFLE_BUCKET_WITH_PARTITION =
+            key("streaming-read.shuffle-bucket-with-partition")
                     .booleanType()
                     .defaultValue(true)
                     .withDescription(

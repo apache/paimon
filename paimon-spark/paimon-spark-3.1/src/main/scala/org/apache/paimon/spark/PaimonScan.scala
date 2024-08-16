@@ -29,5 +29,6 @@ case class PaimonScan(
     requiredSchema: StructType,
     filters: Seq[Predicate],
     reservedFilters: Seq[Filter],
-    pushDownLimit: Option[Int])
+    pushDownLimit: Option[Int],
+    disableBucketedScan: Boolean = false)
   extends PaimonBaseScan(table, requiredSchema, filters, reservedFilters, pushDownLimit)

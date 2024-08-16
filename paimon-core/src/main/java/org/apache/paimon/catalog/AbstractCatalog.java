@@ -118,7 +118,7 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     protected boolean lockEnabled() {
-        return catalogOptions.get(LOCK_ENABLED);
+        return catalogOptions.getOptional(LOCK_ENABLED).orElse(fileIO.isObjectStore());
     }
 
     @Override

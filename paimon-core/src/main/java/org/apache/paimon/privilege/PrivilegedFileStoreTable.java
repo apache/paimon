@@ -146,12 +146,6 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
     }
 
     @Override
-    public void createBranch(String branchName, long snapshotId) {
-        privilegeChecker.assertCanInsert(identifier);
-        wrapped.createBranch(branchName, snapshotId);
-    }
-
-    @Override
     public void createBranch(String branchName, String tagName) {
         privilegeChecker.assertCanInsert(identifier);
         wrapped.createBranch(branchName, tagName);
@@ -239,6 +233,12 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
     public LocalTableQuery newLocalTableQuery() {
         privilegeChecker.assertCanSelect(identifier);
         return wrapped.newLocalTableQuery();
+    }
+
+    @Override
+    public FileStoreTable switchToBranch(String branchName) {
+        return new PrivilegedFileStoreTable(
+                wrapped.switchToBranch(branchName), privilegeChecker, identifier);
     }
 
     @Override

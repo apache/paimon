@@ -19,11 +19,13 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.predicate.Predicate
-import org.apache.paimon.table.Table
+import org.apache.paimon.table.{BucketMode, FileStoreTable, Table}
+import org.apache.paimon.table.source.{DataSplit, Split}
 
 import org.apache.spark.sql.PaimonUtils.fieldReference
-import org.apache.spark.sql.connector.expressions.NamedReference
-import org.apache.spark.sql.connector.read.SupportsRuntimeFiltering
+import org.apache.spark.sql.connector.expressions.{Expressions, NamedReference, Transform}
+import org.apache.spark.sql.connector.read.{SupportsReportPartitioning, SupportsRuntimeFiltering}
+import org.apache.spark.sql.connector.read.partitioning.{KeyGroupedPartitioning, Partitioning, UnknownPartitioning}
 import org.apache.spark.sql.sources.{Filter, In}
 import org.apache.spark.sql.types.StructType
 
@@ -34,9 +36,65 @@ case class PaimonScan(
     requiredSchema: StructType,
     filters: Seq[Predicate],
     reservedFilters: Seq[Filter],
-    pushDownLimit: Option[Int])
+    pushDownLimit: Option[Int],
+    bucketedScanDisabled: Boolean = false)
   extends PaimonBaseScan(table, requiredSchema, filters, reservedFilters, pushDownLimit)
-  with SupportsRuntimeFiltering {
+  with SupportsRuntimeFiltering
+  with SupportsReportPartitioning {
+
+  def disableBucketedScan(): PaimonScan = {
+    copy(bucketedScanDisabled = true)
+  }
+
+  @transient
+  private lazy val extractBucketTransform: Option[Transform] = {
+    table match {
+      case fileStoreTable: FileStoreTable =>
+        val bucketSpec = fileStoreTable.bucketSpec()
+        if (bucketSpec.getBucketMode != BucketMode.HASH_FIXED) {
+          None
+        } else if (bucketSpec.getBucketKeys.size() > 1) {
+          None
+        } else {
+          // Spark does not support bucket with several input attributes,
+          // so we only support one bucket key case.
+          assert(bucketSpec.getNumBuckets > 0)
+          assert(bucketSpec.getBucketKeys.size() == 1)
+          val bucketKey = bucketSpec.getBucketKeys.get(0)
+          if (requiredSchema.exists(f => conf.resolver(f.name, bucketKey))) {
+            Some(Expressions.bucket(bucketSpec.getNumBuckets, bucketKey))
+          } else {
+            None
+          }
+        }
+
+      case _ => None
+    }
+  }
+
+  override def outputPartitioning: Partitioning = {
+    extractBucketTransform
+      .map(bucket => new KeyGroupedPartitioning(Array(bucket), lazyInputPartitions.size))
+      .getOrElse(new UnknownPartitioning(0))
+  }
+
+  override def getInputPartitions(splits: Array[Split]): Seq[PaimonInputPartition] = {
+    if (
+      bucketedScanDisabled || !conf.v2BucketingEnabled || extractBucketTransform.isEmpty ||
+      splits.exists(!_.isInstanceOf[DataSplit])
+    ) {
+      return super.getInputPartitions(splits)
+    }
+
+    splits
+      .map(_.asInstanceOf[DataSplit])
+      .groupBy(_.bucket())
+      .map {
+        case (bucket, groupedSplits) =>
+          PaimonBucketedInputPartition(groupedSplits, bucket)
+      }
+      .toSeq
+  }
 
   override def filterAttributes(): Array[NamedReference] = {
     val requiredFields = readBuilder.readType().getFieldNames.asScala

@@ -21,6 +21,7 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.spark.PaimonMetrics.{RESULTED_TABLE_FILES, SKIPPED_TABLE_FILES}
 import org.apache.paimon.spark.PaimonSparkTestBase
 
+import org.apache.spark.scheduler.{SparkListener, SparkListenerTaskEnd}
 import org.apache.spark.sql.connector.metric.CustomTaskMetric
 import org.junit.jupiter.api.Assertions
 
@@ -42,7 +43,7 @@ class PaimonMetricTest extends PaimonSparkTestBase {
       def checkMetrics(s: String, skippedTableFiles: Long, resultedTableFiles: Long): Unit = {
         val scan = getPaimonScan(s)
         // call getInputPartitions to trigger scan
-        scan.getInputPartitions
+        scan.lazyInputPartitions
         val metrics = scan.reportDriverMetrics()
         Assertions.assertEquals(skippedTableFiles, metric(metrics, SKIPPED_TABLE_FILES))
         Assertions.assertEquals(resultedTableFiles, metric(metrics, RESULTED_TABLE_FILES))
@@ -58,6 +59,31 @@ class PaimonMetricTest extends PaimonSparkTestBase {
       checkMetrics(s"SELECT * FROM T", 0, 2)
       checkMetrics(s"SELECT * FROM T WHERE pt = 'p2'", 1, 1)
     }
+  }
+
+  test("Paimon Metric: report output metric") {
+    sql(s"CREATE TABLE T (id int)")
+
+    var recordsWritten = 0L
+    var bytesWritten = 0L
+
+    val listener = new SparkListener() {
+      override def onTaskEnd(taskEnd: SparkListenerTaskEnd): Unit = {
+        val outputMetrics = taskEnd.taskMetrics.outputMetrics
+        recordsWritten += outputMetrics.recordsWritten
+        bytesWritten += outputMetrics.bytesWritten
+      }
+    }
+
+    try {
+      spark.sparkContext.addSparkListener(listener)
+      sql(s"INSERT INTO T VALUES 1, 2, 3")
+    } finally {
+      spark.sparkContext.removeSparkListener(listener)
+    }
+
+    Assertions.assertEquals(3, recordsWritten)
+    Assertions.assertTrue(bytesWritten > 0)
   }
 
   def metric(metrics: Array[CustomTaskMetric], name: String): Long = {

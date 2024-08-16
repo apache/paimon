@@ -81,6 +81,8 @@ public class CoreOptions implements Serializable {
 
     public static final String DISTINCT = "distinct";
 
+    public static final String LIST_AGG_DELIMITER = "list-agg-delimiter";
+
     public static final String FILE_INDEX = "file-index";
 
     public static final String COLUMNS = "columns";
@@ -962,6 +964,13 @@ public class CoreOptions implements Serializable {
                             "Read incremental changes between start timestamp (exclusive) and end timestamp, "
                                     + "for example, 't1,t2' means changes between timestamp t1 and timestamp t2.");
 
+    public static final ConfigOption<Boolean> END_INPUT_CHECK_PARTITION_EXPIRE =
+            key("end-input.check-partition-expire")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Optional endInput check partition expire used in case of batch mode or bounded stream.");
+
     public static final String STATS_MODE_SUFFIX = "stats-mode";
 
     public static final ConfigOption<String> METADATA_STATS_MODE =
@@ -1474,6 +1483,13 @@ public class CoreOptions implements Serializable {
                         .defaultValue(false));
     }
 
+    public String fieldListAggDelimiter(String fieldName) {
+        return options.get(
+                key(FIELDS_PREFIX + "." + fieldName + "." + LIST_AGG_DELIMITER)
+                        .stringType()
+                        .defaultValue(","));
+    }
+
     @Nullable
     public String fileCompression() {
         return options.get(FILE_COMPRESSION);
@@ -1531,6 +1547,10 @@ public class CoreOptions implements Serializable {
     public int deleteFileThreadNum() {
         return options.getOptional(DELETE_FILE_THREAD_NUM)
                 .orElseGet(() -> Runtime.getRuntime().availableProcessors());
+    }
+
+    public boolean endInputCheckPartitionExpire() {
+        return options.get(END_INPUT_CHECK_PARTITION_EXPIRE);
     }
 
     public ExpireConfig expireConfig() {

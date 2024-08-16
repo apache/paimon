@@ -175,6 +175,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     }
 
     @Override
+    public DataTable switchToBranch(String branchName) {
+        return new AuditLogTable(wrapped.switchToBranch(branchName));
+    }
+
+    @Override
     public InnerTableRead newRead() {
         return new AuditLogRead(wrapped.newRead());
     }
