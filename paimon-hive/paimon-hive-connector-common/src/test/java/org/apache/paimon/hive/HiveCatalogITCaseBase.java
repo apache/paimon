@@ -389,6 +389,20 @@ public abstract class HiveCatalogITCaseBase {
                                 .contains("\tfile.format         \tavro                "))
                 .isTrue();
 
+        tEnv.executeSql("ALTER TABLE t01 SET ( 'file.format' = 'parquet' )").await();
+        assertThat(
+                        hiveShell
+                                .executeQuery("DESC FORMATTED t01")
+                                .contains("\tfile.format         \tparquet             "))
+                .isTrue();
+
+        tEnv.executeSql("ALTER TABLE t01 SET ('owner' = 'hive')").await();
+        assertThat(
+                        hiveShell
+                                .executeQuery("DESC FORMATTED t01")
+                                .contains("\towner               \thive                "))
+                .isTrue();
+
         tEnv.executeSql(
                         String.join(
                                 "\n",
@@ -412,6 +426,20 @@ public abstract class HiveCatalogITCaseBase {
                         hiveShell
                                 .executeQuery("DESC FORMATTED t02")
                                 .contains("\tfile.format         \tavro                "))
+                .isFalse();
+
+        tEnv.executeSql("ALTER TABLE t02 SET ( 'file.format' = 'parquet' )").await();
+        assertThat(
+                        hiveShell
+                                .executeQuery("DESC FORMATTED t02")
+                                .contains("\tfile.format         \tparquet             "))
+                .isFalse();
+
+        tEnv.executeSql("ALTER TABLE t02 SET ('owner' = 'hive')").await();
+        assertThat(
+                        hiveShell
+                                .executeQuery("DESC FORMATTED t02")
+                                .contains("\towner               \thive                "))
                 .isFalse();
     }
 

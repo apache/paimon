@@ -802,7 +802,12 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     private void updateHmsTablePars(Table table, TableSchema schema) {
-        table.getParameters().putAll(convertToPropertiesPrefixKey(schema.options(), HIVE_PREFIX));
+        if (syncAllProperties()) {
+            table.getParameters().putAll(schema.options());
+        } else {
+            table.getParameters()
+                    .putAll(convertToPropertiesPrefixKey(schema.options(), HIVE_PREFIX));
+        }
     }
 
     @VisibleForTesting
