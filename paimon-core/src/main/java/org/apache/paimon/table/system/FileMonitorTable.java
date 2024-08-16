@@ -117,6 +117,11 @@ public class FileMonitorTable implements DataTable, ReadonlyTable {
     }
 
     @Override
+    public DataTable switchToBranch(String branchName) {
+        return new FileMonitorTable(wrapped.switchToBranch(branchName));
+    }
+
+    @Override
     public String name() {
         return "__internal_file_monitor_" + wrapped.location().getName();
     }

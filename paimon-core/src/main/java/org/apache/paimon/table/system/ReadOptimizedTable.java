@@ -146,6 +146,11 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     }
 
     @Override
+    public DataTable switchToBranch(String branchName) {
+        return new ReadOptimizedTable(wrapped.switchToBranch(branchName));
+    }
+
+    @Override
     public InnerTableRead newRead() {
         return wrapped.newRead();
     }

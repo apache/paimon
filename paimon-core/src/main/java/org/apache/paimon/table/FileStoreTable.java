@@ -111,4 +111,11 @@ public interface FileStoreTable extends DataTable {
     boolean supportStreamingReadOverwrite();
 
     RowKeyExtractor createRowKeyExtractor();
+
+    /**
+     * Get {@link DataTable} with branch identified by {@code branchName}. Note that this method
+     * does not keep dynamic options in current table.
+     */
+    @Override
+    FileStoreTable switchToBranch(String branchName);
 }

@@ -19,7 +19,6 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.Changelog;
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
@@ -33,11 +32,8 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.DateTimeUtils;
@@ -171,17 +167,7 @@ public class OrphanFilesClean {
         Set<String> usedFiles = new HashSet<>();
 
         for (String branch : branches) {
-            FileStoreTable branchTable = table;
-            if (!BranchManager.DEFAULT_MAIN_BRANCH.equals(branch)) {
-                TableSchema branchSchema =
-                        new SchemaManager(table.fileIO(), table.location(), branch).latest().get();
-                Options branchOptions = new Options(branchSchema.options());
-                branchOptions.set(CoreOptions.BRANCH, branch);
-                branchSchema = branchSchema.copy(branchOptions.toMap());
-                branchTable =
-                        FileStoreTableFactory.create(
-                                table.fileIO(), table.location(), branchSchema);
-            }
+            FileStoreTable branchTable = table.switchToBranch(branch);
             SnapshotManager snapshotManager = branchTable.snapshotManager();
 
             // specially handle the snapshot directory
