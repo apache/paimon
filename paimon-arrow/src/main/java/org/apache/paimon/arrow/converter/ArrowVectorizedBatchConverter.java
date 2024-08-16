@@ -16,8 +16,9 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.arrow.writer;
+package org.apache.paimon.arrow.converter;
 
+import org.apache.paimon.arrow.writer.ArrowFieldWriter;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
@@ -32,14 +33,14 @@ import org.apache.arrow.vector.VectorSchemaRoot;
 import javax.annotation.Nullable;
 
 /** To convert {@link VectorizedColumnBatch} to Arrow format. */
-public class ArrowBatchWriter extends ArrowWriter {
+public class ArrowVectorizedBatchConverter extends ArrowBatchConverter {
 
     private VectorizedColumnBatch batch;
     private @Nullable int[] pickedInColumn;
     private int totalNumRows;
     private int startIndex;
 
-    public ArrowBatchWriter(VectorSchemaRoot root, ArrowFieldWriter[] fieldWriters) {
+    public ArrowVectorizedBatchConverter(VectorSchemaRoot root, ArrowFieldWriter[] fieldWriters) {
         super(root, fieldWriters);
     }
 

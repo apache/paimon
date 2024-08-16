@@ -16,8 +16,9 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.arrow.writer;
+package org.apache.paimon.arrow.converter;
 
+import org.apache.paimon.arrow.writer.ArrowFieldWriter;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.reader.RecordReader;
 
@@ -26,10 +27,10 @@ import org.apache.arrow.vector.VectorSchemaRoot;
 import javax.annotation.Nullable;
 
 /**
- * A reusable writer to convert Paimon data in {@link RecordReader.RecordIterator} into Arrow
+ * A reusable converter to convert Paimon data in {@link RecordReader.RecordIterator} into Arrow
  * format.
  */
-public abstract class ArrowWriter {
+public abstract class ArrowBatchConverter {
 
     // reusable
     protected final VectorSchemaRoot root;
@@ -37,7 +38,7 @@ public abstract class ArrowWriter {
 
     protected RecordReader.RecordIterator<InternalRow> iterator;
 
-    ArrowWriter(VectorSchemaRoot root, ArrowFieldWriter[] fieldWriters) {
+    ArrowBatchConverter(VectorSchemaRoot root, ArrowFieldWriter[] fieldWriters) {
         this.root = root;
         this.fieldWriters = fieldWriters;
     }

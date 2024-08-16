@@ -16,10 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.arrow.writer;
+package org.apache.paimon.arrow.converter;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.arrow.ArrowUtils;
+import org.apache.paimon.arrow.writer.ArrowFieldWriter;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
@@ -88,9 +89,9 @@ import java.util.stream.IntStream;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assumptions.assumeThat;
 
-/** UT for {@link ArrowWriter}. */
+/** UT for {@link ArrowBatchConverter}. */
 @ExtendWith(ParameterizedTestExtension.class)
-public class ArrowWriterTest {
+public class ArrowBatchConverterTest {
 
     private static final Random RND = ThreadLocalRandom.current();
     private @TempDir java.nio.file.Path tempDir;
@@ -133,7 +134,7 @@ public class ArrowWriterTest {
         PRIMITIVE_TYPE = new RowType(dataFields);
     }
 
-    public ArrowWriterTest(String testMode) {
+    public ArrowBatchConverterTest(String testMode) {
         this.testMode = testMode;
     }
 
@@ -186,7 +187,7 @@ public class ArrowWriterTest {
         int numRows = expected.size();
         try (RootAllocator allocator = new RootAllocator()) {
             VectorSchemaRoot vsr = ArrowUtils.createVectorSchemaRoot(PRIMITIVE_TYPE, allocator);
-            ArrowWriter arrowWriter = createArrowWriter(iterator, PRIMITIVE_TYPE, vsr);
+            ArrowBatchConverter arrowWriter = createArrowWriter(iterator, PRIMITIVE_TYPE, vsr);
             arrowWriter.next(numRows);
             assertThat(vsr.getRowCount()).isEqualTo(numRows);
 
@@ -246,7 +247,7 @@ public class ArrowWriterTest {
                 getRecordIterator(nestedArrayType, rows);
         try (RootAllocator allocator = new RootAllocator()) {
             VectorSchemaRoot vsr = ArrowUtils.createVectorSchemaRoot(nestedArrayType, allocator);
-            ArrowWriter arrowWriter = createArrowWriter(iterator, nestedArrayType, vsr);
+            ArrowBatchConverter arrowWriter = createArrowWriter(iterator, nestedArrayType, vsr);
             arrowWriter.next(numRows);
             assertThat(vsr.getRowCount()).isEqualTo(numRows);
 
@@ -310,7 +311,7 @@ public class ArrowWriterTest {
         RecordReader.RecordIterator<InternalRow> iterator = getRecordIterator(nestedMapType, rows);
         try (RootAllocator allocator = new RootAllocator()) {
             VectorSchemaRoot vsr = ArrowUtils.createVectorSchemaRoot(nestedMapType, allocator);
-            ArrowWriter arrowWriter = createArrowWriter(iterator, nestedMapType, vsr);
+            ArrowBatchConverter arrowWriter = createArrowWriter(iterator, nestedMapType, vsr);
             arrowWriter.next(numRows);
             assertThat(vsr.getRowCount()).isEqualTo(numRows);
 
@@ -367,7 +368,7 @@ public class ArrowWriterTest {
                 getRecordIterator(nestedMapRowType, Arrays.asList(row1, row2, row3));
         try (RootAllocator allocator = new RootAllocator()) {
             VectorSchemaRoot vsr = ArrowUtils.createVectorSchemaRoot(nestedMapRowType, allocator);
-            ArrowWriter arrowWriter = createArrowWriter(iterator, nestedMapRowType, vsr);
+            ArrowBatchConverter arrowWriter = createArrowWriter(iterator, nestedMapRowType, vsr);
             arrowWriter.next(3);
             assertThat(vsr.getRowCount()).isEqualTo(3);
 
@@ -425,7 +426,7 @@ public class ArrowWriterTest {
         RecordReader.RecordIterator<InternalRow> iterator = getRecordIterator(nestedRowType, rows);
         try (RootAllocator allocator = new RootAllocator()) {
             VectorSchemaRoot vsr = ArrowUtils.createVectorSchemaRoot(nestedRowType, allocator);
-            ArrowWriter arrowWriter = createArrowWriter(iterator, nestedRowType, vsr);
+            ArrowBatchConverter arrowWriter = createArrowWriter(iterator, nestedRowType, vsr);
             arrowWriter.next(numRows);
             assertThat(vsr.getRowCount()).isEqualTo(numRows);
 
@@ -466,7 +467,7 @@ public class ArrowWriterTest {
         RecordReader.RecordIterator<InternalRow> iterator = getRecordIterator(rowType, rows);
         try (RootAllocator allocator = new RootAllocator()) {
             VectorSchemaRoot vsr = ArrowUtils.createVectorSchemaRoot(rowType, allocator);
-            ArrowWriter arrowWriter = createArrowWriter(iterator, rowType, vsr);
+            ArrowBatchConverter arrowWriter = createArrowWriter(iterator, rowType, vsr);
 
             // write 3 times
             arrowWriter.next(3);
@@ -521,7 +522,7 @@ public class ArrowWriterTest {
             try (RootAllocator allocator = new RootAllocator()) {
                 Set<Integer> expectedPks = getExpectedPks(numRows, deleted);
                 VectorSchemaRoot vsr = ArrowUtils.createVectorSchemaRoot(rowType, allocator);
-                ArrowWriter arrowWriter = createArrowWriter(iterator, rowType, vsr);
+                ArrowBatchConverter arrowWriter = createArrowWriter(iterator, rowType, vsr);
                 int expectedRowCount = rows.size() - deleted.size();
                 int averageBatchRows = RND.nextInt(expectedRowCount) + 1;
                 int readRows = 0;
@@ -591,7 +592,7 @@ public class ArrowWriterTest {
         try (RootAllocator allocator = new RootAllocator()) {
             Set<Integer> expectedPks = getExpectedPks(numRows, deleted);
             VectorSchemaRoot vsr = ArrowUtils.createVectorSchemaRoot(nestedArrayType, allocator);
-            ArrowWriter arrowWriter = createArrowWriter(iterator, nestedArrayType, vsr);
+            ArrowBatchConverter arrowWriter = createArrowWriter(iterator, nestedArrayType, vsr);
             int expectedRowCount = rows.size() - deleted.size();
             int averageBatchRows = RND.nextInt(expectedRowCount) + 1;
             int readRows = 0;
@@ -669,7 +670,7 @@ public class ArrowWriterTest {
         try (RootAllocator allocator = new RootAllocator()) {
             Set<Integer> expectedPks = getExpectedPks(numRows, deleted);
             VectorSchemaRoot vsr = ArrowUtils.createVectorSchemaRoot(nestedMapType, allocator);
-            ArrowWriter arrowWriter = createArrowWriter(iterator, nestedMapType, vsr);
+            ArrowBatchConverter arrowWriter = createArrowWriter(iterator, nestedMapType, vsr);
             int expectedRowCount = rows.size() - deleted.size();
             int averageBatchRows = RND.nextInt(expectedRowCount) + 1;
             int readRows = 0;
@@ -738,12 +739,13 @@ public class ArrowWriterTest {
         try (RootAllocator allocator = new RootAllocator()) {
             Set<Integer> expectedPks = getExpectedPks(numRows, deleted);
             VectorSchemaRoot vsr = ArrowUtils.createVectorSchemaRoot(nestedRowType, allocator);
-            ArrowWriter arrowWriter = createArrowWriter(iterator, nestedRowType, vsr);
+            ArrowBatchConverter arrowBatchConverter =
+                    createArrowWriter(iterator, nestedRowType, vsr);
             int expectedRowCount = rows.size() - deleted.size();
             int averageBatchRows = RND.nextInt(expectedRowCount) + 1;
             int readRows = 0;
             Set<Integer> readPks = new HashSet<>();
-            while ((vsr = arrowWriter.next(averageBatchRows)) != null) {
+            while ((vsr = arrowBatchConverter.next(averageBatchRows)) != null) {
                 readRows += vsr.getRowCount();
                 // validate current result
                 IntVector pkVector = (IntVector) vsr.getVector(0);
@@ -766,7 +768,7 @@ public class ArrowWriterTest {
             }
             assertThat(readRows).isEqualTo(expectedRowCount);
             assertThat(readPks).isEqualTo(expectedPks);
-            arrowWriter.close();
+            arrowBatchConverter.close();
         }
     }
 
@@ -791,12 +793,12 @@ public class ArrowWriterTest {
         try (RootAllocator allocator = new RootAllocator()) {
             RowType rowType = RowType.of();
             VectorSchemaRoot vsr = ArrowUtils.createVectorSchemaRoot(rowType, allocator);
-            ArrowWriter arrowWriter = createArrowWriter(iterator, rowType, vsr);
-            arrowWriter.next(expectedRowCount);
+            ArrowBatchConverter arrowBatchConverter = createArrowWriter(iterator, rowType, vsr);
+            arrowBatchConverter.next(expectedRowCount);
             assertThat(vsr.getRowCount()).isEqualTo(expectedRowCount);
             assertThat(vsr.getSchema().getFields()).isEmpty();
             assertThat(vsr.getFieldVectors()).isEmpty();
-            arrowWriter.close();
+            arrowBatchConverter.close();
         }
     }
 
@@ -874,21 +876,23 @@ public class ArrowWriterTest {
         return (FileStoreTable) catalog.getTable(identifier);
     }
 
-    private ArrowWriter createArrowWriter(
+    private ArrowBatchConverter createArrowWriter(
             RecordReader.RecordIterator<InternalRow> iterator,
             RowType rowType,
             VectorSchemaRoot vsr) {
         ArrowFieldWriter[] fieldWriters = ArrowUtils.createArrowFieldWriters(vsr, rowType);
         if (testMode.equals("vectorized_without_dv")) {
-            ArrowBatchWriter batchWriter = new ArrowBatchWriter(vsr, fieldWriters);
+            ArrowVectorizedBatchConverter batchWriter =
+                    new ArrowVectorizedBatchConverter(vsr, fieldWriters);
             batchWriter.reset((VectorizedRecordIterator) iterator);
             return batchWriter;
         } else if (testMode.equals("vectorized_with_dv")) {
-            ArrowBatchWriter batchWriter = new ArrowBatchWriter(vsr, fieldWriters);
+            ArrowVectorizedBatchConverter batchWriter =
+                    new ArrowVectorizedBatchConverter(vsr, fieldWriters);
             batchWriter.reset((ApplyDeletionFileRecordIterator) iterator);
             return batchWriter;
         } else {
-            ArrowRowWriter rowWriter = new ArrowRowWriter(vsr, fieldWriters);
+            ArrowPerRowBatchConverter rowWriter = new ArrowPerRowBatchConverter(vsr, fieldWriters);
             rowWriter.reset(iterator);
             return rowWriter;
         }

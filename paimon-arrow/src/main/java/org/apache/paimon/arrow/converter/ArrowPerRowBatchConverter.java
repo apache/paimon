@@ -16,8 +16,9 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.arrow.writer;
+package org.apache.paimon.arrow.converter;
 
+import org.apache.paimon.arrow.writer.ArrowFieldWriter;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.reader.RecordReader;
 
@@ -27,11 +28,11 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 
 /** To convert iterator row by row. */
-public class ArrowRowWriter extends ArrowWriter {
+public class ArrowPerRowBatchConverter extends ArrowBatchConverter {
 
     private InternalRow currentRow;
 
-    public ArrowRowWriter(VectorSchemaRoot root, ArrowFieldWriter[] fieldWriters) {
+    public ArrowPerRowBatchConverter(VectorSchemaRoot root, ArrowFieldWriter[] fieldWriters) {
         super(root, fieldWriters);
     }
 
