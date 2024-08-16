@@ -334,16 +334,23 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testDifferentRowTypes() {
+    public void testDifferentRowTypes() throws Exception {
         sql(
                 "CREATE TABLE t ( pt INT NOT NULL, k INT NOT NULL, v STRING ) PARTITIONED BY (pt) WITH ( 'bucket' = '-1' )");
         sql("CALL sys.create_branch('default.t', 'pk')");
         sql("ALTER TABLE `t$branch_pk` SET ( 'primary-key' = 'pt, k', 'bucket' = '2' )");
         sql("ALTER TABLE `t$branch_pk` ADD (v2 INT)");
-        sql("ALTER TABLE t SET ( 'scan.fallback-branch' = 'pk' )");
+        sql("INSERT INTO t VALUES (1, 10, 'apple')");
+        sql("INSERT INTO `t$branch_pk` VALUES (1, 10, 'cat', 100)");
 
+        sql("ALTER TABLE t SET ( 'scan.fallback-branch' = 'pk' )");
         assertThatThrownBy(() -> sql("SELECT * FROM t"))
                 .hasMessageContaining("Branch main and pk does not have the same row type");
+
+        sql("ALTER TABLE t RESET ( 'scan.fallback-branch' )");
+        assertThat(collectResult("SELECT v, k FROM t")).containsExactlyInAnyOrder("+I[apple, 10]");
+        assertThat(collectResult("SELECT v, v2, k FROM `t$branch_pk`"))
+                .containsExactlyInAnyOrder("+I[cat, 100, 10]");
     }
 
     private List<String> collectResult(String sql) throws Exception {
