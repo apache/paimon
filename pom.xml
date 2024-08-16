@@ -836,6 +836,9 @@ under the License.
                             </licenseHeader>
                         </java>
                         <scala>
+                            <!--  make it works `// spotless:off`  -->
+                            <toggleOffOn />
+
                             <scalafmt>
                                 <version>3.4.3</version>
                                 <file>${maven.multiModuleProjectDirectory}/.scalafmt.conf</file>
