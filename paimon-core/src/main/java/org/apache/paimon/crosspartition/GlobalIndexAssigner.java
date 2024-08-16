@@ -44,6 +44,7 @@ import org.apache.paimon.table.sink.RowPartitionKeyExtractor;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.IDMapping;
 import org.apache.paimon.utils.MutableObjectIterator;
@@ -63,6 +64,7 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiConsumer;
@@ -192,6 +194,15 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
     }
 
     public void endBoostrap(boolean isEndInput) throws Exception {
+        try (CloseableIterator<BinaryRow> iterator = endBoostrapWithoutEmit(isEndInput)) {
+            while (iterator.hasNext()) {
+                processInput(iterator.next());
+            }
+        }
+    }
+
+    public CloseableIterator<BinaryRow> endBoostrapWithoutEmit(boolean isEndInput)
+            throws Exception {
         bootstrap = false;
         bootstrapRecords.complete();
         boolean isEmpty = true;
@@ -222,8 +233,9 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
         if (isEmpty && isEndInput) {
             // optimization: bulk load mode
             bulkLoadBootstrapRecords();
+            return CloseableIterator.empty();
         } else {
-            loopBootstrapRecords();
+            return bootstrapRecords();
         }
     }
 
@@ -363,16 +375,35 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
         keyIdBuffer.clear();
     }
 
-    /** Loop bootstrap records to get and put RocksDB. */
-    private void loopBootstrapRecords() throws Exception {
-        try (RowBuffer.RowBufferIterator iterator = bootstrapRecords.newIterator()) {
-            while (iterator.advanceNext()) {
-                processInput(iterator.getRow());
-            }
-        }
+    private CloseableIterator<BinaryRow> bootstrapRecords() {
+        RowBuffer.RowBufferIterator iterator = bootstrapRecords.newIterator();
+        return new CloseableIterator<BinaryRow>() {
 
-        bootstrapRecords.reset();
-        bootstrapRecords = null;
+            boolean hasNext = iterator.advanceNext();
+
+            @Override
+            public boolean hasNext() {
+                return hasNext;
+            }
+
+            @Override
+            public BinaryRow next() {
+                if (!hasNext) {
+                    throw new NoSuchElementException();
+                }
+
+                BinaryRow row = iterator.getRow();
+                hasNext = iterator.advanceNext();
+                return row;
+            }
+
+            @Override
+            public void close() {
+                iterator.close();
+                bootstrapRecords.reset();
+                bootstrapRecords = null;
+            }
+        };
     }
 
     private void processNewRecord(BinaryRow partition, int partId, BinaryRow key, InternalRow value)
