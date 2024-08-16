@@ -91,6 +91,7 @@ import static org.apache.paimon.hive.HiveCatalogOptions.HIVE_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalogOptions.LOCATION_IN_PROPERTIES;
 import static org.apache.paimon.options.CatalogOptions.ALLOW_UPPER_CASE;
+import static org.apache.paimon.options.CatalogOptions.SYNC_ALL_PROPERTIES;
 import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
@@ -516,10 +517,14 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     private Table createHiveTable(Identifier identifier, TableSchema tableSchema) {
-        Table table =
-                newHmsTable(
-                        identifier,
-                        convertToPropertiesPrefixKey(tableSchema.options(), HIVE_PREFIX));
+        Map<String, String> tblProperties;
+        if (syncAllProperties()) {
+            tblProperties = new HashMap<>(tableSchema.options());
+        } else {
+            tblProperties = convertToPropertiesPrefixKey(tableSchema.options(), HIVE_PREFIX);
+        }
+
+        Table table = newHmsTable(identifier, tblProperties);
         updateHmsTable(table, identifier, tableSchema);
         return table;
     }
@@ -605,6 +610,10 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     public boolean allowUpperCase() {
         return catalogOptions.getOptional(ALLOW_UPPER_CASE).orElse(false);
+    }
+
+    public boolean syncAllProperties() {
+        return catalogOptions.get(SYNC_ALL_PROPERTIES);
     }
 
     @Override
