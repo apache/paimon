@@ -46,7 +46,7 @@ import org.apache.arrow.vector.types.Types;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.FieldType;
 
-import java.util.TimeZone;
+import java.time.ZoneId;
 
 /** Utils for conversion between Paimon {@link DataType} and Arrow {@link FieldType}. */
 public class ArrowFieldTypeConversion {
@@ -145,7 +145,7 @@ public class ArrowFieldTypeConversion {
             int precision = localZonedTimestampType.getPrecision();
             TimeUnit timeUnit = getTimeUnit(precision);
             ArrowType arrowType =
-                    new ArrowType.Timestamp(timeUnit, TimeZone.getDefault().toString());
+                    new ArrowType.Timestamp(timeUnit, ZoneId.systemDefault().toString());
             return new FieldType(localZonedTimestampType.isNullable(), arrowType, null);
         }
 
