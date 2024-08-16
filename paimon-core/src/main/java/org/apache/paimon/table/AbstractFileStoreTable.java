@@ -58,6 +58,7 @@ import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanne
 import org.apache.paimon.table.source.snapshot.StaticFromWatermarkStartingScanner;
 import org.apache.paimon.tag.TagPreview;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.SnapshotNotExistException;
@@ -270,15 +271,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         CoreOptions.setDefaultValues(newOptions);
 
         // copy a new table schema to contain dynamic options
-        TableSchema newTableSchema = tableSchema;
-        if (newOptions.contains(CoreOptions.BRANCH)) {
-            newTableSchema =
-                    schemaManager()
-                            .copyWithBranch(new CoreOptions(newOptions).branch())
-                            .latest()
-                            .get();
-        }
-        newTableSchema = newTableSchema.copy(newOptions.toMap());
+        TableSchema newTableSchema = tableSchema.copy(newOptions.toMap());
 
         if (tryTimeTravel) {
             // see if merged options contain time travel option
@@ -622,6 +615,21 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public BranchManager branchManager() {
         return new BranchManager(fileIO, path, snapshotManager(), tagManager(), schemaManager());
+    }
+
+    @Override
+    public FileStoreTable switchToBranch(String branchName) {
+        Optional<TableSchema> optionalSchema =
+                new SchemaManager(fileIO(), location(), branchName).latest();
+        Preconditions.checkArgument(
+                optionalSchema.isPresent(), "Branch " + branchName + " does not exist");
+
+        TableSchema branchSchema = optionalSchema.get();
+        Options branchOptions = new Options(branchSchema.options());
+        branchOptions.set(CoreOptions.BRANCH, branchName);
+        branchSchema = branchSchema.copy(branchOptions.toMap());
+        return FileStoreTableFactory.create(
+                fileIO(), location(), branchSchema, new Options(), catalogEnvironment());
     }
 
     private RollbackHelper rollbackHelper() {

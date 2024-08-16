@@ -41,7 +41,6 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.TableType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -346,9 +345,7 @@ public class HiveCatalog extends AbstractCatalog {
                 continue;
             }
 
-            FileStoreTable table =
-                    FileStoreTableFactory.create(
-                            mainTable.fileIO(), mainTable.location(), branchSchema.get());
+            FileStoreTable table = mainTable.switchToBranch(branchName);
             if (!table.newScan().withPartitionFilter(partitionSpec).listPartitions().isEmpty()) {
                 return true;
             }

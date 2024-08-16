@@ -91,7 +91,7 @@ public class FileStoreTableFactory {
         Options options = new Options(table.options());
         String fallbackBranch = options.get(CoreOptions.SCAN_FALLBACK_BRANCH);
         if (!StringUtils.isNullOrWhitespaceOnly(fallbackBranch)) {
-            Options branchOptions = new Options();
+            Options branchOptions = new Options(dynamicOptions.toMap());
             branchOptions.set(CoreOptions.BRANCH, fallbackBranch);
             FileStoreTable fallbackTable =
                     createWithoutFallbackBranch(

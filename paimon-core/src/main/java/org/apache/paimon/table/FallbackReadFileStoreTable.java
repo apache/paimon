@@ -147,8 +147,19 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
                 wrapped.copyWithLatestSchema(), fallback.copyWithLatestSchema());
     }
 
+    @Override
+    public FileStoreTable switchToBranch(String branchName) {
+        return new FallbackReadFileStoreTable(wrapped.switchToBranch(branchName), fallback);
+    }
+
     private Map<String, String> rewriteFallbackOptions(Map<String, String> options) {
         Map<String, String> result = new HashMap<>(options);
+
+        // branch of fallback table should never change
+        String branchKey = CoreOptions.BRANCH.key();
+        if (options.containsKey(branchKey)) {
+            result.put(branchKey, fallback.options().get(branchKey));
+        }
 
         // snapshot ids may be different between the main branch and the fallback branch,
         // so we need to convert main branch snapshot id to millisecond,

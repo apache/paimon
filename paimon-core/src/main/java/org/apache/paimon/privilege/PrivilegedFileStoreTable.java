@@ -236,6 +236,12 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
     }
 
     @Override
+    public FileStoreTable switchToBranch(String branchName) {
+        return new PrivilegedFileStoreTable(
+                wrapped.switchToBranch(branchName), privilegeChecker, identifier);
+    }
+
+    @Override
     public boolean equals(Object o) {
         if (this == o) {
             return true;
