@@ -61,7 +61,6 @@ import java.util.Map;
 import java.util.Objects;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
-import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 
 /** A {@link Table} for showing schemas of table. */
 public class SchemasTable implements ReadonlyTable {
@@ -92,10 +91,6 @@ public class SchemasTable implements ReadonlyTable {
                 dataTable.fileIO(),
                 dataTable.location(),
                 CoreOptions.branch(dataTable.schema().options()));
-    }
-
-    public SchemasTable(FileIO fileIO, Path location) {
-        this(fileIO, location, DEFAULT_MAIN_BRANCH);
     }
 
     public SchemasTable(FileIO fileIO, Path location, String branchName) {
@@ -148,7 +143,7 @@ public class SchemasTable implements ReadonlyTable {
     }
 
     /** {@link Split} implementation for {@link SchemasTable}. */
-    private class SchemasSplit extends SingletonSplit {
+    private static class SchemasSplit extends SingletonSplit {
 
         private static final long serialVersionUID = 1L;
 

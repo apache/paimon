@@ -65,12 +65,12 @@ public class CatalogOptionsTableTest extends TableTestBase {
 
     @Test
     public void testCatalogOptionsTable() throws Exception {
-        List<InternalRow> expectRow = getExceptedResult();
+        List<InternalRow> expectRow = getExpectedResult();
         List<InternalRow> result = read(catalogOptionsTable);
         assertThat(result).containsExactlyElementsOf(expectRow);
     }
 
-    private List<InternalRow> getExceptedResult() {
+    private List<InternalRow> getExpectedResult() {
         List<InternalRow> expectedRow = new ArrayList<>();
         for (Map.Entry<String, String> option : catalogOptions.toMap().entrySet()) {
             expectedRow.add(

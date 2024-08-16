@@ -104,9 +104,7 @@ If you want see `DELETE` records, you can use audit_log table:
 ```sql
 SELECT * FROM t$audit_log /*+ OPTIONS('incremental-between' = '12,20') */;
 ```
-{{< hint warning >}}
-When doing `insert overwrite` operation, `'incremental-between-scan-mode'` will not take effect.
-{{< /hint >}}
+
 ## Streaming Query
 
 By default, Streaming read produces the latest snapshot on the table upon first startup,

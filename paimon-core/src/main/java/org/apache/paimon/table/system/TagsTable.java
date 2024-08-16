@@ -61,7 +61,6 @@ import java.util.Objects;
 import java.util.Optional;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
-import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 
 /** A {@link Table} for showing tags of table. */
 public class TagsTable implements ReadonlyTable {
@@ -91,10 +90,6 @@ public class TagsTable implements ReadonlyTable {
                 dataTable.fileIO(),
                 dataTable.location(),
                 CoreOptions.branch(dataTable.schema().options()));
-    }
-
-    public TagsTable(FileIO fileIO, Path location) {
-        this(fileIO, location, DEFAULT_MAIN_BRANCH);
     }
 
     public TagsTable(FileIO fileIO, Path location, String branchName) {
@@ -147,7 +142,7 @@ public class TagsTable implements ReadonlyTable {
         }
     }
 
-    private class TagsSplit extends SingletonSplit {
+    private static class TagsSplit extends SingletonSplit {
 
         private static final long serialVersionUID = 1L;
 

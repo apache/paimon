@@ -55,7 +55,6 @@ import java.util.Map;
 import java.util.Objects;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
-import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 
 /** A {@link Table} for showing consumers of table. */
 public class ConsumersTable implements ReadonlyTable {
@@ -80,10 +79,6 @@ public class ConsumersTable implements ReadonlyTable {
                 dataTable.fileIO(),
                 dataTable.location(),
                 CoreOptions.branch(dataTable.schema().options()));
-    }
-
-    public ConsumersTable(FileIO fileIO, Path location) {
-        this(fileIO, location, DEFAULT_MAIN_BRANCH);
     }
 
     public ConsumersTable(FileIO fileIO, Path location, String branchName) {

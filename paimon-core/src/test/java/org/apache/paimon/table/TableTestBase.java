@@ -58,7 +58,6 @@ import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
 import java.util.function.Predicate;
-import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -78,12 +77,7 @@ public abstract class TableTestBase {
     @BeforeEach
     public void beforeEach() throws Catalog.DatabaseAlreadyExistException {
         database = "default";
-        if (System.getProperty("os.name").startsWith("Windows")
-                && Pattern.compile("^/?[a-zA-Z]:").matcher(tempPath.toString()).find()) {
-            warehouse = new Path(tempPath.toString());
-        } else {
-            warehouse = new Path(TraceableFileIO.SCHEME + "://" + tempPath.toString());
-        }
+        warehouse = new Path(TraceableFileIO.SCHEME + "://" + tempPath.toString());
         catalog = CatalogFactory.createCatalog(CatalogContext.create(warehouse));
         catalog.createDatabase(database, true);
     }

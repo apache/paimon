@@ -83,12 +83,12 @@ class TagsTableTest extends TableTestBase {
 
     @Test
     void testTagsTable() throws Exception {
-        List<InternalRow> expectRow = getExceptedResult();
+        List<InternalRow> expectRow = getExpectedResult();
         List<InternalRow> result = read(tagsTable);
         assertThat(result).containsExactlyElementsOf(expectRow);
     }
 
-    private List<InternalRow> getExceptedResult() {
+    private List<InternalRow> getExpectedResult() {
         List<InternalRow> internalRows = new ArrayList<>();
         for (Pair<Tag, String> snapshot : tagManager.tagObjects()) {
             Tag tag = snapshot.getKey();

@@ -75,6 +75,13 @@ public class OptionsTableTest extends TableTestBase {
     }
 
     @Test
+    public void testOptionsTable() throws Exception {
+        List<InternalRow> expectRow = getExpectedResult();
+        List<InternalRow> result = read(optionsTable);
+        assertThat(result).containsExactlyElementsOf(expectRow);
+    }
+
+    @Test
     public void testBranchOptionsTable() throws Exception {
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier(tableName));
         table.createBranch("b1");
@@ -105,39 +112,18 @@ public class OptionsTableTest extends TableTestBase {
                                                 + SYSTEM_BRANCH_PREFIX
                                                 + "b1"
                                                 + "$options"));
-        List<InternalRow> expectRow = getExceptedResult(schemaManagerBranch);
+        List<InternalRow> expectRow = getExpectedResult(schemaManagerBranch);
         List<InternalRow> result = read(branchOptionsTable);
         assertThat(result).containsExactlyElementsOf(expectRow);
     }
 
-    @Test
-    public void testOptionsTable() throws Exception {
-        List<InternalRow> expectRow = getExceptedResult();
-        List<InternalRow> result = read(optionsTable);
-        assertThat(result).containsExactlyElementsOf(expectRow);
+    private List<InternalRow> getExpectedResult() {
+        return getExpectedResult(schemaManager);
     }
 
-    private List<InternalRow> getExceptedResult() {
+    private List<InternalRow> getExpectedResult(SchemaManager schemaManager) {
         Map<String, String> options =
                 schemaManager
-                        .latest()
-                        .orElseThrow(() -> new RuntimeException("Table does not exist."))
-                        .options();
-
-        List<InternalRow> expectedRows = new ArrayList<>();
-        for (Map.Entry<String, String> entry : options.entrySet()) {
-            GenericRow genericRow =
-                    GenericRow.of(
-                            BinaryString.fromString(entry.getKey()),
-                            BinaryString.fromString(entry.getValue()));
-            expectedRows.add(genericRow);
-        }
-        return expectedRows;
-    }
-
-    private List<InternalRow> getExceptedResult(SchemaManager schemaManagerBranch) {
-        Map<String, String> options =
-                schemaManagerBranch
                         .latest()
                         .orElseThrow(() -> new RuntimeException("Table does not exist."))
                         .options();

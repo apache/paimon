@@ -53,7 +53,6 @@ import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.SerializationUtils;
 import org.apache.paimon.utils.SnapshotManager;
-import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
@@ -70,7 +69,6 @@ import java.util.Objects;
 import java.util.Optional;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
-import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 
 /** A {@link Table} for showing committing snapshots of table. */
 public class SnapshotsTable implements ReadonlyTable {
@@ -78,7 +76,6 @@ public class SnapshotsTable implements ReadonlyTable {
     private static final long serialVersionUID = 1L;
 
     public static final String SNAPSHOTS = "snapshots";
-    public final String branch;
     public static final RowType TABLE_TYPE =
             new RowType(
                     Arrays.asList(
@@ -109,6 +106,7 @@ public class SnapshotsTable implements ReadonlyTable {
 
     private final FileIO fileIO;
     private final Path location;
+    private final String branch;
 
     private final FileStoreTable dataTable;
 
@@ -120,16 +118,12 @@ public class SnapshotsTable implements ReadonlyTable {
                 CoreOptions.branch(dataTable.schema().options()));
     }
 
-    public SnapshotsTable(FileIO fileIO, Path location, FileStoreTable dataTable) {
-        this(fileIO, location, dataTable, DEFAULT_MAIN_BRANCH);
-    }
-
     public SnapshotsTable(
             FileIO fileIO, Path location, FileStoreTable dataTable, String branchName) {
         this.fileIO = fileIO;
         this.location = location;
         this.dataTable = dataTable;
-        this.branch = StringUtils.isBlank(branchName) ? DEFAULT_MAIN_BRANCH : branchName;
+        this.branch = branchName;
     }
 
     @Override
@@ -176,7 +170,7 @@ public class SnapshotsTable implements ReadonlyTable {
         }
     }
 
-    private class SnapshotsSplit extends SingletonSplit {
+    private static class SnapshotsSplit extends SingletonSplit {
 
         private static final long serialVersionUID = 1L;
 

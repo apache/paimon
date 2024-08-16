@@ -73,6 +73,7 @@ public class AggregationFieldsTableTest extends TableTestBase {
         aggregationFieldsTable =
                 (AggregationFieldsTable)
                         catalog.getTable(identifier(tableName + "$aggregation_fields"));
+
         FileIO fileIO = LocalFileIO.create();
         Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, tableName));
         schemaManager = new SchemaManager(fileIO, tablePath);
@@ -80,7 +81,7 @@ public class AggregationFieldsTableTest extends TableTestBase {
 
     @Test
     public void testAggregationFieldsRecord() throws Exception {
-        List<InternalRow> expectRow = getExceptedResult();
+        List<InternalRow> expectRow = getExpectedResult();
         List<InternalRow> result = read(aggregationFieldsTable);
         assertThat(result).containsExactlyElementsOf(expectRow);
     }
@@ -115,39 +116,20 @@ public class AggregationFieldsTableTest extends TableTestBase {
                                                 + SYSTEM_BRANCH_PREFIX
                                                 + "b1"
                                                 + "$aggregation_fields"));
-        List<InternalRow> expectRow = getExceptedResult();
+        List<InternalRow> expectRow = getExpectedResult();
         List<InternalRow> result = read(aggregationFieldsTable);
         assertThat(result).containsExactlyElementsOf(expectRow);
 
-        expectRow = getExceptedResult(schemaManagerBranch);
+        expectRow = getExpectedResult(schemaManagerBranch);
         result = read(branchAggregationFieldsTable);
         assertThat(result).containsExactlyElementsOf(expectRow);
     }
 
-    private List<InternalRow> getExceptedResult() {
-        TableSchema schema = schemaManager.latest().get();
-        Multimap<String, String> function =
-                extractFieldMultimap(schema.options(), Map.Entry::getValue);
-        Multimap<String, String> functionOptions =
-                extractFieldMultimap(schema.options(), Map.Entry::getKey);
-
-        GenericRow genericRow;
-        List<InternalRow> expectedRow = new ArrayList<>();
-        for (int i = 0; i < schema.fields().size(); i++) {
-            String fieldName = schema.fields().get(i).name();
-            genericRow =
-                    GenericRow.of(
-                            BinaryString.fromString(fieldName),
-                            BinaryString.fromString(schema.fields().get(i).type().toString()),
-                            BinaryString.fromString(function.get(fieldName).toString()),
-                            BinaryString.fromString(functionOptions.get(fieldName).toString()),
-                            BinaryString.fromString(schema.fields().get(i).description()));
-            expectedRow.add(genericRow);
-        }
-        return expectedRow;
+    private List<InternalRow> getExpectedResult() {
+        return getExpectedResult(schemaManager);
     }
 
-    private List<InternalRow> getExceptedResult(SchemaManager schemaManager) {
+    private List<InternalRow> getExpectedResult(SchemaManager schemaManager) {
         TableSchema schema = schemaManager.latest().get();
         Multimap<String, String> function =
                 extractFieldMultimap(schema.options(), Map.Entry::getValue);

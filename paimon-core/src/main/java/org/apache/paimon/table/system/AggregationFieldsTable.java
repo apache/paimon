@@ -58,7 +58,6 @@ import java.util.Objects;
 import java.util.function.Function;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
-import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 
 /** A {@link Table} for showing Aggregation of table. */
 public class AggregationFieldsTable implements ReadonlyTable {
@@ -86,10 +85,6 @@ public class AggregationFieldsTable implements ReadonlyTable {
                 dataTable.fileIO(),
                 dataTable.location(),
                 CoreOptions.branch(dataTable.schema().options()));
-    }
-
-    public AggregationFieldsTable(FileIO fileIO, Path location) {
-        this(fileIO, location, DEFAULT_MAIN_BRANCH);
     }
 
     public AggregationFieldsTable(FileIO fileIO, Path location, String branchName) {

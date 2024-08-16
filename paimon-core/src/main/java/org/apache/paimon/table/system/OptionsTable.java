@@ -41,7 +41,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.ProjectedRow;
-import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
@@ -54,7 +53,6 @@ import java.util.Map;
 import java.util.Objects;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
-import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.SerializationUtils.newStringType;
 
 /** A {@link Table} for showing options of table. */
@@ -81,14 +79,10 @@ public class OptionsTable implements ReadonlyTable {
                 CoreOptions.branch(dataTable.schema().options()));
     }
 
-    public OptionsTable(FileIO fileIO, Path location) {
-        this(fileIO, location, DEFAULT_MAIN_BRANCH);
-    }
-
     public OptionsTable(FileIO fileIO, Path location, String branchName) {
         this.fileIO = fileIO;
         this.location = location;
-        this.branch = StringUtils.isBlank(branchName) ? DEFAULT_MAIN_BRANCH : branchName;
+        this.branch = branchName;
     }
 
     @Override
@@ -134,7 +128,7 @@ public class OptionsTable implements ReadonlyTable {
         }
     }
 
-    private class OptionsSplit extends SingletonSplit {
+    private static class OptionsSplit extends SingletonSplit {
 
         private static final long serialVersionUID = 1L;
 
