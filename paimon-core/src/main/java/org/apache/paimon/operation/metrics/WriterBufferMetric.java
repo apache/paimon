@@ -22,6 +22,7 @@ import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.metrics.MetricGroup;
 import org.apache.paimon.metrics.MetricRegistry;
 
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -29,17 +30,21 @@ import java.util.function.Supplier;
 public class WriterBufferMetric {
 
     private static final String GROUP_NAME = "writerBuffer";
+    private static final String NUM_WRITERS = "numWriters";
     private static final String BUFFER_PREEMPT_COUNT = "bufferPreemptCount";
     private static final String USED_WRITE_BUFFER_SIZE = "usedWriteBufferSizeByte";
     private static final String TOTAL_WRITE_BUFFER_SIZE = "totalWriteBufferSizeByte";
 
     private final MetricGroup metricGroup;
+    private final AtomicInteger numWriters;
 
     public WriterBufferMetric(
             Supplier<MemoryPoolFactory> memoryPoolFactorySupplier,
             MetricRegistry metricRegistry,
             String tableName) {
         metricGroup = metricRegistry.tableMetricGroup(GROUP_NAME, tableName);
+        numWriters = new AtomicInteger(0);
+        metricGroup.gauge(NUM_WRITERS, numWriters::get);
         metricGroup.gauge(
                 BUFFER_PREEMPT_COUNT,
                 () ->
@@ -60,6 +65,14 @@ public class WriterBufferMetric {
             Function<MemoryPoolFactory, Long> function) {
         MemoryPoolFactory memoryPoolFactory = memoryPoolFactorySupplier.get();
         return memoryPoolFactory == null ? -1 : function.apply(memoryPoolFactory);
+    }
+
+    public void increaseNumWriters() {
+        numWriters.incrementAndGet();
+    }
+
+    public void setNumWriters(int x) {
+        numWriters.set(x);
     }
 
     public void close() {
