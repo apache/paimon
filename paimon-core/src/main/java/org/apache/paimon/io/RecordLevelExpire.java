@@ -21,6 +21,7 @@ package org.apache.paimon.io;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
@@ -36,6 +37,7 @@ public class RecordLevelExpire {
 
     private final int timeField;
     private final int expireTime;
+    private final CoreOptions.TimeFieldType timeFieldType;
 
     @Nullable
     public static RecordLevelExpire create(CoreOptions options, RowType rowType) {
@@ -58,20 +60,26 @@ public class RecordLevelExpire {
                             "Can not find time field %s for record level expire.", timeField));
         }
 
+        CoreOptions.TimeFieldType timeFieldType = options.recordLevelTimeFieldType();
+
         DataField field = rowType.getField(timeField);
-        if (!(field.type() instanceof IntType)) {
+        if (!((timeFieldType == CoreOptions.TimeFieldType.SECOND && field.type() instanceof IntType)
+                || (timeFieldType == CoreOptions.TimeFieldType.MILLISECOND
+                        && field.type() instanceof BigIntType))) {
             throw new IllegalArgumentException(
                     String.format(
                             "Record level time field should be INT type, but is %s.",
                             field.type()));
         }
 
-        return new RecordLevelExpire(fieldIndex, (int) expireTime.getSeconds());
+        return new RecordLevelExpire(fieldIndex, (int) expireTime.getSeconds(), timeFieldType);
     }
 
-    public RecordLevelExpire(int timeField, int expireTime) {
+    public RecordLevelExpire(
+            int timeField, int expireTime, CoreOptions.TimeFieldType timeFieldType) {
         this.timeField = timeField;
         this.expireTime = expireTime;
+        this.timeFieldType = timeFieldType;
     }
 
     public FileReaderFactory<KeyValue> wrap(FileReaderFactory<KeyValue> readerFactory) {
@@ -79,13 +87,16 @@ public class RecordLevelExpire {
     }
 
     public RecordReader<KeyValue> wrap(RecordReader<KeyValue> reader) {
-        int currentTime = (int) (System.currentTimeMillis() / 1000);
+        long currentTime = (int) (System.currentTimeMillis() / 1000);
         return reader.filter(
                 kv -> {
                     checkArgument(
                             !kv.value().isNullAt(timeField),
                             "Time field for record-level expire should not be null.");
-                    int recordTime = kv.value().getInt(timeField);
+                    int recordTime =
+                            timeFieldType == CoreOptions.TimeFieldType.SECOND
+                                    ? kv.value().getInt(timeField)
+                                    : (int) (kv.value().getLong(timeField) / 1000);
                     return currentTime <= recordTime + expireTime;
                 });
     }
