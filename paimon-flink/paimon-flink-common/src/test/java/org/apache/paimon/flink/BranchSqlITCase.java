@@ -19,8 +19,10 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.SnapshotManager;
 
+import org.apache.commons.lang3.StringUtils;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.Test;
@@ -344,6 +346,161 @@ public class BranchSqlITCase extends CatalogITCaseBase {
 
         assertThatThrownBy(() -> sql("INSERT INTO t VALUES (1, 10, 'apple')"))
                 .hasMessageContaining("Branch main and pk does not have the same row type");
+    }
+
+    @Test
+    public void testBranchOptionsTable() throws Exception {
+        sql(
+                "CREATE TABLE t ( pt INT, k INT, v STRING, PRIMARY KEY (pt, k) NOT ENFORCED ) "
+                        + "PARTITIONED BY (pt) WITH ( 'bucket' = '2' )");
+
+        sql("CALL sys.create_branch('default.t', 'test')");
+
+        sql("ALTER TABLE t SET ('snapshot.time-retained' = '5 h')");
+        sql("ALTER TABLE t$branch_test SET ('snapshot.time-retained' = '1 h')");
+
+        assertThat(collectResult("SELECT * FROM t$options"))
+                .containsExactlyInAnyOrder(
+                        "+I[bucket, 2]",
+                        "+I[snapshot.time-retained, 5 h]",
+                        "+I[scan.infer-parallelism, false]");
+        assertThat(collectResult("SELECT * FROM t$branch_test$options"))
+                .containsExactlyInAnyOrder(
+                        "+I[bucket, 2]",
+                        "+I[snapshot.time-retained, 1 h]",
+                        "+I[scan.infer-parallelism, false]");
+    }
+
+    @Test
+    public void testBranchSchemasTable() throws Exception {
+        sql("CREATE TABLE t (a INT, b INT)");
+        sql("INSERT INTO t VALUES (1, 2)");
+        sql("CALL sys.create_branch('default.t', 'b1')");
+        assertThat(collectResult("SELECT schema_id FROM t$branch_b1$schemas order by schema_id"))
+                .containsExactlyInAnyOrder("+I[0]");
+
+        sql("ALTER TABLE t$branch_b1 SET ('snapshot.time-retained' = '5 h')");
+        assertThat(collectResult("SELECT schema_id FROM t$branch_b1$schemas order by schema_id"))
+                .containsExactlyInAnyOrder("+I[0]", "+I[1]");
+    }
+
+    @Test
+    public void testBranchAuditLogTable() throws Exception {
+        sql("CREATE TABLE t (a INT, b INT)");
+        sql("INSERT INTO t VALUES (1, 2)");
+        assertThat(collectResult("SELECT * FROM t$audit_log"))
+                .containsExactlyInAnyOrder("+I[+I, 1, 2]");
+
+        sql("CALL sys.create_branch('default.t', 'b1')");
+        sql("INSERT INTO t$branch_b1 VALUES (3, 4)");
+        assertThat(collectResult("SELECT * FROM t$branch_b1$audit_log"))
+                .containsExactlyInAnyOrder("+I[+I, 3, 4]");
+    }
+
+    @Test
+    public void testBranchReadOptimizedTable() throws Exception {
+        sql("CREATE TABLE t (a INT, b INT)");
+        sql("INSERT INTO t VALUES (1, 2)");
+        assertThat(collectResult("SELECT * FROM t$ro")).containsExactlyInAnyOrder("+I[1, 2]");
+
+        sql("CALL sys.create_branch('default.t', 'b1')");
+        sql("INSERT INTO t$branch_b1 VALUES (3, 4)");
+        assertThat(collectResult("SELECT * FROM t$branch_b1$ro"))
+                .containsExactlyInAnyOrder("+I[3, 4]");
+    }
+
+    @Test
+    public void testBranchFilesTable() throws Exception {
+        sql("CREATE TABLE t (a INT, b INT)");
+        sql("INSERT INTO t VALUES (1, 2)");
+
+        sql("CALL sys.create_branch('default.t', 'b1')");
+        sql("INSERT INTO t$branch_b1 VALUES (3, 4)");
+        sql("INSERT INTO t$branch_b1 VALUES (5, 6)");
+
+        assertThat(collectResult("SELECT min_value_stats FROM t$files"))
+                .containsExactlyInAnyOrder("+I[{a=1, b=2}]");
+        assertThat(collectResult("SELECT min_value_stats FROM t$branch_b1$files"))
+                .containsExactlyInAnyOrder("+I[{a=3, b=4}]", "+I[{a=5, b=6}]");
+    }
+
+    @Test
+    public void testBranchTagsTable() throws Exception {
+        sql("CREATE TABLE t (a INT, b INT)");
+        sql("INSERT INTO t VALUES (1, 2)");
+        paimonTable("t").createTag("tag1", 1);
+
+        sql("CALL sys.create_branch('default.t', 'b1','tag1')");
+        sql("INSERT INTO t$branch_b1 VALUES (3, 4)");
+        paimonTable("t$branch_b1").createTag("tag2", 2);
+
+        assertThat(collectResult("SELECT tag_name,snapshot_id,record_count FROM t$tags"))
+                .containsExactlyInAnyOrder("+I[tag1, 1, 1]");
+        assertThat(collectResult("SELECT tag_name,snapshot_id,record_count FROM t$branch_b1$tags"))
+                .containsExactlyInAnyOrder("+I[tag1, 1, 1]", "+I[tag2, 2, 2]");
+    }
+
+    @Test
+    public void testBranchConsumersTable() throws Exception {
+        sql("CREATE TABLE t (a INT, b INT)");
+        sql("INSERT INTO t VALUES (1, 2), (3,4)");
+
+        sql("CALL sys.create_branch('default.t', 'b1')");
+        BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(
+                        streamSqlIter(
+                                "SELECT * FROM t$branch_b1 /*+ OPTIONS('consumer-id'='id1','consumer.expiration-time'='3h') */"));
+        sql("INSERT INTO t$branch_b1 VALUES (5, 6), (7, 8)");
+        assertThat(iterator.collect(2)).containsExactlyInAnyOrder(Row.of(5, 6), Row.of(7, 8));
+        iterator.close();
+
+        assertThat(collectResult("SELECT * FROM t$consumers")).isEmpty();
+        assertThat(collectResult("SELECT * FROM t$branch_b1$consumers"))
+                .containsExactlyInAnyOrder("+I[id1, 2]");
+    }
+
+    @Test
+    public void testBranchManifestsTable() {
+        sql("CREATE TABLE t (a INT, b INT)");
+        sql("INSERT INTO t VALUES (1, 2)");
+
+        sql("CALL sys.create_branch('default.t', 'b1')");
+        sql("INSERT INTO t$branch_b1 VALUES (3, 4)");
+        sql("INSERT INTO t$branch_b1 VALUES (5, 6)");
+
+        List<Row> res = sql("SELECT schema_id, file_name, file_size FROM t$manifests");
+        assertThat(res).hasSize(1);
+
+        res = sql("SELECT schema_id, file_name, file_size FROM t$branch_b1$manifests");
+        assertThat(res).hasSize(2);
+        res.forEach(
+                row -> {
+                    assertThat((long) row.getField(0)).isEqualTo(0L);
+                    assertThat(StringUtils.startsWith((String) row.getField(1), "manifest"))
+                            .isTrue();
+                    assertThat((long) row.getField(2)).isGreaterThan(0L);
+                });
+    }
+
+    @Test
+    public void testBranchPartitionsTable() throws Exception {
+        sql("CREATE TABLE t (a INT, b INT,c STRING) PARTITIONED BY (a)");
+        assertThat(sql("SELECT * FROM t$partitions")).isEmpty();
+
+        sql("INSERT INTO t VALUES (1, 2, 'x')");
+        sql("INSERT INTO t VALUES (1, 4, 'S2'), (2, 2, 'S1'), (2, 2, 'S1')");
+        sql("INSERT INTO t VALUES (1, 4, 'S3'), (2, 2, 'S4')");
+
+        sql("CALL sys.create_branch('default.t', 'b1')");
+        sql("INSERT INTO t$branch_b1 VALUES (1, 4, 'S2'), (2, 2, 'S1'), (2, 2, 'S5')");
+        sql("INSERT INTO t$branch_b1 VALUES (1, 4, 'S3'), (2, 2, 'S4')");
+
+        assertThat(collectResult("SELECT `partition`, record_count, file_count FROM t$partitions"))
+                .containsExactlyInAnyOrder("+I[[1], 3, 3]", "+I[[2], 3, 2]");
+        assertThat(
+                        collectResult(
+                                "SELECT `partition`, record_count, file_count FROM t$branch_b1$partitions"))
+                .containsExactlyInAnyOrder("+I[[1], 2, 2]", "+I[[2], 3, 2]");
     }
 
     private List<String> collectResult(String sql) throws Exception {

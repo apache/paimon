@@ -70,12 +70,12 @@ public class ConsumersTableTest extends TableTestBase {
 
     @Test
     public void testPartitionRecordCount() throws Exception {
-        List<InternalRow> expectRow = getExceptedResult();
+        List<InternalRow> expectRow = getExpectedResult();
         List<InternalRow> result = read(consumersTable);
         assertThat(result).containsExactlyInAnyOrderElementsOf(expectRow);
     }
 
-    private List<InternalRow> getExceptedResult() throws IOException {
+    private List<InternalRow> getExpectedResult() throws IOException {
         Map<String, Long> consumers = manager.consumers();
         return consumers.entrySet().stream()
                 .map(

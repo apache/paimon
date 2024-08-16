@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.system;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -83,14 +84,19 @@ public class SchemasTable implements ReadonlyTable {
 
     private final FileIO fileIO;
     private final Path location;
+    private final String branch;
 
     public SchemasTable(FileStoreTable dataTable) {
-        this(dataTable.fileIO(), dataTable.location());
+        this(
+                dataTable.fileIO(),
+                dataTable.location(),
+                CoreOptions.branch(dataTable.schema().options()));
     }
 
-    public SchemasTable(FileIO fileIO, Path location) {
+    public SchemasTable(FileIO fileIO, Path location, String branchName) {
         this.fileIO = fileIO;
         this.location = location;
+        this.branch = branchName;
     }
 
     @Override
@@ -120,7 +126,7 @@ public class SchemasTable implements ReadonlyTable {
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new SchemasTable(fileIO, location);
+        return new SchemasTable(fileIO, location, branch);
     }
 
     private class SchemasScan extends ReadOnceTableScan {
@@ -165,7 +171,7 @@ public class SchemasTable implements ReadonlyTable {
     }
 
     /** {@link TableRead} implementation for {@link SchemasTable}. */
-    private static class SchemasRead implements InnerTableRead {
+    private class SchemasRead implements InnerTableRead {
 
         private final FileIO fileIO;
         private int[][] projection;
@@ -197,7 +203,7 @@ public class SchemasTable implements ReadonlyTable {
             }
             Path location = ((SchemasSplit) split).location;
             Iterator<TableSchema> schemas =
-                    new SchemaManager(fileIO, location).listAll().iterator();
+                    new SchemaManager(fileIO, location, branch).listAll().iterator();
             Iterator<InternalRow> rows = Iterators.transform(schemas, this::toRow);
             if (projection != null) {
                 rows =
