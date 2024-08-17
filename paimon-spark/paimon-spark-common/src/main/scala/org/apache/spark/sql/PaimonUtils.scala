@@ -65,7 +65,7 @@ object PaimonUtils {
   }
 
   def fieldReference(name: String): NamedReference = {
-    FieldReference(name)
+    FieldReference(Seq(name))
   }
 
   def bytesToString(size: Long): String = {
