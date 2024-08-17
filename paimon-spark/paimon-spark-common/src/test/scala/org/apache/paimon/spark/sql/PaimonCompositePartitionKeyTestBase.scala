@@ -29,11 +29,12 @@ abstract class PaimonCompositePartitionKeyTestBase extends PaimonSparkTestBase {
   import testImplicits._
 
   test("PaimonCompositePartitionKeyTest") {
-    withTable("source", "t") {
+    withTable("source", "t", "t1") {
       Seq((1L, "x1", "2023"), (2L, "x2", "2023"), (5L, "x5", "2025"), (6L, "x6", "2026"))
         .toDF("a", "b", "pt t")
         .createOrReplaceTempView("source")
 
+      // test single composite partition key
       spark.sql("""
                   |CREATE TABLE t (id INT, name STRING, `pt t` STRING) PARTITIONED BY (`pt t`)
                   |""".stripMargin)
@@ -61,6 +62,36 @@ abstract class PaimonCompositePartitionKeyTestBase extends PaimonSparkTestBase {
       val qe2 = df1.queryExecution
       Assertions.assertFalse(qe2.analyzed.containsPattern(DYNAMIC_PRUNING_SUBQUERY))
       checkAnswer(df2, Row(5, "e", "2025", "x5") :: Nil)
+
+      // test normal and composite partitions key
+      spark.sql(
+        """
+          |CREATE TABLE t1 (id INT, name STRING, `pt t` STRING, v STRING) PARTITIONED BY (`pt t`, v)
+          |""".stripMargin)
+
+      spark.sql(
+        """
+          |INSERT INTO t1(`id`, `name`, `pt t`, v) VALUES (1, "a", "2023", "2222"), (3, "c", "2023", "2223"), (5, "e", "2025", "2224"), (7, "g", "2027", "2225")
+          |""".stripMargin)
+
+      val df3 =
+        spark.sql("""
+                    |SELECT t1.id, t1.name, source.b FROM source join t1
+                    |ON source.`pt t` = t1.`pt t` AND source.`pt t` = '2023' AND t1.v = '2223'
+                    |ORDER BY t1.id, source.b
+                    |""".stripMargin)
+      val qe3 = df3.queryExecution
+      Assertions.assertFalse(qe3.analyzed.containsPattern(DYNAMIC_PRUNING_SUBQUERY))
+      checkAnswer(df3, Row(3, "c", "x1") :: Row(3, "c", "x2") :: Nil)
+
+      val df4 = spark.sql("""
+                            |SELECT t1.*, source.b FROM source join t1
+                            |ON source.a = t1.id AND source.`pt t` = t1.`pt t` AND source.a > 3
+                            |""".stripMargin)
+      val qe4 = df4.queryExecution
+      Assertions.assertFalse(qe4.analyzed.containsPattern(DYNAMIC_PRUNING_SUBQUERY))
+      checkAnswer(df4, Row(5, "e", "2025", "2224", "x5") :: Nil)
+
     }
   }
 }
