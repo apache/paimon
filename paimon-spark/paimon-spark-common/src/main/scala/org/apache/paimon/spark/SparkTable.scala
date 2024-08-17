@@ -22,7 +22,7 @@ import org.apache.paimon.CoreOptions
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.table.{DataTable, FileStoreTable, Table}
-
+import org.apache.paimon.utils.StringUtils
 import org.apache.spark.sql.connector.catalog.{MetadataColumn, SupportsMetadataColumns, SupportsRead, SupportsWrite, TableCapability, TableCatalog}
 import org.apache.spark.sql.connector.expressions.{Expressions, Transform}
 import org.apache.spark.sql.connector.read.ScanBuilder
@@ -31,7 +31,6 @@ import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import java.util.{Collections, EnumSet => JEnumSet, HashMap => JHashMap, Map => JMap, Set => JSet}
-
 import scala.collection.JavaConverters._
 
 /** A spark [[org.apache.spark.sql.connector.catalog.Table]] for paimon. */
@@ -49,7 +48,7 @@ case class SparkTable(table: Table)
   override lazy val schema: StructType = SparkTypeUtils.fromPaimonRowType(table.rowType)
 
   override def partitioning: Array[Transform] = {
-    table.partitionKeys().asScala.map(p => Expressions.identity(p)).toArray
+    table.partitionKeys().asScala.map(p => Expressions.identity(StringUtils.quote(p))).toArray
   }
 
   override def properties: JMap[String, String] = {

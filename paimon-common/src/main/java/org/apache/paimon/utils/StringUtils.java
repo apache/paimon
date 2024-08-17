@@ -551,6 +551,10 @@ public class StringUtils {
         return true;
     }
 
+    public static String quote(String str) {
+        return "`" + str + "`";
+    }
+
     public static String caseSensitiveConversion(String str, boolean allowUpperCase) {
         return allowUpperCase ? str : str.toLowerCase();
     }
