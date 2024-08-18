@@ -46,6 +46,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -67,6 +68,8 @@ public class CompactDatabaseAction extends ActionBase {
     private final Map<String, FileStoreTable> tableMap = new HashMap<>();
 
     private Options tableOptions = new Options();
+
+    @Nullable private Duration partitionIdleTime = null;
 
     public CompactDatabaseAction(String warehouse, Map<String, String> catalogConfig) {
         super(warehouse, catalogConfig);
@@ -98,6 +101,11 @@ public class CompactDatabaseAction extends ActionBase {
 
     public CompactDatabaseAction withTableOptions(Map<String, String> tableOptions) {
         this.tableOptions = Options.fromMap(tableOptions);
+        return this;
+    }
+
+    public CompactDatabaseAction withPartitionIdleTime(@Nullable Duration partitionIdleTime) {
+        this.partitionIdleTime = partitionIdleTime;
         return this;
     }
 
@@ -191,11 +199,14 @@ public class CompactDatabaseAction extends ActionBase {
                 conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING;
         CombinedTableCompactorSourceBuilder sourceBuilder =
                 new CombinedTableCompactorSourceBuilder(
-                        catalogLoader(),
-                        databasePattern,
-                        includingPattern,
-                        excludingPattern,
-                        tableOptions.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL).toMillis());
+                                catalogLoader(),
+                                databasePattern,
+                                includingPattern,
+                                excludingPattern,
+                                tableOptions
+                                        .get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL)
+                                        .toMillis())
+                        .withPartitionIdleTime(partitionIdleTime);
 
         // multi bucket table which has multi bucket in a partition like fix bucket and dynamic
         // bucket
@@ -225,7 +236,9 @@ public class CompactDatabaseAction extends ActionBase {
             FileStoreTable table,
             boolean isStreaming) {
 
-        CompactorSourceBuilder sourceBuilder = new CompactorSourceBuilder(fullName, table);
+        CompactorSourceBuilder sourceBuilder =
+                new CompactorSourceBuilder(fullName, table)
+                        .withPartitionIdleTime(partitionIdleTime);
         CompactorSinkBuilder sinkBuilder = new CompactorSinkBuilder(table);
 
         DataStreamSource<RowData> source =
@@ -242,6 +255,7 @@ public class CompactDatabaseAction extends ActionBase {
                 new UnawareBucketCompactionTopoBuilder(env, fullName, table);
 
         unawareBucketCompactionTopoBuilder.withContinuousMode(isStreaming);
+        unawareBucketCompactionTopoBuilder.withPartitionIdleTime(partitionIdleTime);
         unawareBucketCompactionTopoBuilder.build();
     }
 

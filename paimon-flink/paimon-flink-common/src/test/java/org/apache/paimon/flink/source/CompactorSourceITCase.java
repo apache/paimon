@@ -51,6 +51,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -281,6 +282,54 @@ public class CompactorSourceITCase extends AbstractTestBase {
             actual.add(toString(it.next()));
         }
         assertThat(actual).hasSameElementsAs(expected);
+
+        write.close();
+        commit.close();
+        it.close();
+    }
+
+    @ParameterizedTest(name = "defaultOptions = {0}")
+    @ValueSource(booleans = {true, false})
+    public void testHistoryPartitionRead(boolean defaultOptions) throws Exception {
+        Duration partitionIdleTime = Duration.ofMillis(3000);
+        FileStoreTable table = createFileStoreTable();
+        if (!defaultOptions) {
+            // change options to test whether CompactorSourceBuilder work normally
+            table = table.copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "2"));
+        }
+        StreamWriteBuilder streamWriteBuilder =
+                table.newStreamWriteBuilder().withCommitUser(commitUser);
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
+
+        write.write(rowData(1, 1510, BinaryString.fromString("20221208"), 15));
+        write.write(rowData(1, 1620, BinaryString.fromString("20221208"), 16));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        write.write(rowData(2, 1511, BinaryString.fromString("20221208"), 15));
+        write.write(rowData(2, 1510, BinaryString.fromString("20221209"), 15));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        Thread.sleep(3000);
+        write.write(rowData(3, 1510, BinaryString.fromString("20221208"), 16));
+        commit.commit(2, write.prepareCommit(true, 2));
+
+        StreamExecutionEnvironment env =
+                streamExecutionEnvironmentBuilder().streamingMode().build();
+        DataStreamSource<RowData> compactorSource =
+                new CompactorSourceBuilder("test", table)
+                        .withContinuousMode(false)
+                        .withPartitionIdleTime(partitionIdleTime)
+                        .withEnv(env)
+                        .build();
+        CloseableIterator<RowData> it = compactorSource.executeAndCollect();
+
+        List<String> actual = new ArrayList<>();
+        while (it.hasNext()) {
+            actual.add(toString(it.next()));
+        }
+        assertThat(actual)
+                .hasSameElementsAs(Arrays.asList("+I 3|20221208|15|0|0", "+I 3|20221209|15|0|0"));
 
         write.close();
         commit.close();

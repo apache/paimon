@@ -34,6 +34,9 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 
+import javax.annotation.Nullable;
+
+import java.time.Duration;
 import java.util.regex.Pattern;
 
 /**
@@ -49,6 +52,7 @@ public class CombinedTableCompactorSourceBuilder {
 
     private boolean isContinuous = false;
     private StreamExecutionEnvironment env;
+    @Nullable private Duration partitionIdleTime = null;
 
     public CombinedTableCompactorSourceBuilder(
             Catalog.Loader catalogLoader,
@@ -73,6 +77,12 @@ public class CombinedTableCompactorSourceBuilder {
         return this;
     }
 
+    public CombinedTableCompactorSourceBuilder withPartitionIdleTime(
+            @Nullable Duration partitionIdleTime) {
+        this.partitionIdleTime = partitionIdleTime;
+        return this;
+    }
+
     public DataStream<RowData> buildAwareBucketTableSource() {
         Preconditions.checkArgument(env != null, "StreamExecutionEnvironment should not be null.");
         RowType produceType = BucketsTable.getRowType();
@@ -94,7 +104,8 @@ public class CombinedTableCompactorSourceBuilder {
                     catalogLoader,
                     includingPattern,
                     excludingPattern,
-                    databasePattern);
+                    databasePattern,
+                    partitionIdleTime);
         }
     }
 
@@ -116,7 +127,8 @@ public class CombinedTableCompactorSourceBuilder {
                     catalogLoader,
                     includingPattern,
                     excludingPattern,
-                    databasePattern);
+                    databasePattern,
+                    partitionIdleTime);
         }
     }
 }

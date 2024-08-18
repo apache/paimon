@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.utils.TimeUtils;
+
 import java.util.Optional;
 
 /** Factory to create {@link CompactDatabaseAction}. */
@@ -29,6 +31,7 @@ public class CompactDatabaseActionFactory implements ActionFactory {
     private static final String INCLUDING_TABLES = "including_tables";
     private static final String EXCLUDING_TABLES = "excluding_tables";
     private static final String MODE = "mode";
+    private static final String PARTITION_IDLE_TIME = "partition_idle_time";
 
     @Override
     public String identifier() {
@@ -47,6 +50,10 @@ public class CompactDatabaseActionFactory implements ActionFactory {
                 .excludingTables(params.get(EXCLUDING_TABLES))
                 .withDatabaseCompactMode(params.get(MODE))
                 .withTableOptions(optionalConfigMap(params, TABLE_CONF));
+        String partitionIdleTime = params.get(PARTITION_IDLE_TIME);
+        if (partitionIdleTime != null) {
+            action.withPartitionIdleTime(TimeUtils.parseDuration(partitionIdleTime));
+        }
 
         return Optional.of(action);
     }
@@ -59,13 +66,19 @@ public class CompactDatabaseActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  compact_database --warehouse <warehouse_path> --database <database_name> "
+                "  compact_database --warehouse <warehouse_path> --including_databases <database-name|name-regular-expr> "
                         + "[--including_tables <paimon_table_name|name_regular_expr>] "
-                        + "[--excluding_tables <paimon_table_name|name_regular_expr>] ");
+                        + "[--excluding_tables <paimon_table_name|name_regular_expr>] "
+                        + "[--mode <compact_mode>]"
+                        + "[--partition_idle_time <partition_idle_time>]");
         System.out.println(
-                "  compact_database --warehouse s3://path/to/warehouse --database <database_name> "
+                "  compact_database --warehouse s3://path/to/warehouse --including_databases <database-name|name-regular-expr> "
                         + "[--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]]");
         System.out.println();
+
+        System.out.println(
+                "--including_databases is used to specify which databases are to be compacted. "
+                        + "You must use '|' to separate multiple databases, Regular expression is supported.");
 
         System.out.println(
                 "--including_tables is used to specify which source tables are to be compacted. "
@@ -75,14 +88,19 @@ public class CompactDatabaseActionFactory implements ActionFactory {
                         + "The usage is same as --including_tables.");
         System.out.println(
                 "--excluding_tables has higher priority than --including_tables if you specified both.");
+        System.out.println(
+                "--mode is used to specify compaction mode. Possible values: divided, combined.");
+        System.out.println(
+                "--partition_idle_time is used to do a full compaction for partition which had not receive any new data for 'partition_idle_time' time. And only these partitions will be compacted.");
+        System.out.println("--partition_idle_time is only supported in batch mode. ");
         System.out.println();
 
         System.out.println("Examples:");
         System.out.println(
-                "  compact_database --warehouse hdfs:///path/to/warehouse --database test_db");
+                "  compact_database --warehouse hdfs:///path/to/warehouse --including_databases test_db");
         System.out.println(
                 "  compact_database --warehouse s3:///path/to/warehouse "
-                        + "--database test_db "
+                        + "--including_databases test_db "
                         + "--catalog_conf s3.endpoint=https://****.com "
                         + "--catalog_conf s3.access-key=***** "
                         + "--catalog_conf s3.secret-key=***** ");
