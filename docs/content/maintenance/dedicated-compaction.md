@@ -310,7 +310,8 @@ CALL sys.compact(`table` => 'default.T', order_strategy => 'zorder', order_by =>
 
 ## Historical Partition Compact
 
-You can run the following command to submit a compaction job for partition which has not received any new data for a period of time. Small files in those partitions will be full compacted.
+You can run the following command to submit a compaction job for partition which has not received any new data for
+a period of time. Small files in those partitions will be full compacted.
 
 {{< hint info >}}
 
@@ -338,9 +339,11 @@ This is for one table.
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
     [--table_conf <paimon-table-dynamic-conf> [--table_conf <paimon-table-dynamic-conf>] ...]
 ```
+
 There are one new configuration in `Historical Partition Compact`
 
-* `--partition_idle_time`: this is used to do a full compaction for partition which had not received any new data for 'partition_idle_time'. And only these partitions will be compacted.
+* `--partition_idle_time`: this is used to do a full compaction for partition which had not received any new data for
+  'partition_idle_time'. And only these partitions will be compacted.
 
 {{< /tab >}}
 
@@ -350,8 +353,9 @@ Run the following sql:
 
 ```sql
 -- history partition compact table
-CALL sys.compact(`table` => 'default.T', 'partition_idle_time' => '5s')
+CALL sys.compact(`table` => 'default.T', 'partition_idle_time' => '1 d')
 ```
+
 {{< /tab >}}
 
 {{< /tabs >}}
@@ -386,7 +390,7 @@ Example: compact historical partitions for tables in database
     compact_database \
     --warehouse s3:///path/to/warehouse \
     --including_databases test_db \
-    --partition_idle_time 60s \
+    --partition_idle_time 1d \
     --catalog_conf s3.endpoint=https://****.com \
     --catalog_conf s3.access-key=***** \
     --catalog_conf s3.secret-key=*****
@@ -407,7 +411,7 @@ Example: compact historical partitions for tables in database
 
 ```sql
 -- history partition compact table
-CALL sys.compact_database('test_db', 'combined', '', '', '', '60s')
+CALL sys.compact_database('test_db', 'combined', '', '', '', '1 d')
 ```
 
 {{< /tab >}}
