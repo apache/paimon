@@ -235,7 +235,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 forWrite,
                 options.scanManifestParallelism(),
                 options.deletionVectorsEnabled(),
-                options.mergeEngine());
+                options.mergeEngine(),
+                options.changelogProducer());
     }
 
     @Override

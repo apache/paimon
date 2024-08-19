@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -30,6 +31,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.stats.SimpleStatsConverters;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -49,6 +51,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     private Predicate valueFilter;
     private final boolean deletionVectorsEnabled;
     private final MergeEngine mergeEngine;
+    private final ChangelogProducer changelogProducer;
 
     public KeyValueFileStoreScan(
             RowType partitionType,
@@ -63,7 +66,8 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             boolean checkNumOfBuckets,
             Integer scanManifestParallelism,
             boolean deletionVectorsEnabled,
-            MergeEngine mergeEngine) {
+            MergeEngine mergeEngine,
+            ChangelogProducer changelogProducer) {
         super(
                 partitionType,
                 bucketFilter,
@@ -85,6 +89,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                         schema.id());
         this.deletionVectorsEnabled = deletionVectorsEnabled;
         this.mergeEngine = mergeEngine;
+        this.changelogProducer = changelogProducer;
     }
 
     public KeyValueFileStoreScan withKeyFilter(Predicate predicate) {
@@ -104,9 +109,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
         Predicate filter = null;
         SimpleStatsConverter serializer = null;
         SimpleStats stats = null;
-        if ((deletionVectorsEnabled || mergeEngine == FIRST_ROW)
-                && entry.level() > 0
-                && valueFilter != null) {
+        if (isValueFilterEnabled(entry)) {
             filter = valueFilter;
             serializer = fieldValueStatsConverters.getOrCreate(entry.file().schemaId());
             stats = entry.file().valueStats();
@@ -129,10 +132,28 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                 serializer.evolution(stats.nullCounts(), entry.file().rowCount()));
     }
 
+    private boolean isValueFilterEnabled(ManifestEntry entry) {
+        if (valueFilter == null) {
+            return false;
+        }
+
+        switch (scanMode) {
+            case ALL:
+                return (deletionVectorsEnabled || mergeEngine == FIRST_ROW) && entry.level() > 0;
+            case DELTA:
+                return false;
+            case CHANGELOG:
+                return changelogProducer == ChangelogProducer.LOOKUP
+                        || changelogProducer == ChangelogProducer.FULL_COMPACTION;
+            default:
+                throw new UnsupportedOperationException("Unsupported scan mode: " + scanMode);
+        }
+    }
+
     /** Note: Keep this thread-safe. */
     @Override
     protected List<ManifestEntry> filterWholeBucketByStats(List<ManifestEntry> entries) {
-        if (valueFilter == null) {
+        if (valueFilter == null || scanMode != ScanMode.ALL) {
             return entries;
         }
 
