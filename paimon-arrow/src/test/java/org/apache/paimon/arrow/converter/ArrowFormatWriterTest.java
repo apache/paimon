@@ -39,6 +39,7 @@ import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 
+/** Test for {@link ArrowFormatWriter}. */
 public class ArrowFormatWriterTest {
 
     private static final Random RND = ThreadLocalRandom.current();
