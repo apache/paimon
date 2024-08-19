@@ -18,6 +18,9 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.TimeUtils;
+
 import org.apache.flink.api.java.tuple.Tuple3;
 
 import java.util.List;
@@ -34,6 +37,8 @@ public class CompactActionFactory implements ActionFactory {
 
     private static final String WHERE = "where";
 
+    private static final String PARTITION_IDLE_TIME = "partition_idle_time";
+
     @Override
     public String identifier() {
         return IDENTIFIER;
@@ -47,6 +52,9 @@ public class CompactActionFactory implements ActionFactory {
 
         CompactAction action;
         if (params.has(ORDER_STRATEGY)) {
+            Preconditions.checkArgument(
+                    !params.has(PARTITION_IDLE_TIME),
+                    "sort compact do not support 'partition_idle_time'.");
             action =
                     new SortCompactAction(
                                     tablePath.f0,
@@ -64,6 +72,10 @@ public class CompactActionFactory implements ActionFactory {
                             tablePath.f2,
                             catalogConfig,
                             optionalConfigMap(params, TABLE_CONF));
+            if (params.has(PARTITION_IDLE_TIME)) {
+                action.withPartitionIdleTime(
+                        TimeUtils.parseDuration(params.get(PARTITION_IDLE_TIME)));
+            }
         }
 
         if (params.has(PARTITION)) {
@@ -88,7 +100,8 @@ public class CompactActionFactory implements ActionFactory {
                         + "--table <table_name> [--partition <partition_name>]"
                         + "[--order_strategy <order_strategy>]"
                         + "[--table_conf <key>=<value>]"
-                        + "[--order_by <order_columns>]");
+                        + "[--order_by <order_columns>]"
+                        + "[--partition_idle_time <partition_idle_time>]");
         System.out.println(
                 "  compact --warehouse s3://path/to/warehouse --database <database_name> "
                         + "--table <table_name> [--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]]");
@@ -103,6 +116,9 @@ public class CompactActionFactory implements ActionFactory {
         System.out.println(
                 "  order compact now only support append-only table with bucket=-1, please don't specify --order_strategy parameter if your table does not meet the request");
         System.out.println("  order_strategy now only support zorder in batch mode");
+        System.out.println(
+                "partition_idle_time now can not be used with order_strategy, please don't specify --partition_idle_time when use order compact");
+        System.out.println("  partition_idle_time now is only supported in batch mode");
         System.out.println();
 
         System.out.println("Examples:");
@@ -113,6 +129,9 @@ public class CompactActionFactory implements ActionFactory {
         System.out.println(
                 "  compact --warehouse hdfs:///path/to/warehouse --database test_db --table test_table "
                         + "--partition dt=20221126,hh=08 --partition dt=20221127,hh=09");
+        System.out.println(
+                "  compact --warehouse hdfs:///path/to/warehouse --database test_db --table test_table "
+                        + "--partition_idle_time 10s");
         System.out.println(
                 "  compact --warehouse s3:///path/to/warehouse "
                         + "--database test_db "

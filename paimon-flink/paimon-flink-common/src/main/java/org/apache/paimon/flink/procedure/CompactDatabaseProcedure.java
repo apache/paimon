@@ -20,6 +20,7 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.flink.action.CompactDatabaseAction;
 import org.apache.paimon.utils.StringUtils;
+import org.apache.paimon.utils.TimeUtils;
 
 import org.apache.flink.table.procedure.ProcedureContext;
 
@@ -98,6 +99,25 @@ public class CompactDatabaseProcedure extends ProcedureBase {
             String excludingTables,
             String tableOptions)
             throws Exception {
+        return call(
+                procedureContext,
+                includingDatabases,
+                mode,
+                includingTables,
+                excludingTables,
+                tableOptions,
+                "");
+    }
+
+    public String[] call(
+            ProcedureContext procedureContext,
+            String includingDatabases,
+            String mode,
+            String includingTables,
+            String excludingTables,
+            String tableOptions,
+            String partitionIdleTime)
+            throws Exception {
         String warehouse = catalog.warehouse();
         Map<String, String> catalogOptions = catalog.options();
         CompactDatabaseAction action =
@@ -108,6 +128,9 @@ public class CompactDatabaseProcedure extends ProcedureBase {
                         .withDatabaseCompactMode(nullable(mode));
         if (!StringUtils.isBlank(tableOptions)) {
             action.withTableOptions(parseCommaSeparatedKeyValues(tableOptions));
+        }
+        if (!StringUtils.isBlank(partitionIdleTime)) {
+            action.withPartitionIdleTime(TimeUtils.parseDuration(partitionIdleTime));
         }
 
         return execute(procedureContext, action, "Compact database job");

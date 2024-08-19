@@ -24,6 +24,7 @@ import org.apache.paimon.append.UnawareAppendCompactionTask;
 import org.apache.paimon.append.UnawareAppendTableCompactionCoordinator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.spark.PaimonSplitScan;
@@ -48,6 +49,7 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ParameterUtils;
 import org.apache.paimon.utils.SerializationUtils;
 import org.apache.paimon.utils.StringUtils;
+import org.apache.paimon.utils.TimeUtils;
 
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
@@ -71,6 +73,9 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -80,6 +85,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -113,6 +119,7 @@ public class CompactProcedure extends BaseProcedure {
                 ProcedureParameter.optional("where", StringType),
                 ProcedureParameter.optional("max_concurrent_jobs", IntegerType),
                 ProcedureParameter.optional("options", StringType),
+                ProcedureParameter.optional("partition_idle_time", StringType),
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -147,9 +154,15 @@ public class CompactProcedure extends BaseProcedure {
         String where = blank(args, 4) ? null : args.getString(4);
         int maxConcurrentJobs = args.isNullAt(5) ? 15 : args.getInt(5);
         String options = args.isNullAt(6) ? null : args.getString(6);
+        Duration partitionIdleTime =
+                blank(args, 7) ? null : TimeUtils.parseDuration(args.getString(7));
         if (TableSorter.OrderType.NONE.name().equals(sortType) && !sortColumns.isEmpty()) {
             throw new IllegalArgumentException(
                     "order_strategy \"none\" cannot work with order_by columns.");
+        }
+        if (partitionIdleTime != null && (!TableSorter.OrderType.NONE.name().equals(sortType))) {
+            throw new IllegalArgumentException(
+                    "sort compact do not support 'partition_idle_time'.");
         }
         checkArgument(
                 partitions == null || where == null,
@@ -193,7 +206,8 @@ public class CompactProcedure extends BaseProcedure {
                                             sortColumns,
                                             relation,
                                             condition,
-                                            maxConcurrentJobs));
+                                            maxConcurrentJobs,
+                                            partitionIdleTime));
                     return new InternalRow[] {internalRow};
                 });
     }
@@ -213,7 +227,8 @@ public class CompactProcedure extends BaseProcedure {
             List<String> sortColumns,
             DataSourceV2Relation relation,
             @Nullable Expression condition,
-            int maxConcurrentJobs) {
+            int maxConcurrentJobs,
+            @Nullable Duration partitionIdleTime) {
         BucketMode bucketMode = table.bucketMode();
         TableSorter.OrderType orderType = TableSorter.OrderType.of(sortType);
         Predicate filter =
@@ -230,10 +245,10 @@ public class CompactProcedure extends BaseProcedure {
             switch (bucketMode) {
                 case HASH_FIXED:
                 case HASH_DYNAMIC:
-                    compactAwareBucketTable(table, filter, javaSparkContext);
+                    compactAwareBucketTable(table, filter, partitionIdleTime, javaSparkContext);
                     break;
                 case BUCKET_UNAWARE:
-                    compactUnAwareBucketTable(table, filter, javaSparkContext);
+                    compactUnAwareBucketTable(table, filter, partitionIdleTime, javaSparkContext);
                     break;
                 default:
                     throw new UnsupportedOperationException(
@@ -256,17 +271,22 @@ public class CompactProcedure extends BaseProcedure {
     }
 
     private void compactAwareBucketTable(
-            FileStoreTable table, @Nullable Predicate filter, JavaSparkContext javaSparkContext) {
+            FileStoreTable table,
+            @Nullable Predicate filter,
+            @Nullable Duration partitionIdleTime,
+            JavaSparkContext javaSparkContext) {
         SnapshotReader snapshotReader = table.newSnapshotReader();
         if (filter != null) {
             snapshotReader.withFilter(filter);
         }
-
+        Set<BinaryRow> partitionToBeCompacted =
+                getHistoryPartition(snapshotReader, partitionIdleTime);
         List<Pair<byte[], Integer>> partitionBuckets =
                 snapshotReader.read().splits().stream()
                         .map(split -> (DataSplit) split)
                         .map(dataSplit -> Pair.of(dataSplit.partition(), dataSplit.bucket()))
                         .distinct()
+                        .filter(pair -> partitionToBeCompacted.contains(pair.getKey()))
                         .map(
                                 p ->
                                         Pair.of(
@@ -329,9 +349,30 @@ public class CompactProcedure extends BaseProcedure {
     }
 
     private void compactUnAwareBucketTable(
-            FileStoreTable table, @Nullable Predicate filter, JavaSparkContext javaSparkContext) {
+            FileStoreTable table,
+            @Nullable Predicate filter,
+            @Nullable Duration partitionIdleTime,
+            JavaSparkContext javaSparkContext) {
         List<UnawareAppendCompactionTask> compactionTasks =
                 new UnawareAppendTableCompactionCoordinator(table, false, filter).run();
+        if (partitionIdleTime != null) {
+            Map<BinaryRow, Long> partitionInfo =
+                    table.newSnapshotReader().partitionEntries().stream()
+                            .collect(
+                                    Collectors.toMap(
+                                            PartitionEntry::partition,
+                                            PartitionEntry::lastFileCreationTime));
+            long historyMilli =
+                    LocalDateTime.now()
+                            .minus(partitionIdleTime)
+                            .atZone(ZoneId.systemDefault())
+                            .toInstant()
+                            .toEpochMilli();
+            compactionTasks =
+                    compactionTasks.stream()
+                            .filter(task -> partitionInfo.get(task.partition()) <= historyMilli)
+                            .collect(Collectors.toList());
+        }
         if (compactionTasks.isEmpty()) {
             return;
         }
@@ -390,6 +431,31 @@ public class CompactProcedure extends BaseProcedure {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private Set<BinaryRow> getHistoryPartition(
+            SnapshotReader snapshotReader, @Nullable Duration partitionIdleTime) {
+        Set<Pair<BinaryRow, Long>> partitionInfo =
+                snapshotReader.partitionEntries().stream()
+                        .map(
+                                partitionEntry ->
+                                        Pair.of(
+                                                partitionEntry.partition(),
+                                                partitionEntry.lastFileCreationTime()))
+                        .collect(Collectors.toSet());
+        if (partitionIdleTime != null) {
+            long historyMilli =
+                    LocalDateTime.now()
+                            .minus(partitionIdleTime)
+                            .atZone(ZoneId.systemDefault())
+                            .toInstant()
+                            .toEpochMilli();
+            partitionInfo =
+                    partitionInfo.stream()
+                            .filter(partition -> partition.getValue() <= historyMilli)
+                            .collect(Collectors.toSet());
+        }
+        return partitionInfo.stream().map(Pair::getKey).collect(Collectors.toSet());
     }
 
     private void sortCompactUnAwareBucketTable(

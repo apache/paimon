@@ -86,22 +86,96 @@ class DynamicBucketTableTest extends PaimonSparkTestBase {
       Row(0) :: Row(1) :: Row(2) :: Nil)
   }
 
-  test(s"Paimon dynamic bucket table: write with global dynamic bucket") {
-    spark.sql(s"""
-                 |CREATE TABLE T (
-                 |  pk STRING,
-                 |  v STRING,
-                 |  pt STRING)
-                 |TBLPROPERTIES (
-                 |  'primary-key' = 'pk',
-                 |  'bucket' = '-1'
-                 |)
-                 |PARTITIONED BY (pt)
-                 |""".stripMargin)
+  test(s"Paimon cross partition table: write with partition change") {
+    sql(s"""
+           |CREATE TABLE T (
+           |  pt INT,
+           |  pk INT,
+           |  v INT)
+           |TBLPROPERTIES (
+           |  'primary-key' = 'pk',
+           |  'bucket' = '-1',
+           |  'dynamic-bucket.target-row-num'='3',
+           |  'dynamic-bucket.assigner-parallelism'='1'
+           |)
+           |PARTITIONED BY (pt)
+           |""".stripMargin)
 
-    val error = intercept[UnsupportedOperationException] {
-      spark.sql("INSERT INTO T VALUES ('1', 'a', 'p')")
-    }.getMessage
-    assert(error.contains("Spark doesn't support CROSS_PARTITION mode"))
+    sql("INSERT INTO T VALUES (1, 1, 1), (1, 2, 2), (1, 3, 3), (1, 4, 4), (1, 5, 5)")
+    checkAnswer(
+      sql("SELECT * FROM T ORDER BY pk"),
+      Seq(Row(1, 1, 1), Row(1, 2, 2), Row(1, 3, 3), Row(1, 4, 4), Row(1, 5, 5)))
+
+    sql("INSERT INTO T VALUES (1, 3, 33), (1, 1, 11)")
+    checkAnswer(
+      sql("SELECT * FROM T ORDER BY pk"),
+      Seq(Row(1, 1, 11), Row(1, 2, 2), Row(1, 3, 33), Row(1, 4, 4), Row(1, 5, 5)))
+
+    checkAnswer(sql("SELECT DISTINCT bucket FROM `T$FILES`"), Seq(Row(0), Row(1)))
+
+    // change partition
+    sql("INSERT INTO T VALUES (2, 1, 2), (2, 2, 3)")
+    checkAnswer(
+      sql("SELECT * FROM T ORDER BY pk"),
+      Seq(Row(2, 1, 2), Row(2, 2, 3), Row(1, 3, 33), Row(1, 4, 4), Row(1, 5, 5)))
+  }
+
+  test(s"Paimon cross partition table: write with delete") {
+    sql(s"""
+           |CREATE TABLE T (
+           |  pt INT,
+           |  pk INT,
+           |  v INT)
+           |TBLPROPERTIES (
+           |  'primary-key' = 'pk',
+           |  'bucket' = '-1',
+           |  'dynamic-bucket.target-row-num'='3'
+           |)
+           |PARTITIONED BY (pt)
+           |""".stripMargin)
+
+    sql("INSERT INTO T VALUES (1, 1, 1), (1, 2, 2), (1, 3, 3), (1, 4, 4), (1, 5, 5)")
+    checkAnswer(
+      sql("SELECT * FROM T ORDER BY pk"),
+      Seq(Row(1, 1, 1), Row(1, 2, 2), Row(1, 3, 3), Row(1, 4, 4), Row(1, 5, 5)))
+
+    sql("DELETE FROM T WHERE pk = 1")
+    checkAnswer(
+      sql("SELECT * FROM T ORDER BY pk"),
+      Seq(Row(1, 2, 2), Row(1, 3, 3), Row(1, 4, 4), Row(1, 5, 5)))
+
+    // change partition
+    sql("INSERT INTO T VALUES (2, 1, 2), (2, 2, 3)")
+    checkAnswer(
+      sql("SELECT * FROM T ORDER BY pk"),
+      Seq(Row(2, 1, 2), Row(2, 2, 3), Row(1, 3, 3), Row(1, 4, 4), Row(1, 5, 5)))
+
+    sql("DELETE FROM T WHERE pk = 2")
+    checkAnswer(
+      sql("SELECT * FROM T ORDER BY pk"),
+      Seq(Row(2, 1, 2), Row(1, 3, 3), Row(1, 4, 4), Row(1, 5, 5)))
+  }
+
+  test(s"Paimon cross partition table: user define assigner parallelism") {
+    sql(s"""
+           |CREATE TABLE T (
+           |  pt INT,
+           |  pk INT,
+           |  v INT)
+           |TBLPROPERTIES (
+           |  'primary-key' = 'pk',
+           |  'bucket' = '-1',
+           |  'dynamic-bucket.target-row-num'='3',
+           |  'dynamic-bucket.assigner-parallelism'='3'
+           |)
+           |PARTITIONED BY (pt)
+           |""".stripMargin)
+
+    sql("INSERT INTO T VALUES (1, 1, 1), (1, 2, 2), (1, 3, 3), (1, 4, 4), (1, 5, 5)")
+    checkAnswer(
+      sql("SELECT * FROM T ORDER BY pk"),
+      Seq(Row(1, 1, 1), Row(1, 2, 2), Row(1, 3, 3), Row(1, 4, 4), Row(1, 5, 5)))
+
+    checkAnswer(sql("SELECT DISTINCT bucket FROM `T$FILES`"), Seq(Row(0), Row(1), Row(2)))
   }
 }

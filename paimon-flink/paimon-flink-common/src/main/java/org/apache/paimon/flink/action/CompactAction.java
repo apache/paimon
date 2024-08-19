@@ -38,6 +38,9 @@ import org.apache.flink.table.data.RowData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
+import java.time.Duration;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -53,6 +56,8 @@ public class CompactAction extends TableActionBase {
     private List<Map<String, String>> partitions;
 
     private String whereSql;
+
+    @Nullable private Duration partitionIdleTime = null;
 
     public CompactAction(String warehouse, String database, String tableName) {
         this(warehouse, database, tableName, Collections.emptyMap(), Collections.emptyMap());
@@ -90,6 +95,11 @@ public class CompactAction extends TableActionBase {
         return this;
     }
 
+    public CompactAction withPartitionIdleTime(@Nullable Duration partitionIdleTime) {
+        this.partitionIdleTime = partitionIdleTime;
+        return this;
+    }
+
     @Override
     public void build() throws Exception {
         ReadableConfig conf = env.getConfiguration();
@@ -120,7 +130,11 @@ public class CompactAction extends TableActionBase {
 
         sourceBuilder.withPartitionPredicate(getPredicate());
         DataStreamSource<RowData> source =
-                sourceBuilder.withEnv(env).withContinuousMode(isStreaming).build();
+                sourceBuilder
+                        .withEnv(env)
+                        .withContinuousMode(isStreaming)
+                        .withPartitionIdleTime(partitionIdleTime)
+                        .build();
         sinkBuilder.withInput(source).build();
     }
 
@@ -132,6 +146,7 @@ public class CompactAction extends TableActionBase {
 
         unawareBucketCompactionTopoBuilder.withPartitionPredicate(getPredicate());
         unawareBucketCompactionTopoBuilder.withContinuousMode(isStreaming);
+        unawareBucketCompactionTopoBuilder.withPartitionIdleTime(partitionIdleTime);
         unawareBucketCompactionTopoBuilder.build();
     }
 
