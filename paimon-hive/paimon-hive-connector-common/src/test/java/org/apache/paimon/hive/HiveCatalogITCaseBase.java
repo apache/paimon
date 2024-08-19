@@ -230,7 +230,12 @@ public abstract class HiveCatalogITCaseBase {
         // create database
         tEnv.executeSql("CREATE DATABASE test_db2").await();
         assertThat(collect("SHOW DATABASES"))
-                .isEqualTo(Arrays.asList(Row.of("default"), Row.of("test_db"), Row.of("test_db2")));
+                .isEqualTo(
+                        Arrays.asList(
+                                Row.of("sys"),
+                                Row.of("default"),
+                                Row.of("test_db"),
+                                Row.of("test_db2")));
         tEnv.executeSql("CREATE DATABASE IF NOT EXISTS test_db2").await();
 
         assertThatThrownBy(() -> tEnv.executeSql("CREATE DATABASE test_db2").await())
@@ -240,7 +245,7 @@ public abstract class HiveCatalogITCaseBase {
         // drop database
         tEnv.executeSql("DROP DATABASE test_db2").await();
         assertThat(collect("SHOW DATABASES"))
-                .isEqualTo(Arrays.asList(Row.of("default"), Row.of("test_db")));
+                .isEqualTo(Arrays.asList(Row.of("sys"), Row.of("default"), Row.of("test_db")));
         tEnv.executeSql("DROP DATABASE IF EXISTS test_db2").await();
 
         assertThatThrownBy(() -> tEnv.executeSql("DROP DATABASE test_db2").await())
@@ -265,7 +270,7 @@ public abstract class HiveCatalogITCaseBase {
 
         tEnv.executeSql("DROP DATABASE test_db2 CASCADE").await();
         assertThat(collect("SHOW DATABASES"))
-                .isEqualTo(Arrays.asList(Row.of("default"), Row.of("test_db")));
+                .isEqualTo(Arrays.asList(Row.of("sys"), Row.of("default"), Row.of("test_db")));
         assertThat(tablePath.getFileSystem().exists(tablePath)).isFalse();
     }
 

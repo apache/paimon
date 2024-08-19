@@ -409,12 +409,14 @@ public class FlinkCatalogTest {
     public void testCreateDb_Database() throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         List<String> dbs = catalog.listDatabases();
-        assertThat(dbs).hasSize(2);
+        assertThat(dbs).hasSize(3);
         assertThat(new HashSet<>(dbs))
                 .isEqualTo(
                         new HashSet<>(
                                 Arrays.asList(
-                                        path1.getDatabaseName(), catalog.getDefaultDatabase())));
+                                        path1.getDatabaseName(),
+                                        catalog.getDefaultDatabase(),
+                                        "sys")));
     }
 
     @Test
@@ -585,12 +587,12 @@ public class FlinkCatalogTest {
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage(
                         "Creating table in default database is disabled, please specify a database name.");
-        assertThatCollection(catalog.listDatabases()).isEmpty();
+        assertThatCollection(catalog.listDatabases()).containsOnly("sys");
 
         catalog.createDatabase("db1", null, false);
         assertThatCode(() -> catalog.createTable(path1, this.createTable(new HashMap<>(0)), false))
                 .doesNotThrowAnyException();
-        assertThat(catalog.listDatabases()).containsExactlyInAnyOrder("db1");
+        assertThat(catalog.listDatabases()).containsExactlyInAnyOrder("sys", "db1");
 
         conf.set(FlinkCatalogOptions.DEFAULT_DATABASE, "default-db");
         Catalog catalog1 =
