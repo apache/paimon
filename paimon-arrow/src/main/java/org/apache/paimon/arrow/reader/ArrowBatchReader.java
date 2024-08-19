@@ -16,31 +16,41 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.arrow.converter;
+package org.apache.paimon.arrow.reader;
 
+import org.apache.paimon.arrow.converter.Arrow2PaimonVectorConvertor;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
-import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.RowType;
 
 import org.apache.arrow.vector.VectorSchemaRoot;
 
 import java.util.Iterator;
 
-/** Util to convert a {@link VectorSchemaRoot} to paimon rows. */
-public class Arrow2PaimonBatchConverter {
+/** Reader from a {@link VectorSchemaRoot} to paimon rows. */
+public class ArrowBatchReader {
 
-    public static Iterable<InternalRow> convet(DataType[] types, VectorSchemaRoot vsr) {
-        ColumnVector[] columnVectors = new ColumnVector[types.length];
+    private final VectorizedColumnBatch batch;
+    private final Arrow2PaimonVectorConvertor[] convertors;
 
-        for (int i = 0; i < types.length; i++) {
-            columnVectors[i] =
-                    Arrow2PaimonVectorConvertor.construct(types[i]).convertVector(vsr.getVector(i));
+    public ArrowBatchReader(RowType rowType) {
+        ColumnVector[] columnVectors = new ColumnVector[rowType.getFieldCount()];
+        this.convertors = new Arrow2PaimonVectorConvertor[rowType.getFieldCount()];
+        this.batch = new VectorizedColumnBatch(columnVectors);
+
+        for (int i = 0; i < columnVectors.length; i++) {
+            this.convertors[i] = Arrow2PaimonVectorConvertor.construct(rowType.getTypeAt(i));
         }
+    }
 
+    public Iterable<InternalRow> readBatch(VectorSchemaRoot vsr) {
+        for (int i = 0; i < batch.columns.length; i++) {
+            batch.columns[i] = convertors[i].convertVector(vsr.getVector(i));
+        }
         int rowCount = vsr.getRowCount();
-        VectorizedColumnBatch batch = new VectorizedColumnBatch(columnVectors);
+
         batch.setNumRows(vsr.getRowCount());
         ColumnarRow columnarRow = new ColumnarRow(batch);
         return () ->

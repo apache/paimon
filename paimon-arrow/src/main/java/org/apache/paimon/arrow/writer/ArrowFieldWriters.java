@@ -487,48 +487,6 @@ public class ArrowFieldWriters {
         }
     }
 
-    /** Writer for TIMESTAMP & TIMESTAMP_LTZ. */
-    public static class TimestampWriterLZ extends ArrowFieldWriter {
-
-        private final int precision;
-        @Nullable private final ZoneId castZoneId;
-
-        public TimestampWriterLZ(
-                FieldVector fieldVector, int precision, @Nullable ZoneId castZoneId) {
-            super(fieldVector);
-            this.precision = precision;
-            this.castZoneId = castZoneId;
-        }
-
-        @Override
-        protected void doWrite(
-                ColumnVector columnVector,
-                @Nullable int[] pickedInColumn,
-                int startIndex,
-                int batchRows) {
-            TimeStampVector timeStampVector = (TimeStampVector) fieldVector;
-            for (int i = 0; i < batchRows; i++) {
-                int row = getRowNumber(startIndex, i, pickedInColumn);
-                if (columnVector.isNullAt(row)) {
-                    timeStampVector.setNull(i);
-                } else {
-                    Timestamp timestamp =
-                            ((TimestampColumnVector) columnVector).getTimestamp(row, precision);
-                    long value = ArrowUtils.timestampToEpoch(timestamp, precision, castZoneId);
-                    timeStampVector.setSafe(i, value);
-                }
-            }
-        }
-
-        @Override
-        protected void doWrite(int rowIndex, DataGetters getters, int pos) {
-            TimeStampVector timeStampNanoVector = (TimeStampVector) fieldVector;
-            Timestamp timestamp = getters.getTimestamp(pos, precision);
-            long value = ArrowUtils.timestampToEpoch(timestamp, precision, castZoneId);
-            timeStampNanoVector.setSafe(rowIndex, value);
-        }
-    }
-
     /** Writer for ARRAY. */
     public static class ArrayWriter extends ArrowFieldWriter {
 

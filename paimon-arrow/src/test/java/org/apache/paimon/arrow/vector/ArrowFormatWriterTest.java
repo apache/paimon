@@ -18,14 +18,13 @@
 
 package org.apache.paimon.arrow.vector;
 
-import org.apache.paimon.arrow.converter.Arrow2PaimonBatchConverter;
+import org.apache.paimon.arrow.reader.ArrowBatchReader;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.StringUtils;
@@ -99,10 +98,8 @@ public class ArrowFormatWriterTest {
             writer.flush();
             VectorSchemaRoot vectorSchemaRoot = writer.getVectorSchemaRoot();
 
-            Iterable<InternalRow> rows =
-                    Arrow2PaimonBatchConverter.convet(
-                            PRIMITIVE_TYPE.getFieldTypes().toArray(new DataType[0]),
-                            vectorSchemaRoot);
+            ArrowBatchReader arrowBatchReader = new ArrowBatchReader(PRIMITIVE_TYPE);
+            Iterable<InternalRow> rows = arrowBatchReader.readBatch(vectorSchemaRoot);
 
             Iterator<InternalRow> iterator = rows.iterator();
             for (int i = 0; i < 1000; i++) {
