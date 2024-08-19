@@ -16,9 +16,8 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.arrow.converter;
+package org.apache.paimon.arrow.vector;
 
-import org.apache.paimon.arrow.vector.ArrowFormatWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
@@ -39,7 +38,7 @@ import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 
-/** Test for {@link ArrowFormatWriter}. */
+/** Test for {@link org.apache.paimon.arrow.vector.ArrowFormatWriter}. */
 public class ArrowFormatWriterTest {
 
     private static final Random RND = ThreadLocalRandom.current();

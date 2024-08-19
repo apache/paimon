@@ -31,10 +31,8 @@ import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.util.OversizedAllocationException;
 
-import java.io.Closeable;
-
 /** Write from {@link InternalRow} to {@link VectorSchemaRoot}. */
-public class ArrowFormatWriter implements Closeable {
+public class ArrowFormatWriter implements AutoCloseable {
 
     private final VectorSchemaRoot vectorSchemaRoot;
     private final ArrowFieldWriter[] fieldWriters;
@@ -95,21 +93,18 @@ public class ArrowFormatWriter implements Closeable {
         return rowId == 0;
     }
 
+    @Override
     public void close() {
-        try {
-            array.release();
-            schema.release();
-            array.close();
-            schema.close();
-            vectorSchemaRoot.close();
-            allocator.close();
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        array.release();
+        schema.release();
+        array.close();
+        schema.close();
+        vectorSchemaRoot.close();
+        allocator.close();
     }
 
     @VisibleForTesting
-    public VectorSchemaRoot getVectorSchemaRoot() {
+    VectorSchemaRoot getVectorSchemaRoot() {
         return vectorSchemaRoot;
     }
 }
