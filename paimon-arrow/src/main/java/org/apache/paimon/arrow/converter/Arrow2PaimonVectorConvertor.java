@@ -94,6 +94,7 @@ public interface Arrow2PaimonVectorConvertor {
 
     ColumnVector convertVector(FieldVector vector);
 
+    /** Visitor to create convertor from arrow to paimon. */
     class Arrow2PaimonVectorConvertorVisitor
             implements DataTypeVisitor<Arrow2PaimonVectorConvertor> {
 
