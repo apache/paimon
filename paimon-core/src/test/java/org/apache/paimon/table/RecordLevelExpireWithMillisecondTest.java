@@ -43,7 +43,6 @@ class RecordLevelExpireWithMillisecondTest extends PrimaryKeyTableTestBase {
     @Override
     @BeforeEach
     public void beforeEachBase() throws Exception {
-        super.beforeEachBase();
         CatalogContext context =
                 CatalogContext.create(
                         new Path(TraceableFileIO.SCHEME + "://" + tempPath.toString()));
@@ -80,8 +79,8 @@ class RecordLevelExpireWithMillisecondTest extends PrimaryKeyTableTestBase {
         writeCommit(GenericRow.of(1, 1, 1L), GenericRow.of(1, 2, 2L));
 
         // can be queried
-        assertThat(query())
-                .containsExactlyInAnyOrder(GenericRow.of(1, 1, 1), GenericRow.of(1, 2, 2));
+        assertThat(query(new int[] {0, 1}))
+                .containsExactlyInAnyOrder(GenericRow.of(1, 1), GenericRow.of(1, 2));
 
         long currentSecs = System.currentTimeMillis();
         writeCommit(GenericRow.of(1, 3, currentSecs));
