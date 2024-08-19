@@ -48,6 +48,28 @@ class MigrateTableProcedureTest extends PaimonHiveTestBase {
 
   Seq("parquet", "orc", "avro").foreach(
     format => {
+      test(s"Paimon migrate table procedure: migrate $format table with separator") {
+        withTable("hive_tbl") {
+          // create hive table
+          spark.sql(s"""
+                       |CREATE TABLE hive_tbl (id STRING, name STRING, pt STRING)
+                       |USING $format
+                       |""".stripMargin)
+
+          spark.sql(s"INSERT INTO hive_tbl VALUES ('1', 'a', 'p1'), ('2', 'b', 'p2')")
+
+          spark.sql(
+            s"CALL sys.migrate_table(source_type => 'hive', table => '$hiveDbName.hive_tbl', options => 'file.format=$format;orc.encrypt=pii:id,name')")
+
+          checkAnswer(
+            spark.sql(s"SELECT * FROM hive_tbl ORDER BY id"),
+            Row("1", "a", "p1") :: Row("2", "b", "p2") :: Nil)
+        }
+      }
+    })
+
+  Seq("parquet", "orc", "avro").foreach(
+    format => {
       test(
         s"Paimon migrate table procedure: migrate $format non-partitioned table with set target table") {
         withTable("hive_tbl_rn") {

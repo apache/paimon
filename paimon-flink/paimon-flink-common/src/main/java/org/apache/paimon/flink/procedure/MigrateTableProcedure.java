@@ -50,6 +50,16 @@ public class MigrateTableProcedure extends ProcedureBase {
             String sourceTablePath,
             String properties)
             throws Exception {
+        return call(procedureContext, connector, sourceTablePath, properties, ",");
+    }
+
+    public String[] call(
+            ProcedureContext procedureContext,
+            String connector,
+            String sourceTablePath,
+            String properties,
+            String separator)
+            throws Exception {
         String targetPaimonTablePath = sourceTablePath + PAIMON_SUFFIX;
 
         Identifier sourceTableId = Identifier.fromString(sourceTablePath);
@@ -62,7 +72,7 @@ public class MigrateTableProcedure extends ProcedureBase {
                         sourceTableId.getObjectName(),
                         targetTableId.getDatabaseName(),
                         targetTableId.getObjectName(),
-                        ParameterUtils.parseCommaSeparatedKeyValues(properties))
+                        ParameterUtils.parseSeparatedKeyValues(properties, separator))
                 .executeMigrate();
 
         LOG.info("Last step: rename " + targetTableId + " to " + sourceTableId);

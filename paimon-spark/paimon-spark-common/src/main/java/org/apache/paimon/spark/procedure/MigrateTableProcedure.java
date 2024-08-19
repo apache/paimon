@@ -53,7 +53,8 @@ public class MigrateTableProcedure extends BaseProcedure {
                 ProcedureParameter.required("table", StringType),
                 ProcedureParameter.optional("options", StringType),
                 ProcedureParameter.optional("delete_origin", BooleanType),
-                ProcedureParameter.optional("target_table", StringType)
+                ProcedureParameter.optional("target_table", StringType),
+                ProcedureParameter.optional("separator", StringType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -83,6 +84,7 @@ public class MigrateTableProcedure extends BaseProcedure {
         String properties = args.isNullAt(2) ? null : args.getString(2);
         boolean deleteNeed = args.isNullAt(3) || args.getBoolean(3);
         String targetTable = args.isNullAt(4) ? null : args.getString(4);
+        String separator = args.isNullAt(5) ? "," : args.getString(4);
 
         Identifier sourceTableId = Identifier.fromString(sourceTable);
         Identifier tmpTableId =
@@ -101,7 +103,7 @@ public class MigrateTableProcedure extends BaseProcedure {
                             sourceTableId.getObjectName(),
                             tmpTableId.getDatabaseName(),
                             tmpTableId.getObjectName(),
-                            ParameterUtils.parseCommaSeparatedKeyValues(properties));
+                            ParameterUtils.parseSeparatedKeyValues(properties, separator));
 
             migrator.deleteOriginTable(deleteNeed);
             migrator.executeMigrate();

@@ -28,6 +28,7 @@ public class MigrateTableActionFactory implements ActionFactory {
 
     private static final String SOURCE_TYPE = "source_type";
     private static final String OPTIONS = "options";
+    private static final String SEPARATOR = "separator";
 
     @Override
     public String identifier() {
@@ -41,10 +42,11 @@ public class MigrateTableActionFactory implements ActionFactory {
         String sourceHiveTable = params.get(TABLE);
         Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
         String tableConf = params.get(OPTIONS);
+        String separator = params.get(SEPARATOR) == null ? "," : params.get(SEPARATOR);
 
         MigrateTableAction migrateTableAction =
                 new MigrateTableAction(
-                        connector, warehouse, sourceHiveTable, catalogConfig, tableConf);
+                        connector, warehouse, sourceHiveTable, catalogConfig, tableConf, separator);
         return Optional.of(migrateTableAction);
     }
 
