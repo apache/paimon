@@ -18,7 +18,6 @@
 
 package org.apache.paimon.arrow.vector;
 
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.arrow.ArrowUtils;
 import org.apache.paimon.arrow.writer.ArrowFieldWriter;
 import org.apache.paimon.arrow.writer.ArrowFieldWriterFactoryVisitor;
@@ -103,8 +102,7 @@ public class ArrowFormatWriter implements AutoCloseable {
         allocator.close();
     }
 
-    @VisibleForTesting
-    VectorSchemaRoot getVectorSchemaRoot() {
+    public VectorSchemaRoot getVectorSchemaRoot() {
         return vectorSchemaRoot;
     }
 }

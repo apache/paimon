@@ -18,6 +18,7 @@
 
 package org.apache.paimon.arrow.vector;
 
+import org.apache.paimon.arrow.reader.ArrowBatchReader;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
@@ -34,6 +35,7 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
@@ -82,6 +84,11 @@ public class ArrowFormatWriterTest {
     public void testWrite() {
         try (ArrowFormatWriter writer = new ArrowFormatWriter(PRIMITIVE_TYPE, 4096)) {
             List<InternalRow> list = new ArrayList<>();
+            List<InternalRow.FieldGetter> fieldGetters = new ArrayList<>();
+
+            for (int i = 0; i < PRIMITIVE_TYPE.getFieldCount(); i++) {
+                fieldGetters.add(InternalRow.createFieldGetter(PRIMITIVE_TYPE.getTypeAt(i), i));
+            }
             for (int i = 0; i < 1000; i++) {
                 list.add(GenericRow.of(randomRowValues(null)));
             }
@@ -91,14 +98,18 @@ public class ArrowFormatWriterTest {
             writer.flush();
             VectorSchemaRoot vectorSchemaRoot = writer.getVectorSchemaRoot();
 
-            for (int i = 0; i < vectorSchemaRoot.getRowCount(); i++) {
-                Assertions.assertThat(list.get(i).getString(0).toString())
-                        .isEqualTo(vectorSchemaRoot.getVector(0).getObject(i).toString());
-            }
+            ArrowBatchReader arrowBatchReader = new ArrowBatchReader(PRIMITIVE_TYPE);
+            Iterable<InternalRow> rows = arrowBatchReader.readBatch(vectorSchemaRoot);
 
-            for (int i = 0; i < vectorSchemaRoot.getRowCount(); i++) {
-                Assertions.assertThat(list.get(i).getInt(14))
-                        .isEqualTo(vectorSchemaRoot.getVector(14).getObject(i));
+            Iterator<InternalRow> iterator = rows.iterator();
+            for (int i = 0; i < 1000; i++) {
+                InternalRow actual = iterator.next();
+                InternalRow expectec = list.get(i);
+
+                for (InternalRow.FieldGetter fieldGetter : fieldGetters) {
+                    Assertions.assertThat(fieldGetter.getFieldOrNull(actual))
+                            .isEqualTo(fieldGetter.getFieldOrNull(expectec));
+                }
             }
         }
     }

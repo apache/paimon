@@ -136,7 +136,7 @@ public class ArrowUtils {
         return ArrowCStruct.of(array, schema);
     }
 
-    public void serializeToIpc(VectorSchemaRoot vsr, OutputStream out) {
+    public static void serializeToIpc(VectorSchemaRoot vsr, OutputStream out) {
         try (ArrowStreamWriter writer = new ArrowStreamWriter(vsr, null, out)) {
             writer.start();
             writer.writeBatch();
