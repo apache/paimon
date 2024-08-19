@@ -41,6 +41,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.SmallIntType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.HllSketchUtil;
 import org.apache.paimon.utils.RoaringBitmap32;
 import org.apache.paimon.utils.RoaringBitmap64;
 
@@ -724,6 +725,29 @@ public class FieldAggregatorTest {
         byte[] inputVal = sketchOf(1);
         byte[] acc1 = sketchOf(2, 3);
         byte[] acc2 = sketchOf(1, 2, 3);
+
+        assertThat(agg.agg(null, null)).isNull();
+
+        byte[] result1 = (byte[]) agg.agg(null, inputVal);
+        assertThat(inputVal).isEqualTo(result1);
+
+        byte[] result2 = (byte[]) agg.agg(acc1, null);
+        assertThat(result2).isEqualTo(acc1);
+
+        byte[] result3 = (byte[]) agg.agg(acc1, inputVal);
+        assertThat(result3).isEqualTo(acc2);
+
+        byte[] result4 = (byte[]) agg.agg(acc2, inputVal);
+        assertThat(result4).isEqualTo(acc2);
+    }
+
+    @Test
+    public void testFieldHllSketchAgg() {
+        FieldHllSketchAgg agg = new FieldHllSketchAgg(DataTypes.VARBINARY(20));
+
+        byte[] inputVal = HllSketchUtil.sketchOf(1);
+        byte[] acc1 = HllSketchUtil.sketchOf(2, 3);
+        byte[] acc2 = HllSketchUtil.sketchOf(1, 2, 3);
 
         assertThat(agg.agg(null, null)).isNull();
 

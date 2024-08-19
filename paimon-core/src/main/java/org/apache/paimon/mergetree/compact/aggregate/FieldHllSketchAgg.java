@@ -21,6 +21,8 @@ package org.apache.paimon.mergetree.compact.aggregate;
 import org.apache.paimon.types.VarBinaryType;
 
 import org.apache.datasketches.hll.HllSketch;
+import org.apache.datasketches.hll.TgtHllType;
+import org.apache.datasketches.hll.Union;
 
 /** HllSketch aggregate a field of a row. */
 public class FieldHllSketchAgg extends FieldAggregator {
@@ -49,7 +51,9 @@ public class FieldHllSketchAgg extends FieldAggregator {
         }
 
         HllSketch heapify = HllSketch.heapify((byte[]) accumulator);
-        heapify.update((byte[]) inputField);
-        return heapify.toCompactByteArray();
+        Union union = Union.heapify((byte[]) inputField);
+        union.update(heapify);
+        HllSketch result = union.getResult(TgtHllType.HLL_4);
+        return result.toCompactByteArray();
     }
 }
