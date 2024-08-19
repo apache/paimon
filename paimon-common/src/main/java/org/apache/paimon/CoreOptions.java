@@ -1144,8 +1144,14 @@ public class CoreOptions implements Serializable {
             key("record-level.time-field")
                     .stringType()
                     .noDefaultValue()
+                    .withDescription("Time field for record level expire.");
+
+    public static final ConfigOption<TimeFieldType> RECORD_LEVEL_TIME_FIELD_TYPE =
+            key("record-level.time-field.type")
+                    .enumType(TimeFieldType.class)
+                    .defaultValue(TimeFieldType.SECOND)
                     .withDescription(
-                            "Time field for record level expire, it should be a seconds INT.");
+                            "Time field type for record level expire, it can be second or millisecond.");
 
     private final Options options;
 
@@ -1792,6 +1798,11 @@ public class CoreOptions implements Serializable {
         return options.get(RECORD_LEVEL_TIME_FIELD);
     }
 
+    @Nullable
+    public TimeFieldType recordLevelTimeFieldType() {
+        return options.get(RECORD_LEVEL_TIME_FIELD_TYPE);
+    }
+
     /** Specifies the merge engine for table with primary key. */
     public enum MergeEngine implements DescribedEnum {
         DEDUPLICATE("deduplicate", "De-duplicate and keep the last row."),
@@ -2366,6 +2377,35 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         ConsumerMode(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** Time field type for record level expire. */
+    public enum TimeFieldType implements DescribedEnum {
+        SECOND(
+                "second",
+                "10-bit timestamp which indicates the number of seconds from 00:00:00 UTC on January 1, 1970 to the present, excluding milliseconds."),
+
+        MILLISECOND(
+                "millisecond",
+                "13-bit timestamp which indicates the number of milliseconds from 00:00:00 UTC on January 1, 1970 to the present, including millisecond information.");
+
+        private final String value;
+        private final String description;
+
+        TimeFieldType(String value, String description) {
             this.value = value;
             this.description = description;
         }
