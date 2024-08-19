@@ -18,7 +18,7 @@
 
 package org.apache.paimon.arrow.reader;
 
-import org.apache.paimon.arrow.converter.Arrow2PaimonVectorConvertor;
+import org.apache.paimon.arrow.converter.Arrow2PaimonVectorConverter;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarRow;
@@ -33,15 +33,15 @@ import java.util.Iterator;
 public class ArrowBatchReader {
 
     private final VectorizedColumnBatch batch;
-    private final Arrow2PaimonVectorConvertor[] convertors;
+    private final Arrow2PaimonVectorConverter[] convertors;
 
     public ArrowBatchReader(RowType rowType) {
         ColumnVector[] columnVectors = new ColumnVector[rowType.getFieldCount()];
-        this.convertors = new Arrow2PaimonVectorConvertor[rowType.getFieldCount()];
+        this.convertors = new Arrow2PaimonVectorConverter[rowType.getFieldCount()];
         this.batch = new VectorizedColumnBatch(columnVectors);
 
         for (int i = 0; i < columnVectors.length; i++) {
-            this.convertors[i] = Arrow2PaimonVectorConvertor.construct(rowType.getTypeAt(i));
+            this.convertors[i] = Arrow2PaimonVectorConverter.construct(rowType.getTypeAt(i));
         }
     }
 

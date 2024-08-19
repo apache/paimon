@@ -86,9 +86,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** Convert a {@link FieldVector} to {@link ColumnVector}. */
-public interface Arrow2PaimonVectorConvertor {
+public interface Arrow2PaimonVectorConverter {
 
-    static Arrow2PaimonVectorConvertor construct(DataType type) {
+    static Arrow2PaimonVectorConverter construct(DataType type) {
         return type.accept(Arrow2PaimonVectorConvertorVisitor.INSTANCE);
     }
 
@@ -96,13 +96,13 @@ public interface Arrow2PaimonVectorConvertor {
 
     /** Visitor to create convertor from arrow to paimon. */
     class Arrow2PaimonVectorConvertorVisitor
-            implements DataTypeVisitor<Arrow2PaimonVectorConvertor> {
+            implements DataTypeVisitor<Arrow2PaimonVectorConverter> {
 
         private static final Arrow2PaimonVectorConvertorVisitor INSTANCE =
                 new Arrow2PaimonVectorConvertorVisitor();
 
         @Override
-        public Arrow2PaimonVectorConvertor visit(CharType charType) {
+        public Arrow2PaimonVectorConverter visit(CharType charType) {
             return vector ->
                     new BytesColumnVector() {
 
@@ -125,7 +125,7 @@ public interface Arrow2PaimonVectorConvertor {
         }
 
         @Override
-        public Arrow2PaimonVectorConvertor visit(VarCharType varCharType) {
+        public Arrow2PaimonVectorConverter visit(VarCharType varCharType) {
             return vector ->
                     new BytesColumnVector() {
 
@@ -148,7 +148,7 @@ public interface Arrow2PaimonVectorConvertor {
         }
 
         @Override
-        public Arrow2PaimonVectorConvertor visit(BooleanType booleanType) {
+        public Arrow2PaimonVectorConverter visit(BooleanType booleanType) {
             return vector ->
                     new BooleanColumnVector() {
                         @Override
@@ -164,7 +164,7 @@ public interface Arrow2PaimonVectorConvertor {
         }
 
         @Override
-        public Arrow2PaimonVectorConvertor visit(BinaryType binaryType) {
+        public Arrow2PaimonVectorConverter visit(BinaryType binaryType) {
             return vector ->
                     new BytesColumnVector() {
 
@@ -187,7 +187,7 @@ public interface Arrow2PaimonVectorConvertor {
         }
 
         @Override
-        public Arrow2PaimonVectorConvertor visit(VarBinaryType varBinaryType) {
+        public Arrow2PaimonVectorConverter visit(VarBinaryType varBinaryType) {
             return vector ->
                     new BytesColumnVector() {
 
@@ -210,7 +210,7 @@ public interface Arrow2PaimonVectorConvertor {
         }
 
         @Override
-        public Arrow2PaimonVectorConvertor visit(DecimalType decimalType) {
+        public Arrow2PaimonVectorConverter visit(DecimalType decimalType) {
             return vector ->
                     new DecimalColumnVector() {
 
@@ -228,7 +228,7 @@ public interface Arrow2PaimonVectorConvertor {
         }
 
         @Override
-        public Arrow2PaimonVectorConvertor visit(TinyIntType tinyIntType) {
+        public Arrow2PaimonVectorConverter visit(TinyIntType tinyIntType) {
             return vector ->
                     new ByteColumnVector() {
 
@@ -245,7 +245,7 @@ public interface Arrow2PaimonVectorConvertor {
         }
 
         @Override
-        public Arrow2PaimonVectorConvertor visit(SmallIntType smallIntType) {
+        public Arrow2PaimonVectorConverter visit(SmallIntType smallIntType) {
             return vector ->
                     new ShortColumnVector() {
 
@@ -262,7 +262,7 @@ public interface Arrow2PaimonVectorConvertor {
         }
 
         @Override
-        public Arrow2PaimonVectorConvertor visit(IntType intType) {
+        public Arrow2PaimonVectorConverter visit(IntType intType) {
             return vector ->
                     new IntColumnVector() {
 
@@ -279,7 +279,7 @@ public interface Arrow2PaimonVectorConvertor {
         }
 
         @Override
-        public Arrow2PaimonVectorConvertor visit(BigIntType bigIntType) {
+        public Arrow2PaimonVectorConverter visit(BigIntType bigIntType) {
             return vector ->
                     new LongColumnVector() {
 
@@ -296,7 +296,7 @@ public interface Arrow2PaimonVectorConvertor {
         }
 
         @Override
-        public Arrow2PaimonVectorConvertor visit(FloatType floatType) {
+        public Arrow2PaimonVectorConverter visit(FloatType floatType) {
             return vector ->
                     new FloatColumnVector() {
 
@@ -313,7 +313,7 @@ public interface Arrow2PaimonVectorConvertor {
         }
 
         @Override
-        public Arrow2PaimonVectorConvertor visit(DoubleType doubleType) {
+        public Arrow2PaimonVectorConverter visit(DoubleType doubleType) {
             return vector ->
                     new DoubleColumnVector() {
 
@@ -330,7 +330,7 @@ public interface Arrow2PaimonVectorConvertor {
         }
 
         @Override
-        public Arrow2PaimonVectorConvertor visit(DateType dateType) {
+        public Arrow2PaimonVectorConverter visit(DateType dateType) {
             return vector ->
                     new IntColumnVector() {
 
@@ -347,7 +347,7 @@ public interface Arrow2PaimonVectorConvertor {
         }
 
         @Override
-        public Arrow2PaimonVectorConvertor visit(TimeType timeType) {
+        public Arrow2PaimonVectorConverter visit(TimeType timeType) {
             return vector ->
                     new IntColumnVector() {
 
@@ -364,7 +364,7 @@ public interface Arrow2PaimonVectorConvertor {
         }
 
         @Override
-        public Arrow2PaimonVectorConvertor visit(TimestampType timestampType) {
+        public Arrow2PaimonVectorConverter visit(TimestampType timestampType) {
             return vector ->
                     new TimestampColumnVector() {
 
@@ -382,7 +382,7 @@ public interface Arrow2PaimonVectorConvertor {
         }
 
         @Override
-        public Arrow2PaimonVectorConvertor visit(LocalZonedTimestampType localZonedTimestampType) {
+        public Arrow2PaimonVectorConverter visit(LocalZonedTimestampType localZonedTimestampType) {
             return vector ->
                     new TimestampColumnVector() {
 
@@ -409,8 +409,8 @@ public interface Arrow2PaimonVectorConvertor {
         }
 
         @Override
-        public Arrow2PaimonVectorConvertor visit(ArrayType arrayType) {
-            final Arrow2PaimonVectorConvertor arrowVectorConvertor =
+        public Arrow2PaimonVectorConverter visit(ArrayType arrayType) {
+            final Arrow2PaimonVectorConverter arrowVectorConvertor =
                     arrayType.getElementType().accept(this);
 
             return vector ->
@@ -450,14 +450,14 @@ public interface Arrow2PaimonVectorConvertor {
         }
 
         @Override
-        public Arrow2PaimonVectorConvertor visit(MultisetType multisetType) {
+        public Arrow2PaimonVectorConverter visit(MultisetType multisetType) {
             throw new UnsupportedOperationException("Doesn't support MultisetType.");
         }
 
         @Override
-        public Arrow2PaimonVectorConvertor visit(MapType mapType) {
-            final Arrow2PaimonVectorConvertor keyConvertor = mapType.getKeyType().accept(this);
-            final Arrow2PaimonVectorConvertor valueConverter = mapType.getValueType().accept(this);
+        public Arrow2PaimonVectorConverter visit(MapType mapType) {
+            final Arrow2PaimonVectorConverter keyConvertor = mapType.getKeyType().accept(this);
+            final Arrow2PaimonVectorConverter valueConverter = mapType.getValueType().accept(this);
 
             return vector ->
                     new MapColumnVector() {
@@ -512,8 +512,8 @@ public interface Arrow2PaimonVectorConvertor {
         }
 
         @Override
-        public Arrow2PaimonVectorConvertor visit(RowType rowType) {
-            final List<Arrow2PaimonVectorConvertor> convertors = new ArrayList<>();
+        public Arrow2PaimonVectorConverter visit(RowType rowType) {
+            final List<Arrow2PaimonVectorConverter> convertors = new ArrayList<>();
             for (int i = 0; i < rowType.getFields().size(); i++) {
                 convertors.add(rowType.getTypeAt(i).accept(this));
             }
