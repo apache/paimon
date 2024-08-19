@@ -18,6 +18,7 @@
 
 package org.apache.paimon.arrow;
 
+import org.apache.paimon.arrow.vector.ArrowCStruct;
 import org.apache.paimon.arrow.writer.ArrowFieldWriter;
 import org.apache.paimon.arrow.writer.ArrowFieldWriterFactoryVisitor;
 import org.apache.paimon.data.Timestamp;
@@ -26,11 +27,15 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 
+import org.apache.arrow.c.ArrowArray;
+import org.apache.arrow.c.ArrowSchema;
+import org.apache.arrow.c.Data;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.complex.ListVector;
 import org.apache.arrow.vector.complex.MapVector;
+import org.apache.arrow.vector.ipc.ArrowStreamWriter;
 import org.apache.arrow.vector.types.Types;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.FieldType;
@@ -38,6 +43,8 @@ import org.apache.arrow.vector.types.pojo.Schema;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
+import java.io.OutputStream;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.Arrays;
@@ -120,6 +127,23 @@ public class ArrowUtils {
         return castZoneId == null
                 ? nonCastedTimestampToEpoch(timestamp, precision)
                 : zoneCastedTimestampZoneCastToEpoch(timestamp, precision, castZoneId);
+    }
+
+    public static ArrowCStruct serializeToCStruct(
+            VectorSchemaRoot vsr, ArrowArray array, ArrowSchema schema) {
+        BufferAllocator bufferAllocator = vsr.getVector(0).getAllocator();
+        Data.exportVectorSchemaRoot(bufferAllocator, vsr, null, array, schema);
+        return ArrowCStruct.of(array, schema);
+    }
+
+    public void serializeToIpc(VectorSchemaRoot vsr, OutputStream out) {
+        try (ArrowStreamWriter writer = new ArrowStreamWriter(vsr, null, out)) {
+            writer.start();
+            writer.writeBatch();
+            writer.end();
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to serialize VectorSchemaRoot to IPC", e);
+        }
     }
 
     private static long nonCastedTimestampToEpoch(Timestamp timestamp, int precision) {
