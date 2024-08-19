@@ -141,7 +141,7 @@ public class SparkGenericCatalogWithHiveTest {
         spark2.sql("USE paimon");
         spark2.sql("USE my_db");
         assertThat(spark2.sql("SHOW NAMESPACES").collectAsList().stream().map(Object::toString))
-                .containsExactlyInAnyOrder("[default]", "[my_db]");
+                .containsExactlyInAnyOrder("[sys]", "[default]", "[my_db]");
         assertThat(
                         spark2.sql("SHOW TABLES").collectAsList().stream()
                                 .map(s -> s.get(1))

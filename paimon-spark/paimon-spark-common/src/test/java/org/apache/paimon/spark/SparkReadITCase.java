@@ -586,7 +586,7 @@ public class SparkReadITCase extends SparkReadTestBase {
                         spark.sql("SHOW NAMESPACES").collectAsList().stream()
                                 .map(row -> row.getString(0))
                                 .collect(Collectors.toList()))
-                .containsExactlyInAnyOrder("bar", "default");
+                .containsExactlyInAnyOrder("bar", "default", "sys");
 
         Path nsPath = new Path(warehousePath, "bar.db");
         assertThat(new File(nsPath.toUri())).exists();
@@ -594,7 +594,7 @@ public class SparkReadITCase extends SparkReadTestBase {
         // drop namespace
         spark.sql("DROP NAMESPACE bar");
         assertThat(spark.sql("SHOW NAMESPACES").collectAsList().toString())
-                .isEqualTo("[[default]]");
+                .isEqualTo("[[sys], [default]]");
         assertThat(new File(nsPath.toUri())).doesNotExist();
     }
 

@@ -27,6 +27,7 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
 
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -85,6 +86,23 @@ public interface Catalog extends AutoCloseable {
      * Get the names of all databases in this catalog.
      *
      * @return a list of the names of all databases
+     */
+    default List<String> listDatabases(boolean includeSystem) {
+        List<String> userDatabases = listDatabases();
+        if (includeSystem) {
+            List<String> allDatabases = new ArrayList<>(userDatabases.size() + 1);
+            allDatabases.add(SYSTEM_DATABASE_NAME);
+            allDatabases.addAll(userDatabases);
+            return allDatabases;
+        } else {
+            return userDatabases;
+        }
+    }
+
+    /**
+     * Get the names of user databases in this catalog.
+     *
+     * @return a list of the names of user databases
      */
     List<String> listDatabases();
 

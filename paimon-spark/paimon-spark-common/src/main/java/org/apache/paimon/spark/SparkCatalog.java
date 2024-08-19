@@ -125,7 +125,7 @@ public class SparkCatalog extends SparkBaseCatalog {
 
     @Override
     public String[][] listNamespaces() {
-        List<String> databases = catalog.listDatabases();
+        List<String> databases = catalog.listDatabases(true);
         String[][] namespaces = new String[databases.size()][];
         for (int i = 0; i < databases.size(); i++) {
             namespaces[i] = new String[] {databases.get(i)};

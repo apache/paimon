@@ -174,7 +174,7 @@ public class FlinkCatalog extends AbstractCatalog {
 
     @Override
     public List<String> listDatabases() throws CatalogException {
-        return catalog.listDatabases();
+        return catalog.listDatabases(true);
     }
 
     @Override
