@@ -49,7 +49,7 @@ public class Identifier implements Serializable {
                     false,
                     Arrays.asList(
                             new DataField(0, "_DATABASE", DataTypes.STRING()),
-                            new DataField(0, "_OBJECT", DataTypes.STRING())));
+                            new DataField(1, "_OBJECT", DataTypes.STRING())));
 
     public static final String UNKNOWN_DATABASE = "unknown";
 
