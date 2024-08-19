@@ -62,8 +62,9 @@ public class RecordLevelExpire {
 
         CoreOptions.TimeFieldType timeFieldType = options.recordLevelTimeFieldType();
         DataField field = rowType.getField(timeField);
-        if (!((timeFieldType == CoreOptions.TimeFieldType.SECOND && field.type() instanceof IntType)
-                || (timeFieldType == CoreOptions.TimeFieldType.MILLISECOND
+        if (!((timeFieldType == CoreOptions.TimeFieldType.SECONDS_INT
+                        && field.type() instanceof IntType)
+                || (timeFieldType == CoreOptions.TimeFieldType.MILLIS_LONG
                         && field.type() instanceof BigIntType))) {
             throw new IllegalArgumentException(
                     String.format(
@@ -92,10 +93,22 @@ public class RecordLevelExpire {
                     checkArgument(
                             !kv.value().isNullAt(timeField),
                             "Time field for record-level expire should not be null.");
-                    int recordTime =
-                            timeFieldType == CoreOptions.TimeFieldType.SECOND
-                                    ? kv.value().getInt(timeField)
-                                    : (int) (kv.value().getLong(timeField) / 1000);
+                    final int recordTime;
+                    switch (timeFieldType) {
+                        case SECONDS_INT:
+                            recordTime = kv.value().getInt(timeField);
+                            break;
+                        case MILLIS_LONG:
+                            recordTime = (int) (kv.value().getLong(timeField) / 1000);
+                            break;
+                        default:
+                            String msg =
+                                    String.format(
+                                            "type %s not support in %s",
+                                            timeFieldType,
+                                            CoreOptions.TimeFieldType.class.getName());
+                            throw new IllegalArgumentException(msg);
+                    }
                     return currentTime <= recordTime + expireTime;
                 });
     }

@@ -76,7 +76,7 @@ In compaction, you can configure record-Level expire time to expire records, you
 
 1. `'record-level.expire-time'`: time retain for records.
 2. `'record-level.time-field'`: time field for record level expire.
-3. `'record-level.time-field.type'`: time field type for record level expire, it can be second or millisecond.
+3. `'record-level.time-field-type'`: time field type for record level expire, it can be seconds-int or millis-long.
 
 Expiration happens in compaction, and there is no strong guarantee to expire records in time.
 

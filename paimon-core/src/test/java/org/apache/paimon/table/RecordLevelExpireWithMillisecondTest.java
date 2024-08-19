@@ -70,7 +70,7 @@ class RecordLevelExpireWithMillisecondTest extends PrimaryKeyTableTestBase {
         options.set(CoreOptions.RECORD_LEVEL_EXPIRE_TIME, Duration.ofSeconds(1));
         options.set(CoreOptions.RECORD_LEVEL_TIME_FIELD, "col1");
         options.set(
-                CoreOptions.RECORD_LEVEL_TIME_FIELD_TYPE, CoreOptions.TimeFieldType.MILLISECOND);
+                CoreOptions.RECORD_LEVEL_TIME_FIELD_TYPE, CoreOptions.TimeFieldType.MILLIS_LONG);
         return options;
     }
 

@@ -1254,11 +1254,11 @@ public class CoreOptions implements Serializable {
                     .withDescription("Time field for record level expire.");
 
     public static final ConfigOption<TimeFieldType> RECORD_LEVEL_TIME_FIELD_TYPE =
-            key("record-level.time-field.type")
+            key("record-level.time-field-type")
                     .enumType(TimeFieldType.class)
-                    .defaultValue(TimeFieldType.SECOND)
+                    .defaultValue(TimeFieldType.SECONDS_INT)
                     .withDescription(
-                            "Time field type for record level expire, it can be second or millisecond.");
+                            "Time field type for record level expire, it can be seconds-int or millis-long.");
 
     public static final ConfigOption<String> FIELDS_DEFAULT_AGG_FUNC =
             key(FIELDS_PREFIX + "." + DEFAULT_AGG_FUNCTION)
@@ -2696,13 +2696,9 @@ public class CoreOptions implements Serializable {
 
     /** Time field type for record level expire. */
     public enum TimeFieldType implements DescribedEnum {
-        SECOND(
-                "second",
-                "10-bit timestamp which indicates the number of seconds from 00:00:00 UTC on January 1, 1970 to the present, excluding milliseconds."),
+        SECONDS_INT("seconds-int", "Timestamps in seconds should be INT type."),
 
-        MILLISECOND(
-                "millisecond",
-                "13-bit timestamp which indicates the number of milliseconds from 00:00:00 UTC on January 1, 1970 to the present, including millisecond information.");
+        MILLIS_LONG("millis-long", "Timestamps in milliseconds should be BIGINT type.");
 
         private final String value;
         private final String description;
