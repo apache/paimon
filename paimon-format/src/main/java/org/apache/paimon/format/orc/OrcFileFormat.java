@@ -165,7 +165,7 @@ public class OrcFileFormat extends FileFormat {
         return orcProperties;
     }
 
-    private static DataType refineDataType(DataType type) {
+    public static DataType refineDataType(DataType type) {
         switch (type.getTypeRoot()) {
             case BINARY:
             case VARBINARY:
