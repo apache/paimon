@@ -140,7 +140,7 @@ public class ManifestList extends ObjectsFile<ManifestFileMeta> {
         }
 
         public ManifestList create() {
-            RowType metaType = VersionedObjectSerializer.versionType(ManifestFileMeta.schema());
+            RowType metaType = VersionedObjectSerializer.versionType(ManifestFileMeta.SCHEMA);
             return new ManifestList(
                     fileIO,
                     new ManifestFileMetaSerializer(),

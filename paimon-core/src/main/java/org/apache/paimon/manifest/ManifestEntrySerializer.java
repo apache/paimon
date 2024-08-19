@@ -38,7 +38,7 @@ public class ManifestEntrySerializer extends VersionedObjectSerializer<ManifestE
     private final DataFileMetaSerializer dataFileMetaSerializer;
 
     public ManifestEntrySerializer() {
-        super(ManifestEntry.schema());
+        super(ManifestEntry.SCHEMA);
         this.dataFileMetaSerializer = new DataFileMetaSerializer();
     }
 

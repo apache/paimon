@@ -21,11 +21,14 @@ package org.apache.paimon.table;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.SimpleFileReader;
 
 import java.io.Serializable;
 import java.time.Duration;
@@ -82,6 +85,14 @@ public interface Table extends Serializable {
     /** Get the {@link Snapshot} from snapshot id. */
     @Experimental
     Snapshot snapshot(long snapshotId);
+
+    /** Reader to read manifest file meta from manifest list file. */
+    @Experimental
+    SimpleFileReader<ManifestFileMeta> manifestListReader();
+
+    /** Reader to read manifest entry from manifest file. */
+    @Experimental
+    SimpleFileReader<ManifestEntry> manifestFileReader();
 
     /** Rollback table's state to a specific snapshot. */
     @Experimental

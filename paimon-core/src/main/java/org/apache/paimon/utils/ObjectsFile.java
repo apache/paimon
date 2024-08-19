@@ -39,7 +39,7 @@ import java.util.List;
 import static org.apache.paimon.utils.FileUtils.checkExists;
 
 /** A file which contains several {@link T}s, provides read and write. */
-public class ObjectsFile<T> {
+public class ObjectsFile<T> implements SimpleFileReader<T> {
 
     protected final FileIO fileIO;
     protected final ObjectSerializer<T> serializer;
@@ -88,6 +88,7 @@ public class ObjectsFile<T> {
         }
     }
 
+    @Override
     public List<T> read(String fileName) {
         return read(fileName, null);
     }

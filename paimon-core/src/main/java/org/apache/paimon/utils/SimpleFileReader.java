@@ -16,40 +16,19 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.manifest;
+package org.apache.paimon.utils;
 
 import org.apache.paimon.annotation.Public;
 
+import java.util.List;
+
 /**
- * Kind of a file.
+ * A reader for reading file to entries.
  *
  * @since 0.9.0
  */
 @Public
-public enum FileKind {
-    ADD((byte) 0),
+public interface SimpleFileReader<T> {
 
-    DELETE((byte) 1);
-
-    private final byte value;
-
-    FileKind(byte value) {
-        this.value = value;
-    }
-
-    public byte toByteValue() {
-        return value;
-    }
-
-    public static FileKind fromByteValue(byte value) {
-        switch (value) {
-            case 0:
-                return ADD;
-            case 1:
-                return DELETE;
-            default:
-                throw new UnsupportedOperationException(
-                        "Unsupported byte value '" + value + "' for value kind.");
-        }
-    }
+    List<T> read(String fileName);
 }

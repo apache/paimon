@@ -32,7 +32,7 @@ public class SimpleFileEntrySerializer extends VersionedObjectSerializer<SimpleF
     private final int version;
 
     public SimpleFileEntrySerializer() {
-        super(ManifestEntry.schema());
+        super(ManifestEntry.SCHEMA);
         this.version = new ManifestEntrySerializer().getVersion();
     }
 

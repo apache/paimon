@@ -28,7 +28,7 @@ import org.apache.paimon.utils.ObjectSerializer;
 public class IdentifierSerializer extends ObjectSerializer<Identifier> {
 
     public IdentifierSerializer() {
-        super(Identifier.schema());
+        super(Identifier.SCHEMA);
     }
 
     @Override
