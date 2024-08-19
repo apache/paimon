@@ -18,6 +18,7 @@
 
 package org.apache.paimon.metastore;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestCommittable;
@@ -27,8 +28,6 @@ import org.apache.paimon.table.sink.CommitMessage;
 
 import org.apache.paimon.shade.guava30.com.google.common.cache.Cache;
 import org.apache.paimon.shade.guava30.com.google.common.cache.CacheBuilder;
-
-import javax.annotation.Nullable;
 
 import java.time.Duration;
 import java.util.List;
@@ -52,8 +51,7 @@ public class AddPartitionCommitCallback implements CommitCallback {
     }
 
     @Override
-    public void call(
-            List<ManifestEntry> committedEntries, long identifier, @Nullable Long watermark) {
+    public void call(List<ManifestEntry> committedEntries, Snapshot snapshot) {
         committedEntries.stream()
                 .filter(e -> FileKind.ADD.equals(e.kind()))
                 .map(ManifestEntry::partition)

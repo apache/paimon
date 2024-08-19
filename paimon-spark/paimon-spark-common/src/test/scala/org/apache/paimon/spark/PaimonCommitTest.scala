@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.CoreOptions
+import org.apache.paimon.{CoreOptions, Snapshot}
 import org.apache.paimon.manifest.{ManifestCommittable, ManifestEntry}
 import org.apache.paimon.table.sink.CommitCallback
 
@@ -64,10 +64,7 @@ object PaimonCommitTest {
 
 case class CustomCommitCallback(testId: String) extends CommitCallback {
 
-  override def call(
-      committedEntries: List[ManifestEntry],
-      identifier: Long,
-      watermark: lang.Long): Unit = {
+  override def call(committedEntries: List[ManifestEntry], snapshot: Snapshot): Unit = {
     PaimonCommitTest.id = testId
   }
 

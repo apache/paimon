@@ -44,20 +44,16 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitCallback;
-import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.RawFile;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
-
-import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -132,69 +128,55 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
     }
 
     @Override
-    public void call(
-            List<ManifestEntry> committedEntries, long identifier, @Nullable Long watermark) {
-        try {
-            commitMetadata(identifier);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+    public void call(List<ManifestEntry> committedEntries, Snapshot snapshot) {
+        createMetadata(
+                snapshot.id(),
+                (removedFiles, addedFiles) ->
+                        collectFileChanges(committedEntries, removedFiles, addedFiles));
     }
 
     @Override
     public void retry(ManifestCommittable committable) {
+        SnapshotManager snapshotManager = table.snapshotManager();
+        long snapshotId =
+                snapshotManager
+                        .findSnapshotsForIdentifiers(
+                                commitUser, Collections.singletonList(committable.identifier()))
+                        .stream()
+                        .mapToLong(Snapshot::id)
+                        .max()
+                        .orElseThrow(
+                                () ->
+                                        new RuntimeException(
+                                                "There is no snapshot for commit user "
+                                                        + commitUser
+                                                        + " and identifier "
+                                                        + committable.identifier()
+                                                        + ". This is unexpected."));
+        createMetadata(
+                snapshotId,
+                (removedFiles, addedFiles) ->
+                        collectFileChanges(snapshotId, removedFiles, addedFiles));
+    }
+
+    private void createMetadata(long snapshotId, FileChangesCollector fileChangesCollector) {
         try {
-            commitMetadata(committable.identifier());
+            if (table.fileIO().exists(pathFactory.toMetadataPath(snapshotId))) {
+                return;
+            }
+
+            Path baseMetadataPath = pathFactory.toMetadataPath(snapshotId - 1);
+            if (table.fileIO().exists(baseMetadataPath)) {
+                createMetadataWithBase(
+                        fileChangesCollector,
+                        snapshotId,
+                        IcebergMetadata.fromPath(table.fileIO(), baseMetadataPath));
+            } else {
+                createMetadataWithoutBase(snapshotId);
+            }
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
-    }
-
-    private void commitMetadata(long identifier) throws IOException {
-        Pair<Long, Long> pair = getCurrentAndBaseSnapshotIds(identifier);
-        long currentSnapshot = pair.getLeft();
-        Long baseSnapshot = pair.getRight();
-
-        if (baseSnapshot == null) {
-            createMetadataWithoutBase(currentSnapshot);
-        } else {
-            createMetadataWithBase(committable, currentSnapshot, baseSnapshot);
-        }
-    }
-
-    private Pair<Long, Long> getCurrentAndBaseSnapshotIds(long commitIdentifier) {
-        SnapshotManager snapshotManager = table.snapshotManager();
-        List<Snapshot> currentSnapshots =
-                snapshotManager.findSnapshotsForIdentifiers(
-                        commitUser, Collections.singletonList(commitIdentifier));
-        Preconditions.checkArgument(
-                currentSnapshots.size() == 1,
-                "Cannot find snapshot with user {} and identifier {}",
-                commitUser,
-                commitIdentifier);
-        long currentSnapshotId = currentSnapshots.get(0).id();
-
-        long earliest =
-                Preconditions.checkNotNull(
-                        snapshotManager.earliestSnapshotId(),
-                        "Cannot determine earliest snapshot ID. This is unexpected.");
-        Long baseSnapshotId = null;
-        for (long id = currentSnapshotId - 1; id >= earliest; id--) {
-            try {
-                Snapshot snapshot = snapshotManager.snapshot(id);
-                if (!snapshot.commitUser().equals(commitUser)
-                        || snapshot.commitIdentifier() < commitIdentifier) {
-                    if (table.fileIO().exists(pathFactory.toMetadataPath(id))) {
-                        baseSnapshotId = id;
-                    }
-                    break;
-                }
-            } catch (Exception ignore) {
-                break;
-            }
-        }
-
-        return Pair.of(currentSnapshotId, baseSnapshotId);
     }
 
     private void createMetadataWithoutBase(long snapshotId) throws IOException {
@@ -269,49 +251,43 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
     }
 
     private void createMetadataWithBase(
-            ManifestCommittable committable, long currentSnapshotId, long baseSnapshotId)
+            FileChangesCollector fileChangesCollector,
+            long snapshotId,
+            IcebergMetadata baseMetadata)
             throws IOException {
-        Set<String> removedFiles = new LinkedHashSet<>();
-        Map<String, Pair<BinaryRow, DataFileMeta>> addedFiles = new LinkedHashMap<>();
-        collectFileChanges(committable, removedFiles, addedFiles);
-        List<BinaryRow> modifiedPartitions =
-                committable.fileCommittables().stream()
-                        .map(CommitMessage::partition)
-                        .distinct()
-                        .collect(Collectors.toList());
-
-        IcebergMetadata baseMetadata =
-                IcebergMetadata.fromPath(
-                        table.fileIO(), pathFactory.toMetadataPath(baseSnapshotId));
         List<IcebergManifestFileMeta> baseManifestFileMetas =
                 manifestList.read(baseMetadata.currentSnapshot().manifestList());
 
-        // Note that `isAddOnly(commitable)` and `removedFiles.isEmpty()` may be different,
+        Map<String, BinaryRow> removedFiles = new LinkedHashMap<>();
+        Map<String, Pair<BinaryRow, DataFileMeta>> addedFiles = new LinkedHashMap<>();
+        boolean isAddOnly = fileChangesCollector.collect(removedFiles, addedFiles);
+        Set<BinaryRow> modifiedPartitionsSet = new LinkedHashSet<>(removedFiles.values());
+        modifiedPartitionsSet.addAll(
+                addedFiles.values().stream().map(Pair::getLeft).collect(Collectors.toList()));
+        List<BinaryRow> modifiedPartitions = new ArrayList<>(modifiedPartitionsSet);
+
+        // Note that this check may be different from `removedFiles.isEmpty()`,
         // because if a file's level is changed, it will first be removed and then added.
         // In this case, if `baseMetadata` already contains this file, we should not add a
         // duplicate.
-        IcebergSnapshotSummary snapshotSummary;
         List<IcebergManifestFileMeta> newManifestFileMetas;
-        if (isAddOnly(committable)) {
+        IcebergSnapshotSummary snapshotSummary;
+        if (isAddOnly) {
             // Fast case. We don't need to remove files from `baseMetadata`. We only need to append
             // new metadata files.
-            snapshotSummary = IcebergSnapshotSummary.APPEND;
             newManifestFileMetas = new ArrayList<>(baseManifestFileMetas);
-            newManifestFileMetas.addAll(
-                    createNewlyAddedManifestFileMetas(addedFiles, currentSnapshotId));
+            newManifestFileMetas.addAll(createNewlyAddedManifestFileMetas(addedFiles, snapshotId));
+            snapshotSummary = IcebergSnapshotSummary.APPEND;
         } else {
-            Pair<List<IcebergManifestFileMeta>, Boolean> result =
+            Pair<List<IcebergManifestFileMeta>, IcebergSnapshotSummary> result =
                     createWithDeleteManifestFileMetas(
                             removedFiles,
                             addedFiles,
                             modifiedPartitions,
                             baseManifestFileMetas,
-                            currentSnapshotId);
-            snapshotSummary =
-                    result.getRight()
-                            ? IcebergSnapshotSummary.APPEND
-                            : IcebergSnapshotSummary.OVERWRITE;
+                            snapshotId);
             newManifestFileMetas = result.getLeft();
+            snapshotSummary = result.getRight();
         }
         String manifestListFileName = manifestList.writeWithoutRolling(newManifestFileMetas);
 
@@ -326,8 +302,8 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
         List<IcebergSnapshot> snapshots = new ArrayList<>(baseMetadata.snapshots());
         snapshots.add(
                 new IcebergSnapshot(
-                        currentSnapshotId,
-                        currentSnapshotId,
+                        snapshotId,
+                        snapshotId,
                         System.currentTimeMillis(),
                         snapshotSummary,
                         pathFactory.toManifestListPath(manifestListFileName).toString(),
@@ -337,65 +313,71 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                 new IcebergMetadata(
                         baseMetadata.tableUuid(),
                         baseMetadata.location(),
-                        currentSnapshotId,
+                        snapshotId,
                         table.schema().highestFieldId(),
                         schemas,
                         schemaId,
                         baseMetadata.partitionSpecs(),
                         baseMetadata.lastPartitionId(),
                         snapshots,
-                        (int) currentSnapshotId);
-        table.fileIO()
-                .tryToWriteAtomic(pathFactory.toMetadataPath(currentSnapshotId), metadata.toJson());
+                        (int) snapshotId);
+        table.fileIO().tryToWriteAtomic(pathFactory.toMetadataPath(snapshotId), metadata.toJson());
         table.fileIO()
                 .overwriteFileUtf8(
                         new Path(pathFactory.metadataDirectory(), VERSION_HINT_FILENAME),
-                        String.valueOf(currentSnapshotId));
+                        String.valueOf(snapshotId));
     }
 
-    private boolean isAddOnly(ManifestCommittable committable) {
-        for (CommitMessage message : committable.fileCommittables()) {
-            CommitMessageImpl m = (CommitMessageImpl) message;
-            if (!m.newFilesIncrement().deletedFiles().isEmpty()
-                    || !m.compactIncrement().compactBefore().isEmpty()) {
-                return false;
-            }
-        }
-        return true;
+    private interface FileChangesCollector {
+        boolean collect(
+                Map<String, BinaryRow> removedFiles,
+                Map<String, Pair<BinaryRow, DataFileMeta>> addedFiles)
+                throws IOException;
     }
 
-    private void collectFileChanges(
-            ManifestCommittable committable,
-            Set<String> removedFiles,
+    private boolean collectFileChanges(
+            List<ManifestEntry> manifestEntries,
+            Map<String, BinaryRow> removedFiles,
             Map<String, Pair<BinaryRow, DataFileMeta>> addedFiles) {
-        for (CommitMessage message : committable.fileCommittables()) {
-            CommitMessageImpl m = (CommitMessageImpl) message;
-            String bucketPath =
-                    fileStorePathFactory.bucketPath(m.partition(), m.bucket()).toString();
-            for (DataFileMeta meta : m.newFilesIncrement().deletedFiles()) {
-                String path = bucketPath + "/" + meta.fileName();
-                removedFiles.add(path);
-            }
-            for (DataFileMeta meta : m.newFilesIncrement().newFiles()) {
-                if (shouldAddFileToIceberg(meta)) {
-                    String path = bucketPath + "/" + meta.fileName();
-                    removedFiles.remove(path);
-                    addedFiles.put(path, Pair.of(m.partition(), meta));
-                }
-            }
-            for (DataFileMeta meta : m.compactIncrement().compactBefore()) {
-                String path = bucketPath + "/" + meta.fileName();
-                addedFiles.remove(path);
-                removedFiles.add(path);
-            }
-            for (DataFileMeta meta : m.compactIncrement().compactAfter()) {
-                if (shouldAddFileToIceberg(meta)) {
-                    String path = bucketPath + "/" + meta.fileName();
-                    removedFiles.remove(path);
-                    addedFiles.put(path, Pair.of(m.partition(), meta));
-                }
+        boolean isAddOnly = true;
+        for (ManifestEntry entry : manifestEntries) {
+            String path =
+                    fileStorePathFactory.bucketPath(entry.partition(), entry.bucket())
+                            + "/"
+                            + entry.fileName();
+            switch (entry.kind()) {
+                case ADD:
+                    if (shouldAddFileToIceberg(entry.file())) {
+                        removedFiles.remove(path);
+                        addedFiles.put(path, Pair.of(entry.partition(), entry.file()));
+                    }
+                    break;
+                case DELETE:
+                    isAddOnly = false;
+                    addedFiles.remove(path);
+                    removedFiles.put(path, entry.partition());
+                    break;
+                default:
+                    throw new UnsupportedOperationException(
+                            "Unknown ManifestEntry FileKind " + entry.kind());
             }
         }
+        return isAddOnly;
+    }
+
+    private boolean collectFileChanges(
+            long snapshotId,
+            Map<String, BinaryRow> removedFiles,
+            Map<String, Pair<BinaryRow, DataFileMeta>> addedFiles) {
+        return collectFileChanges(
+                table.store()
+                        .newScan()
+                        .withKind(ScanMode.DELTA)
+                        .withSnapshot(snapshotId)
+                        .plan()
+                        .files(),
+                removedFiles,
+                addedFiles);
     }
 
     protected abstract boolean shouldAddFileToIceberg(DataFileMeta meta);
@@ -430,14 +412,15 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                 currentSnapshotId);
     }
 
-    private Pair<List<IcebergManifestFileMeta>, Boolean> createWithDeleteManifestFileMetas(
-            Set<String> removedFiles,
-            Map<String, Pair<BinaryRow, DataFileMeta>> addedFiles,
-            List<BinaryRow> modifiedPartitions,
-            List<IcebergManifestFileMeta> baseManifestFileMetas,
-            long currentSnapshotId)
-            throws IOException {
-        boolean isAppend = true;
+    private Pair<List<IcebergManifestFileMeta>, IcebergSnapshotSummary>
+            createWithDeleteManifestFileMetas(
+                    Map<String, BinaryRow> removedFiles,
+                    Map<String, Pair<BinaryRow, DataFileMeta>> addedFiles,
+                    List<BinaryRow> modifiedPartitions,
+                    List<IcebergManifestFileMeta> baseManifestFileMetas,
+                    long currentSnapshotId)
+                    throws IOException {
+        IcebergSnapshotSummary snapshotSummary = IcebergSnapshotSummary.APPEND;
         List<IcebergManifestFileMeta> newManifestFileMetas = new ArrayList<>();
 
         RowType partitionType = table.schema().logicalPartitionType();
@@ -479,7 +462,7 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                             // added file already exists (most probably due to level changes),
                             // remove it to not add a duplicate.
                             addedFiles.remove(path);
-                        } else if (removedFiles.contains(path)) {
+                        } else if (removedFiles.containsKey(path)) {
                             canReuseFile = false;
                         }
                     }
@@ -490,13 +473,13 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                     newManifestFileMetas.add(fileMeta);
                 } else {
                     // some file is removed, rewrite this file meta
-                    isAppend = false;
+                    snapshotSummary = IcebergSnapshotSummary.OVERWRITE;
                     List<IcebergManifestEntry> newEntries = new ArrayList<>();
                     for (IcebergManifestEntry entry : entries) {
                         if (entry.isLive()) {
                             newEntries.add(
                                     new IcebergManifestEntry(
-                                            removedFiles.contains(entry.file().filePath())
+                                            removedFiles.containsKey(entry.file().filePath())
                                                     ? IcebergManifestEntry.Status.DELETED
                                                     : IcebergManifestEntry.Status.EXISTING,
                                             entry.snapshotId(),
@@ -513,7 +496,7 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
 
         newManifestFileMetas.addAll(
                 createNewlyAddedManifestFileMetas(addedFiles, currentSnapshotId));
-        return Pair.of(newManifestFileMetas, isAppend);
+        return Pair.of(newManifestFileMetas, snapshotSummary);
     }
 
     private List<IcebergPartitionField> getPartitionFields(RowType partitionType) {
