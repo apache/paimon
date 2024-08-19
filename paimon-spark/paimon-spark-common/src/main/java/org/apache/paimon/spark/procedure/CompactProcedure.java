@@ -44,7 +44,6 @@ import org.apache.paimon.table.sink.CompactionTaskSerializer;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
-import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ParameterUtils;
 import org.apache.paimon.utils.SerializationUtils;
@@ -81,22 +80,14 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.stream.Collectors;
-
-import scala.collection.Seq;
-import scala.collection.mutable.ListBuffer;
 
 import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.spark.sql.types.DataTypes.IntegerType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /**
@@ -117,7 +108,6 @@ public class CompactProcedure extends BaseProcedure {
                 ProcedureParameter.optional("order_strategy", StringType),
                 ProcedureParameter.optional("order_by", StringType),
                 ProcedureParameter.optional("where", StringType),
-                ProcedureParameter.optional("max_concurrent_jobs", IntegerType),
                 ProcedureParameter.optional("options", StringType),
                 ProcedureParameter.optional("partition_idle_time", StringType),
             };
@@ -152,10 +142,9 @@ public class CompactProcedure extends BaseProcedure {
                         ? Collections.emptyList()
                         : Arrays.asList(args.getString(3).split(","));
         String where = blank(args, 4) ? null : args.getString(4);
-        int maxConcurrentJobs = args.isNullAt(5) ? 15 : args.getInt(5);
-        String options = args.isNullAt(6) ? null : args.getString(6);
+        String options = args.isNullAt(5) ? null : args.getString(5);
         Duration partitionIdleTime =
-                blank(args, 7) ? null : TimeUtils.parseDuration(args.getString(7));
+                blank(args, 6) ? null : TimeUtils.parseDuration(args.getString(6));
         if (TableSorter.OrderType.NONE.name().equals(sortType) && !sortColumns.isEmpty()) {
             throw new IllegalArgumentException(
                     "order_strategy \"none\" cannot work with order_by columns.");
@@ -206,7 +195,6 @@ public class CompactProcedure extends BaseProcedure {
                                             sortColumns,
                                             relation,
                                             condition,
-                                            maxConcurrentJobs,
                                             partitionIdleTime));
                     return new InternalRow[] {internalRow};
                 });
@@ -227,7 +215,6 @@ public class CompactProcedure extends BaseProcedure {
             List<String> sortColumns,
             DataSourceV2Relation relation,
             @Nullable Expression condition,
-            int maxConcurrentJobs,
             @Nullable Duration partitionIdleTime) {
         BucketMode bucketMode = table.bucketMode();
         TableSorter.OrderType orderType = TableSorter.OrderType.of(sortType);
@@ -257,8 +244,7 @@ public class CompactProcedure extends BaseProcedure {
         } else {
             switch (bucketMode) {
                 case BUCKET_UNAWARE:
-                    sortCompactUnAwareBucketTable(
-                            table, orderType, sortColumns, relation, filter, maxConcurrentJobs);
+                    sortCompactUnAwareBucketTable(table, orderType, sortColumns, relation, filter);
                     break;
                 default:
                     throw new UnsupportedOperationException(
@@ -463,49 +449,34 @@ public class CompactProcedure extends BaseProcedure {
             TableSorter.OrderType orderType,
             List<String> sortColumns,
             DataSourceV2Relation relation,
-            @Nullable Predicate filter,
-            int maxConcurrentJobs) {
+            @Nullable Predicate filter) {
         SnapshotReader snapshotReader = table.newSnapshotReader();
         if (filter != null) {
             snapshotReader.withFilter(filter);
         }
         Map<BinaryRow, DataSplit[]> packedSplits = packForSort(snapshotReader.read().dataSplits());
-
-        PaimonSparkWriter writer = new PaimonSparkWriter(table);
-        // Use dynamic partition overwrite
-        writer.writeBuilder().withOverwrite();
-
-        ExecutorService executorService =
-                Executors.newFixedThreadPool(
-                        Math.min(maxConcurrentJobs, packedSplits.size()),
-                        new ExecutorThreadFactory(Thread.currentThread().getName() + "-compact"));
-        LinkedList<Future<Seq<CommitMessage>>> futures = new LinkedList<>();
         TableSorter sorter = TableSorter.getSorter(table, orderType, sortColumns);
-
-        LOG.info("Start submit sort compact jobs, count: {}", packedSplits.size());
-        for (Map.Entry<BinaryRow, DataSplit[]> entry : packedSplits.entrySet()) {
-            Dataset<Row> dataset =
-                    PaimonUtils.createDataset(
-                            spark(),
-                            Compatibility.createDataSourceV2ScanRelation(
-                                    relation,
-                                    PaimonSplitScan.apply(table, entry.getValue()),
-                                    relation.output()));
-            futures.add(executorService.submit(() -> writer.write(sorter.sort(dataset))));
+        Dataset<Row> datasetForWrite =
+                packedSplits.values().stream()
+                        .map(
+                                split -> {
+                                    Dataset<Row> dataset =
+                                            PaimonUtils.createDataset(
+                                                    spark(),
+                                                    Compatibility.createDataSourceV2ScanRelation(
+                                                            relation,
+                                                            PaimonSplitScan.apply(table, split),
+                                                            relation.output()));
+                                    return sorter.sort(dataset);
+                                })
+                        .reduce(Dataset::union)
+                        .orElse(null);
+        if (datasetForWrite != null) {
+            PaimonSparkWriter writer = new PaimonSparkWriter(table);
+            // Use dynamic partition overwrite
+            writer.writeBuilder().withOverwrite();
+            writer.commit(writer.write(datasetForWrite));
         }
-
-        ListBuffer<CommitMessage> messages = new ListBuffer<>();
-        try {
-            for (Future<Seq<CommitMessage>> future : futures) {
-                messages.append(future.get());
-            }
-        } catch (Throwable e) {
-            throw new RuntimeException("Compact failed", e);
-        } finally {
-            executorService.shutdownNow();
-        }
-
-        writer.commit(messages.toSeq());
     }
 
     private Map<BinaryRow, DataSplit[]> packForSort(List<DataSplit> dataSplits) {
