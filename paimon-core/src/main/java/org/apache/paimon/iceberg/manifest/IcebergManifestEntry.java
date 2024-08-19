@@ -90,6 +90,10 @@ public class IcebergManifestEntry {
         return status;
     }
 
+    public boolean isLive() {
+        return status == Status.ADDED || status == Status.EXISTING;
+    }
+
     public long snapshotId() {
         return snapshotId;
     }
