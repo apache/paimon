@@ -70,6 +70,8 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
         testUpgradeNonPartitionTable("avro");
         resetMetastore();
         testUpgradePartitionTable("avro");
+        resetMetastore();
+        testUpgradePartitionTableWithSeparator("avro", ";");
     }
 
     @Test
@@ -77,7 +79,6 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
         testUpgradeNonPartitionTable("parquet");
         resetMetastore();
         testUpgradePartitionTable("parquet");
-        testUpgradePartitionTableWithSeparator("parquet", ";");
     }
 
     private void resetMetastore() throws Exception {
@@ -151,8 +152,11 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
                                 + "')")
                 .await();
         List<Row> r2 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
-
         Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
+
+        List<Row> r3 =
+                ImmutableList.copyOf(tEnv.executeSql("SHOW CREATE TABLE hivetable").collect());
+        assert (r3.get(0).toString().contains("'orc.encrypt' = 'pii:id,name',"));
     }
 
     public void testUpgradeNonPartitionTable(String format) throws Exception {

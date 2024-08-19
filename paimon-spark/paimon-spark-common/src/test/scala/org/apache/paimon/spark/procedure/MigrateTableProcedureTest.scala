@@ -64,6 +64,14 @@ class MigrateTableProcedureTest extends PaimonHiveTestBase {
           checkAnswer(
             spark.sql(s"SELECT * FROM hive_tbl ORDER BY id"),
             Row("1", "a", "p1") :: Row("2", "b", "p2") :: Nil)
+
+          assert(
+            spark
+              .sql("SHOW CREATE TABLE hive_tbl")
+              .collect()
+              .apply(0)
+              .toString()
+              .contains("'orc.encrypt' = 'pii:id,name',"))
         }
       }
     })

@@ -84,7 +84,7 @@ public class MigrateTableProcedure extends BaseProcedure {
         String properties = args.isNullAt(2) ? null : args.getString(2);
         boolean deleteNeed = args.isNullAt(3) || args.getBoolean(3);
         String targetTable = args.isNullAt(4) ? null : args.getString(4);
-        String separator = args.isNullAt(5) ? "," : args.getString(4);
+        String separator = args.isNullAt(5) ? "," : args.getString(5);
 
         Identifier sourceTableId = Identifier.fromString(sourceTable);
         Identifier tmpTableId =
