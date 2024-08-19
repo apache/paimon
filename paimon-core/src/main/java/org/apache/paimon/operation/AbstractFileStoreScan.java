@@ -21,9 +21,11 @@ package org.apache.paimon.operation;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestEntrySerializer;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
@@ -481,8 +483,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                 .read(
                         manifest.fileName(),
                         manifest.fileSize(),
-                        ManifestEntry.createCacheRowFilter(manifestCacheFilter, numOfBuckets),
-                        ManifestEntry.createEntryRowFilter(
+                        createCacheRowFilter(manifestCacheFilter, numOfBuckets),
+                        createEntryRowFilter(
                                 partitionFilter, bucketFilter, fileNameFilter, numOfBuckets));
     }
 
@@ -496,9 +498,70 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                         // use filter for ManifestEntry
                         // currently, projection is not pushed down to file format
                         // see SimpleFileEntrySerializer
-                        ManifestEntry.createCacheRowFilter(manifestCacheFilter, numOfBuckets),
-                        ManifestEntry.createEntryRowFilter(
+                        createCacheRowFilter(manifestCacheFilter, numOfBuckets),
+                        createEntryRowFilter(
                                 partitionFilter, bucketFilter, fileNameFilter, numOfBuckets));
+    }
+
+    /**
+     * According to the {@link ManifestCacheFilter}, entry that needs to be cached will be retained,
+     * so the entry that will not be accessed in the future will not be cached.
+     *
+     * <p>Implemented to {@link InternalRow} is for performance (No deserialization).
+     */
+    private static Filter<InternalRow> createCacheRowFilter(
+            @Nullable ManifestCacheFilter manifestCacheFilter, int numOfBuckets) {
+        if (manifestCacheFilter == null) {
+            return Filter.alwaysTrue();
+        }
+
+        Function<InternalRow, BinaryRow> partitionGetter =
+                ManifestEntrySerializer.partitionGetter();
+        Function<InternalRow, Integer> bucketGetter = ManifestEntrySerializer.bucketGetter();
+        Function<InternalRow, Integer> totalBucketGetter =
+                ManifestEntrySerializer.totalBucketGetter();
+        return row -> {
+            if (numOfBuckets != totalBucketGetter.apply(row)) {
+                return true;
+            }
+
+            return manifestCacheFilter.test(partitionGetter.apply(row), bucketGetter.apply(row));
+        };
+    }
+
+    /**
+     * Read the corresponding entries based on the current required partition and bucket.
+     *
+     * <p>Implemented to {@link InternalRow} is for performance (No deserialization).
+     */
+    private static Filter<InternalRow> createEntryRowFilter(
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable Filter<Integer> bucketFilter,
+            @Nullable Filter<String> fileNameFilter,
+            int numOfBuckets) {
+        Function<InternalRow, BinaryRow> partitionGetter =
+                ManifestEntrySerializer.partitionGetter();
+        Function<InternalRow, Integer> bucketGetter = ManifestEntrySerializer.bucketGetter();
+        Function<InternalRow, Integer> totalBucketGetter =
+                ManifestEntrySerializer.totalBucketGetter();
+        Function<InternalRow, String> fileNameGetter = ManifestEntrySerializer.fileNameGetter();
+        return row -> {
+            if ((partitionFilter != null && !partitionFilter.test(partitionGetter.apply(row)))) {
+                return false;
+            }
+
+            if (bucketFilter != null
+                    && numOfBuckets == totalBucketGetter.apply(row)
+                    && !bucketFilter.test(bucketGetter.apply(row))) {
+                return false;
+            }
+
+            if (fileNameFilter != null && !fileNameFilter.test((fileNameGetter.apply(row)))) {
+                return false;
+            }
+
+            return true;
+        };
     }
 
     // ------------------------------------------------------------------------

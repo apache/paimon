@@ -36,7 +36,7 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
     private static final long serialVersionUID = 1L;
 
     public DataFileMetaSerializer() {
-        super(DataFileMeta.schema());
+        super(DataFileMeta.SCHEMA);
     }
 
     @Override

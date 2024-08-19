@@ -197,7 +197,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         }
 
         public ManifestFile create() {
-            RowType entryType = VersionedObjectSerializer.versionType(ManifestEntry.schema());
+            RowType entryType = VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA);
             return new ManifestFile(
                     fileIO,
                     schemaManager,
@@ -213,7 +213,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         }
 
         public ObjectsFile<SimpleFileEntry> createSimpleFileEntryReader() {
-            RowType entryType = VersionedObjectSerializer.versionType(ManifestEntry.schema());
+            RowType entryType = VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA);
             return new ObjectsFile<>(
                     fileIO,
                     new SimpleFileEntrySerializer(),

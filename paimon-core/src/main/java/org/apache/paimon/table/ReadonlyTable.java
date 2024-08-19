@@ -19,6 +19,8 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.InnerTableCommit;
@@ -26,6 +28,7 @@ import org.apache.paimon.table.sink.InnerTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.sink.WriteSelector;
 import org.apache.paimon.table.source.StreamDataTableScan;
+import org.apache.paimon.utils.SimpleFileReader;
 
 import java.time.Duration;
 import java.util.Collections;
@@ -118,6 +121,22 @@ public interface ReadonlyTable extends InnerTable {
         throw new UnsupportedOperationException(
                 String.format(
                         "Readonly Table %s does not support snapshot.",
+                        this.getClass().getSimpleName()));
+    }
+
+    @Override
+    default SimpleFileReader<ManifestFileMeta> manifestListReader() {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support manifestListReader.",
+                        this.getClass().getSimpleName()));
+    }
+
+    @Override
+    default SimpleFileReader<ManifestEntry> manifestFileReader() {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support manifestFileReader.",
                         this.getClass().getSimpleName()));
     }
 

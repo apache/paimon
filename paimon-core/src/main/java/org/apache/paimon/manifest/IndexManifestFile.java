@@ -93,7 +93,7 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
         }
 
         public IndexManifestFile create() {
-            RowType schema = VersionedObjectSerializer.versionType(IndexManifestEntry.schema());
+            RowType schema = VersionedObjectSerializer.versionType(IndexManifestEntry.SCHEMA);
             return new IndexManifestFile(
                     fileIO,
                     schema,

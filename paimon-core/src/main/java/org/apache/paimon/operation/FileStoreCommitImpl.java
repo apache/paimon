@@ -864,7 +864,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
             // merge manifest files with changes
             newMetas.addAll(
-                    ManifestFileMeta.merge(
+                    ManifestFileMerger.merge(
                             oldMetas,
                             manifestFile,
                             manifestTargetSize.getBytes(),
