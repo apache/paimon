@@ -585,7 +585,13 @@ This config option does not affect the default filesystem metastore.</td>
             <td><h5>record-level.time-field</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>Time field for record level expire, it should be a seconds INT.</td>
+            <td>Time field for record level expire.</td>
+        </tr>
+        <tr>
+            <td><h5>record-level.time-field-type</h5></td>
+            <td style="word-wrap: break-word;">seconds-int</td>
+            <td><p>Enum</p></td>
+            <td>Time field type for record level expire, it can be seconds-int or millis-long.<br /><br />Possible values:<ul><li>"seconds-int": Timestamps in seconds should be INT type.</li><li>"millis-long": Timestamps in milliseconds should be BIGINT type.</li></ul></td>
         </tr>
         <tr>
             <td><h5>rowkind.field</h5></td>

@@ -1251,8 +1251,14 @@ public class CoreOptions implements Serializable {
             key("record-level.time-field")
                     .stringType()
                     .noDefaultValue()
+                    .withDescription("Time field for record level expire.");
+
+    public static final ConfigOption<TimeFieldType> RECORD_LEVEL_TIME_FIELD_TYPE =
+            key("record-level.time-field-type")
+                    .enumType(TimeFieldType.class)
+                    .defaultValue(TimeFieldType.SECONDS_INT)
                     .withDescription(
-                            "Time field for record level expire, it should be a seconds INT.");
+                            "Time field type for record level expire, it can be seconds-int or millis-long.");
 
     public static final ConfigOption<String> FIELDS_DEFAULT_AGG_FUNC =
             key(FIELDS_PREFIX + "." + DEFAULT_AGG_FUNCTION)
@@ -2058,6 +2064,11 @@ public class CoreOptions implements Serializable {
         return options.get(RECORD_LEVEL_TIME_FIELD);
     }
 
+    @Nullable
+    public TimeFieldType recordLevelTimeFieldType() {
+        return options.get(RECORD_LEVEL_TIME_FIELD_TYPE);
+    }
+
     public boolean prepareCommitWaitCompaction() {
         if (!needLookup()) {
             return false;
@@ -2668,6 +2679,31 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         LookupLocalFileType(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** Time field type for record level expire. */
+    public enum TimeFieldType implements DescribedEnum {
+        SECONDS_INT("seconds-int", "Timestamps in seconds should be INT type."),
+
+        MILLIS_LONG("millis-long", "Timestamps in milliseconds should be BIGINT type.");
+
+        private final String value;
+        private final String description;
+
+        TimeFieldType(String value, String description) {
             this.value = value;
             this.description = description;
         }
