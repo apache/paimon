@@ -60,6 +60,7 @@ public class MigrateTableActionFactory implements ActionFactory {
                 "  migrate_table --warehouse <warehouse_path> --source_type hive "
                         + "--table <database.table_name> "
                         + "[--catalog_conf <key>=<value] "
-                        + "[--options <key>=<value>,<key>=<value>,...]");
+                        + "[--options <key>=<value>,<key>=<value>,...]"
+                        + "[--separator <separator>]");
     }
 }

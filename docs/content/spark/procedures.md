@@ -127,8 +127,9 @@ This section introduce all available spark procedures about paimon.
             <li>options: the table options of the paimon table to migrate.</li>
             <li>target_table: name of the target paimon table to migrate. If not set would keep the same name with origin table</li>
             <li>delete_origin: If had set target_table, can set delete_origin to decide whether delete the origin table metadata from hms after migrate. Default is true</li>
+            <li>separator: Options is separated by the value. Default is ','</li>      
       </td>
-      <td>CALL sys.migrate_table(source_type => 'hive', table => 'default.T', options => 'file.format=parquet')</td>
+      <td>CALL sys.migrate_table(source_type => 'hive', table => 'default.T', options => 'file.format=parquet', separator => ',')</td>
     </tr>
     <tr>
       <td>migrate_file</td>
