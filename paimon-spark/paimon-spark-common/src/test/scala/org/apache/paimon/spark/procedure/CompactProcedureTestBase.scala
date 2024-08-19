@@ -250,7 +250,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     }
   }
 
-  test("Paimon Procedure: sort compact with max_concurrent_jobs") {
+  test("Paimon Procedure: sort compact with multi-partitions") {
     Seq("order", "zorder").foreach {
       orderStrategy =>
         {
@@ -276,7 +276,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
 
             checkAnswer(
               spark.sql(
-                s"CALL sys.compact(table => 'T', order_strategy => '$orderStrategy', order_by => 'id', max_concurrent_jobs => 2)"),
+                s"CALL sys.compact(table => 'T', order_strategy => '$orderStrategy', order_by => 'id')"),
               Seq(true).toDF())
 
             val result = List(Row(1), Row(2), Row(3), Row(4)).asJava
