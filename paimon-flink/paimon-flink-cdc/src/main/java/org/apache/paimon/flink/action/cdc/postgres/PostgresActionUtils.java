@@ -154,6 +154,12 @@ public class PostgresActionUtils {
         postgresConfig
                 .getOptional(PostgresSourceOptions.HEARTBEAT_INTERVAL)
                 .ifPresent(sourceBuilder::heartbeatInterval);
+        postgresConfig
+                .getOptional(PostgresSourceOptions.SCAN_INCREMENTAL_CLOSE_IDLE_READER_ENABLED)
+                .ifPresent(sourceBuilder::closeIdleReaders);
+        postgresConfig
+                .getOptional(PostgresSourceOptions.SCAN_INCREMENTAL_SNAPSHOT_BACKFILL_SKIP)
+                .ifPresent(sourceBuilder::skipSnapshotBackfill);
 
         String startupMode = postgresConfig.get(PostgresSourceOptions.SCAN_STARTUP_MODE);
 

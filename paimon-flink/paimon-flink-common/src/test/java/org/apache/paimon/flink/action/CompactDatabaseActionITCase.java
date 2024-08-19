@@ -503,6 +503,107 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
     @ParameterizedTest(name = "mode = {0}")
     @ValueSource(strings = {"divided", "combined"})
     @Timeout(60)
+    public void testHistoryPartitionCompact(String mode) throws Exception {
+        List<FileStoreTable> tables = new ArrayList<>();
+        String partitionIdleTime = "10s";
+
+        for (String dbName : DATABASE_NAMES) {
+            for (String tableName : TABLE_NAMES) {
+                Map<String, String> option = new HashMap<>();
+                option.put(CoreOptions.WRITE_ONLY.key(), "true");
+                List<String> keys;
+                if (tableName.endsWith("unaware_bucket")) {
+                    option.put("bucket", "-1");
+                    option.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+                    option.put(CoreOptions.COMPACTION_MAX_FILE_NUM.key(), "2");
+                    keys = Lists.newArrayList();
+                } else {
+                    option.put("bucket", "1");
+                    keys = Arrays.asList("dt", "hh", "k");
+                }
+                FileStoreTable table =
+                        createTable(dbName, tableName, Arrays.asList("dt", "hh"), keys, option);
+                tables.add(table);
+                SnapshotManager snapshotManager = table.snapshotManager();
+                StreamWriteBuilder streamWriteBuilder =
+                        table.newStreamWriteBuilder().withCommitUser(commitUser);
+                write = streamWriteBuilder.newWrite();
+                commit = streamWriteBuilder.newCommit();
+
+                writeData(
+                        rowData(1, 100, 15, BinaryString.fromString("20221208")),
+                        rowData(1, 100, 16, BinaryString.fromString("20221208")),
+                        rowData(1, 100, 15, BinaryString.fromString("20221209")));
+
+                writeData(
+                        rowData(2, 100, 15, BinaryString.fromString("20221208")),
+                        rowData(2, 100, 16, BinaryString.fromString("20221208")),
+                        rowData(2, 100, 15, BinaryString.fromString("20221209")));
+
+                Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
+                assertThat(snapshot.id()).isEqualTo(2);
+                assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
+                write.close();
+                commit.close();
+            }
+        }
+
+        // sleep 3s, update partition 20221208-16
+        Thread.sleep(10000);
+        for (FileStoreTable table : tables) {
+            StreamWriteBuilder streamWriteBuilder =
+                    table.newStreamWriteBuilder().withCommitUser(commitUser);
+            write = streamWriteBuilder.newWrite();
+            commit = streamWriteBuilder.newCommit();
+            writeData(rowData(3, 100, 16, BinaryString.fromString("20221208")));
+        }
+
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            StreamExecutionEnvironment env =
+                    streamExecutionEnvironmentBuilder().batchMode().build();
+            createAction(
+                            CompactDatabaseAction.class,
+                            "compact_database",
+                            "--warehouse",
+                            warehouse,
+                            "--mode",
+                            mode,
+                            "--partition_idle_time",
+                            partitionIdleTime)
+                    .withStreamExecutionEnvironment(env)
+                    .build();
+            env.execute();
+        } else {
+            callProcedure(
+                    String.format(
+                            "CALL sys.compact_database('', '%s','','','','%s')",
+                            mode, partitionIdleTime),
+                    false,
+                    true);
+        }
+
+        for (FileStoreTable table : tables) {
+            SnapshotManager snapshotManager = table.snapshotManager();
+            Snapshot snapshot =
+                    table.snapshotManager().snapshot(snapshotManager.latestSnapshotId());
+            assertThat(snapshot.id()).isEqualTo(4);
+            assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
+
+            List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
+            assertThat(splits.size()).isEqualTo(3);
+            for (DataSplit split : splits) {
+                if (split.partition().getInt(1) == 16) {
+                    assertThat(split.dataFiles().size()).isEqualTo(3);
+                } else {
+                    assertThat(split.dataFiles().size()).isEqualTo(1);
+                }
+            }
+        }
+    }
+
+    @ParameterizedTest(name = "mode = {0}")
+    @ValueSource(strings = {"divided", "combined"})
+    @Timeout(60)
     public void includeTableCompaction(String mode) throws Exception {
         includingAndExcludingTablesImpl(
                 mode,

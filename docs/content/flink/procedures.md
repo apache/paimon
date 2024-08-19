@@ -68,6 +68,7 @@ All available procedures are listed below.
             <li>order_by(optional): the columns need to be sort. Left empty if 'order_strategy' is 'none'.</li>
             <li>options(optional): additional dynamic options of the table.</li>
             <li>where(optional): partition predicate(Can't be used together with "partitions"). Note: as where is a keyword,a pair of backticks need to add around like `where`.</li>
+            <li>partition_idle_time(optional): this is used to do a full compaction for partition which had not received any new data for 'partition_idle_time'. And only these partitions will be compacted. This argument can not be used with order compact.</li>
       </td>
       <td>
          -- use partition filter <br/>
@@ -85,6 +86,7 @@ All available procedures are listed below.
          CALL [catalog.]sys.compact_database('includingDatabases', 'mode', 'includingTables') <br/><br/> 
          CALL [catalog.]sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables') <br/><br/>
          CALL [catalog.]sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables', 'tableOptions')
+         CALL [catalog.]sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables', 'tableOptions', 'partitionIdleTime')
       </td>
       <td>
          To compact databases. Arguments:
@@ -95,6 +97,7 @@ All available procedures are listed below.
             <li>includingTables: to specify tables. You can use regular expression.</li>
             <li>excludingTables: to specify tables that are not compacted. You can use regular expression.</li>
             <li>tableOptions: additional dynamic options of the table.</li>
+            <li>partition_idle_time: this is used to do a full compaction for partition which had not received any new data for 'partition_idle_time'. And only these partitions will be compacted.</li>
       </td>
       <td>
          CALL sys.compact_database('db1|db2', 'combined', 'table_.*', 'ignore', 'sink.parallelism=4')

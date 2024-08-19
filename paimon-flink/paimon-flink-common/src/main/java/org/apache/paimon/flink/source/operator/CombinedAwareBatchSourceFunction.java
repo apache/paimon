@@ -39,6 +39,7 @@ import org.apache.flink.table.data.RowData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Duration;
 import java.util.regex.Pattern;
 
 import static org.apache.paimon.flink.compact.MultiTableScanBase.ScanResult.FINISHED;
@@ -98,7 +99,8 @@ public class CombinedAwareBatchSourceFunction
             Catalog.Loader catalogLoader,
             Pattern includingPattern,
             Pattern excludingPattern,
-            Pattern databasePattern) {
+            Pattern databasePattern,
+            Duration partitionIdleTime) {
         CombinedAwareBatchSourceFunction function =
                 new CombinedAwareBatchSourceFunction(
                         catalogLoader, includingPattern, excludingPattern, databasePattern);
@@ -112,7 +114,10 @@ public class CombinedAwareBatchSourceFunction
                 .partitionCustom(
                         (key, numPartitions) -> key % numPartitions,
                         split -> ((DataSplit) split.f0).bucket())
-                .transform(name, typeInfo, new MultiTablesReadOperator(catalogLoader, false));
+                .transform(
+                        name,
+                        typeInfo,
+                        new MultiTablesReadOperator(catalogLoader, false, partitionIdleTime));
     }
 
     @Override

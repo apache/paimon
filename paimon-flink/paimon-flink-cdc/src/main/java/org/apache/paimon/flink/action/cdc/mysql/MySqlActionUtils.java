@@ -176,10 +176,12 @@ public class MySqlActionUtils {
         mySqlConfig
                 .getOptional(MySqlSourceOptions.HEARTBEAT_INTERVAL)
                 .ifPresent(sourceBuilder::heartbeatInterval);
-
         mySqlConfig
                 .getOptional(MySqlSourceOptions.SCAN_INCREMENTAL_CLOSE_IDLE_READER_ENABLED)
                 .ifPresent(sourceBuilder::closeIdleReaders);
+        mySqlConfig
+                .getOptional(MySqlSourceOptions.SCAN_INCREMENTAL_SNAPSHOT_BACKFILL_SKIP)
+                .ifPresent(sourceBuilder::skipSnapshotBackfill);
 
         String startupMode = mySqlConfig.get(MySqlSourceOptions.SCAN_STARTUP_MODE);
         // see
