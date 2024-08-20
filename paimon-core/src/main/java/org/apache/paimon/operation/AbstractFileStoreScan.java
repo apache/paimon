@@ -86,7 +86,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private Snapshot specifiedSnapshot = null;
     private Filter<Integer> bucketFilter = null;
     private List<ManifestFileMeta> specifiedManifests = null;
-    private ScanMode scanMode = ScanMode.ALL;
+    protected ScanMode scanMode = ScanMode.ALL;
     private Filter<Integer> levelFilter = null;
     private Long dataFileTimeMills = null;
     private Filter<String> fileNameFilter = null;
