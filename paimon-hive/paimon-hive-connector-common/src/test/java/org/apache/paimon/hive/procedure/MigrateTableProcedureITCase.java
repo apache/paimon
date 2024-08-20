@@ -70,8 +70,6 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
         testUpgradeNonPartitionTable("avro");
         resetMetastore();
         testUpgradePartitionTable("avro");
-        resetMetastore();
-        testUpgradePartitionTableWithSeparator("avro", ";");
     }
 
     @Test
@@ -118,45 +116,6 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
         List<Row> r2 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
 
         Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
-    }
-
-    public void testUpgradePartitionTableWithSeparator(String format, String separator)
-            throws Exception {
-        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
-        tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
-        tEnv.useCatalog("HIVE");
-        tEnv.getConfig().setSqlDialect(SqlDialect.HIVE);
-        tEnv.executeSql(
-                "CREATE TABLE hivetable (id string, name string) PARTITIONED BY (id2 int, id3 int) STORED AS "
-                        + format);
-        tEnv.executeSql("INSERT INTO hivetable VALUES ('a', 'bb', 2, 3)").await();
-        tEnv.executeSql("SHOW CREATE TABLE hivetable");
-
-        tEnv.getConfig().setSqlDialect(SqlDialect.DEFAULT);
-        tEnv.executeSql("CREATE CATALOG PAIMON_GE WITH ('type'='paimon-generic')");
-        tEnv.useCatalog("PAIMON_GE");
-        List<Row> r1 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
-
-        tEnv.executeSql(
-                "CREATE CATALOG PAIMON WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:"
-                        + PORT
-                        + "' , 'warehouse' = '"
-                        + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname)
-                        + "')");
-        tEnv.useCatalog("PAIMON");
-        tEnv.executeSql(
-                        "CALL sys.migrate_table('hive', 'default.hivetable', 'file.format="
-                                + format
-                                + ";orc.encrypt=pii:id,name', '"
-                                + separator
-                                + "')")
-                .await();
-        List<Row> r2 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
-        Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
-
-        List<Row> r3 =
-                ImmutableList.copyOf(tEnv.executeSql("SHOW CREATE TABLE hivetable").collect());
-        assert (r3.get(0).toString().contains("'orc.encrypt' = 'pii:id,name',"));
     }
 
     public void testUpgradeNonPartitionTable(String format) throws Exception {
@@ -216,8 +175,7 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
                         System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname),
                         "default.hivetable",
                         catalogConf,
-                        "",
-                        ",");
+                        "");
         migrateTableAction.run();
 
         tEnv.executeSql(

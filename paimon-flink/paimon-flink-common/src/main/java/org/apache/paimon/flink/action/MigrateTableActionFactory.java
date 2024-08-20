@@ -28,8 +28,6 @@ public class MigrateTableActionFactory implements ActionFactory {
 
     private static final String SOURCE_TYPE = "source_type";
     private static final String OPTIONS = "options";
-    private static final String SEPARATOR = "separator";
-
     @Override
     public String identifier() {
         return IDENTIFIER;
@@ -42,11 +40,10 @@ public class MigrateTableActionFactory implements ActionFactory {
         String sourceHiveTable = params.get(TABLE);
         Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
         String tableConf = params.get(OPTIONS);
-        String separator = params.get(SEPARATOR) == null ? "," : params.get(SEPARATOR);
 
         MigrateTableAction migrateTableAction =
                 new MigrateTableAction(
-                        connector, warehouse, sourceHiveTable, catalogConfig, tableConf, separator);
+                        connector, warehouse, sourceHiveTable, catalogConfig, tableConf);
         return Optional.of(migrateTableAction);
     }
 
@@ -60,7 +57,6 @@ public class MigrateTableActionFactory implements ActionFactory {
                 "  migrate_table --warehouse <warehouse_path> --source_type hive "
                         + "--table <database.table_name> "
                         + "[--catalog_conf <key>=<value] "
-                        + "[--options <key>=<value>,<key>=<value>,...]"
-                        + "[--separator <separator>]");
+                        + "[--options <key>=<value>,<key>=<value>,...]");
     }
 }

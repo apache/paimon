@@ -27,11 +27,15 @@ import org.apache.paimon.utils.ParameterUtils;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.spark.sql.catalyst.InternalRow;
+import org.apache.spark.sql.catalyst.util.MapData;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
+
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.apache.spark.sql.types.DataTypes.BooleanType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
@@ -54,7 +58,7 @@ public class MigrateTableProcedure extends BaseProcedure {
                 ProcedureParameter.optional("options", StringType),
                 ProcedureParameter.optional("delete_origin", BooleanType),
                 ProcedureParameter.optional("target_table", StringType),
-                ProcedureParameter.optional("separator", StringType)
+                ProcedureParameter.optional("options_map", DataTypes.createMapType(StringType, StringType))
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -84,7 +88,8 @@ public class MigrateTableProcedure extends BaseProcedure {
         String properties = args.isNullAt(2) ? null : args.getString(2);
         boolean deleteNeed = args.isNullAt(3) || args.getBoolean(3);
         String targetTable = args.isNullAt(4) ? null : args.getString(4);
-        String separator = args.isNullAt(5) ? "," : args.getString(5);
+        MapData mapData = args.isNullAt(5) ? null : args.getMap(5);
+        Map<String, String> optionMap = mapDataToHashMap(mapData);
 
         Identifier sourceTableId = Identifier.fromString(sourceTable);
         Identifier tmpTableId =
@@ -93,6 +98,9 @@ public class MigrateTableProcedure extends BaseProcedure {
                         : Identifier.fromString(targetTable);
 
         Catalog paimonCatalog = ((WithPaimonCatalog) tableCatalog()).paimonCatalog();
+
+        Map<String, String> options = ParameterUtils.parseCommaSeparatedKeyValues(properties);
+        options.putAll(optionMap);
 
         try {
             Migrator migrator =
@@ -103,7 +111,7 @@ public class MigrateTableProcedure extends BaseProcedure {
                             sourceTableId.getObjectName(),
                             tmpTableId.getDatabaseName(),
                             tmpTableId.getObjectName(),
-                            ParameterUtils.parseSeparatedKeyValues(properties, separator));
+                            options);
 
             migrator.deleteOriginTable(deleteNeed);
             migrator.executeMigrate();
@@ -115,6 +123,16 @@ public class MigrateTableProcedure extends BaseProcedure {
         }
 
         return new InternalRow[] {newInternalRow(true)};
+    }
+
+    public static Map<String, String> mapDataToHashMap(MapData mapData) {
+        HashMap<String, String> map = new HashMap<>();
+        if (mapData != null) {
+            for (int index = 0; index < mapData.numElements(); index ++) {
+                map.put(mapData.keyArray().getUTF8String(index).toString(), mapData.valueArray().getUTF8String(index).toString());
+            }
+        }
+        return map;
     }
 
     public static ProcedureBuilder builder() {

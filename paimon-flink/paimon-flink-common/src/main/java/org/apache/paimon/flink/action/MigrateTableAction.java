@@ -31,20 +31,16 @@ public class MigrateTableAction extends ActionBase {
     private final String hiveTableFullName;
     private final String tableProperties;
 
-    private final String separator;
-
     public MigrateTableAction(
             String connector,
             String warehouse,
             String hiveTableFullName,
             Map<String, String> catalogConfig,
-            String tableProperties,
-            String separator) {
+            String tableProperties) {
         super(warehouse, catalogConfig);
         this.connector = connector;
         this.hiveTableFullName = hiveTableFullName;
         this.tableProperties = tableProperties;
-        this.separator = separator;
     }
 
     @Override
@@ -52,10 +48,6 @@ public class MigrateTableAction extends ActionBase {
         MigrateTableProcedure migrateTableProcedure = new MigrateTableProcedure();
         migrateTableProcedure.withCatalog(catalog);
         migrateTableProcedure.call(
-                new DefaultProcedureContext(env),
-                connector,
-                hiveTableFullName,
-                tableProperties,
-                separator);
+                new DefaultProcedureContext(env), connector, hiveTableFullName, tableProperties);
     }
 }
