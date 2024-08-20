@@ -74,13 +74,13 @@ class AppendDeletionFileMaintainerTest {
                 store.createDVIFMaintainer(BinaryRow.EMPTY_ROW, dataFileToDeletionFiles);
 
         // no dv should be rewritten, because nothing is changed.
-        List<IndexManifestEntry> res = dvIFMaintainer.writeUnchangedDeletionVector();
+        List<IndexManifestEntry> res = dvIFMaintainer.persist();
         assertThat(res.size()).isEqualTo(0);
 
         // the dv of f3 is updated, and the index file that contains the dv of f3 should be marked
         // as REMOVE.
         FileIO fileIO = LocalFileIO.create();
-        dvIFMaintainer.notifyDeletionFiles(
+        dvIFMaintainer.notifyNewDeletionVector(
                 "f3", DeletionVector.read(fileIO, dataFileToDeletionFiles.get("f3")));
         res = dvIFMaintainer.writeUnchangedDeletionVector();
         assertThat(res.size()).isEqualTo(1);
@@ -88,7 +88,7 @@ class AppendDeletionFileMaintainerTest {
 
         // the dv of f1 and f2 are in one index file, and the dv of f1 is updated.
         // the dv of f2 need to be rewritten, and this index file should be marked as REMOVE.
-        dvIFMaintainer.notifyDeletionFiles(
+        dvIFMaintainer.notifyNewDeletionVector(
                 "f1", DeletionVector.read(fileIO, dataFileToDeletionFiles.get("f1")));
         res = dvIFMaintainer.writeUnchangedDeletionVector();
         assertThat(res.size()).isEqualTo(3);

@@ -203,6 +203,7 @@ public class BucketedAppendCompactManagerTest {
                 new BucketedAppendCompactManager(
                         null, // not used
                         toCompactBeforePick,
+                        null,
                         minFileNum,
                         maxFileNum,
                         targetFileSize,

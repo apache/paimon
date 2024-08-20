@@ -317,7 +317,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         compactChangelog.clear();
         this.compactDeletionFile = null;
 
-        return new CommitIncrement(dataIncrement, compactIncrement, drainDeletionFile);
+        return new CommitIncrement(dataIncrement, compactIncrement, null, drainDeletionFile);
     }
 
     private void trySyncLatestCompaction(boolean blocking) throws Exception {
