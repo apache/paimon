@@ -227,6 +227,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                         changelogWriter == null ? null : changelogWriter::write,
                         dataWriter::write);
             } finally {
+                writeBuffer.clear();
                 if (changelogWriter != null) {
                     changelogWriter.close();
                 }
@@ -251,8 +252,6 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                 newFiles.add(dataMeta);
                 compactManager.addNewFile(dataMeta);
             }
-
-            writeBuffer.clear();
         }
 
         trySyncLatestCompaction(waitForLatestCompaction);

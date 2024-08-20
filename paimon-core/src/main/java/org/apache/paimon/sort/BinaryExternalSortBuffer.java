@@ -148,8 +148,8 @@ public class BinaryExternalSortBuffer implements SortBuffer {
         // release memory
         inMemorySortBuffer.clear();
         spillChannelIDs.clear();
-        channelManager.close();
         // delete files
+        channelManager.close();
         channelManager = new SpillChannelManager();
     }
 
