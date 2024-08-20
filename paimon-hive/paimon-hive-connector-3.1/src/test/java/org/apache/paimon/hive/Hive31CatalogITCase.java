@@ -78,8 +78,8 @@ public class Hive31CatalogITCase extends HiveCatalogITCaseBase {
         assertThat(collect("SHOW DATABASES"))
                 .isEqualTo(
                         Arrays.asList(
-                                Row.of("sys"),
                                 Row.of("default"),
+                                Row.of("sys"),
                                 Row.of("test_db"),
                                 Row.of(TestHiveMetaStoreClient.MOCK_DATABASE)));
     }
