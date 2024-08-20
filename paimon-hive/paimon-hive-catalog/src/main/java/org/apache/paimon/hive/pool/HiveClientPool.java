@@ -26,8 +26,13 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.MetaException;
+import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.thrift.TException;
 import org.apache.thrift.transport.TTransportException;
+
+import java.io.IOException;
+import java.security.PrivilegedAction;
+import java.security.PrivilegedExceptionAction;
 
 /**
  * Pool of Hive Metastore clients.
@@ -38,26 +43,49 @@ public class HiveClientPool extends ClientPool.ClientPoolImpl<IMetaStoreClient, 
 
     private final HiveConf hiveConf;
     private final String clientClassName;
+    private final UserGroupInformation ugi;
 
     public HiveClientPool(int poolSize, Configuration conf, String clientClassName) {
+        this(poolSize, conf, clientClassName, null);
+    }
+
+    public HiveClientPool(
+            int poolSize, Configuration conf, String clientClassName, UserGroupInformation ugi) {
         // Do not allow retry by default as we rely on RetryingHiveClient
         super(poolSize, TTransportException.class, false);
         this.hiveConf = new HiveConf(conf, HiveClientPool.class);
         this.hiveConf.addResource(conf);
         this.clientClassName = clientClassName;
+        this.ugi = ugi;
     }
 
     @Override
     protected IMetaStoreClient newClient() {
-        return new RetryingMetaStoreClientFactory().createClient(hiveConf, clientClassName);
+        return this.ugi != null
+                ? this.ugi.doAs(
+                        (PrivilegedAction<IMetaStoreClient>)
+                                () ->
+                                        new RetryingMetaStoreClientFactory()
+                                                .createClient(hiveConf, clientClassName))
+                : new RetryingMetaStoreClientFactory().createClient(hiveConf, clientClassName);
     }
 
     @Override
     protected IMetaStoreClient reconnect(IMetaStoreClient client) {
         try {
-            client.close();
-            client.reconnect();
-        } catch (MetaException e) {
+            if (this.ugi != null) {
+                this.ugi.doAs(
+                        (PrivilegedExceptionAction<Void>)
+                                () -> {
+                                    client.close();
+                                    client.reconnect();
+                                    return null;
+                                });
+            } else {
+                client.close();
+                client.reconnect();
+            }
+        } catch (MetaException | IOException | InterruptedException e) {
             throw new RuntimeException("Failed to reconnect to Hive Metastore", e);
         }
         return client;
