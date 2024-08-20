@@ -49,6 +49,7 @@ import java.util.Map;
  * @param <T> type of record to write.
  */
 public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> {
+
     private static final Logger LOG = LoggerFactory.getLogger(MemoryFileStoreWrite.class);
 
     protected final CoreOptions options;

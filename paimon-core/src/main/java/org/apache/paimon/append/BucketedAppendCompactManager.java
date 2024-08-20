@@ -270,7 +270,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
                     }
                 }
                 if (small > big && toCompact.size() >= FULL_COMPACT_MIN_FILE) {
-                    return compact(dvMaintainer, toCompact, rewriter);
+                    return compact(null, toCompact, rewriter);
                 } else {
                     return result(emptyList(), emptyList());
                 }
@@ -318,25 +318,17 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
             List<DataFileMeta> toCompact,
             CompactRewriter rewriter)
             throws Exception {
+        List<DataFileMeta> rewrite = rewriter.rewrite(toCompact);
+        CompactResult result = result(toCompact, rewrite);
         if (dvMaintainer != null) {
             toCompact.forEach(f -> dvMaintainer.removeDeletionVectorOf(f.fileName()));
+            result.setDeletionFile(CompactDeletionFile.generateFiles(dvMaintainer));
         }
-        return result(toCompact, rewriter.rewrite(toCompact), dvMaintainer);
+        return result;
     }
 
     private static CompactResult result(List<DataFileMeta> before, List<DataFileMeta> after) {
         return new CompactResult(before, after);
-    }
-
-    private static CompactResult result(
-            List<DataFileMeta> before,
-            List<DataFileMeta> after,
-            DeletionVectorsMaintainer maintainer) {
-        CompactResult result = new CompactResult(before, after);
-        if (maintainer != null) {
-            result.setDeletionFile(CompactDeletionFile.generateFiles(maintainer));
-        }
-        return result;
     }
 
     /** Compact rewriter for append-only table. */

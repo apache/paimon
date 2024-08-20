@@ -19,6 +19,7 @@
 package org.apache.paimon.append;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
@@ -75,6 +76,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     private final List<DataFileMeta> deletedFiles;
     private final List<DataFileMeta> compactBefore;
     private final List<DataFileMeta> compactAfter;
+    @Nullable private CompactDeletionFile compactDeletionFile;
     private final LongCounter seqNumCounter;
     private final String fileCompression;
     private final String spillCompression;
@@ -139,6 +141,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             deletedFiles.addAll(increment.newFilesIncrement().deletedFiles());
             compactBefore.addAll(increment.compactIncrement().compactBefore());
             compactAfter.addAll(increment.compactIncrement().compactAfter());
+            updateCompactDeletionFile(increment.compactDeletionFile());
         }
     }
 
@@ -227,6 +230,10 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         }
 
         sinkWriter.close();
+
+        if (compactDeletionFile != null) {
+            compactDeletionFile.clean();
+        }
     }
 
     public void toBufferedWriter() throws Exception {
@@ -276,7 +283,17 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
                         result -> {
                             compactBefore.addAll(result.before());
                             compactAfter.addAll(result.after());
+                            updateCompactDeletionFile(result.deletionFile());
                         });
+    }
+
+    private void updateCompactDeletionFile(@Nullable CompactDeletionFile newDeletionFile) {
+        if (newDeletionFile != null) {
+            compactDeletionFile =
+                    compactDeletionFile == null
+                            ? newDeletionFile
+                            : newDeletionFile.mergeOldFile(compactDeletionFile);
+        }
     }
 
     private CommitIncrement drainIncrement() {
@@ -290,13 +307,15 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
                         new ArrayList<>(compactBefore),
                         new ArrayList<>(compactAfter),
                         Collections.emptyList());
+        CompactDeletionFile drainDeletionFile = compactDeletionFile;
 
         newFiles.clear();
         deletedFiles.clear();
         compactBefore.clear();
         compactAfter.clear();
+        compactDeletionFile = null;
 
-        return new CommitIncrement(dataIncrement, compactIncrement, null);
+        return new CommitIncrement(dataIncrement, compactIncrement, drainDeletionFile);
     }
 
     @Override

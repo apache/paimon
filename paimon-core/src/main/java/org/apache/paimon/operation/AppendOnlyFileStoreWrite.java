@@ -22,7 +22,6 @@ import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.append.AppendOnlyWriter;
 import org.apache.paimon.append.BucketedAppendCompactManager;
-import org.apache.paimon.append.BucketedAppendCompactManager.CompactRewriter;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compact.NoopCompactManager;
 import org.apache.paimon.data.BinaryRow;
@@ -147,7 +146,6 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                     dvMaintainer != null
                             ? f -> dvMaintainer.deletionVectorOf(f).orElse(null)
                             : null;
-            CompactRewriter rewriter = files -> compactRewrite(partition, bucket, dvFactory, files);
             compactManager =
                     new BucketedAppendCompactManager(
                             compactExecutor,
@@ -156,7 +154,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                             compactionMinFileNum,
                             compactionMaxFileNum,
                             targetFileSize,
-                            rewriter,
+                            files -> compactRewrite(partition, bucket, dvFactory, files),
                             compactionMetrics == null
                                     ? null
                                     : compactionMetrics.createReporter(partition, bucket));
