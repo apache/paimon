@@ -23,13 +23,17 @@ import org.apache.paimon.types.DataField
 
 import org.apache.spark.sql.catalyst.expressions.AttributeReference
 import org.apache.spark.sql.connector.catalog.MetadataColumn
-import org.apache.spark.sql.types.{DataType, LongType, StringType}
+import org.apache.spark.sql.types.{DataType, LongType, StringType, StructField}
 
 case class PaimonMetadataColumn(id: Int, override val name: String, override val dataType: DataType)
   extends MetadataColumn {
 
   def toPaimonDataField: DataField = {
     new DataField(id, name, SparkTypeUtils.toPaimonType(dataType));
+  }
+
+  def toStructField: StructField = {
+    StructField(name, dataType);
   }
 
   def toAttribute: AttributeReference = {
