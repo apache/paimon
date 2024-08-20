@@ -144,9 +144,8 @@ public class UnawareAppendTableCompactionCoordinator {
         UnawareAppendDeletionFileMaintainer dvIndexFileMaintainer;
         if (deletionVectorEnabled) {
             dvIndexFileMaintainer =
-                    (UnawareAppendDeletionFileMaintainer)
-                            AppendDeletionFileMaintainer.forUnawareAppend(
-                                    indexFileHandler, snapshotId, partition);
+                    AppendDeletionFileMaintainer.forUnawareAppend(
+                            indexFileHandler, snapshotId, partition);
         } else {
             dvIndexFileMaintainer = null;
         }

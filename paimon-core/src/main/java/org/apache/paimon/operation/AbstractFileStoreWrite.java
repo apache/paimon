@@ -69,7 +69,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     private final FileStoreScan scan;
     private final int writerNumberMax;
     @Nullable private final IndexMaintainer.Factory<T> indexFactory;
-    @Nullable private final DeletionVectorsMaintainer.Factory deletionVectorsMaintainerFactory;
+    @Nullable private final DeletionVectorsMaintainer.Factory dvMaintainerFactory;
 
     @Nullable protected IOManager ioManager;
 
@@ -89,14 +89,14 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             @Nullable IndexMaintainer.Factory<T> indexFactory,
-            @Nullable DeletionVectorsMaintainer.Factory deletionVectorsMaintainerFactory,
+            @Nullable DeletionVectorsMaintainer.Factory dvMaintainerFactory,
             String tableName,
             int writerNumberMax) {
         this.commitUser = commitUser;
         this.snapshotManager = snapshotManager;
         this.scan = scan;
         this.indexFactory = indexFactory;
-        this.deletionVectorsMaintainerFactory = deletionVectorsMaintainerFactory;
+        this.dvMaintainerFactory = dvMaintainerFactory;
         this.writers = new HashMap<>();
         this.tableName = tableName;
         this.writerNumberMax = writerNumberMax;
@@ -208,7 +208,6 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 WriterContainer<T> writerContainer = entry.getValue();
 
                 CommitIncrement increment = writerContainer.writer.prepareCommit(waitCompaction);
-                List<IndexFileMeta> deletedIndexFiles = new ArrayList<>();
                 List<IndexFileMeta> newIndexFiles = new ArrayList<>();
                 if (writerContainer.indexMaintainer != null) {
                     newIndexFiles.addAll(writerContainer.indexMaintainer.prepareCommit());
@@ -217,17 +216,13 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 if (compactDeletionFile != null) {
                     compactDeletionFile.getOrCompute().ifPresent(newIndexFiles::add);
                 }
-                if (increment.indexIncrement() != null) {
-                    newIndexFiles.addAll(increment.indexIncrement().newIndexFiles());
-                    deletedIndexFiles.addAll(increment.indexIncrement().deletedIndexFiles());
-                }
                 CommitMessageImpl committable =
                         new CommitMessageImpl(
                                 partition,
                                 bucket,
                                 increment.newFilesIncrement(),
                                 increment.compactIncrement(),
-                                new IndexIncrement(newIndexFiles, deletedIndexFiles));
+                                new IndexIncrement(newIndexFiles));
                 result.add(committable);
 
                 if (committable.isEmpty()) {
@@ -408,9 +403,9 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                         : indexFactory.createOrRestore(
                                 ignorePreviousFiles ? null : latestSnapshotId, partition, bucket);
         DeletionVectorsMaintainer deletionVectorsMaintainer =
-                deletionVectorsMaintainerFactory == null
+                dvMaintainerFactory == null
                         ? null
-                        : deletionVectorsMaintainerFactory.createOrRestore(
+                        : dvMaintainerFactory.createOrRestore(
                                 ignorePreviousFiles ? null : latestSnapshotId, partition, bucket);
         RecordWriter<T> writer =
                 createWriter(

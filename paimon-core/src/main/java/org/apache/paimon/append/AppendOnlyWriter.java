@@ -27,12 +27,10 @@ import org.apache.paimon.disk.RowBuffer;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataIncrement;
-import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.io.RowDataRollingFileWriter;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.memory.MemoryOwner;
@@ -77,8 +75,6 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     private final List<DataFileMeta> deletedFiles;
     private final List<DataFileMeta> compactBefore;
     private final List<DataFileMeta> compactAfter;
-    private final List<IndexFileMeta> indexFilesBefore;
-    private final List<IndexFileMeta> indexFilesAfter;
     private final LongCounter seqNumCounter;
     private final String fileCompression;
     private final String spillCompression;
@@ -125,8 +121,6 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         this.deletedFiles = new ArrayList<>();
         this.compactBefore = new ArrayList<>();
         this.compactAfter = new ArrayList<>();
-        this.indexFilesBefore = new ArrayList<>();
-        this.indexFilesAfter = new ArrayList<>();
         this.seqNumCounter = new LongCounter(maxSequenceNumber + 1);
         this.fileCompression = fileCompression;
         this.spillCompression = spillCompression;
@@ -145,10 +139,6 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             deletedFiles.addAll(increment.newFilesIncrement().deletedFiles());
             compactBefore.addAll(increment.compactIncrement().compactBefore());
             compactAfter.addAll(increment.compactIncrement().compactAfter());
-            if (increment.indexIncrement() != null) {
-                indexFilesBefore.addAll(increment.indexIncrement().deletedIndexFiles());
-                indexFilesAfter.addAll(increment.indexIncrement().newIndexFiles());
-            }
         }
     }
 
@@ -286,11 +276,6 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
                         result -> {
                             compactBefore.addAll(result.before());
                             compactAfter.addAll(result.after());
-                            if (result.indexIncrement() != null) {
-                                indexFilesBefore.addAll(
-                                        result.indexIncrement().deletedIndexFiles());
-                                indexFilesAfter.addAll(result.indexIncrement().newIndexFiles());
-                            }
                         });
     }
 
@@ -306,21 +291,12 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
                         new ArrayList<>(compactAfter),
                         Collections.emptyList());
 
-        IndexIncrement indexIncrement = null;
-        if (!indexFilesBefore.isEmpty() || !indexFilesAfter.isEmpty()) {
-            indexIncrement =
-                    new IndexIncrement(
-                            new ArrayList<>(indexFilesAfter), new ArrayList<>(indexFilesBefore));
-        }
-
         newFiles.clear();
         deletedFiles.clear();
         compactBefore.clear();
         compactAfter.clear();
-        indexFilesBefore.clear();
-        indexFilesAfter.clear();
 
-        return new CommitIncrement(dataIncrement, compactIncrement, indexIncrement, null);
+        return new CommitIncrement(dataIncrement, compactIncrement, null);
     }
 
     @Override

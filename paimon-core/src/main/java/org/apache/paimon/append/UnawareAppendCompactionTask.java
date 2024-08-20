@@ -77,19 +77,19 @@ public class UnawareAppendCompactionTask {
         IndexIncrement indexIncrement;
         if (dvEnabled) {
             UnawareAppendDeletionFileMaintainer dvIndexFileMaintainer =
-                    (UnawareAppendDeletionFileMaintainer)
-                            AppendDeletionFileMaintainer.forUnawareAppend(
-                                    table.store().newIndexFileHandler(),
-                                    table.snapshotManager().latestSnapshotId(),
-                                    partition);
+                    AppendDeletionFileMaintainer.forUnawareAppend(
+                            table.store().newIndexFileHandler(),
+                            table.snapshotManager().latestSnapshotId(),
+                            partition);
             compactAfter.addAll(
                     write.compactRewrite(
-                            partition, UNAWARE_BUCKET, dvIndexFileMaintainer, compactBefore));
+                            partition,
+                            UNAWARE_BUCKET,
+                            dvIndexFileMaintainer::getDeletionVector,
+                            compactBefore));
 
             compactBefore.forEach(
-                    f -> {
-                        dvIndexFileMaintainer.notifyRemovedDeletionVector(f.fileName());
-                    });
+                    f -> dvIndexFileMaintainer.notifyRemovedDeletionVector(f.fileName()));
             List<IndexManifestEntry> indexEntries = dvIndexFileMaintainer.persist();
             Preconditions.checkArgument(
                     indexEntries.stream().noneMatch(i -> i.kind() == FileKind.ADD));

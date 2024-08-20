@@ -21,7 +21,6 @@ package org.apache.paimon.utils;
 import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
-import org.apache.paimon.io.IndexIncrement;
 
 import javax.annotation.Nullable;
 
@@ -30,23 +29,14 @@ public class CommitIncrement {
 
     private final DataIncrement dataIncrement;
     private final CompactIncrement compactIncrement;
-
-    // TODO: unify IndexIncrement and CompactDeletionFile for both primary-key table and append-only
-    // table.
-    @Nullable private final IndexIncrement indexIncrement;
     @Nullable private final CompactDeletionFile compactDeletionFile;
 
     public CommitIncrement(
             DataIncrement dataIncrement,
             CompactIncrement compactIncrement,
-            @Nullable IndexIncrement indexIncrement,
             @Nullable CompactDeletionFile compactDeletionFile) {
-        Preconditions.checkArgument(
-                indexIncrement == null || compactDeletionFile == null,
-                "indexIncrement and compactDeletionFile can't be set at the same time");
         this.dataIncrement = dataIncrement;
         this.compactIncrement = compactIncrement;
-        this.indexIncrement = indexIncrement;
         this.compactDeletionFile = compactDeletionFile;
     }
 
@@ -56,11 +46,6 @@ public class CommitIncrement {
 
     public CompactIncrement compactIncrement() {
         return compactIncrement;
-    }
-
-    @Nullable
-    public IndexIncrement indexIncrement() {
-        return indexIncrement;
     }
 
     @Nullable

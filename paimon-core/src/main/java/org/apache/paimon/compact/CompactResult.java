@@ -19,8 +19,6 @@
 package org.apache.paimon.compact;
 
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.io.IndexIncrement;
-import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 
@@ -34,9 +32,6 @@ public class CompactResult {
     private final List<DataFileMeta> before;
     private final List<DataFileMeta> after;
     private final List<DataFileMeta> changelog;
-    // TODO: unify IndexIncrement and CompactDeletionFile for both primary-key table and append-only
-    // table.
-    @Nullable private IndexIncrement indexIncrement;
 
     @Nullable private CompactDeletionFile deletionFile;
 
@@ -71,23 +66,8 @@ public class CompactResult {
         return changelog;
     }
 
-    public void setIndexIncrement(@Nullable IndexIncrement indexIncrement) {
-        Preconditions.checkArgument(
-                deletionFile == null,
-                "indexIncrement and deletionFile can't be set at the same time");
-        this.indexIncrement = indexIncrement;
-    }
-
     public void setDeletionFile(@Nullable CompactDeletionFile deletionFile) {
-        Preconditions.checkArgument(
-                indexIncrement == null,
-                "indexIncrement and deletionFile can't be set at the same time");
         this.deletionFile = deletionFile;
-    }
-
-    @Nullable
-    public IndexIncrement indexIncrement() {
-        return indexIncrement;
     }
 
     @Nullable

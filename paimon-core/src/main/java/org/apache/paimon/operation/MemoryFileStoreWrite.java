@@ -63,14 +63,14 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
             FileStoreScan scan,
             CoreOptions options,
             @Nullable IndexMaintainer.Factory<T> indexFactory,
-            @Nullable DeletionVectorsMaintainer.Factory deletionVectorsMaintainerFactory,
+            @Nullable DeletionVectorsMaintainer.Factory dvMaintainerFactory,
             String tableName) {
         super(
                 commitUser,
                 snapshotManager,
                 scan,
                 indexFactory,
-                deletionVectorsMaintainerFactory,
+                dvMaintainerFactory,
                 tableName,
                 options.writeMaxWritersToSpill());
         this.options = options;

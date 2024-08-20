@@ -108,7 +108,6 @@ public class UnawareAppendDeletionFileMaintainer implements AppendDeletionFileMa
         return this.dataFileToDeletionFile.get(dataFile);
     }
 
-    @Override
     public DeletionVector getDeletionVector(String dataFile) {
         DeletionFile deletionFile = getDeletionFile(dataFile);
         if (deletionFile != null) {
@@ -117,14 +116,21 @@ public class UnawareAppendDeletionFileMaintainer implements AppendDeletionFileMa
         return null;
     }
 
-    public void notifyRemovedDeletionVector(String dataFile) {
-        getRemovedDeletionFile(dataFile);
+    public DeletionFile notifyRemovedDeletionVector(String dataFile) {
+        if (dataFileToIndexFile.containsKey(dataFile)) {
+            String indexFileName = dataFileToIndexFile.get(dataFile);
+            touchedIndexFiles.add(indexFileName);
+            if (indexFileToDeletionFiles.containsKey(indexFileName)) {
+                return indexFileToDeletionFiles.get(indexFileName).remove(dataFile);
+            }
+        }
+        return null;
     }
 
     @Override
     public void notifyNewDeletionVector(String dataFile, DeletionVector deletionVector) {
         DeletionVectorsIndexFile deletionVectorsIndexFile = indexFileHandler.deletionVectorsIndex();
-        DeletionFile previous = getRemovedDeletionFile(dataFile);
+        DeletionFile previous = notifyRemovedDeletionVector(dataFile);
         if (previous != null) {
             deletionVector.merge(deletionVectorsIndexFile.readDeletionVector(previous));
         }
@@ -143,17 +149,6 @@ public class UnawareAppendDeletionFileMaintainer implements AppendDeletionFileMa
                         .collect(Collectors.toList());
         result.addAll(newIndexFileEntries);
         return result;
-    }
-
-    private DeletionFile getRemovedDeletionFile(String dataFile) {
-        if (dataFileToIndexFile.containsKey(dataFile)) {
-            String indexFileName = dataFileToIndexFile.get(dataFile);
-            touchedIndexFiles.add(indexFileName);
-            if (indexFileToDeletionFiles.containsKey(indexFileName)) {
-                return indexFileToDeletionFiles.get(indexFileName).remove(dataFile);
-            }
-        }
-        return null;
     }
 
     public IndexFileMeta getIndexFile(String dataFile) {
