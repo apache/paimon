@@ -54,9 +54,10 @@ public interface SupportFunction extends FunctionCatalog, SupportsNamespaces {
                     .toArray(Identifier[]::new);
         } else if (namespaceExists(namespace)) {
             return new Identifier[0];
-        } else
-            throw new NoSuchNamespaceException(
-                    "Namespace " + Arrays.toString(namespace) + " is not valid", Option.empty());
+        }
+
+        throw new NoSuchNamespaceException(
+                "Namespace " + Arrays.toString(namespace) + " is not valid", Option.empty());
     }
 
     @Override
@@ -67,6 +68,7 @@ public interface SupportFunction extends FunctionCatalog, SupportsNamespaces {
                 return func;
             }
         }
+
         throw new NoSuchFunctionException(
                 "Function " + ident + " is not a paimon function", Option.empty());
     }
