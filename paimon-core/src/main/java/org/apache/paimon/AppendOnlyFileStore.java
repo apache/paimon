@@ -46,6 +46,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
 
     private final RowType bucketKeyType;
     private final RowType rowType;
+    private final RowType rowTypeWithoutPt;
     private final String tableName;
 
     public AppendOnlyFileStore(
@@ -62,6 +63,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
         this.bucketKeyType = bucketKeyType;
         this.rowType = rowType;
         this.tableName = tableName;
+        this.rowTypeWithoutPt = schema.logicalTrimmedPartitionType();
     }
 
     @Override
@@ -104,7 +106,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 newRead(),
                 schema.id(),
                 commitUser,
-                rowType,
+                options.skipPartitionWrite() ? rowTypeWithoutPt : rowType,
                 pathFactory(),
                 snapshotManager(),
                 newScan(true).withManifestCacheFilter(manifestFilter),

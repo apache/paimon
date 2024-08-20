@@ -424,6 +424,13 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Cache size for reading manifest files for write initialization.");
 
+    public static final ConfigOption<Boolean> WRITE_SKIP_PARTITION =
+            key("write-skip-partition")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withFallbackKeys("write.skip-partition")
+                    .withDescription("Whether to automatically complete missing tags.");
+
     public static final ConfigOption<Integer> LOCAL_SORT_MAX_NUM_FILE_HANDLES =
             key("local-sort.max-num-file-handles")
                     .intType()
@@ -1396,6 +1403,10 @@ public class CoreOptions implements Serializable {
 
     public MemorySize writeManifestCache() {
         return options.get(WRITE_MANIFEST_CACHE);
+    }
+
+    public boolean skipPartitionWrite() {
+        return options.get(WRITE_SKIP_PARTITION);
     }
 
     public String partitionDefaultName() {

@@ -34,6 +34,7 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.CommitCallback;
+import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.AbstractDataTableRead;
 import org.apache.paimon.table.source.AppendOnlySplitGenerator;
@@ -42,6 +43,7 @@ import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.utils.KeyProjectedRow;
 import org.apache.paimon.utils.Preconditions;
 
 import java.io.IOException;
@@ -143,13 +145,15 @@ class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
                 rowType(),
                 writer,
                 createRowKeyExtractor(),
-                (record, rowKind) -> {
-                    Preconditions.checkState(
-                            rowKind.isAdd(),
-                            "Append only writer can not accept row with RowKind %s",
-                            rowKind);
-                    return record.row();
-                },
+                coreOptions().skipPartitionWrite()
+                        ? new AppendRecordExtractor(schema().projectionNonPartitionFields())
+                        : (record, rowKind) -> {
+                            Preconditions.checkState(
+                                    rowKind.isAdd(),
+                                    "Append only writer can not accept row with RowKind %s",
+                                    rowKind);
+                            return record.row();
+                        },
                 rowKindGenerator(),
                 CoreOptions.fromMap(tableSchema.options()).ignoreDelete());
     }
@@ -169,5 +173,25 @@ class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
         }
 
         return callbacks;
+    }
+
+    private static class AppendRecordExtractor
+            implements TableWriteImpl.RecordExtractor<InternalRow> {
+
+        private final KeyProjectedRow keyProjectedRow;
+
+        public AppendRecordExtractor(int[] mapping) {
+            this.keyProjectedRow = new KeyProjectedRow(mapping);
+        }
+
+        @Override
+        public InternalRow extract(SinkRecord record, RowKind rowKind) {
+            Preconditions.checkState(
+                    rowKind.isAdd(),
+                    "Append only writer can not accept row with RowKind %s",
+                    rowKind);
+            keyProjectedRow.setRowKind(rowKind);
+            return keyProjectedRow.replaceRow(record.row());
+        }
     }
 }

@@ -31,6 +31,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
@@ -247,6 +248,12 @@ public class TableSchema implements Serializable {
         return projectedLogicalRowType(partitionKeys);
     }
 
+    public RowType logicalTrimmedPartitionType() {
+        List<String> tripped = new ArrayList<>(fieldNames());
+        tripped.removeAll(partitionKeys);
+        return projectedLogicalRowType(tripped);
+    }
+
     public RowType logicalBucketKeyType() {
         return projectedLogicalRowType(bucketKeys());
     }
@@ -270,6 +277,12 @@ public class TableSchema implements Serializable {
     public int[] projection(List<String> projectedFieldNames) {
         List<String> fieldNames = fieldNames();
         return projectedFieldNames.stream().mapToInt(fieldNames::indexOf).toArray();
+    }
+
+    public int[] projectionNonPartitionFields() {
+        List<String> fieldNames = fieldNames();
+        fieldNames.removeAll(partitionKeys);
+        return projection(fieldNames);
     }
 
     private List<DataField> projectedDataFields(List<String> projectedFieldNames) {
