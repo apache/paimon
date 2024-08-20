@@ -80,6 +80,7 @@ public class Hive23CatalogITCase extends HiveCatalogITCaseBase {
                 .isEqualTo(
                         Arrays.asList(
                                 Row.of("default"),
+                                Row.of("sys"),
                                 Row.of("test_db"),
                                 Row.of(TestHiveMetaStoreClient.MOCK_DATABASE)));
     }
