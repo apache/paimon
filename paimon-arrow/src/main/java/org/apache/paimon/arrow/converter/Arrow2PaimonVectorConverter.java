@@ -74,14 +74,13 @@ import org.apache.arrow.vector.Float8Vector;
 import org.apache.arrow.vector.IntVector;
 import org.apache.arrow.vector.SmallIntVector;
 import org.apache.arrow.vector.TimeMilliVector;
+import org.apache.arrow.vector.TimeStampVector;
 import org.apache.arrow.vector.TinyIntVector;
 import org.apache.arrow.vector.VarBinaryVector;
 import org.apache.arrow.vector.VarCharVector;
 import org.apache.arrow.vector.complex.ListVector;
-import org.apache.arrow.vector.complex.MapVector;
 import org.apache.arrow.vector.complex.StructVector;
 
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -375,8 +374,17 @@ public interface Arrow2PaimonVectorConverter {
 
                         @Override
                         public Timestamp getTimestamp(int i, int precision) {
-                            return Timestamp.fromLocalDateTime(
-                                    (LocalDateTime) (vector.getObject(i)));
+                            long value = ((TimeStampVector) vector).get(i);
+                            if (precision == 0) {
+                                return Timestamp.fromEpochMillis(value * 1000);
+                            } else if (precision >= 1 && precision <= 3) {
+                                return Timestamp.fromEpochMillis(value);
+                            } else if (precision >= 4 && precision <= 6) {
+                                return Timestamp.fromMicros(value);
+                            } else {
+                                return Timestamp.fromEpochMillis(
+                                        value / 1_000_000, (int) value % 1_000_000);
+                            }
                         }
                     };
         }
@@ -463,13 +471,13 @@ public interface Arrow2PaimonVectorConverter {
                     new MapColumnVector() {
 
                         private boolean inited = false;
-                        private MapVector mapVector;
+                        private ListVector mapVector;
                         private ColumnVector keyColumnVector;
                         private ColumnVector valueColumnVector;
 
                         private void init() {
                             if (!inited) {
-                                this.mapVector = (MapVector) vector;
+                                this.mapVector = (ListVector) vector;
                                 StructVector listVector = (StructVector) mapVector.getDataVector();
 
                                 FieldVector keyVector = listVector.getChildrenFromFields().get(0);
