@@ -26,9 +26,6 @@ import org.apache.flink.table.procedure.ProcedureContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.HashMap;
-import java.util.Map;
-
 /** Migrate procedure to migrate hive table to paimon table. */
 public class MigrateTableProcedure extends ProcedureBase {
 
@@ -58,9 +55,6 @@ public class MigrateTableProcedure extends ProcedureBase {
         Identifier sourceTableId = Identifier.fromString(sourceTablePath);
         Identifier targetTableId = Identifier.fromString(targetPaimonTablePath);
 
-        HashMap<String, String> options = new HashMap<>();
-        options.putAll(ParameterUtils.parseCommaSeparatedKeyValues(properties));
-
         TableMigrationUtils.getImporter(
                         connector,
                         catalog,
@@ -68,7 +62,7 @@ public class MigrateTableProcedure extends ProcedureBase {
                         sourceTableId.getObjectName(),
                         targetTableId.getDatabaseName(),
                         targetTableId.getObjectName(),
-                        options)
+                        ParameterUtils.parseCommaSeparatedKeyValues(properties))
                 .executeMigrate();
 
         LOG.info("Last step: rename " + targetTableId + " to " + sourceTableId);
