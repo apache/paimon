@@ -40,6 +40,8 @@ import org.apache.paimon.iceberg.metadata.IcebergSnapshotSummary;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
@@ -52,6 +54,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.ManifestReadThreadPool;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -66,6 +69,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -76,6 +80,15 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
 
     // see org.apache.iceberg.hadoop.Util
     private static final String VERSION_HINT_FILENAME = "version-hint.text";
+
+    static final ConfigOption<Integer> COMPACT_MIN_FILE_NUM =
+            ConfigOptions.key("metadata.iceberg.compaction.min.file-num")
+                    .intType()
+                    .defaultValue(10);
+    static final ConfigOption<Integer> COMPACT_MAX_FILE_NUM =
+            ConfigOptions.key("metadata.iceberg.compaction.max.file-num")
+                    .intType()
+                    .defaultValue(50);
 
     protected final FileStoreTable table;
     private final String commitUser;
@@ -289,7 +302,9 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
             newManifestFileMetas = result.getLeft();
             snapshotSummary = result.getRight();
         }
-        String manifestListFileName = manifestList.writeWithoutRolling(newManifestFileMetas);
+        String manifestListFileName =
+                manifestList.writeWithoutRolling(
+                        compactMetadataIfNeeded(newManifestFileMetas, snapshotId));
 
         // add new schema if needed
         int schemaId = (int) table.schema().id();
@@ -491,6 +506,10 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                     newManifestFileMetas.addAll(
                             manifestFile.rollingWrite(newEntries.iterator(), currentSnapshotId));
                 }
+            } else {
+                // partition of this file meta is not modified in this snapshot,
+                // use this file meta again
+                newManifestFileMetas.add(fileMeta);
             }
         }
 
@@ -506,6 +525,72 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
             result.add(new IcebergPartitionField(field, fieldId));
             fieldId++;
         }
+        return result;
+    }
+
+    private List<IcebergManifestFileMeta> compactMetadataIfNeeded(
+            List<IcebergManifestFileMeta> toCompact, long currentSnapshotId) throws IOException {
+        List<IcebergManifestFileMeta> result = new ArrayList<>();
+        long targetSizeInBytes = table.coreOptions().manifestTargetSize().getBytes();
+
+        List<IcebergManifestFileMeta> candidates = new ArrayList<>();
+        long totalSizeInBytes = 0;
+        for (IcebergManifestFileMeta meta : toCompact) {
+            if (meta.manifestLength() < targetSizeInBytes * 2 / 3) {
+                candidates.add(meta);
+                totalSizeInBytes += meta.manifestLength();
+            } else {
+                result.add(meta);
+            }
+        }
+
+        Options options = new Options(table.options());
+        if (candidates.size() < options.get(COMPACT_MIN_FILE_NUM)) {
+            return toCompact;
+        }
+        if (candidates.size() < options.get(COMPACT_MAX_FILE_NUM)
+                && totalSizeInBytes < targetSizeInBytes) {
+            return toCompact;
+        }
+
+        Function<IcebergManifestFileMeta, List<IcebergManifestEntry>> processor =
+                meta -> {
+                    List<IcebergManifestEntry> entries = new ArrayList<>();
+                    for (IcebergManifestEntry entry :
+                            manifestFile.read(new Path(meta.manifestPath()).getName())) {
+                        if (entry.fileSequenceNumber() == currentSnapshotId
+                                || entry.status() == IcebergManifestEntry.Status.EXISTING) {
+                            entries.add(entry);
+                        } else {
+                            // rewrite status if this entry is from an older snapshot
+                            IcebergManifestEntry.Status newStatus;
+                            if (entry.status() == IcebergManifestEntry.Status.ADDED) {
+                                newStatus = IcebergManifestEntry.Status.EXISTING;
+                            } else if (entry.status() == IcebergManifestEntry.Status.DELETED) {
+                                continue;
+                            } else {
+                                throw new UnsupportedOperationException(
+                                        "Unknown IcebergManifestEntry.Status " + entry.status());
+                            }
+                            entries.add(
+                                    new IcebergManifestEntry(
+                                            newStatus,
+                                            entry.snapshotId(),
+                                            entry.sequenceNumber(),
+                                            entry.fileSequenceNumber(),
+                                            entry.file()));
+                        }
+                    }
+                    if (meta.sequenceNumber() == currentSnapshotId) {
+                        // this file is created for this snapshot, so it is not recorded in any
+                        // iceberg metas, we need to clean it
+                        table.fileIO().deleteQuietly(new Path(meta.manifestPath()));
+                    }
+                    return entries;
+                };
+        Iterable<IcebergManifestEntry> newEntries =
+                ManifestReadThreadPool.sequentialBatchedExecute(processor, candidates, null);
+        result.addAll(manifestFile.rollingWrite(newEntries.iterator(), currentSnapshotId));
         return result;
     }
 
