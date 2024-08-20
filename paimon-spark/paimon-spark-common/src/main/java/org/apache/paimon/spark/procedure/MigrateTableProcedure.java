@@ -58,7 +58,8 @@ public class MigrateTableProcedure extends BaseProcedure {
                 ProcedureParameter.optional("options", StringType),
                 ProcedureParameter.optional("delete_origin", BooleanType),
                 ProcedureParameter.optional("target_table", StringType),
-                ProcedureParameter.optional("options_map", DataTypes.createMapType(StringType, StringType))
+                ProcedureParameter.optional(
+                        "options_map", DataTypes.createMapType(StringType, StringType))
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -128,8 +129,10 @@ public class MigrateTableProcedure extends BaseProcedure {
     public static Map<String, String> mapDataToHashMap(MapData mapData) {
         HashMap<String, String> map = new HashMap<>();
         if (mapData != null) {
-            for (int index = 0; index < mapData.numElements(); index ++) {
-                map.put(mapData.keyArray().getUTF8String(index).toString(), mapData.valueArray().getUTF8String(index).toString());
+            for (int index = 0; index < mapData.numElements(); index++) {
+                map.put(
+                        mapData.keyArray().getUTF8String(index).toString(),
+                        mapData.valueArray().getUTF8String(index).toString());
             }
         }
         return map;
