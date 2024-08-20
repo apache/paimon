@@ -283,3 +283,27 @@ For more information of drop_partition, see
     /path/to/paimon-flink-action-{{< version >}}.jar \
     drop_partition --help
 ```
+
+## Rewrite File Index
+
+Run the following command to submit a rewrite_file_index job for the table.
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    rewrite_file_index \
+    --warehouse <warehouse-path> \
+    --identifier <database.table> \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
+
+partition_spec:
+key1=value1,key2=value2...
+```
+
+For more information of rewrite_file_index, see
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    rewrite_file_index --help
+```
