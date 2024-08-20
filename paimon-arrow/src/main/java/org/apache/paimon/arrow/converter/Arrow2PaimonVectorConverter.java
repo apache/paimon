@@ -78,7 +78,6 @@ import org.apache.arrow.vector.TinyIntVector;
 import org.apache.arrow.vector.VarBinaryVector;
 import org.apache.arrow.vector.VarCharVector;
 import org.apache.arrow.vector.complex.ListVector;
-import org.apache.arrow.vector.complex.MapVector;
 import org.apache.arrow.vector.complex.StructVector;
 
 import java.time.LocalDateTime;
@@ -463,13 +462,13 @@ public interface Arrow2PaimonVectorConverter {
                     new MapColumnVector() {
 
                         private boolean inited = false;
-                        private MapVector mapVector;
+                        private ListVector mapVector;
                         private ColumnVector keyColumnVector;
                         private ColumnVector valueColumnVector;
 
                         private void init() {
                             if (!inited) {
-                                this.mapVector = (MapVector) vector;
+                                this.mapVector = (ListVector) vector;
                                 StructVector listVector = (StructVector) mapVector.getDataVector();
 
                                 FieldVector keyVector = listVector.getChildrenFromFields().get(0);

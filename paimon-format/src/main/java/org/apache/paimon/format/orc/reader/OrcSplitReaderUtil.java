@@ -25,6 +25,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarCharType;
 
 import org.apache.orc.TypeDescription;
@@ -74,9 +75,11 @@ public class OrcSplitReaderUtil {
             case DATE:
                 return TypeDescription.createDate();
             case TIMESTAMP_WITHOUT_TIME_ZONE:
-                return TypeDescription.createTimestamp();
+                return TypeDescription.createTimestamp()
+                        .withPrecision(((TimestampType) type).getPrecision());
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                return TypeDescription.createTimestampInstant();
+                return TypeDescription.createTimestampInstant()
+                        .withPrecision(((TimestampType) type).getPrecision());
             case ARRAY:
                 ArrayType arrayType = (ArrayType) type;
                 return TypeDescription.createList(toOrcType(arrayType.getElementType()));
