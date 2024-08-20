@@ -33,16 +33,16 @@ class PaimonFunctionTest extends PaimonHiveTestBase {
           sql(s"use $catalogName")
           val functionCatalog =
             spark.sessionState.catalogManager.currentCatalog.asInstanceOf[FunctionCatalog]
-          val identifiers = functionCatalog.listFunctions(Array.empty)
 
           // test load paimon function
+          val identifiers = functionCatalog.listFunctions(Array.empty)
           PaimonFunctions
             .names()
             .forEach(
               name => {
-                val bucketFunIdent = identifiers.find(x => x.name().equals(name))
-                assert(bucketFunIdent.isDefined)
-                val function = functionCatalog.loadFunction(bucketFunIdent.get)
+                val identifier = identifiers.find(x => x.name().equals(name))
+                assert(identifier.isDefined)
+                val function = functionCatalog.loadFunction(identifier.get)
                 assert(function.name().equals(name))
               })
 
