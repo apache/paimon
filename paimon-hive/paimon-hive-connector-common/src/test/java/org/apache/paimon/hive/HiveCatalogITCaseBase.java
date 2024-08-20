@@ -81,9 +81,7 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** IT cases for using Paimon {@link HiveCatalog} together with Paimon Hive connector. */
 @RunWith(PaimonEmbeddedHiveRunner.class)
@@ -488,12 +486,12 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql("USE test_db").await();
 
         // set case-sensitive = false would throw exception out
-        assertThrows(
-                RuntimeException.class,
-                () ->
-                        tEnv.executeSql(
-                                        "CREATE TABLE t1 ( aa INT, Bb STRING ) WITH ( 'file.format' = 'avro' )")
-                                .await());
+        assertThatThrownBy(
+                        () ->
+                                tEnv.executeSql(
+                                                "CREATE TABLE t1 ( aa INT, Bb STRING ) WITH ( 'file.format' = 'avro' )")
+                                        .await())
+                .isInstanceOf(RuntimeException.class);
     }
 
     @Test
@@ -1405,12 +1403,12 @@ public abstract class HiveCatalogITCaseBase {
 
         tEnv.executeSql("INSERT INTO mark_done_t1 VALUES (5, '20240501')").await();
 
-        // check event.
+        // check partition.mark-done-action=mark-event
         Catalog catalog =
                 ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
         Identifier identifier = new Identifier("test_db", "mark_done_t2");
         Table table = catalog.getTable(identifier);
-        assertThat(table instanceof FileStoreTable);
+        assertThat(table).isInstanceOf(FileStoreTable.class);
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         MetastoreClient.Factory metastoreClientFactory =
                 fileStoreTable.catalogEnvironment().metastoreClientFactory();
@@ -1418,19 +1416,29 @@ public abstract class HiveCatalogITCaseBase {
         IMetaStoreClient hmsClient = metastoreClient.client();
         Map<String, String> partitionSpec = Collections.singletonMap("dt", "20240501");
         // LOAD_DONE event is not marked by now.
-        assertFalse(
-                hmsClient.isPartitionMarkedForEvent(
-                        "test_db", "mark_done_t2", partitionSpec, PartitionEventType.LOAD_DONE));
+        assertThat(
+                        hmsClient.isPartitionMarkedForEvent(
+                                "test_db",
+                                "mark_done_t2",
+                                partitionSpec,
+                                PartitionEventType.LOAD_DONE))
+                .isFalse();
 
         Thread.sleep(10 * 1000);
         // after sleep, LOAD_DONE event should be marked.
-        assertTrue(
-                hmsClient.isPartitionMarkedForEvent(
-                        "test_db", "mark_done_t2", partitionSpec, PartitionEventType.LOAD_DONE));
+        assertThat(
+                        hmsClient.isPartitionMarkedForEvent(
+                                "test_db",
+                                "mark_done_t2",
+                                partitionSpec,
+                                PartitionEventType.LOAD_DONE))
+                .isTrue();
 
+        // check partition.mark-done-action=drop-partition
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS mark_done_t2"))
                 .containsExactlyInAnyOrder("dt=20240501", "dt=20240501.done");
 
+        // check partition.mark-done-action=success-file
         Path successFile = new Path(path, "test_db.db/mark_done_t2/dt=20240501/_SUCCESS");
         String successText;
         try (FSDataInputStream in = successFile.getFileSystem().open(successFile)) {
