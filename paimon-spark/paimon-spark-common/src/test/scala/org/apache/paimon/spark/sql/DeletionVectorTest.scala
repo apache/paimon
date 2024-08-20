@@ -37,10 +37,10 @@ class DeletionVectorTest extends PaimonSparkTestBase {
 
   bucketModes.foreach {
     bucket =>
-      test(s"Paimon MergeInto: multiple clauses") {
+      test(s"Paimon DeletionVector: merge into with bucket = $bucket") {
         withTable("source", "target") {
           val bucketKey = if (bucket > 1) {
-            ", 'bucket-key' = 'id'"
+            ", 'bucket-key' = 'a'"
           } else {
             ""
           }
@@ -56,6 +56,9 @@ class DeletionVectorTest extends PaimonSparkTestBase {
           spark.sql(
             "INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2'), (3, 30, 'c3'), (4, 40, 'c4'), (5, 50, 'c5')")
 
+          val table = loadTable("target")
+          val dvMaintainerFactory =
+            new DeletionVectorsMaintainer.Factory(table.store().newIndexFileHandler())
           spark.sql(s"""
                        |MERGE INTO target
                        |USING source
@@ -79,6 +82,8 @@ class DeletionVectorTest extends PaimonSparkTestBase {
               700,
               "c77") :: Row(9, 990, "c99") :: Nil
           )
+          val deletionVectors = getLatestDeletionVectors(table, dvMaintainerFactory)
+          Assertions.assertTrue(deletionVectors.nonEmpty)
         }
       }
   }
