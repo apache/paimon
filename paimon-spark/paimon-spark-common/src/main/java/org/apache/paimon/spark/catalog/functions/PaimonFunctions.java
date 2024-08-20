@@ -27,6 +27,8 @@ import org.apache.spark.sql.types.DataType;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 import java.util.Map;
 
@@ -45,6 +47,7 @@ public class PaimonFunctions {
         return FUNCTION_NAMES;
     }
 
+    @Nullable
     public static UnboundFunction load(String name) {
         return FUNCTIONS.get(name);
     }
