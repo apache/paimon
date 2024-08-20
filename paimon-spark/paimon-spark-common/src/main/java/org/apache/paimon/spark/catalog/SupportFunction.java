@@ -36,7 +36,7 @@ import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 /** Catalog methods for working with Functions. */
 public interface SupportFunction extends FunctionCatalog, SupportsNamespaces {
 
-    default boolean isFunctionNamespace(String[] namespace) {
+    static boolean isFunctionNamespace(String[] namespace) {
         // Allow for empty namespace, as Spark's bucket join will use `bucket` function with empty
         // namespace to generate transforms for partitioning. Otherwise, use `sys` namespace.
         return namespace.length == 0 || isSystemNamespace(namespace);
