@@ -28,7 +28,7 @@ public class MigrateTableActionFactory implements ActionFactory {
 
     private static final String SOURCE_TYPE = "source_type";
     private static final String OPTIONS = "options";
-    
+
     @Override
     public String identifier() {
         return IDENTIFIER;
