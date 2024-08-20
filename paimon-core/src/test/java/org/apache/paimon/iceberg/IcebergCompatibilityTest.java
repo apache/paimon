@@ -29,6 +29,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -258,8 +259,8 @@ public class IcebergCompatibilityTest {
                         },
                         new String[] {"k1", "k2", "v1", "v2"});
 
-        int numRounds = 5;
-        int numRecords = 500;
+        int numRounds = 20;
+        int numRecords = 1000;
         ThreadLocalRandom random = ThreadLocalRandom.current();
         List<List<TestRecord>> testRecords = new ArrayList<>();
         List<List<String>> expected = new ArrayList<>();
@@ -316,16 +317,18 @@ public class IcebergCompatibilityTest {
                     return b;
                 };
 
-        int numRounds = 2;
-        int numRecords = 3;
+        int numRounds = 20;
+        int numRecords = 500;
         ThreadLocalRandom random = ThreadLocalRandom.current();
+        boolean samePartitionEachRound = random.nextBoolean();
+
         List<List<TestRecord>> testRecords = new ArrayList<>();
         List<List<String>> expected = new ArrayList<>();
         Map<String, String> expectedMap = new LinkedHashMap<>();
         for (int r = 0; r < numRounds; r++) {
             List<TestRecord> round = new ArrayList<>();
             for (int i = 0; i < numRecords; i++) {
-                int pt1 = random.nextInt(0, 2);
+                int pt1 = (random.nextInt(0, samePartitionEachRound ? 1 : 2) + r) % 3;
                 String pt2 = String.valueOf(random.nextInt(10, 12));
                 String k = String.valueOf(random.nextInt(0, 100));
                 int v1 = random.nextInt();
@@ -551,6 +554,10 @@ public class IcebergCompatibilityTest {
         options.set(CoreOptions.BUCKET, numBuckets);
         options.set(CoreOptions.METADATA_ICEBERG_COMPATIBLE, true);
         options.set(CoreOptions.FILE_FORMAT, "avro");
+        options.set(CoreOptions.TARGET_FILE_SIZE, MemorySize.ofKibiBytes(32));
+        options.set(AbstractIcebergCommitCallback.COMPACT_MIN_FILE_NUM, 4);
+        options.set(AbstractIcebergCommitCallback.COMPACT_MIN_FILE_NUM, 8);
+        options.set(CoreOptions.MANIFEST_TARGET_FILE_SIZE, MemorySize.ofKibiBytes(8));
         Schema schema =
                 new Schema(rowType.getFields(), partitionKeys, primaryKeys, options.toMap(), "");
 
