@@ -301,8 +301,7 @@ public class UnawareAppendTableCompactionCoordinator {
                 }
             }
 
-            List<List<DataFileMeta>> result = new ArrayList<>();
-            result.addAll(filesWithDV.values());
+            List<List<DataFileMeta>> result = new ArrayList<>(filesWithDV.values());
             if (rest.size() > 1) {
                 result.addAll(pack(rest));
             }
