@@ -416,6 +416,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public List<PartitionEntry> getPartitionEntries() {
+            return batchScan.getPartitionEntries();
+        }
+
+        @Override
         public DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
             batchScan.withShard(indexOfThisSubtask, numberOfParallelSubtasks);
             return this;
@@ -449,6 +454,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public List<BinaryRow> listPartitions() {
             return streamScan.listPartitions();
+        }
+
+        @Override
+        public List<PartitionEntry> getPartitionEntries() {
+            return streamScan.getPartitionEntries();
         }
 
         @Nullable

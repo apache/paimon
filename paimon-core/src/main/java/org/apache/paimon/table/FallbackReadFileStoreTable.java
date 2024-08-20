@@ -25,6 +25,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
@@ -300,6 +301,15 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
             Set<BinaryRow> partitions = new LinkedHashSet<>(mainScan.listPartitions());
             partitions.addAll(fallbackScan.listPartitions());
             return new ArrayList<>(partitions);
+        }
+
+        @Override
+        public List<PartitionEntry> getPartitionEntries() {
+            List<PartitionEntry> partitionEntries = mainScan.getPartitionEntries();
+            if (partitionEntries.isEmpty()) {
+                partitionEntries = fallbackScan.getPartitionEntries();
+            }
+            return partitionEntries;
         }
     }
 
