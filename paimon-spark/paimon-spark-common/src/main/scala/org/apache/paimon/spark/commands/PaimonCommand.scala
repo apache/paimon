@@ -185,7 +185,16 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
       sparkSession: SparkSession): Dataset[SparkDeletionVectors] = {
     import sparkSession.implicits._
 
-    val dataFileToPartitionAndBucket: Array[(String, (BinaryRow, Int))] =
+    val resolver = sparkSession.sessionState.conf.resolver
+    Seq(FILE_PATH_COLUMN, ROW_INDEX_COLUMN).foreach {
+      metadata =>
+        dataWithMetadataColumns.schema
+          .find(field => resolver(field.name, metadata))
+          .orElse(throw new RuntimeException(
+            "This input dataset doesn't contains the required metadata columns: __paimon_file_path and __paimon_row_index."))
+    }
+
+    val dataFileToPartitionAndBucket =
       dataFilePathToMeta.mapValues(meta => (meta.partition, meta.bucket)).toArray
 
     val my_table = table
