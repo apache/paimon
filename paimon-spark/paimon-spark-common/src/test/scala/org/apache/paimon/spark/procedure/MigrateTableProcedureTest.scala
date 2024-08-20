@@ -48,7 +48,7 @@ class MigrateTableProcedureTest extends PaimonHiveTestBase {
 
   Seq("parquet", "orc", "avro").foreach(
     format => {
-      test(s"Paimon migrate table procedure: migrate $format table with separator") {
+      test(s"Paimon migrate table procedure: migrate $format table with options_map") {
         withTable("hive_tbl") {
           // create hive table
           spark.sql(s"""
