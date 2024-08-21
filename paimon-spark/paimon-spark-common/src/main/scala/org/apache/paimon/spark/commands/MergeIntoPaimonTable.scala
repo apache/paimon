@@ -125,19 +125,15 @@ case class MergeIntoPaimonTable(
           .getOrElse(throw new RuntimeException("Can not find _row_kind_ column."))
 
         // Step3: filter rows that should be marked as DELETED in Deletion Vector mode.
-        val toDeleteRowsFilter = Or(
-          EqualTo(rowKindAttribute, Literal(RowKind.DELETE.toByteValue)),
-          EqualTo(rowKindAttribute, Literal(RowKind.UPDATE_AFTER.toByteValue)))
-        val dvDS = ds.where(new Column(toDeleteRowsFilter))
+        val dvDS = ds.where(
+          s"$ROW_KIND_COL = ${RowKind.DELETE.toByteValue} or $ROW_KIND_COL = ${RowKind.UPDATE_AFTER.toByteValue}")
         val deletionVectors = collectDeletionVectors(dataFilePathToMeta, dvDS, sparkSession)
         val indexCommitMsg = writer.persistDeletionVectors(deletionVectors)
 
         // Step4: filter rows that should be written as the inserted/updated data.
-        val toWriteRowsFilter = Or(
-          EqualTo(rowKindAttribute, Literal(RowKind.INSERT.toByteValue)),
-          EqualTo(rowKindAttribute, Literal(RowKind.UPDATE_AFTER.toByteValue)))
         val toWriteDS = ds
-          .filter(new Column(toWriteRowsFilter))
+          .where(
+            s"$ROW_KIND_COL = ${RowKind.INSERT.toByteValue} or $ROW_KIND_COL = ${RowKind.UPDATE_AFTER.toByteValue}")
           .drop(FILE_PATH_COLUMN, ROW_INDEX_COLUMN)
         val addCommitMessage = writer.write(toWriteDS)
 
@@ -342,8 +338,7 @@ object MergeIntoPaimonTable {
       val sourceRowHasNoMatchPred = generatePredicate(sourceRowHasNoMatch)
       val matchedPreds = matchedConditions.map(generatePredicate)
       val matchedProjs = matchedOutputs.map(generateProjection)
-      val notMatchedBySourcePreds: Seq[BasePredicate] =
-        notMatchedBySourceConditions.map(generatePredicate)
+      val notMatchedBySourcePreds = notMatchedBySourceConditions.map(generatePredicate)
       val notMatchedBySourceProjs = notMatchedBySourceOutputs.map(generateProjection)
       val notMatchedPreds = notMatchedConditions.map(generatePredicate)
       val notMatchedProjs = notMatchedOutputs.map(generateProjection)
