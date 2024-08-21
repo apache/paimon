@@ -76,6 +76,7 @@ import java.util.UUID;
 import java.util.stream.Stream;
 
 import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
+import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS;
 import static org.apache.paimon.flink.FlinkCatalogOptions.DISABLE_CREATE_TABLE_IN_DEFAULT_DB;
 import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGISTER;
@@ -97,15 +98,17 @@ public class FlinkCatalogTest {
     private final ObjectPath tableInDefaultDb1 = new ObjectPath("default-db", "t1");
     private final ObjectPath nonExistDbPath = ObjectPath.fromString("non.exist");
     private final ObjectPath nonExistObjectPath = ObjectPath.fromString("db1.nonexist");
+
+    private String warehouse;
     private Catalog catalog;
 
     @TempDir public static java.nio.file.Path temporaryFolder;
 
     @BeforeEach
     public void beforeEach() throws IOException {
-        String path = new File(temporaryFolder.toFile(), UUID.randomUUID().toString()).toString();
+        warehouse = new File(temporaryFolder.toFile(), UUID.randomUUID().toString()).toString();
         Options conf = new Options();
-        conf.setString("warehouse", path);
+        conf.setString("warehouse", warehouse);
         conf.set(LOG_SYSTEM_AUTO_REGISTER, true);
         catalog =
                 FlinkCatalogFactory.createCatalog(
@@ -227,6 +230,22 @@ public class FlinkCatalogTest {
         assertThatThrownBy(() -> catalog.createTable(this.path1, newTable, false))
                 .isInstanceOf(CatalogException.class)
                 .hasMessageContaining("Paimon Catalog only supports paimon tables");
+    }
+
+    @Test
+    public void testCreateFlinkTableWithPath() throws Exception {
+        catalog.createDatabase(path1.getDatabaseName(), null, false);
+        Map<String, String> options = new HashMap<>();
+        options.put(PATH.key(), "/unknown/path");
+        CatalogTable table1 = createTable(options);
+        assertThatThrownBy(() -> catalog.createTable(this.path1, table1, false))
+                .hasMessageContaining(
+                        "You specified the Path when creating the table, "
+                                + "but the Path '/unknown/path' is different from where it should be");
+
+        options.put(PATH.key(), warehouse + "/db1.db/t1");
+        CatalogTable table2 = createTable(options);
+        catalog.createTable(this.path1, table2, false);
     }
 
     @ParameterizedTest
@@ -654,7 +673,7 @@ public class FlinkCatalogTest {
                                     .catalog()
                                     .getTable(FlinkCatalog.toIdentifier(path))
                                     .options()
-                                    .get(CoreOptions.PATH.key()));
+                                    .get(PATH.key()));
         } catch (org.apache.paimon.catalog.Catalog.TableNotExistException e) {
             throw new RuntimeException(e);
         }
