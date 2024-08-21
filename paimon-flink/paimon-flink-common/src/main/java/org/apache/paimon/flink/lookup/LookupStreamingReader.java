@@ -24,8 +24,6 @@ import org.apache.paimon.io.SplitsParallelReadUtil;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.predicate.CompoundPredicate;
-import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
@@ -46,7 +44,6 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -84,17 +81,11 @@ public class LookupStreamingReader {
                 this.table
                         .newReadBuilder()
                         .withProjection(projection)
+                        .withFilter(predicate)
                         .withBucketFilter(
                                 requireCachedBucketIds == null
                                         ? null
                                         : requireCachedBucketIds::contains);
-        if (predicate != null) {
-            Set<String> fields = new HashSet<>(((FileStoreTable) table).schema().primaryKeys());
-            if (canFilter(predicate, fields)) {
-                readBuilder.withFilter(predicate);
-            }
-        }
-
         scan = readBuilder.newStreamScan();
 
         if (predicate != null) {
@@ -119,22 +110,6 @@ public class LookupStreamingReader {
         } else {
             this.projectedPredicate = null;
         }
-    }
-
-    private boolean canFilter(Predicate predicate, Set<String> fields) {
-        if (predicate instanceof LeafPredicate) {
-            LeafPredicate leafP = (LeafPredicate) predicate;
-            return fields.contains(leafP.fieldName());
-        } else {
-            CompoundPredicate leafP = (CompoundPredicate) predicate;
-            List<Predicate> children = leafP.children();
-            for (Predicate ch : children) {
-                if (!canFilter(ch, fields)) {
-                    return false;
-                }
-            }
-        }
-        return true;
     }
 
     private Table unsetTimeTravelOptions(Table origin) {
