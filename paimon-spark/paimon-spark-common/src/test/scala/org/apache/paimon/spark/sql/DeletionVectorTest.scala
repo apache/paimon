@@ -82,7 +82,7 @@ class DeletionVectorTest extends PaimonSparkTestBase {
               700,
               "c77") :: Row(9, 990, "c99") :: Nil
           )
-          val deletionVectors = getLatestDeletionVectors(table, dvMaintainerFactory)
+          val deletionVectors = getAllLatestDeletionVectors(table, dvMaintainerFactory)
           Assertions.assertTrue(deletionVectors.nonEmpty)
         }
       }
