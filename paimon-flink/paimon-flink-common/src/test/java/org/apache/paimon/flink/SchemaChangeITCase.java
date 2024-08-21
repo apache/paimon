@@ -1030,6 +1030,33 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                                 + ")")
                 .doesNotContain("schema");
         // change name from non-physical column to physical column is not allowed
-        assertThatThrownBy(() -> sql("ALTER TABLE T MODIFY name VARCHAR COMMENT 'header3'"));
+        assertThatThrownBy(() -> sql("ALTER TABLE T MODIFY name VARCHAR COMMENT 'header3'"))
+                .satisfies(
+                        anyCauseMatches(
+                                UnsupportedOperationException.class,
+                                "Change is not supported: class org.apache.flink.table.catalog.TableChange$ModifyColumn"));
+    }
+
+    @Test
+    public void testAlterBucket() {
+        sql("CREATE TABLE T1 (a INT PRIMARY KEY NOT ENFORCED, b STRING) WITH ('bucket' = '-1')");
+        sql("INSERT INTO T1 VALUES (1, '1')");
+        assertThatThrownBy(() -> sql("ALTER TABLE T1 RESET ('bucket')"))
+                .satisfies(
+                        anyCauseMatches(
+                                UnsupportedOperationException.class, "Cannot reset bucket."));
+        assertThatThrownBy(() -> sql("ALTER TABLE T1 SET ('bucket' = '1')"))
+                .satisfies(
+                        anyCauseMatches(
+                                UnsupportedOperationException.class,
+                                "Cannot change bucket when it is -1."));
+
+        sql("CREATE TABLE T2 (a INT PRIMARY KEY NOT ENFORCED, b STRING) WITH ('bucket' = '1')");
+        sql("INSERT INTO T2 VALUES (1, '1')");
+        assertThatThrownBy(() -> sql("ALTER TABLE T2 SET ('bucket' = '-1')"))
+                .satisfies(
+                        anyCauseMatches(
+                                UnsupportedOperationException.class,
+                                "Cannot change bucket to -1."));
     }
 }
