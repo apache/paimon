@@ -1040,6 +1040,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     @Test
     public void testAlterBucket() {
         sql("CREATE TABLE T1 (a INT PRIMARY KEY NOT ENFORCED, b STRING) WITH ('bucket' = '-1')");
+        sql("INSERT INTO T1 VALUES (1, '1')");
         assertThatThrownBy(() -> sql("ALTER TABLE T1 RESET ('bucket')"))
                 .satisfies(
                         anyCauseMatches(
@@ -1051,6 +1052,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                                 "Cannot change bucket when it is -1."));
 
         sql("CREATE TABLE T2 (a INT PRIMARY KEY NOT ENFORCED, b STRING) WITH ('bucket' = '1')");
+        sql("INSERT INTO T2 VALUES (1, '1')");
         assertThatThrownBy(() -> sql("ALTER TABLE T2 SET ('bucket' = '-1')"))
                 .satisfies(
                         anyCauseMatches(

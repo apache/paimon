@@ -596,20 +596,17 @@ public class SchemaManager implements Serializable {
                             ? CoreOptions.BUCKET.defaultValue()
                             : Integer.parseInt(oldValue);
             int newBucket = Integer.parseInt(newValue);
-            checkAlterBucket(oldBucket, newBucket, fromDynamicOptions);
-        }
-    }
 
-    private static void checkAlterBucket(int oldValue, int newValue, boolean fromDynamicOptions) {
-        if (fromDynamicOptions) {
-            throw new UnsupportedOperationException(
-                    "Cannot change bucket number through dynamic options. You might need to rescale bucket.");
-        }
-        if (oldValue == -1) {
-            throw new UnsupportedOperationException("Cannot change bucket when it is -1.");
-        }
-        if (newValue == -1) {
-            throw new UnsupportedOperationException("Cannot change bucket to -1.");
+            if (fromDynamicOptions) {
+                throw new UnsupportedOperationException(
+                        "Cannot change bucket number through dynamic options. You might need to rescale bucket.");
+            }
+            if (oldBucket == -1) {
+                throw new UnsupportedOperationException("Cannot change bucket when it is -1.");
+            }
+            if (newBucket == -1) {
+                throw new UnsupportedOperationException("Cannot change bucket to -1.");
+            }
         }
     }
 
