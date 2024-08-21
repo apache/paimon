@@ -179,7 +179,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testManifestsTable() throws Exception {
+    public void testManifestsTable() {
         sql("CREATE TABLE T (a INT, b INT)");
         sql("INSERT INTO T VALUES (1, 2)");
 
@@ -205,7 +205,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testSchemasTable() throws Exception {
+    public void testSchemasTable() {
         sql(
                 "CREATE TABLE T(a INT, b INT, c STRING, PRIMARY KEY (a) NOT ENFORCED) with ('a.aa.aaa'='val1', 'b.bb.bbb'='val2')");
         sql("ALTER TABLE T SET ('snapshot.time-retained' = '5 h')");
@@ -240,7 +240,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testSnapshotsSchemasTable() throws Exception {
+    public void testSnapshotsSchemasTable() {
         sql("CREATE TABLE T (a INT, b INT)");
         sql("INSERT INTO T VALUES (1, 2)");
         sql("INSERT INTO T VALUES (3, 4)");
@@ -261,9 +261,9 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testCreateTableLike() throws Exception {
+    public void testCreateTableLike() {
         sql("CREATE TABLE T (a INT)");
-        sql("CREATE TABLE T1 LIKE T");
+        sql("CREATE TABLE T1 LIKE T (EXCLUDING OPTIONS)");
         List<Row> result =
                 sql(
                         "SELECT schema_id, fields, partition_keys, "
