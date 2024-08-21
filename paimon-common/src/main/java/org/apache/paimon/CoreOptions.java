@@ -47,7 +47,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -2455,21 +2454,21 @@ public class CoreOptions implements Serializable {
         return list;
     }
 
-    public static Set<String> getImmutableOptionKeys() {
-        final Field[] fields = CoreOptions.class.getFields();
-        final Set<String> immutableKeys = new HashSet<>(fields.length);
-        for (Field field : fields) {
-            if (ConfigOption.class.isAssignableFrom(field.getType())
-                    && field.getAnnotation(Immutable.class) != null) {
-                try {
-                    immutableKeys.add(((ConfigOption<?>) field.get(CoreOptions.class)).key());
-                } catch (IllegalAccessException e) {
-                    throw new RuntimeException(e);
-                }
-            }
-        }
-        return immutableKeys;
-    }
+    public static final Set<String> IMMUTABLE_OPTIONS =
+            Arrays.stream(CoreOptions.class.getFields())
+                    .filter(
+                            f ->
+                                    ConfigOption.class.isAssignableFrom(f.getType())
+                                            && f.getAnnotation(Immutable.class) != null)
+                    .map(
+                            f -> {
+                                try {
+                                    return ((ConfigOption<?>) f.get(CoreOptions.class)).key();
+                                } catch (IllegalAccessException e) {
+                                    throw new RuntimeException(e);
+                                }
+                            })
+                    .collect(Collectors.toSet());
 
     /** Specifies the sort engine for table with primary key. */
     public enum SortEngine implements DescribedEnum {

@@ -579,7 +579,7 @@ public class SchemaManager implements Serializable {
     }
 
     public static void checkAlterTableOption(String key) {
-        if (CoreOptions.getImmutableOptionKeys().contains(key)) {
+        if (CoreOptions.IMMUTABLE_OPTIONS.contains(key)) {
             throw new UnsupportedOperationException(
                     String.format("Change '%s' is not supported yet.", key));
         }
