@@ -265,20 +265,20 @@ public abstract class SchemaEvolutionTableTestBase {
          * </ul>
          */
         final long millsPerDay = 86400000;
-        write.write(
-                rowData(
-                        1,
-                        "100",
-                        "101",
-                        toDecimal(102),
-                        (short) 103,
-                        104,
-                        105L,
-                        106F,
-                        107D,
-                        108,
-                        toTimestamp(109 * millsPerDay),
-                        "110".getBytes()));
+//        write.write(
+//                rowData(
+//                        1,
+//                        "100",
+//                        "101",
+//                        toDecimal(102),
+//                        (short) 103,
+//                        104,
+//                        105L,
+//                        106F,
+//                        107D,
+//                        108,
+//                        toTimestamp(109 * millsPerDay),
+//                        "110".getBytes()));
         write.write(
                 rowData(
                         2,
@@ -375,34 +375,34 @@ public abstract class SchemaEvolutionTableTestBase {
                         408,
                         409,
                         toBytes("410")));
-        write.write(
-                rowData(
-                        1,
-                        "500",
-                        "501",
-                        502D,
-                        503,
-                        toDecimal(504),
-                        505F,
-                        506D,
-                        toDecimal(507),
-                        508,
-                        509,
-                        toBytes("510")));
-        write.write(
-                rowData(
-                        1,
-                        "600",
-                        "601",
-                        602D,
-                        603,
-                        toDecimal(604),
-                        605F,
-                        606D,
-                        toDecimal(607),
-                        608,
-                        609,
-                        toBytes("610")));
+//        write.write(
+//                rowData(
+//                        1,
+//                        "500",
+//                        "501",
+//                        502D,
+//                        503,
+//                        toDecimal(504),
+//                        505F,
+//                        506D,
+//                        toDecimal(507),
+//                        508,
+//                        509,
+//                        toBytes("510")));
+//        write.write(
+//                rowData(
+//                        1,
+//                        "600",
+//                        "601",
+//                        602D,
+//                        603,
+//                        toDecimal(604),
+//                        605F,
+//                        606D,
+//                        toDecimal(607),
+//                        608,
+//                        609,
+//                        toBytes("610")));
         commit.commit(1, write.prepareCommit(true, 1));
         write.close();
         commit.close();

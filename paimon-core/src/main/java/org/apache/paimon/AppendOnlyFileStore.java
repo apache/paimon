@@ -151,7 +151,8 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 options.bucket(),
                 forWrite,
                 options.scanManifestParallelism(),
-                options.fileIndexReadEnabled());
+                options.fileIndexReadEnabled(),
+                options.skipPartitionWrite());
     }
 
     @Override

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.partition;
 
+import java.util.stream.IntStream;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.schema.TableSchema;
@@ -28,9 +29,20 @@ import javax.annotation.Nullable;
 
 import java.util.Arrays;
 import java.util.List;
+import shaded.parquet.it.unimi.dsi.fastutil.ints.IntArrays;
 
 /** Utils to fetch partition map information from data schema and row type. */
 public class PartitionUtils {
+
+    public static Pair<int[], int[][]> constructPartitionMapping(
+            TableSchema dataSchema) {
+        int[][] projection = new int[dataSchema.fields().size()][];
+        for (int i = 0; i < projection.length; i++) {
+            projection[i] = new int[]{i};
+        }
+        return constructPartitionMapping(
+                dataSchema.logicalRowType(), dataSchema.partitionKeys(), projection);
+    }
 
     public static Pair<int[], int[][]> constructPartitionMapping(
             TableSchema dataSchema, int[][] projection) {

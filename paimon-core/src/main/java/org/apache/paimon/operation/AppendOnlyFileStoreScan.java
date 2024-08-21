@@ -19,6 +19,8 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.AppendOnlyFileStore;
+import org.apache.paimon.partition.PartitionUtils;
+import org.apache.paimon.utils.TwoJoinedRow;
 import org.apache.paimon.fileindex.FileIndexPredicate;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
@@ -48,8 +50,11 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
     private Predicate filter;
 
+    private final boolean skipPartitioned;
     // just cache.
     private final Map<Long, Predicate> dataFilterMapping = new HashMap<>();
+
+    private final int fieldCount;
 
     public AppendOnlyFileStoreScan(
             RowType partitionType,
@@ -62,7 +67,8 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
             int numOfBuckets,
             boolean checkNumOfBuckets,
             Integer scanManifestParallelism,
-            boolean fileIndexReadEnabled) {
+            boolean fileIndexReadEnabled,
+            boolean skipPartitioned) {
         super(
                 partitionType,
                 bucketFilter,
@@ -75,8 +81,10 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                 checkNumOfBuckets,
                 scanManifestParallelism);
         this.simpleStatsConverters =
-                new SimpleStatsConverters(sid -> scanTableSchema(sid).fields(), schema.id());
+                new SimpleStatsConverters(sid -> scanTableSchema(sid).fields(), schema.id(), PartitionUtils.constructPartitionMapping(schema).getLeft());
         this.fileIndexReadEnabled = fileIndexReadEnabled;
+        this.skipPartitioned = skipPartitioned;
+        this.fieldCount = schema.fields().size();
     }
 
     public AppendOnlyFileStoreScan withFilter(Predicate predicate) {
@@ -96,12 +104,21 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                 simpleStatsConverters.getOrCreate(entry.file().schemaId());
         SimpleStats stats = entry.file().valueStats();
 
-        return filter.test(
-                        entry.file().rowCount(),
-                        serializer.evolution(stats.minValues()),
-                        serializer.evolution(stats.maxValues()),
-                        serializer.evolution(stats.nullCounts(), entry.file().rowCount()))
-                && (!fileIndexReadEnabled || testFileIndex(entry.file().embeddedIndex(), entry));
+        if (stats.nullCounts().size() !=  fieldCount && skipPartitioned) {
+            return filter.test(
+                    entry.file().rowCount(),
+                    serializer.evolutionWithPartition(stats.minValues(), entry.partition()),
+                    serializer.evolutionWithPartition(stats.maxValues(), entry.partition()),
+                    serializer.evolutionWithPartition(stats.nullCounts(), entry.file().rowCount()))
+                    && (!fileIndexReadEnabled || testFileIndex(entry.file().embeddedIndex(), entry));
+        } else {
+            return filter.test(
+                    entry.file().rowCount(),
+                    serializer.evolution(stats.minValues()),
+                    serializer.evolution(stats.maxValues()),
+                    serializer.evolution(stats.nullCounts(), entry.file().rowCount()))
+                    && (!fileIndexReadEnabled || testFileIndex(entry.file().embeddedIndex(), entry));
+        }
     }
 
     @Override

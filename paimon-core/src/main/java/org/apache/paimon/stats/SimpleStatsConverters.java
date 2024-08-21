@@ -45,12 +45,24 @@ public class SimpleStatsConverters {
     private final AtomicReference<List<DataField>> tableFields;
     private final ConcurrentMap<Long, SimpleStatsConverter> converters;
 
+    @Nullable private final int[] partitionMap;
+
     public SimpleStatsConverters(Function<Long, List<DataField>> schemaFields, long tableSchemaId) {
         this.schemaFields = schemaFields;
         this.tableSchemaId = tableSchemaId;
         this.tableDataFields = schemaFields.apply(tableSchemaId);
         this.tableFields = new AtomicReference<>();
         this.converters = new ConcurrentHashMap<>();
+        this.partitionMap = null;
+    }
+
+    public SimpleStatsConverters(Function<Long, List<DataField>> schemaFields, long tableSchemaId, @Nullable int[] partitionMap) {
+        this.schemaFields = schemaFields;
+        this.tableSchemaId = tableSchemaId;
+        this.tableDataFields = schemaFields.apply(tableSchemaId);
+        this.tableFields = new AtomicReference<>();
+        this.converters = new ConcurrentHashMap<>();
+        this.partitionMap = partitionMap;
     }
 
     public SimpleStatsConverter getOrCreate(long dataSchemaId) {
@@ -58,7 +70,7 @@ public class SimpleStatsConverters {
                 dataSchemaId,
                 id -> {
                     if (tableSchemaId == id) {
-                        return new SimpleStatsConverter(new RowType(schemaFields.apply(id)));
+                        return new SimpleStatsConverter(new RowType(schemaFields.apply(id)), partitionMap);
                     }
 
                     // Get atomic schema fields.
@@ -72,7 +84,8 @@ public class SimpleStatsConverters {
                     return new SimpleStatsConverter(
                             new RowType(dataFields),
                             indexMapping,
-                            indexCastMapping.getCastMapping());
+                            indexCastMapping.getCastMapping(),
+                            partitionMap);
                 });
     }
 

@@ -427,9 +427,9 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Boolean> WRITE_SKIP_PARTITION =
             key("write-skip-partition")
                     .booleanType()
-                    .defaultValue(false)
+                    .defaultValue(true)
                     .withFallbackKeys("write.skip-partition")
-                    .withDescription("Whether to automatically complete missing tags.");
+                    .withDescription("Whether to skip partition field while writing.");
 
     public static final ConfigOption<Integer> LOCAL_SORT_MAX_NUM_FILE_HANDLES =
             key("local-sort.max-num-file-handles")

@@ -43,8 +43,8 @@ import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.types.RowKind;
-import org.apache.paimon.utils.KeyProjectedRow;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.ProjectedRow;
 
 import java.io.IOException;
 import java.util.List;
@@ -178,10 +178,10 @@ class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     private static class AppendRecordExtractor
             implements TableWriteImpl.RecordExtractor<InternalRow> {
 
-        private final KeyProjectedRow keyProjectedRow;
+        private final ProjectedRow projectedRow;
 
         public AppendRecordExtractor(int[] mapping) {
-            this.keyProjectedRow = new KeyProjectedRow(mapping);
+            this.projectedRow = ProjectedRow.from(mapping);
         }
 
         @Override
@@ -190,8 +190,7 @@ class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
                     rowKind.isAdd(),
                     "Append only writer can not accept row with RowKind %s",
                     rowKind);
-            keyProjectedRow.setRowKind(rowKind);
-            return keyProjectedRow.replaceRow(record.row());
+            return projectedRow.replaceRow(record.row());
         }
     }
 }

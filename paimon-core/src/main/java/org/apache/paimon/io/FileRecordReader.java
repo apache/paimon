@@ -18,7 +18,7 @@
 
 package org.apache.paimon.io;
 
-import org.apache.paimon.PartitionSettedRow;
+import org.apache.paimon.utils.TwoJoinedRow;
 import org.apache.paimon.casting.CastFieldGetter;
 import org.apache.paimon.casting.CastedRow;
 import org.apache.paimon.data.InternalRow;
@@ -53,9 +53,9 @@ public class FileRecordReader implements RecordReader<InternalRow> {
             iterator = ((ColumnarRowIterator) iterator).mapping(partitionInfo, indexMapping);
         } else {
             if (partitionInfo != null) {
-                final PartitionSettedRow partitionSettedRow =
-                        PartitionSettedRow.from(partitionInfo);
-                iterator = iterator.transform(partitionSettedRow::replaceRow);
+                final TwoJoinedRow twoJoinedRow =
+                        TwoJoinedRow.from(partitionInfo.getMap()).replaceSecondRow(partitionInfo.getPartitionRow());
+                iterator = iterator.transform(twoJoinedRow::replaceMainRow);
             }
             if (indexMapping != null) {
                 final ProjectedRow projectedRow = ProjectedRow.from(indexMapping);

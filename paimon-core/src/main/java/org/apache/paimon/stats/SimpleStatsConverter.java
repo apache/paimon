@@ -18,6 +18,7 @@
 
 package org.apache.paimon.stats;
 
+import org.apache.paimon.utils.TwoJoinedRow;
 import org.apache.paimon.casting.CastFieldGetter;
 import org.apache.paimon.casting.CastedRow;
 import org.apache.paimon.data.BinaryArray;
@@ -44,9 +45,14 @@ public class SimpleStatsConverter {
 
     @Nullable private final int[] indexMapping;
     @Nullable private final CastFieldGetter[] castFieldGetters;
+    @Nullable private final int[] partitionMap;
 
     public SimpleStatsConverter(RowType type) {
         this(type, null, null);
+    }
+
+    public SimpleStatsConverter(RowType type, int[] partitionMap) {
+        this(type, null, null, partitionMap);
     }
 
     public SimpleStatsConverter(
@@ -57,6 +63,19 @@ public class SimpleStatsConverter {
         this.serializer = new InternalRowSerializer(safeType);
         this.indexMapping = indexMapping;
         this.castFieldGetters = castFieldGetters;
+        this.partitionMap = null;
+    }
+
+    public SimpleStatsConverter(
+            RowType type,
+            @Nullable int[] indexMapping,
+            @Nullable CastFieldGetter[] castFieldGetters,
+            @Nullable int[] partitionMap) {
+        RowType safeType = toAllFieldsNullableRowType(type);
+        this.serializer = new InternalRowSerializer(safeType);
+        this.indexMapping = indexMapping;
+        this.castFieldGetters = castFieldGetters;
+        this.partitionMap = partitionMap;
     }
 
     public SimpleStats toBinary(SimpleColStats[] stats) {
@@ -88,7 +107,36 @@ public class SimpleStatsConverter {
         return row;
     }
 
+    public InternalRow evolutionWithPartition(BinaryRow values, BinaryRow partition) {
+        InternalRow row = values;
+        if (indexMapping != null) {
+            row = ProjectedRow.from(indexMapping).replaceRow(row);
+        }
+
+        if (castFieldGetters != null) {
+            row = CastedRow.from(castFieldGetters).replaceRow(values);
+        }
+
+        if (partitionMap != null) {
+            row = TwoJoinedRow.from(partitionMap).replaceMainRow(values).replaceSecondRow(partition);
+        }
+
+        return row;
+    }
+
     public InternalArray evolution(BinaryArray nullCounts, @Nullable Long rowCount) {
+        if (indexMapping == null) {
+            return nullCounts;
+        }
+
+        if (rowCount == null) {
+            throw new RuntimeException("Schema Evolution for stats needs row count.");
+        }
+
+        return new NullCountsEvoArray(indexMapping, nullCounts, rowCount);
+    }
+
+    public InternalArray evolutionWithPartition(BinaryArray nullCounts, @Nullable Long rowCount) {
         if (indexMapping == null) {
             return nullCounts;
         }
