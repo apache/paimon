@@ -21,9 +21,19 @@ package org.apache.paimon.utils;
 import org.apache.paimon.annotation.VisibleForTesting;
 
 import org.apache.datasketches.hll.HllSketch;
+import org.apache.datasketches.hll.TgtHllType;
+import org.apache.datasketches.hll.Union;
 
 /** A compressed bitmap for 32-bit integer. */
 public class HllSketchUtil {
+
+    public static byte[] union(byte[] sketchBytes1, byte[] sketchBytes2) {
+        HllSketch heapify = HllSketch.heapify((byte[]) sketchBytes1);
+        org.apache.datasketches.hll.Union union = Union.heapify((byte[]) sketchBytes2);
+        union.update(heapify);
+        HllSketch result = union.getResult(TgtHllType.HLL_4);
+        return result.toCompactByteArray();
+    }
 
     @VisibleForTesting
     public static byte[] sketchOf(int... values) {
