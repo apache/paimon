@@ -898,8 +898,7 @@ public class FlinkCatalog extends AbstractCatalog {
     }
 
     @Override
-    public final CatalogPartition getPartition(
-            ObjectPath tablePath, CatalogPartitionSpec partitionSpec)
+    public CatalogPartition getPartition(ObjectPath tablePath, CatalogPartitionSpec partitionSpec)
             throws PartitionNotExistException, CatalogException {
         throw new PartitionNotExistException(getName(), tablePath, partitionSpec);
     }
