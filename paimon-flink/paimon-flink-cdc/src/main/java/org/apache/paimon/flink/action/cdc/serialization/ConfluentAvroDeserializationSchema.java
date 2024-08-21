@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.serialization;
 
+import io.confluent.kafka.schemaregistry.client.CachedSchemaRegistryClient;
 import io.confluent.kafka.schemaregistry.client.SchemaRegistryClient;
 import io.confluent.kafka.serializers.AbstractKafkaAvroDeserializer;
 import io.confluent.kafka.serializers.GenericContainerWithVersion;
@@ -28,11 +29,20 @@ import java.io.Serializable;
 public class ConfluentAvroDeserializationSchema extends AbstractKafkaAvroDeserializer
         implements Serializable {
 
+    private static final long serialVersionUID = 1L;
+
     public ConfluentAvroDeserializationSchema(SchemaRegistryClient client) {
         this.schemaRegistry = client;
     }
 
     public GenericContainerWithVersion deserialize(String topic, boolean isKey, byte[] payload) {
         return deserializeWithSchemaAndVersion(topic, isKey, payload);
+    }
+
+    private static final int DEFAULT_IDENTITY_MAP_CAPACITY = 1000;
+
+    public static ConfluentAvroDeserializationSchema create(String schemaRegistryUrl) {
+        return new ConfluentAvroDeserializationSchema(
+                new CachedSchemaRegistryClient(schemaRegistryUrl, DEFAULT_IDENTITY_MAP_CAPACITY));
     }
 }
