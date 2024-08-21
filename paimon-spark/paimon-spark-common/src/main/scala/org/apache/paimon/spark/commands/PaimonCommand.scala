@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.deletionvectors.BitmapDeletionVector
 import org.apache.paimon.fs.Path
 import org.apache.paimon.index.IndexFileMeta
@@ -172,16 +173,33 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
       condition: Expression,
       relation: DataSourceV2Relation,
       sparkSession: SparkSession): Dataset[SparkDeletionVectors] = {
+    val metadataCols = Seq(FILE_PATH, ROW_INDEX)
+    val filteredRelation = createNewScanPlan(candidateDataSplits, condition, relation, metadataCols)
+    val dataWithMetadataColumns = createDataset(sparkSession, filteredRelation)
+    collectDeletionVectors(dataFilePathToMeta, dataWithMetadataColumns, sparkSession)
+  }
+
+  protected def collectDeletionVectors(
+      dataFilePathToMeta: Map[String, SparkDataFileMeta],
+      dataWithMetadataColumns: Dataset[Row],
+      sparkSession: SparkSession): Dataset[SparkDeletionVectors] = {
     import sparkSession.implicits._
+
+    val resolver = sparkSession.sessionState.conf.resolver
+    Seq(FILE_PATH_COLUMN, ROW_INDEX_COLUMN).foreach {
+      metadata =>
+        dataWithMetadataColumns.schema
+          .find(field => resolver(field.name, metadata))
+          .orElse(throw new RuntimeException(
+            "This input dataset doesn't contains the required metadata columns: __paimon_file_path and __paimon_row_index."))
+    }
 
     val dataFileToPartitionAndBucket =
       dataFilePathToMeta.mapValues(meta => (meta.partition, meta.bucket)).toArray
-    val metadataCols = Seq(FILE_PATH, ROW_INDEX)
-    val filteredRelation = createNewScanPlan(candidateDataSplits, condition, relation, metadataCols)
 
     val my_table = table
     val location = my_table.location
-    createDataset(sparkSession, filteredRelation)
+    dataWithMetadataColumns
       .select(FILE_PATH_COLUMN, ROW_INDEX_COLUMN)
       .as[(String, Long)]
       .groupByKey(_._1)
@@ -208,7 +226,7 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
       }
   }
 
-  private def createNewScanPlan(
+  protected def createNewScanPlan(
       candidateDataSplits: Seq[DataSplit],
       condition: Expression,
       relation: DataSourceV2Relation,
@@ -216,11 +234,9 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
     val metadataProj = metadataCols.map(_.toAttribute)
     val newRelation = relation.copy(output = relation.output ++ metadataProj)
     val scan = PaimonSplitScan(table, candidateDataSplits.toArray, metadataCols)
-    Project(
-      metadataProj,
-      FilterLogicalNode(
-        condition,
-        Compatibility.createDataSourceV2ScanRelation(newRelation, scan, newRelation.output)))
+    FilterLogicalNode(
+      condition,
+      Compatibility.createDataSourceV2ScanRelation(newRelation, scan, newRelation.output))
 
   }
 
