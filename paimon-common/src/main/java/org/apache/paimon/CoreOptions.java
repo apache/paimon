@@ -1050,8 +1050,10 @@ public class CoreOptions implements Serializable {
                                     .text(
                                             "2. 'done-partition': add 'xxx.done' partition to metastore.")
                                     .linebreak()
+                                    .text("3. 'mark-event': mark partition event to metastore.")
+                                    .linebreak()
                                     .text(
-                                            "Both can be configured at the same time: 'done-partition,success-file'.")
+                                            "Both can be configured at the same time: 'done-partition,success-file,mark-event'.")
                                     .build());
 
     public static final ConfigOption<Boolean> METASTORE_PARTITIONED_TABLE =

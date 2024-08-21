@@ -549,7 +549,7 @@ This config option does not affect the default filesystem metastore.</td>
             <td><h5>partition.mark-done-action</h5></td>
             <td style="word-wrap: break-word;">"success-file"</td>
             <td>String</td>
-            <td>Action to mark a partition done is to notify the downstream application that the partition has finished writing, the partition is ready to be read.<br />1. 'success-file': add '_success' file to directory.<br />2. 'done-partition': add 'xxx.done' partition to metastore.<br />Both can be configured at the same time: 'done-partition,success-file'.</td>
+            <td>Action to mark a partition done is to notify the downstream application that the partition has finished writing, the partition is ready to be read.<br />1. 'success-file': add '_success' file to directory.<br />2. 'done-partition': add 'xxx.done' partition to metastore.<br />3. 'mark-event': mark partition event to metastore.<br />Both can be configured at the same time: 'done-partition,success-file,mark-event'.</td>
         </tr>
         <tr>
             <td><h5>partition.timestamp-formatter</h5></td>
