@@ -40,15 +40,9 @@ import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
-
-import static org.apache.paimon.CoreOptions.SCAN_BOUNDED_WATERMARK;
-import static org.apache.paimon.CoreOptions.STREAM_SCAN_MODE;
-import static org.apache.paimon.CoreOptions.StreamScanMode.FILE_MONITOR;
 
 /** Lookup table for primary key which supports to read the LSM tree directly. */
 public class PrimaryKeyPartialLookupTable implements LookupTable {
@@ -158,7 +152,11 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
         return new PrimaryKeyPartialLookupTable(
                 filter ->
                         new LocalQueryExecutor(
-                                table, projection, tempPath, filter, requireCachedBucketIds),
+                                new LookupFileStoreTable(table, joinKey),
+                                projection,
+                                tempPath,
+                                filter,
+                                requireCachedBucketIds),
                 table,
                 joinKey);
     }
@@ -192,12 +190,8 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
                             .withValueProjection(Projection.of(projection).toNestedIndexes())
                             .withIOManager(new IOManagerImpl(tempPath.toString()));
 
-            Map<String, String> dynamicOptions = new HashMap<>();
-            dynamicOptions.put(STREAM_SCAN_MODE.key(), FILE_MONITOR.getValue());
-            dynamicOptions.put(SCAN_BOUNDED_WATERMARK.key(), null);
             this.scan =
-                    table.copy(dynamicOptions)
-                            .newReadBuilder()
+                    table.newReadBuilder()
                             .withFilter(filter)
                             .withBucketFilter(
                                     requireCachedBucketIds == null

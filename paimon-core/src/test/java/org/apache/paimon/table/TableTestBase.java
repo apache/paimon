@@ -127,10 +127,21 @@ public abstract class TableTestBase {
     }
 
     protected void compact(Table table, BinaryRow partition, int bucket) throws Exception {
+        compact(table, partition, bucket, null, true);
+    }
+
+    protected void compact(
+            Table table,
+            BinaryRow partition,
+            int bucket,
+            IOManager ioManager,
+            boolean fullCompaction)
+            throws Exception {
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         try (BatchTableWrite write = writeBuilder.newWrite();
                 BatchTableCommit commit = writeBuilder.newCommit()) {
-            write.compact(partition, bucket, true);
+            write.withIOManager(ioManager);
+            write.compact(partition, bucket, fullCompaction);
             commit.commit(write.prepareCommit());
         }
     }

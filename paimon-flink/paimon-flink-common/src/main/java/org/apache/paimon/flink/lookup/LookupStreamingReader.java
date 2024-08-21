@@ -22,13 +22,10 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.SplitsParallelReadUtil;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
-import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
@@ -42,10 +39,7 @@ import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.function.IntUnaryOperator;
 import java.util.stream.IntStream;
@@ -62,20 +56,12 @@ public class LookupStreamingReader {
     @Nullable private final Predicate projectedPredicate;
     private final StreamTableScan scan;
 
-    private static final List<ConfigOption<?>> TIME_TRAVEL_OPTIONS =
-            Arrays.asList(
-                    CoreOptions.SCAN_TIMESTAMP_MILLIS,
-                    CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS,
-                    CoreOptions.SCAN_SNAPSHOT_ID,
-                    CoreOptions.SCAN_TAG_NAME,
-                    CoreOptions.SCAN_VERSION);
-
     public LookupStreamingReader(
             Table table,
             int[] projection,
             @Nullable Predicate predicate,
             Set<Integer> requireCachedBucketIds) {
-        this.table = unsetTimeTravelOptions(table);
+        this.table = table;
         this.projection = projection;
         this.readBuilder =
                 this.table
@@ -110,21 +96,6 @@ public class LookupStreamingReader {
         } else {
             this.projectedPredicate = null;
         }
-    }
-
-    private Table unsetTimeTravelOptions(Table origin) {
-        FileStoreTable fileStoreTable = (FileStoreTable) origin;
-        Map<String, String> newOptions = new HashMap<>(fileStoreTable.options());
-        TIME_TRAVEL_OPTIONS.stream().map(ConfigOption::key).forEach(newOptions::remove);
-
-        CoreOptions.StartupMode startupMode = CoreOptions.fromMap(newOptions).startupMode();
-        if (startupMode != CoreOptions.StartupMode.COMPACTED_FULL) {
-            startupMode = CoreOptions.StartupMode.LATEST_FULL;
-        }
-        newOptions.put(CoreOptions.SCAN_MODE.key(), startupMode.toString());
-
-        TableSchema newSchema = fileStoreTable.schema().copy(newOptions);
-        return fileStoreTable.copy(newSchema);
     }
 
     public RecordReader<InternalRow> nextBatch(boolean useParallelism) throws Exception {
