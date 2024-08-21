@@ -352,20 +352,20 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
 
     @Override
     public Identifier[] listFunctions(String[] namespace) throws NoSuchNamespaceException {
-        if (namespace.length == 0 || isSystemNamespace(namespace) || namespaceExists(namespace)) {
-            return new Identifier[0];
+        try {
+            return sparkCatalog.listFunctions(namespace);
+        } catch (NoSuchNamespaceException e) {
+            return asFunctionCatalog().listFunctions(namespace);
         }
-
-        return asFunctionCatalog().listFunctions(namespace);
     }
 
     @Override
     public UnboundFunction loadFunction(Identifier ident) throws NoSuchFunctionException {
-        return asFunctionCatalog().loadFunction(ident);
-    }
-
-    private static boolean isSystemNamespace(String[] namespace) {
-        return namespace.length == 1 && namespace[0].equalsIgnoreCase("system");
+        try {
+            return sparkCatalog.loadFunction(ident);
+        } catch (NoSuchFunctionException e) {
+            return asFunctionCatalog().loadFunction(ident);
+        }
     }
 
     private Table throwsOldIfExceptionHappens(Callable<Table> call, NoSuchTableException e)
