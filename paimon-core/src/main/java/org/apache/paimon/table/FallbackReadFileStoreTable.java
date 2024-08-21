@@ -304,10 +304,10 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         }
 
         @Override
-        public List<PartitionEntry> getPartitionEntries() {
-            List<PartitionEntry> partitionEntries = mainScan.getPartitionEntries();
+        public List<PartitionEntry> listPartitionEntries() {
+            List<PartitionEntry> partitionEntries = mainScan.listPartitionEntries();
             if (partitionEntries.isEmpty()) {
-                partitionEntries = fallbackScan.getPartitionEntries();
+                partitionEntries = fallbackScan.listPartitionEntries();
             }
             return partitionEntries;
         }

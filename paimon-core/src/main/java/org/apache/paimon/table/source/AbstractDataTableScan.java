@@ -243,12 +243,7 @@ public abstract class AbstractDataTableScan implements DataTableScan {
     }
 
     @Override
-    public List<BinaryRow> listPartitions() {
-        return snapshotReader.partitions();
-    }
-
-    @Override
-    public List<PartitionEntry> getPartitionEntries() {
+    public List<PartitionEntry> listPartitionEntries() {
         return snapshotReader.partitionEntries();
     }
 }
