@@ -19,6 +19,7 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.BatchFormatWriter;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.AsyncPositionOutputStream;
@@ -92,6 +93,27 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
     @Override
     public void write(T record) throws IOException {
         writeImpl(record);
+    }
+
+    public void writeBatch(BatchRecords batchRecords) throws IOException {
+        if (closed) {
+            throw new RuntimeException("Writer has already closed!");
+        }
+
+        try {
+            if (writer instanceof BatchFormatWriter) {
+                ((BatchFormatWriter) writer).writeBatch(batchRecords);
+            } else {
+                for (InternalRow row : batchRecords) {
+                    writer.addElement(row);
+                }
+            }
+            recordCount += batchRecords.rowCount();
+        } catch (Throwable e) {
+            LOG.warn("Exception occurs when writing file " + path + ". Cleaning up.", e);
+            abort();
+            throw e;
+        }
     }
 
     protected InternalRow writeImpl(T record) throws IOException {

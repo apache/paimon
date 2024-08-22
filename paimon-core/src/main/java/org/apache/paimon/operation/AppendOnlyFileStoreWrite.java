@@ -31,6 +31,7 @@ import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.io.BatchRecords;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.RowDataRollingFileWriter;
 import org.apache.paimon.manifest.FileSource;
@@ -62,7 +63,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
 
 /** {@link FileStoreWrite} for {@link AppendOnlyFileStore}. */
-public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> {
+public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow>
+        implements BatchWriter {
 
     private static final Logger LOG = LoggerFactory.getLogger(AppendOnlyFileStoreWrite.class);
 
@@ -270,5 +272,11 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                 ((AppendOnlyWriter) writerContainer.writer).toBufferedWriter();
             }
         }
+    }
+
+    @Override
+    public void writeBatch(BinaryRow partition, int bucket, BatchRecords data) throws Exception {
+        WriterContainer<InternalRow> container = getWriterWrapper(partition, bucket);
+        ((AppendOnlyWriter) container.writer).writeBatch(data);
     }
 }

@@ -28,6 +28,7 @@ import org.apache.paimon.disk.RowBuffer;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.io.BatchRecords;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
@@ -40,6 +41,7 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BatchRecordWriter;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.IOFunction;
 import org.apache.paimon.utils.IOUtils;
@@ -60,7 +62,7 @@ import java.util.concurrent.ExecutionException;
  * A {@link RecordWriter} implementation that only accepts records which are always insert
  * operations and don't have any unique keys or sort keys.
  */
-public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner {
+public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner, BatchRecordWriter {
 
     private final FileIO fileIO;
     private final long schemaId;
@@ -162,6 +164,17 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
                 // code in SpillableBuffer.)
                 throw new RuntimeException("Mem table is too small to hold a single element.");
             }
+        }
+    }
+
+    @Override
+    public void writeBatch(BatchRecords batchRecords) throws Exception {
+        if (sinkWriter instanceof BufferedSinkWriter) {
+            for (InternalRow row : batchRecords) {
+                write(row);
+            }
+        } else {
+            ((DirectSinkWriter) sinkWriter).writeBatch(batchRecords);
         }
     }
 
@@ -384,6 +397,13 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             }
             writer.write(data);
             return true;
+        }
+
+        public void writeBatch(BatchRecords batch) throws IOException {
+            if (writer == null) {
+                writer = createRollingRowWriter();
+            }
+            writer.writeBatch(batch);
         }
 
         @Override
