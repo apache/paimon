@@ -84,7 +84,14 @@ public class CachedClientPool implements ClientPool<IMetaStoreClient, TException
         this.clientClassName = clientClassName;
         init();
         // set ugi information to hms client
-        this.clientPool();
+        try {
+            run(client -> null);
+        } catch (TException e) {
+            throw new RuntimeException(e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        }
     }
 
     @VisibleForTesting
@@ -191,8 +198,7 @@ public class CachedClientPool implements ClientPool<IMetaStoreClient, TException
             switch (type) {
                 case UGI:
                     try {
-                        elements.add(
-                                UserGroupInformationConf.of(UserGroupInformation.getCurrentUser()));
+                        elements.add(UserGroupInformation.getCurrentUser());
                     } catch (IOException e) {
                         throw new UncheckedIOException(e);
                     }
@@ -308,36 +314,6 @@ public class CachedClientPool implements ClientPool<IMetaStoreClient, TException
 
         public static ConfElement of(String key, String value) {
             return new ConfElement(key, value);
-        }
-    }
-
-    static class UserGroupInformationConf {
-
-        private final UserGroupInformation ugi;
-
-        private UserGroupInformationConf(UserGroupInformation ugi) {
-            this.ugi = ugi;
-        }
-
-        @Override
-        public boolean equals(Object obj) {
-            if (this == obj) {
-                return true;
-            }
-            if (obj == null || getClass() != obj.getClass()) {
-                return false;
-            }
-            UserGroupInformationConf other = (UserGroupInformationConf) obj;
-            return Objects.equals(other.ugi.getUserName(), ugi.getUserName());
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(ugi.getUserName());
-        }
-
-        public static UserGroupInformationConf of(UserGroupInformation ugi) {
-            return new UserGroupInformationConf(ugi);
         }
     }
 

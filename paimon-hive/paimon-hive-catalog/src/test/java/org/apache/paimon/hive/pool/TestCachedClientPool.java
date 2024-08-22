@@ -99,7 +99,7 @@ public class TestCachedClientPool {
         options1.set("type", "paimon");
         options1.set("paimon.catalog.type", "hive");
         options1.set("hive.metastore.uris", "thrift://localhost:9083");
-        options1.set("client-pool-cache.keys", "ugi,conf:type");
+        options1.set("client-pool-cache.keys", "user_name,conf:type");
 
         CachedClientPool cache1 =
                 UserGroupInformation.createRemoteUser("paimon1")
@@ -116,7 +116,7 @@ public class TestCachedClientPool {
         options2.set("type", "paimon");
         options2.set("paimon.catalog.type", "hive");
         options2.set("hive.metastore.uris", "thrift://localhost:9083");
-        options2.set("client-pool-cache.keys", "ugi,conf:type");
+        options2.set("client-pool-cache.keys", "user_name,conf:type");
 
         CachedClientPool cache2 =
                 UserGroupInformation.createRemoteUser("paimon2")
@@ -137,7 +137,7 @@ public class TestCachedClientPool {
         options.set("type", "paimon");
         options.set("paimon.catalog.type", "hive");
         options.set("hive.metastore.uris", "thrift://localhost:9083");
-        options.set("client-pool-cache.keys", "ugi,conf:type");
+        options.set("client-pool-cache.keys", "user_name,conf:type");
 
         // user paimon login
         CachedClientPool cache1 =
@@ -244,7 +244,7 @@ public class TestCachedClientPool {
         options1.set("type", "paimon");
         options1.set("paimon.catalog.type", "hive");
         options1.set("hive.metastore.uris", "thrift://localhost:9083");
-        options1.set("client-pool-cache.keys", "ugi,conf:*");
+        options1.set("client-pool-cache.keys", "user_name,conf:*");
 
         CachedClientPool cache1 =
                 UserGroupInformation.createRemoteUser("paimon1")
@@ -261,7 +261,7 @@ public class TestCachedClientPool {
         options2.set("type", "hive");
         options2.set("paimon.catalog.type", "hive");
         options2.set("hive.metastore.uris", "thrift://localhost:9083");
-        options2.set("client-pool-cache.keys", "ugi,conf:*");
+        options2.set("client-pool-cache.keys", "user_name,conf:*");
 
         CachedClientPool cache2 =
                 UserGroupInformation.createRemoteUser("paimon2")
@@ -283,7 +283,7 @@ public class TestCachedClientPool {
         options.set("type", "paimon");
         options.set("paimon.catalog.type", "hive");
         options.set("hive.metastore.uris", "thrift://localhost:9083");
-        options.set("client-pool-cache.keys", "ugi,conf:type");
+        options.set("client-pool-cache.keys", "user_name,conf:type");
 
         // user paimon login
         CachedClientPool cache1 =
@@ -317,7 +317,7 @@ public class TestCachedClientPool {
         options.set("type", "paimon");
         options.set("paimon.catalog.type", "hive");
         options.set("hive.metastore.uris", "thrift://30.150.24.155:9083");
-        options.set("client-pool-cache.keys", "ugi,conf:*");
+        options.set("client-pool-cache.keys", "user_name,conf:*");
         options.set(
                 "hive.metastore.filter.hook", MockAuthorizationMetaStoreFilterHook.class.getName());
 
@@ -346,7 +346,7 @@ public class TestCachedClientPool {
         options.set("type", "paimon");
         options.set("paimon.catalog.type", "hive");
         options.set("hive.metastore.uris", "thrift://30.150.24.155:9083");
-        options.set("client-pool-cache.keys", "ugi,conf:*");
+        options.set("client-pool-cache.keys", "user_name,conf:*");
 
         Configuration config = new Configuration();
         config.set("current.user", "root");
@@ -381,7 +381,7 @@ public class TestCachedClientPool {
                                                 options.set(
                                                         "hive.metastore.uris",
                                                         "thrift://30.150.24.155:9083");
-                                                options.set("client-pool-cache.keys", "ugi,conf:*");
+                                                options.set("client-pool-cache.keys", "user_name,conf:*");
 
                                                 // hive config
                                                 HiveConf hiveConf = new HiveConf();
@@ -461,5 +461,13 @@ public class TestCachedClientPool {
                 throw new RuntimeException(e);
             }
         }
+    }
+
+    @Test
+    public void testUgi() throws IOException {
+        UserGroupInformation user1 = UserGroupInformation.createProxyUser("hive", UserGroupInformation.getCurrentUser());
+        UserGroupInformation user2 = UserGroupInformation.createProxyUser("hive", UserGroupInformation.getCurrentUser());
+        System.out.println(user1.hashCode()==user2.hashCode());
+        System.out.println(user1.equals(user2));
     }
 }

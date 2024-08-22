@@ -45,12 +45,6 @@ public class HiveClientPool extends ClientPool.ClientPoolImpl<IMetaStoreClient, 
         this.hiveConf = new HiveConf(conf, HiveClientPool.class);
         this.hiveConf.addResource(conf);
         this.clientClassName = clientClassName;
-        // set ugi information to hms client
-        try {
-            this.run(client -> null);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to connect to Hive Metastore", e);
-        }
     }
 
     @Override
