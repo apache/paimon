@@ -19,12 +19,14 @@
 package org.apache.paimon.flink.sink.partition;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.actions.PartitionMarkDoneAction;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.PartitionPathUtils;
@@ -49,6 +51,7 @@ public class PartitionMarkDone implements Closeable {
     private final InternalRowPartitionComputer partitionComputer;
     private final PartitionMarkDoneTrigger trigger;
     private final List<PartitionMarkDoneAction> actions;
+    private final boolean waitCompaction;
 
     @Nullable
     public static PartitionMarkDone create(
@@ -76,7 +79,14 @@ public class PartitionMarkDone implements Closeable {
         List<PartitionMarkDoneAction> actions =
                 PartitionMarkDoneAction.createActions(table, coreOptions);
 
-        return new PartitionMarkDone(partitionComputer, trigger, actions);
+        // if batch read skip level 0 files, we should wait compaction to mark done
+        // otherwise, some data may not be readable, and there might be data delays
+        boolean waitCompaction =
+                !table.primaryKeys().isEmpty()
+                        && (coreOptions.deletionVectorsEnabled()
+                                || coreOptions.mergeEngine() == MergeEngine.FIRST_ROW);
+
+        return new PartitionMarkDone(partitionComputer, trigger, actions, waitCompaction);
     }
 
     private static boolean disablePartitionMarkDone(
@@ -91,30 +101,32 @@ public class PartitionMarkDone implements Closeable {
             return true;
         }
 
-        List<String> partitionKeys = table.partitionKeys();
-        if (partitionKeys.isEmpty()) {
-            return true;
-        }
-
-        return false;
+        return table.partitionKeys().isEmpty();
     }
 
     public PartitionMarkDone(
             InternalRowPartitionComputer partitionComputer,
             PartitionMarkDoneTrigger trigger,
-            List<PartitionMarkDoneAction> actions) {
+            List<PartitionMarkDoneAction> actions,
+            boolean waitCompaction) {
         this.partitionComputer = partitionComputer;
         this.trigger = trigger;
         this.actions = actions;
+        this.waitCompaction = waitCompaction;
     }
 
     public void notifyCommittable(List<ManifestCommittable> committables) {
         Set<BinaryRow> partitions = new HashSet<>();
         boolean endInput = false;
         for (ManifestCommittable committable : committables) {
-            committable.fileCommittables().stream()
-                    .map(CommitMessage::partition)
-                    .forEach(partitions::add);
+            for (CommitMessage commitMessage : committable.fileCommittables()) {
+                CommitMessageImpl message = (CommitMessageImpl) commitMessage;
+                if (waitCompaction
+                        || !message.indexIncrement().isEmpty()
+                        || !message.newFilesIncrement().isEmpty()) {
+                    partitions.add(message.partition());
+                }
+            }
             if (committable.identifier() == Long.MAX_VALUE) {
                 endInput = true;
             }
