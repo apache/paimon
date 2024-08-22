@@ -605,8 +605,7 @@ public class ParquetColumnVectorTest {
         for (InternalRow row : rows) {
             writer.addElement(row);
         }
-        writer.flush();
-        writer.finish();
+        writer.close();
 
         ParquetReaderFactory readerFactory =
                 new ParquetReaderFactory(new Options(), rowType, 1024, FilterCompat.NOOP);

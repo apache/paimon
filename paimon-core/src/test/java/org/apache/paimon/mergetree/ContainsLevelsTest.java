@@ -216,15 +216,14 @@ public class ContainsLevelsTest {
 
     private KeyValueFileWriterFactory createWriterFactory() {
         Path path = new Path(tempDir.toUri().toString());
-        String identifier = "avro";
         Map<String, FileStorePathFactory> pathFactoryMap = new HashMap<>();
-        pathFactoryMap.put(identifier, createNonPartFactory(path));
+        pathFactoryMap.put("avro", createNonPartFactory(path));
         return KeyValueFileWriterFactory.builder(
                         FileIOFinder.find(path),
                         0,
                         keyType,
                         rowType,
-                        new FlushingFileFormat(identifier),
+                        new FlushingFileFormat("avro"),
                         pathFactoryMap,
                         VALUE_128_MB.getBytes())
                 .build(BinaryRow.EMPTY_ROW, 0, new CoreOptions(new Options()));

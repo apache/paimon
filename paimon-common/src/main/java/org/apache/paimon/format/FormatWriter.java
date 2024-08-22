@@ -20,10 +20,11 @@ package org.apache.paimon.format;
 
 import org.apache.paimon.data.InternalRow;
 
+import java.io.Closeable;
 import java.io.IOException;
 
 /** The writer that writes records. */
-public interface FormatWriter {
+public interface FormatWriter extends Closeable {
 
     /**
      * Adds an element to the encoder. The encoder may temporarily buffer the element, or
@@ -37,29 +38,6 @@ public interface FormatWriter {
      *     stream throws an exception.
      */
     void addElement(InternalRow element) throws IOException;
-
-    /**
-     * Flushes all intermediate buffered data to the output stream. It is expected that flushing
-     * often may reduce the efficiency of the encoding.
-     *
-     * @throws IOException Thrown if the encoder cannot be flushed, or if the output stream throws
-     *     an exception.
-     */
-    void flush() throws IOException;
-
-    /**
-     * Finishes the writing. This must flush all internal buffer, finish encoding, and write
-     * footers.
-     *
-     * <p>The writer is not expected to handle any more records via {@link #addElement(InternalRow)}
-     * after this method is called.
-     *
-     * <p><b>Important:</b> This method MUST NOT close the stream that the writer writes to. Closing
-     * the stream is expected to happen through the invoker of this method afterwards.
-     *
-     * @throws IOException Thrown if the finalization fails.
-     */
-    void finish() throws IOException;
 
     /**
      * Check if the writer has reached the <code>targetSize</code>.

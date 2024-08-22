@@ -145,13 +145,11 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
         }
 
         try {
-            writer.flush();
-            writer.finish();
-
+            writer.close();
             out.flush();
             out.close();
         } catch (IOException e) {
-            LOG.warn("Exception occurs when closing file " + path + ". Cleaning up.", e);
+            LOG.warn("Exception occurs when closing file {}. Cleaning up.", path, e);
             abort();
             throw e;
         } finally {

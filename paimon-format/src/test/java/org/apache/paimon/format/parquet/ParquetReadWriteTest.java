@@ -498,8 +498,7 @@ public class ParquetReadWriteTest {
             writer.addElement(row);
         }
 
-        writer.flush();
-        writer.finish();
+        writer.close();
         return path;
     }
 
