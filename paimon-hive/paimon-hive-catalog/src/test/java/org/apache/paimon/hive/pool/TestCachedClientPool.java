@@ -18,21 +18,29 @@
 
 package org.apache.paimon.hive.pool;
 
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.options.Options;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
+import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.ql.security.authorization.plugin.AuthorizationMetaStoreFilterHook;
 import org.apache.hadoop.security.UserGroupInformation;
-import org.apache.thrift.TException;
 import org.junit.Test;
 
+import java.io.File;
 import java.io.IOException;
 import java.security.PrivilegedAction;
 import java.util.List;
+import java.util.UUID;
 
+import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTORECONNECTURLKEY;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link CachedClientPool}. */
@@ -303,7 +311,7 @@ public class TestCachedClientPool {
     }
 
     @Test
-    public void testLoginPaimon() throws TException {
+    public void testLoginPaimon() throws Exception {
         // user paimon login
         Options options = new Options();
         options.set("type", "paimon");
@@ -328,11 +336,11 @@ public class TestCachedClientPool {
                                                         HiveMetaStoreClient.class.getName()));
 
         // contain default database
-        assertThat(cache.clientPool().newClient().getAllDatabases()).contains("default");
+        assertThat(cache.run(IMetaStoreClient::getAllDatabases)).contains("default");
     }
 
     @Test
-    public void testLoginRoot() throws TException {
+    public void testLoginRoot() throws Exception {
         // user paimon login
         Options options = new Options();
         options.set("type", "paimon");
@@ -355,7 +363,72 @@ public class TestCachedClientPool {
                                                         HiveMetaStoreClient.class.getName()));
 
         // contain default database
-        assertThat(cache.clientPool().newClient().getAllDatabases()).contains("default");
+        assertThat(cache.run(IMetaStoreClient::getAllDatabases)).contains("default");
+    }
+
+    @Test
+    public void testLoginHive() throws Exception {
+        Catalog catalog =
+                UserGroupInformation.createRemoteUser("hive")
+                        .doAs(
+                                (PrivilegedAction<Catalog>)
+                                        () -> {
+                                            try {
+                                                // paimon options
+                                                Options options = new Options();
+                                                options.set("type", "paimon");
+                                                options.set("paimon.catalog.type", "hive");
+                                                options.set(
+                                                        "hive.metastore.uris",
+                                                        "thrift://30.150.24.155:9083");
+                                                options.set("client-pool-cache.keys", "ugi,conf:*");
+
+                                                // hive config
+                                                HiveConf hiveConf = new HiveConf();
+                                                hiveConf.set("current.user", "hive");
+                                                hiveConf.set(
+                                                        "hive.metastore.filter.hook",
+                                                        MockAuthorizationMetaStoreFilterHook.class
+                                                                .getName());
+
+                                                // tempDir
+                                                File tempDir =
+                                                        File.createTempFile(
+                                                                "paimon-", "-hive.catalog");
+                                                tempDir.delete();
+                                                tempDir.mkdir();
+                                                tempDir.deleteOnExit();
+                                                String warehouse = tempDir.getAbsolutePath();
+
+                                                CatalogContext catalogContext =
+                                                        CatalogContext.create(options);
+                                                FileIO fileIO =
+                                                        FileIO.get(
+                                                                new Path(warehouse),
+                                                                catalogContext);
+
+                                                String jdoConnectionURL =
+                                                        "jdbc:derby:memory:" + UUID.randomUUID();
+                                                hiveConf.setVar(
+                                                        METASTORECONNECTURLKEY,
+                                                        jdoConnectionURL + ";create=true");
+                                                String metastoreClientClass =
+                                                        "org.apache.hadoop.hive.metastore.HiveMetaStoreClient";
+
+                                                return new HiveCatalog(
+                                                        fileIO,
+                                                        hiveConf,
+                                                        metastoreClientClass,
+                                                        options,
+                                                        warehouse);
+                                            } catch (Exception e) {
+                                                throw new RuntimeException(e);
+                                            }
+                                        });
+        ;
+
+        // contain default database
+        assertThat(catalog.listDatabases()).contains("default");
     }
 
     /** Tests for {@link CachedClientPool}. */

@@ -52,6 +52,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.hive.HiveCatalogOptions.CLIENT_POOL_CACHE_EVICTION_INTERVAL_MS;
 import static org.apache.paimon.hive.HiveCatalogOptions.CLIENT_POOL_CACHE_KEYS;
@@ -82,32 +83,14 @@ public class CachedClientPool implements ClientPool<IMetaStoreClient, TException
         this.key = extractKey(options.get(CLIENT_POOL_CACHE_KEYS), conf, options);
         this.clientClassName = clientClassName;
         init();
+        // set ugi information to hms client
+        this.clientPool();
     }
 
     @VisibleForTesting
     HiveClientPool clientPool() {
         return clientPoolCache.get(
-                key,
-                k ->
-                        new HiveClientPool(
-                                clientPoolSize, conf, clientClassName, this.getCurrentUser(k)));
-    }
-
-    private UserGroupInformation getCurrentUser(Key key) {
-        try {
-            for (Object elem : key.elements) {
-                if (elem instanceof UserGroupInformationConf) {
-                    return ((UserGroupInformationConf) elem).ugi;
-                }
-                if (elem instanceof UserNameConf) {
-                    return UserGroupInformation.createProxyUser(
-                            ((UserNameConf) elem).userName, UserGroupInformation.getCurrentUser());
-                }
-            }
-            return UserGroupInformation.getCurrentUser();
-        } catch (Exception e) {
-            return null;
-        }
+                key, k -> new HiveClientPool(clientPoolSize, conf, clientClassName));
     }
 
     private synchronized void init() {
@@ -281,6 +264,11 @@ public class CachedClientPool implements ClientPool<IMetaStoreClient, TException
             }
             return hashCode;
         }
+
+        @Override
+        public String toString() {
+            return elements.stream().map(Object::toString).collect(Collectors.joining(","));
+        }
     }
 
     static class ConfElement {
@@ -350,35 +338,6 @@ public class CachedClientPool implements ClientPool<IMetaStoreClient, TException
 
         public static UserGroupInformationConf of(UserGroupInformation ugi) {
             return new UserGroupInformationConf(ugi);
-        }
-    }
-
-    static class UserNameConf {
-        private final String userName;
-
-        private UserNameConf(String userName) {
-            this.userName = userName;
-        }
-
-        @Override
-        public boolean equals(Object obj) {
-            if (this == obj) {
-                return true;
-            }
-            if (obj == null || getClass() != obj.getClass()) {
-                return false;
-            }
-            UserNameConf other = (UserNameConf) obj;
-            return Objects.equals(other.userName, userName);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(userName);
-        }
-
-        public static UserNameConf of(String userName) {
-            return new UserNameConf(userName);
         }
     }
 
