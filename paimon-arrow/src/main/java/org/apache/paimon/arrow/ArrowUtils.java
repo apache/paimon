@@ -23,6 +23,7 @@ import org.apache.paimon.arrow.writer.ArrowFieldWriter;
 import org.apache.paimon.arrow.writer.ArrowFieldWriterFactoryVisitor;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
@@ -71,6 +72,14 @@ public class ArrowUtils {
                                                 f.type()))
                         .collect(Collectors.toList());
         return VectorSchemaRoot.create(new Schema(fields), allocator);
+    }
+
+    public static FieldVector createVector(
+            DataField dataField, BufferAllocator allocator, boolean allowUpperCase) {
+        return toArrowField(
+                        allowUpperCase ? dataField.name() : dataField.name().toLowerCase(),
+                        dataField.type())
+                .createVector(allocator);
     }
 
     private static Field toArrowField(String fieldName, DataType dataType) {
