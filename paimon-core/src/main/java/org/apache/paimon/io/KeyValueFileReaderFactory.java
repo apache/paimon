@@ -107,7 +107,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
 
     public RecordReader<KeyValue> createRecordReader(
             long schemaId, String fileName, long fileSize, int level) throws IOException {
-        if (fileSize >= asyncThreshold && fileName.endsWith("orc")) {
+        if (fileSize >= asyncThreshold && fileName.endsWith(".orc")) {
             return new AsyncRecordReader<>(
                     () -> createRecordReader(schemaId, fileName, level, false, 2, fileSize));
         }
