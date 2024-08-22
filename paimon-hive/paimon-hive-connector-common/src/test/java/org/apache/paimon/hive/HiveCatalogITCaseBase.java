@@ -378,9 +378,22 @@ public abstract class HiveCatalogITCaseBase {
                 .await();
         tEnv.executeSql("USE CATALOG paimon_catalog_sync").await();
         tEnv.executeSql("USE test_db").await();
-        tEnv.executeSql("CREATE TABLE t01 ( aa INT, bb STRING ) WITH ( 'file.format' = 'avro' )")
+        tEnv.executeSql(
+                        "CREATE TABLE t01 ( aa INT, bb STRING, cc STRING, PRIMARY KEY (cc, aa)) PARTITIONED BY (cc) WITH ('file.format' = 'avro')")
                 .await();
         // assert contain properties
+        assertThat(
+                        hiveShell
+                                .executeQuery("DESC FORMATTED t01")
+                                .contains("\tfile.format         \tavro                "))
+                .isTrue();
+
+        assertThat(
+                        hiveShell
+                                .executeQuery("DESC FORMATTED t01")
+                                .contains("\tfile.format         \tavro                "))
+                .isTrue();
+
         assertThat(
                         hiveShell
                                 .executeQuery("DESC FORMATTED t01")

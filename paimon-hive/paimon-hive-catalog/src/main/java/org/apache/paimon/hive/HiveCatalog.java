@@ -521,6 +521,17 @@ public class HiveCatalog extends AbstractCatalog {
             tblProperties = convertToPropertiesPrefixKey(tableSchema.options(), HIVE_PREFIX);
         }
 
+        // add primary-key, partition-key, bucket-id to tblproperties
+        if (!tableSchema.primaryKeys().isEmpty()) {
+            tblProperties.put("primary-key", String.join(",", tableSchema.primaryKeys()));
+        }
+        if (!tableSchema.partitionKeys().isEmpty()) {
+            tblProperties.put("partition-key", String.join(",", tableSchema.partitionKeys()));
+        }
+        if (!tableSchema.bucketKeys().isEmpty()) {
+            tblProperties.put("bucket-id", String.join(",", tableSchema.bucketKeys()));
+        }
+
         Table table = newHmsTable(identifier, tblProperties);
         updateHmsTable(table, identifier, tableSchema);
         return table;
