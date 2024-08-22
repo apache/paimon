@@ -19,10 +19,8 @@
 package org.apache.paimon.format;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.io.BatchRecords;
 
 import java.io.IOException;
-import java.io.UnsupportedEncodingException;
 
 /** The writer that writes records. */
 public interface FormatWriter {
@@ -48,10 +46,6 @@ public interface FormatWriter {
      *     an exception.
      */
     void flush() throws IOException;
-
-    default void writeBatch(BatchRecords batchRecords) throws IOException {
-        throw new UnsupportedEncodingException("Not supported.");
-    }
 
     /**
      * Finishes the writing. This must flush all internal buffer, finish encoding, and write

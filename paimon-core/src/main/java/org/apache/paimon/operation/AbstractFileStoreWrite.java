@@ -26,7 +26,6 @@ import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexMaintainer;
-import org.apache.paimon.io.BatchRecords;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -142,12 +141,6 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         if (container.indexMaintainer != null) {
             container.indexMaintainer.notifyNewRecord(data);
         }
-    }
-
-    @Override
-    public void writeBatch(BinaryRow partition, int bucket, BatchRecords data) throws Exception {
-        WriterContainer<T> container = getWriterWrapper(partition, bucket);
-        container.writer.writeBatch(data);
     }
 
     @Override

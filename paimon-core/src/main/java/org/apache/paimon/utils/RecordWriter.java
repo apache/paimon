@@ -18,7 +18,6 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.paimon.io.BatchRecords;
 import org.apache.paimon.io.DataFileMeta;
 
 import java.util.Collection;
@@ -35,11 +34,6 @@ public interface RecordWriter<T> {
 
     /** Add a key-value element to the writer. */
     void write(T record) throws Exception;
-
-    /** Add a batch elemens to the writer. */
-    default void writeBatch(BatchRecords record) throws Exception {
-        throw new UnsupportedOperationException("Not supported");
-    }
 
     /**
      * Compact files related to the writer. Note that compaction process is only submitted and may
