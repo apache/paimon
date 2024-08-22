@@ -29,7 +29,7 @@ import org.apache.arrow.vector.FieldVector;
 import static org.apache.paimon.arrow.ArrowUtils.createVector;
 
 /** Convert a static value to a FieldVector. */
-public class StaticElementConverter {
+public class OneElementFieldVectorGenerator implements AutoCloseable {
 
     private final GenericRow row;
     private final FieldVector fieldVector;
@@ -37,7 +37,7 @@ public class StaticElementConverter {
 
     private int pos = 0;
 
-    public StaticElementConverter(
+    public OneElementFieldVectorGenerator(
             BufferAllocator bufferAllocator, DataField dataField, Object value) {
         fieldVector = createVector(dataField, bufferAllocator, false);
         writer =
@@ -49,7 +49,7 @@ public class StaticElementConverter {
         row.setField(0, value);
     }
 
-    FieldVector generate(int rowCount) {
+    FieldVector get(int rowCount) {
         if (rowCount > pos) {
             for (int i = pos; i < rowCount; i++) {
                 writer.write(i, row, 0);
@@ -58,5 +58,10 @@ public class StaticElementConverter {
         }
         fieldVector.setValueCount(rowCount);
         return fieldVector;
+    }
+
+    @Override
+    public void close() {
+        fieldVector.close();
     }
 }

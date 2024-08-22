@@ -35,8 +35,8 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 
-/** Test for {@link StaticElementConverter}. */
-public class StaticElementConverterTest {
+/** Test for {@link OneElementFieldVectorGenerator}. */
+public class OneElementFieldVectorGeneratorTest {
 
     @Test
     public void testFunction() {
@@ -45,9 +45,9 @@ public class StaticElementConverterTest {
             GenericRow genericRow = new GenericRow(1);
             Object value = BinaryString.fromString("aklsdfjaklfjasklfd");
             genericRow.setField(0, value);
-            StaticElementConverter staticElementConverter =
-                    new StaticElementConverter(rootAllocator, dataField, value);
-            try (FieldVector fieldVector = staticElementConverter.generate(10000)) {
+            OneElementFieldVectorGenerator oneElementFieldVectorGenerator =
+                    new OneElementFieldVectorGenerator(rootAllocator, dataField, value);
+            try (FieldVector fieldVector = oneElementFieldVectorGenerator.get(10000)) {
                 ArrowBatchReader reader =
                         new ArrowBatchReader(new RowType(Arrays.asList(dataField)));
                 Iterable<InternalRow> it =
@@ -64,9 +64,9 @@ public class StaticElementConverterTest {
             GenericRow genericRow = new GenericRow(1);
             Object value = 10086;
             genericRow.setField(0, value);
-            StaticElementConverter staticElementConverter =
-                    new StaticElementConverter(rootAllocator, dataField, value);
-            try (FieldVector fieldVector = staticElementConverter.generate(10000)) {
+            try (OneElementFieldVectorGenerator oneElementFieldVectorGenerator =
+                    new OneElementFieldVectorGenerator(rootAllocator, dataField, value)) {
+                FieldVector fieldVector = oneElementFieldVectorGenerator.get(10000);
                 ArrowBatchReader reader =
                         new ArrowBatchReader(new RowType(Arrays.asList(dataField)));
                 Iterable<InternalRow> it =
@@ -80,9 +80,9 @@ public class StaticElementConverterTest {
             GenericRow genericRow = new GenericRow(1);
             Object value = Timestamp.fromEpochMillis(10086);
             genericRow.setField(0, value);
-            StaticElementConverter staticElementConverter =
-                    new StaticElementConverter(rootAllocator, dataField, value);
-            try (FieldVector fieldVector = staticElementConverter.generate(100000)) {
+            OneElementFieldVectorGenerator oneElementFieldVectorGenerator =
+                    new OneElementFieldVectorGenerator(rootAllocator, dataField, value);
+            try (FieldVector fieldVector = oneElementFieldVectorGenerator.get(100000)) {
                 Assertions.assertThat(fieldVector.getValueCount()).isEqualTo(100000);
                 ArrowBatchReader reader =
                         new ArrowBatchReader(new RowType(Arrays.asList(dataField)));
