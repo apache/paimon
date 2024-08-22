@@ -75,6 +75,14 @@ under the License.
             If the keys are not in source table, the sink table won't set partition keys.</td>
     </tr>
     <tr>
+        <td><h5>--multiple_table_partition_keys</h5></td>
+        <td>The partition keys for each different Paimon table. If there are multiple partition keys, connect them with comma, for example
+            <li>--multiple_table_partition_keys  tableName1=col1,col2.col3</li>
+            <li>--multiple_table_partition_keys  tableName2=col4,col5.col6</li>
+            <li>--multiple_table_partition_keys  tableName3=col7,col8.col9</li>
+            If the keys are not in source table, the sink table won't set partition keys.</td>
+    </tr>
+    <tr>
         <td><h5>--primary_keys</h5></td>
         <td>The primary keys for Paimon table. If there are multiple primary keys, connect them with comma, for example "buyer_id,seller_id".
             If the keys are not in source table, but the source table has primary keys, the sink table will use source table's primary keys.

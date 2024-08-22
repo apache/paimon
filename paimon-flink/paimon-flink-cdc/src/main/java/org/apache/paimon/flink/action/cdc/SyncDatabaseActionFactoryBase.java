@@ -26,6 +26,7 @@ import java.util.Optional;
 
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.EXCLUDING_TABLES;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.INCLUDING_TABLES;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.MULTIPLE_TABLE_PARTITION_KEYS;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PARTITION_KEYS;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PRIMARY_KEYS;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_PREFIX;
@@ -52,6 +53,8 @@ public abstract class SyncDatabaseActionFactoryBase<T extends SyncDatabaseAction
                 .withTableSuffix(params.get(TABLE_SUFFIX))
                 .includingTables(params.get(INCLUDING_TABLES))
                 .excludingTables(params.get(EXCLUDING_TABLES))
+                .withPartitionKeyMultiple(
+                        optionalConfigMapList(params, MULTIPLE_TABLE_PARTITION_KEYS))
                 .withPartitionKeys();
 
         if (params.has(PARTITION_KEYS)) {
