@@ -427,7 +427,6 @@ public class TestCachedClientPool {
                                                 throw new RuntimeException(e);
                                             }
                                         });
-        ;
 
         // contain default database
         assertThat(catalog.listDatabases()).contains("default");
