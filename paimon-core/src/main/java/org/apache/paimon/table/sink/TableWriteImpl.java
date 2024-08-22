@@ -248,8 +248,8 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     }
 
     @Override
-    public void writeBatch(BinaryRow partition, BatchRecords batch) throws Exception {
-        write.writeBatch(partition, 0, batch);
+    public void writeBatch(BinaryRow partition, int bucket, BatchRecords batch) throws Exception {
+        write.writeBatch(partition, bucket, batch);
     }
 
     @Override

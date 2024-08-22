@@ -40,5 +40,5 @@ public interface BatchTableWrite extends TableWrite {
     List<CommitMessage> prepareCommit() throws Exception;
 
     /** Write a batch records directly, not per row. */
-    void writeBatch(BinaryRow partition, BatchRecords batch) throws Exception;
+    void writeBatch(BinaryRow partition, int bucket, BatchRecords batch) throws Exception;
 }
