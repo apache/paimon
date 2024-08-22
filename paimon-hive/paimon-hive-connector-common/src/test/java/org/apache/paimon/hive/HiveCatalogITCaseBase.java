@@ -379,9 +379,10 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql("USE CATALOG paimon_catalog_sync").await();
         tEnv.executeSql("USE test_db").await();
         tEnv.executeSql(
-                        "CREATE TABLE t01 ( aa INT, bb STRING, cc STRING, PRIMARY KEY (cc, aa) NOT ENFORCED) PARTITIONED BY (cc) WITH ('file.format' = 'avro')")
+                        "CREATE TABLE t01 ( aa INT, bb STRING, cc STRING, PRIMARY KEY (cc, aa) NOT ENFORCED) PARTITIONED BY (cc) WITH ('file.format' = 'avro', 'bucket' = '3')")
                 .await();
         // assert contain properties
+        List<String> descFormattedT01 = hiveShell.executeQuery("DESC FORMATTED t01");
         assertThat(
                         hiveShell
                                 .executeQuery("DESC FORMATTED t01")
@@ -404,6 +405,12 @@ public abstract class HiveCatalogITCaseBase {
                         hiveShell
                                 .executeQuery("DESC FORMATTED t01")
                                 .contains("\tbucket-id           \taa                  "))
+                .isTrue();
+
+        assertThat(
+                        hiveShell
+                                .executeQuery("DESC FORMATTED t01")
+                                .contains("\tbucket              \t3                   "))
                 .isTrue();
 
         tEnv.executeSql("ALTER TABLE t01 SET ( 'file.format' = 'parquet' )").await();
@@ -436,10 +443,11 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql("USE CATALOG paimon_catalog_sync01").await();
         tEnv.executeSql("USE test_db").await();
         tEnv.executeSql(
-                        "CREATE TABLE t02 ( aa INT, bb STRING, cc STRING, PRIMARY KEY (cc, aa) NOT ENFORCED) PARTITIONED BY (cc) WITH ('file.format' = 'avro')")
+                        "CREATE TABLE t02 ( aa INT, bb STRING, cc STRING, PRIMARY KEY (cc, aa) NOT ENFORCED) PARTITIONED BY (cc) WITH ('file.format' = 'avro', 'bucket' = '3')")
                 .await();
 
         // assert not contain properties
+        List<String> descFormattedT02 = hiveShell.executeQuery("DESC FORMATTED t02");
         assertThat(
                         hiveShell
                                 .executeQuery("DESC FORMATTED t02")
@@ -462,6 +470,12 @@ public abstract class HiveCatalogITCaseBase {
                         hiveShell
                                 .executeQuery("DESC FORMATTED t02")
                                 .contains("\tbucket-id           \taa                  "))
+                .isFalse();
+
+        assertThat(
+                        hiveShell
+                                .executeQuery("DESC FORMATTED t02")
+                                .contains("\tbucket              \t3                   "))
                 .isFalse();
 
         tEnv.executeSql("ALTER TABLE t02 SET ( 'file.format' = 'parquet' )").await();

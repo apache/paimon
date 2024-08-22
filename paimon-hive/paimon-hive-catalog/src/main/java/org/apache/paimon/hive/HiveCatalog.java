@@ -528,6 +528,7 @@ public class HiveCatalog extends AbstractCatalog {
             if (!tableSchema.bucketKeys().isEmpty()) {
                 tblProperties.put("bucket-id", String.join(",", tableSchema.bucketKeys()));
             }
+            tblProperties.put("bucket", String.valueOf(tableSchema.numBuckets()));
         } else {
             tblProperties = convertToPropertiesPrefixKey(tableSchema.options(), HIVE_PREFIX);
         }
