@@ -23,6 +23,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.io.BatchRecords;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.memory.MemorySegmentPool;
@@ -244,6 +245,11 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         checkState(!batchCommitted, "BatchTableWrite only support one-time committing.");
         batchCommitted = true;
         return prepareCommit(true, BatchWriteBuilder.COMMIT_IDENTIFIER);
+    }
+
+    @Override
+    public void writeBatch(BinaryRow partition, BatchRecords batch) throws Exception {
+        write.writeBatch(partition, 0, batch);
     }
 
     @Override

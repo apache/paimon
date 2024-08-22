@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.index.IndexMaintainer;
+import org.apache.paimon.io.BatchRecords;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.memory.MemorySegmentPool;
@@ -103,6 +104,16 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
      * @throws Exception the thrown exception when writing the record
      */
     void write(BinaryRow partition, int bucket, T data) throws Exception;
+
+    /**
+     * Write the batch data to the store according to the partition and bucket.
+     *
+     * @param partition the partition of the data
+     * @param bucket the bucket id of the data
+     * @param data the given data
+     * @throws Exception the thrown exception when writing the record
+     */
+    void writeBatch(BinaryRow partition, int bucket, BatchRecords data) throws Exception;
 
     /**
      * Compact data stored in given partition and bucket. Note that compaction process is only

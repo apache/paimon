@@ -16,29 +16,9 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.sink;
+package org.apache.paimon.io;
 
-import org.apache.paimon.annotation.Public;
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.io.BatchRecords;
+public interface BatchRecords {
 
-import java.util.List;
-
-/**
- * A {@link TableWrite} for batch processing. Recommended for one-time committing.
- *
- * @since 0.4.0
- */
-@Public
-public interface BatchTableWrite extends TableWrite {
-
-    /**
-     * Prepare commit for {@link TableCommit}. Collect incremental files for this write.
-     *
-     * @see BatchTableCommit#commit
-     */
-    List<CommitMessage> prepareCommit() throws Exception;
-
-    /** Write a batch records directly, not per row. */
-    void writeBatch(BinaryRow partition, BatchRecords batch) throws Exception;
+    long rowCount();
 }

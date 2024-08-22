@@ -94,6 +94,15 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
         writeImpl(record);
     }
 
+    public void writeBatch(BatchRecords batchRecords) throws IOException {
+        if (closed) {
+            throw new RuntimeException("Writer has already closed!");
+        }
+
+        writer.write(batchRecords);
+        recordCount += batchRecords.rowCount();
+    }
+
     protected InternalRow writeImpl(T record) throws IOException {
         if (closed) {
             throw new RuntimeException("Writer has already closed!");
