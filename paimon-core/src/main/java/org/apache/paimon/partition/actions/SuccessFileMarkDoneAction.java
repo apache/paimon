@@ -46,11 +46,10 @@ public class SuccessFileMarkDoneAction implements PartitionMarkDoneAction {
         Path successPath = new Path(partitionPath, SUCCESS_FILE_NAME);
 
         long currentTime = System.currentTimeMillis();
-        SuccessFile successFile = SuccessFile.safelyFromPath(fileIO, successPath);
-        if (successFile == null) {
-            successFile = new SuccessFile(currentTime, currentTime);
-        } else {
-            successFile = successFile.updateModificationTime(currentTime);
+        SuccessFile successFile = new SuccessFile(currentTime, currentTime);
+        if (fileIO.exists(successPath)) {
+            successFile =
+                    SuccessFile.fromPath(fileIO, successPath).updateModificationTime(currentTime);
         }
         fileIO.overwriteFileUtf8(successPath, successFile.toJson());
     }

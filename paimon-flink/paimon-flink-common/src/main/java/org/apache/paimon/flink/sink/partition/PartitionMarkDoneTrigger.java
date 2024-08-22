@@ -31,6 +31,8 @@ import org.apache.flink.api.common.state.OperatorStateStore;
 import org.apache.flink.api.common.typeutils.base.ListSerializer;
 import org.apache.flink.api.common.typeutils.base.StringSerializer;
 
+import javax.annotation.Nullable;
+
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -57,17 +59,19 @@ public class PartitionMarkDoneTrigger {
 
     private final State state;
     private final PartitionTimeExtractor timeExtractor;
-    private long timeInterval;
-    private long idleTime;
-    private final boolean partitionMarkDoneWhenEndInput;
+    // can be null when markDoneWhenEndInput is true
+    @Nullable private final Long timeInterval;
+    // can be null when markDoneWhenEndInput is true
+    @Nullable private final Long idleTime;
+    private final boolean markDoneWhenEndInput;
     private final Map<String, Long> pendingPartitions;
 
     public PartitionMarkDoneTrigger(
             State state,
             PartitionTimeExtractor timeExtractor,
-            Duration timeInterval,
-            Duration idleTime,
-            boolean partitionMarkDoneWhenEndInput)
+            @Nullable Duration timeInterval,
+            @Nullable Duration idleTime,
+            boolean markDoneWhenEndInput)
             throws Exception {
         this(
                 state,
@@ -75,27 +79,23 @@ public class PartitionMarkDoneTrigger {
                 timeInterval,
                 idleTime,
                 System.currentTimeMillis(),
-                partitionMarkDoneWhenEndInput);
+                markDoneWhenEndInput);
     }
 
     public PartitionMarkDoneTrigger(
             State state,
             PartitionTimeExtractor timeExtractor,
-            Duration timeInterval,
-            Duration idleTime,
+            @Nullable Duration timeInterval,
+            @Nullable Duration idleTime,
             long currentTimeMillis,
-            boolean partitionMarkDoneWhenEndInput)
+            boolean markDoneWhenEndInput)
             throws Exception {
         this.pendingPartitions = new HashMap<>();
         this.state = state;
         this.timeExtractor = timeExtractor;
-        if (timeInterval != null) {
-            this.timeInterval = timeInterval.toMillis();
-        }
-        if (idleTime != null) {
-            this.idleTime = idleTime.toMillis();
-        }
-        this.partitionMarkDoneWhenEndInput = partitionMarkDoneWhenEndInput;
+        this.timeInterval = timeInterval == null ? null : timeInterval.toMillis();
+        this.idleTime = idleTime == null ? null : idleTime.toMillis();
+        this.markDoneWhenEndInput = markDoneWhenEndInput;
         state.restore().forEach(p -> pendingPartitions.put(p, currentTimeMillis));
     }
 
@@ -103,7 +103,8 @@ public class PartitionMarkDoneTrigger {
         notifyPartition(partition, System.currentTimeMillis());
     }
 
-    public void notifyPartition(String partition, long currentTimeMillis) {
+    @VisibleForTesting
+    void notifyPartition(String partition, long currentTimeMillis) {
         if (!StringUtils.isNullOrWhitespaceOnly(partition)) {
             this.pendingPartitions.put(partition, currentTimeMillis);
         }
@@ -113,9 +114,14 @@ public class PartitionMarkDoneTrigger {
         return donePartitions(endInput, System.currentTimeMillis());
     }
 
-    public List<String> donePartitions(boolean endInput, long currentTimeMillis) {
-        if (endInput && partitionMarkDoneWhenEndInput) {
+    @VisibleForTesting
+    List<String> donePartitions(boolean endInput, long currentTimeMillis) {
+        if (endInput && markDoneWhenEndInput) {
             return new ArrayList<>(pendingPartitions.keySet());
+        }
+
+        if (timeInterval == null || idleTime == null) {
+            return Collections.emptyList();
         }
 
         List<String> needDone = new ArrayList<>();
