@@ -39,7 +39,7 @@ public interface RecordWriter<T> {
     /** Add a batch elemens to the writer. */
     default void writeBatch(BatchRecords record) throws Exception {
         throw new UnsupportedOperationException("Not supported");
-    };
+    }
 
     /**
      * Compact files related to the writer. Note that compaction process is only submitted and may

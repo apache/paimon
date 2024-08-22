@@ -99,7 +99,7 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
             throw new RuntimeException("Writer has already closed!");
         }
 
-        writer.write(batchRecords);
+        writer.writeBatch(batchRecords);
         recordCount += batchRecords.rowCount();
     }
 

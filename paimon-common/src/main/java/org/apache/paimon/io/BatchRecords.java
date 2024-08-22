@@ -18,7 +18,10 @@
 
 package org.apache.paimon.io;
 
+/** Interface of Batch records. */
 public interface BatchRecords {
 
     long rowCount();
+
+    Object data();
 }
