@@ -52,7 +52,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.hive.HiveCatalogOptions.CLIENT_POOL_CACHE_EVICTION_INTERVAL_MS;
 import static org.apache.paimon.hive.HiveCatalogOptions.CLIENT_POOL_CACHE_KEYS;
@@ -269,11 +268,6 @@ public class CachedClientPool implements ClientPool<IMetaStoreClient, TException
                 }
             }
             return hashCode;
-        }
-
-        @Override
-        public String toString() {
-            return elements.stream().map(Object::toString).collect(Collectors.joining(","));
         }
     }
 

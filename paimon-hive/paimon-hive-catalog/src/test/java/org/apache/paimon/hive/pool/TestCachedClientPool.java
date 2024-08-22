@@ -381,7 +381,9 @@ public class TestCachedClientPool {
                                                 options.set(
                                                         "hive.metastore.uris",
                                                         "thrift://30.150.24.155:9083");
-                                                options.set("client-pool-cache.keys", "user_name,conf:*");
+                                                options.set(
+                                                        "client-pool-cache.keys",
+                                                        "user_name,conf:*");
 
                                                 // hive config
                                                 HiveConf hiveConf = new HiveConf();
@@ -465,9 +467,11 @@ public class TestCachedClientPool {
 
     @Test
     public void testUgi() throws IOException {
-        UserGroupInformation user1 = UserGroupInformation.createProxyUser("hive", UserGroupInformation.getCurrentUser());
-        UserGroupInformation user2 = UserGroupInformation.createProxyUser("hive", UserGroupInformation.getCurrentUser());
-        System.out.println(user1.hashCode()==user2.hashCode());
+        UserGroupInformation user1 =
+                UserGroupInformation.createProxyUser("hive", UserGroupInformation.getCurrentUser());
+        UserGroupInformation user2 =
+                UserGroupInformation.createProxyUser("hive", UserGroupInformation.getCurrentUser());
+        System.out.println(user1.hashCode() == user2.hashCode());
         System.out.println(user1.equals(user2));
     }
 }
