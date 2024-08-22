@@ -35,9 +35,11 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.TimeZone;
 
 /**
  * Provides a base implementation for parsing messages of various formats into {@link
@@ -52,6 +54,7 @@ public abstract class AbstractRecordParser
 
     private static final Logger LOG = LoggerFactory.getLogger(AbstractRecordParser.class);
 
+    protected static final ZoneId LOCAL_TZ = TimeZone.getDefault().toZoneId();
     protected static final String FIELD_TABLE = "table";
     protected static final String FIELD_DATABASE = "database";
     protected final TypeMapping typeMapping;
