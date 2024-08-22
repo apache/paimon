@@ -65,7 +65,6 @@ import static org.apache.paimon.options.CatalogOptions.CLIENT_POOL_SIZE;
 public class CachedClientPool implements ClientPool<IMetaStoreClient, TException> {
 
     private static final String CONF_ELEMENT_PREFIX = "conf:";
-    private static final String CONF_OPTIONS_ALL = "*";
 
     private static Cache<Key, HiveClientPool> clientPoolCache;
 
@@ -79,7 +78,7 @@ public class CachedClientPool implements ClientPool<IMetaStoreClient, TException
         this.conf = conf;
         this.clientPoolSize = options.get(CLIENT_POOL_SIZE);
         this.evictionInterval = options.get(CLIENT_POOL_CACHE_EVICTION_INTERVAL_MS);
-        this.key = extractKey(options.get(CLIENT_POOL_CACHE_KEYS), conf, options);
+        this.key = extractKey(options.get(CLIENT_POOL_CACHE_KEYS), conf);
         this.clientClassName = clientClassName;
         init();
         // set ugi information to hms client
@@ -153,7 +152,7 @@ public class CachedClientPool implements ClientPool<IMetaStoreClient, TException
     }
 
     @VisibleForTesting
-    static Key extractKey(String cacheKeys, Configuration conf, Options options) {
+    static Key extractKey(String cacheKeys, Configuration conf) {
         // generate key elements in a certain order, so that the Key instances are comparable
         List<Object> elements = Lists.newArrayList();
         elements.add(conf.get(HiveConf.ConfVars.METASTOREURIS.varname, ""));
@@ -168,15 +167,12 @@ public class CachedClientPool implements ClientPool<IMetaStoreClient, TException
             String trimmed = element.trim();
             if (trimmed.toLowerCase(Locale.ROOT).startsWith(CONF_ELEMENT_PREFIX)) {
                 String key = trimmed.substring(CONF_ELEMENT_PREFIX.length());
-                String value = CONF_OPTIONS_ALL;
-                if (!CONF_OPTIONS_ALL.equals(key)) {
-                    Preconditions.checkArgument(
-                            !confElements.containsKey(key),
-                            "Conf key element %s already specified",
-                            key);
-                    value = confElements.get(key);
-                }
-                confElements.put(key, value);
+
+                Preconditions.checkArgument(
+                        !confElements.containsKey(key),
+                        "Conf key element %s already specified",
+                        key);
+                confElements.put(key, conf.get(key));
             } else {
                 KeyElementType type = KeyElementType.valueOf(trimmed.toUpperCase());
                 switch (type) {
@@ -214,11 +210,7 @@ public class CachedClientPool implements ClientPool<IMetaStoreClient, TException
             }
         }
         for (String key : confElements.keySet()) {
-            if (CONF_OPTIONS_ALL.equals(confElements.get(key))) {
-                elements.add(options);
-            } else {
-                elements.add(ConfElement.of(key, confElements.get(key)));
-            }
+            elements.add(ConfElement.of(key, confElements.get(key)));
         }
         return Key.of(elements);
     }
