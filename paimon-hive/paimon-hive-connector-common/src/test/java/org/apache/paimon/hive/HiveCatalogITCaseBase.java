@@ -379,7 +379,7 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql("USE CATALOG paimon_catalog_sync").await();
         tEnv.executeSql("USE test_db").await();
         tEnv.executeSql(
-                        "CREATE TABLE t01 ( aa INT, bb STRING, cc STRING, PRIMARY KEY (cc, aa)) PARTITIONED BY (cc) WITH ('file.format' = 'avro')")
+                        "CREATE TABLE t01 ( aa INT, bb STRING, cc STRING, PRIMARY KEY (cc, aa) NOT ENFORCED) PARTITIONED BY (cc) WITH ('file.format' = 'avro')")
                 .await();
         // assert contain properties
         assertThat(
@@ -391,13 +391,19 @@ public abstract class HiveCatalogITCaseBase {
         assertThat(
                         hiveShell
                                 .executeQuery("DESC FORMATTED t01")
-                                .contains("\tfile.format         \tavro                "))
+                                .contains("\tprimary-key         \tcc,aa               "))
                 .isTrue();
 
         assertThat(
                         hiveShell
                                 .executeQuery("DESC FORMATTED t01")
-                                .contains("\tfile.format         \tavro                "))
+                                .contains("\tpartition-key       \tcc                  "))
+                .isTrue();
+
+        assertThat(
+                        hiveShell
+                                .executeQuery("DESC FORMATTED t01")
+                                .contains("\tbucket-id           \taa                  "))
                 .isTrue();
 
         tEnv.executeSql("ALTER TABLE t01 SET ( 'file.format' = 'parquet' )").await();
@@ -429,7 +435,8 @@ public abstract class HiveCatalogITCaseBase {
                 .await();
         tEnv.executeSql("USE CATALOG paimon_catalog_sync01").await();
         tEnv.executeSql("USE test_db").await();
-        tEnv.executeSql("CREATE TABLE t02 ( aa INT, bb STRING ) WITH ( 'file.format' = 'avro' )")
+        tEnv.executeSql(
+                        "CREATE TABLE t02 ( aa INT, bb STRING, cc STRING, PRIMARY KEY (cc, aa) NOT ENFORCED) PARTITIONED BY (cc) WITH ('file.format' = 'avro')")
                 .await();
 
         // assert not contain properties
@@ -437,6 +444,24 @@ public abstract class HiveCatalogITCaseBase {
                         hiveShell
                                 .executeQuery("DESC FORMATTED t02")
                                 .contains("\tfile.format         \tavro                "))
+                .isFalse();
+
+        assertThat(
+                        hiveShell
+                                .executeQuery("DESC FORMATTED t02")
+                                .contains("\tprimary-key         \tcc,aa               "))
+                .isFalse();
+
+        assertThat(
+                        hiveShell
+                                .executeQuery("DESC FORMATTED t02")
+                                .contains("\tpartition-key       \tcc                  "))
+                .isFalse();
+
+        assertThat(
+                        hiveShell
+                                .executeQuery("DESC FORMATTED t02")
+                                .contains("\tbucket-id           \taa                  "))
                 .isFalse();
 
         tEnv.executeSql("ALTER TABLE t02 SET ( 'file.format' = 'parquet' )").await();
