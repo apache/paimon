@@ -28,6 +28,7 @@ import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.BatchRecords;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
@@ -170,6 +171,14 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
                 throw new RuntimeException("Mem table is too small to hold a single element.");
             }
         }
+    }
+
+    @Override
+    public void writeBatch(BatchRecords batchRecords) throws Exception {
+        if (sinkWriter instanceof BufferedSinkWriter) {
+            throw new RuntimeException("Not suppor BufferedSinkWriter.");
+        }
+        ((DirectSinkWriter) sinkWriter).writeBatch(batchRecords);
     }
 
     @Override
@@ -388,6 +397,14 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
                 writer = createRollingRowWriter();
             }
             writer.write(data);
+            return true;
+        }
+
+        public boolean writeBatch(BatchRecords batch) throws IOException {
+            if (writer == null) {
+                writer = createRollingRowWriter();
+            }
+            writer.writeBatch(batch);
             return true;
         }
 
