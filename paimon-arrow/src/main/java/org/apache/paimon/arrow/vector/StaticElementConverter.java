@@ -21,7 +21,6 @@ package org.apache.paimon.arrow.vector;
 import org.apache.paimon.arrow.writer.ArrowFieldWriter;
 import org.apache.paimon.arrow.writer.ArrowFieldWriterFactoryVisitor;
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.DataField;
 
 import org.apache.arrow.memory.BufferAllocator;
