@@ -91,8 +91,7 @@ public abstract class FormatReadWriteTest {
         writer.addElement(GenericRow.of(1, 1L));
         writer.addElement(GenericRow.of(2, 2L));
         writer.addElement(GenericRow.of(3, null));
-        writer.flush();
-        writer.finish();
+        writer.close();
         out.close();
 
         RecordReader<InternalRow> reader =
@@ -120,8 +119,7 @@ public abstract class FormatReadWriteTest {
         PositionOutputStream out = fileIO.newOutputStream(file, false);
         FormatWriter writer = format.createWriterFactory(rowType).create(out, "zstd");
         writer.addElement(expected);
-        writer.flush();
-        writer.finish();
+        writer.close();
         out.close();
 
         RecordReader<InternalRow> reader =

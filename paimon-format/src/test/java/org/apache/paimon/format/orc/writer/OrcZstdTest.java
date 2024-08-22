@@ -109,7 +109,7 @@ class OrcZstdTest {
                                     UUID.randomUUID().toString() + random.nextInt()));
             formatWriter.addElement(element);
         }
-        formatWriter.finish();
+        formatWriter.close();
         OrcFile.ReaderOptions readerOptions = OrcFile.readerOptions(new Configuration());
         Reader reader =
                 OrcFile.createReader(new org.apache.hadoop.fs.Path(path.toString()), readerOptions);

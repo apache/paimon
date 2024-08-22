@@ -141,13 +141,8 @@ public class AvroFileFormat extends FileFormat {
                 }
 
                 @Override
-                public void flush() throws IOException {
-                    writer.flush();
-                }
-
-                @Override
-                public void finish() throws IOException {
-                    writer.finish();
+                public void close() throws IOException {
+                    writer.close();
                 }
 
                 @Override

@@ -48,12 +48,7 @@ public class ParquetBulkWriter implements FormatWriter {
     }
 
     @Override
-    public void flush() {
-        // nothing we can do here
-    }
-
-    @Override
-    public void finish() throws IOException {
+    public void close() throws IOException {
         parquetWriter.close();
     }
 
