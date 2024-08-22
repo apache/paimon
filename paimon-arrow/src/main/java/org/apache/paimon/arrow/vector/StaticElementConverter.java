@@ -21,6 +21,7 @@ package org.apache.paimon.arrow.vector;
 import org.apache.paimon.arrow.writer.ArrowFieldWriter;
 import org.apache.paimon.arrow.writer.ArrowFieldWriterFactoryVisitor;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.DataField;
 
 import org.apache.arrow.memory.BufferAllocator;
@@ -28,7 +29,7 @@ import org.apache.arrow.vector.FieldVector;
 
 import static org.apache.paimon.arrow.ArrowUtils.createVector;
 
-/** Convert a static value which contained in InternalRow to a FieldVector. */
+/** Convert a static value to a FieldVector. */
 public class StaticElementConverter {
 
     private final GenericRow row;
