@@ -43,9 +43,10 @@ public class StaticElementConverterTest {
         try (RootAllocator rootAllocator = new RootAllocator()) {
             DataField dataField = new DataField(0, "id", DataTypes.STRING());
             GenericRow genericRow = new GenericRow(1);
-            genericRow.setField(0, BinaryString.fromString("aklsdfjaklfjasklfd"));
+            Object value = BinaryString.fromString("aklsdfjaklfjasklfd");
+            genericRow.setField(0, value);
             StaticElementConverter staticElementConverter =
-                    new StaticElementConverter(rootAllocator, dataField, genericRow);
+                    new StaticElementConverter(rootAllocator, dataField, value);
             try (FieldVector fieldVector = staticElementConverter.generate(10000)) {
                 ArrowBatchReader reader =
                         new ArrowBatchReader(new RowType(Arrays.asList(dataField)));
@@ -61,9 +62,10 @@ public class StaticElementConverterTest {
         try (RootAllocator rootAllocator = new RootAllocator()) {
             DataField dataField = new DataField(0, "id", DataTypes.INT());
             GenericRow genericRow = new GenericRow(1);
-            genericRow.setField(0, 10086);
+            Object value = 10086;
+            genericRow.setField(0, value);
             StaticElementConverter staticElementConverter =
-                    new StaticElementConverter(rootAllocator, dataField, genericRow);
+                    new StaticElementConverter(rootAllocator, dataField, value);
             try (FieldVector fieldVector = staticElementConverter.generate(10000)) {
                 ArrowBatchReader reader =
                         new ArrowBatchReader(new RowType(Arrays.asList(dataField)));
@@ -76,9 +78,10 @@ public class StaticElementConverterTest {
         try (RootAllocator rootAllocator = new RootAllocator()) {
             DataField dataField = new DataField(0, "id", DataTypes.TIMESTAMP(6));
             GenericRow genericRow = new GenericRow(1);
-            genericRow.setField(0, Timestamp.fromEpochMillis(10086));
+            Object value = Timestamp.fromEpochMillis(10086);
+            genericRow.setField(0, value);
             StaticElementConverter staticElementConverter =
-                    new StaticElementConverter(rootAllocator, dataField, genericRow);
+                    new StaticElementConverter(rootAllocator, dataField, value);
             try (FieldVector fieldVector = staticElementConverter.generate(100000)) {
                 Assertions.assertThat(fieldVector.getValueCount()).isEqualTo(100000);
                 ArrowBatchReader reader =
