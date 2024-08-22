@@ -29,6 +29,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.StringUtils;
 
+import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -100,6 +101,48 @@ public class ArrowFormatWriterTest {
 
             ArrowBatchReader arrowBatchReader = new ArrowBatchReader(PRIMITIVE_TYPE);
             Iterable<InternalRow> rows = arrowBatchReader.readBatch(vectorSchemaRoot);
+
+            Iterator<InternalRow> iterator = rows.iterator();
+            for (int i = 0; i < 1000; i++) {
+                InternalRow actual = iterator.next();
+                InternalRow expectec = list.get(i);
+
+                for (InternalRow.FieldGetter fieldGetter : fieldGetters) {
+                    Assertions.assertThat(fieldGetter.getFieldOrNull(actual))
+                            .isEqualTo(fieldGetter.getFieldOrNull(expectec));
+                }
+            }
+        }
+    }
+
+    @Test
+    public void testReadWithSchemaMessUp() {
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(PRIMITIVE_TYPE, 4096)) {
+            List<InternalRow> list = new ArrayList<>();
+            List<InternalRow.FieldGetter> fieldGetters = new ArrayList<>();
+
+            for (int i = 0; i < PRIMITIVE_TYPE.getFieldCount(); i++) {
+                fieldGetters.add(InternalRow.createFieldGetter(PRIMITIVE_TYPE.getTypeAt(i), i));
+            }
+            for (int i = 0; i < 1000; i++) {
+                list.add(GenericRow.of(randomRowValues(null)));
+            }
+
+            list.forEach(writer::write);
+
+            writer.flush();
+            VectorSchemaRoot vectorSchemaRoot = writer.getVectorSchemaRoot();
+
+            // mess up the fields
+            List<FieldVector> vectors = vectorSchemaRoot.getFieldVectors();
+            FieldVector vector0 = vectors.get(0);
+            for (int i = 0; i < vectors.size() - 1; i++) {
+                vectors.set(i, vectors.get(i + 1));
+            }
+            vectors.set(vectors.size() - 1, vector0);
+
+            ArrowBatchReader arrowBatchReader = new ArrowBatchReader(PRIMITIVE_TYPE);
+            Iterable<InternalRow> rows = arrowBatchReader.readBatch(new VectorSchemaRoot(vectors));
 
             Iterator<InternalRow> iterator = rows.iterator();
             for (int i = 0; i < 1000; i++) {
