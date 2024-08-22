@@ -73,7 +73,8 @@ public class RollingFileWriterTest {
                                                         new Path(tempDir + "/bucket-0"),
                                                         CoreOptions.FILE_FORMAT
                                                                 .defaultValue()
-                                                                .toString())
+                                                                .toString(),
+                                                        CoreOptions.FILE_PREFIX.defaultValue())
                                                 .newPath(),
                                         SCHEMA,
                                         fileFormat

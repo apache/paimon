@@ -41,16 +41,21 @@ public class DataFilePathFactory {
 
     private final AtomicInteger pathCount;
     private final String formatIdentifier;
+    private final String filePrefix;
 
-    public DataFilePathFactory(Path parent, String formatIdentifier) {
+    public DataFilePathFactory(Path parent, String formatIdentifier, String filePrefix) {
         this.parent = parent;
         this.uuid = UUID.randomUUID().toString();
 
         this.pathCount = new AtomicInteger(0);
         this.formatIdentifier = formatIdentifier;
+        this.filePrefix = filePrefix;
     }
 
     public Path newPath() {
+        if (filePrefix != null) {
+            return newPath(filePrefix);
+        }
         return newPath(DATA_FILE_PREFIX);
     }
 

@@ -25,6 +25,7 @@ import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
@@ -32,6 +33,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.util.Comparator;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -223,5 +225,67 @@ public class SparkWriteITCase {
 
         rows = spark.sql("SELECT max(bucket) FROM `T$FILES`").collectAsList();
         assertThat(rows.toString()).isEqualTo("[[0]]");
+    }
+
+    @Test
+    public void testDefaultDataFilePrefix() {
+        spark.sql("CREATE TABLE T (a INT, b INT, c STRING)");
+
+        spark.sql("INSERT INTO T VALUES (1, 1, 'aa')");
+        spark.sql("INSERT INTO T VALUES (2, 2, 'bb')");
+        spark.sql("INSERT INTO T VALUES (3, 3, 'cc')");
+
+        List<Row> data = spark.sql("SELECT * FROM T").collectAsList();
+        assertThat(data.toString()).isEqualTo("[[1,1,aa], [2,2,bb], [3,3,cc]]");
+
+        List<Row> rows = spark.sql("select file_path from `T$files`").collectAsList();
+        List<String> fileNames =
+                rows.stream().map(x -> x.getString(0)).collect(Collectors.toList());
+        Assertions.assertEquals(3, fileNames.size());
+        for (String fileName : fileNames) {
+            Assertions.assertTrue(fileName.startsWith("data-"));
+        }
+    }
+
+    @Test
+    public void testDataFilePrefixForAppendOnlyTable() {
+        spark.sql("CREATE TABLE T (a INT, b INT, c STRING)");
+
+        spark.conf().set("spark.paimon.file.prefix", "test-");
+        spark.sql("INSERT INTO T VALUES (1, 1, 'aa')");
+        spark.sql("INSERT INTO T VALUES (2, 2, 'bb')");
+        spark.sql("INSERT INTO T VALUES (3, 3, 'cc')");
+
+        List<Row> data = spark.sql("SELECT * FROM T").collectAsList();
+        assertThat(data.toString()).isEqualTo("[[1,1,aa], [2,2,bb], [3,3,cc]]");
+
+        List<Row> rows = spark.sql("select file_path from `T$files`").collectAsList();
+        List<String> fileNames =
+                rows.stream().map(x -> x.getString(0)).collect(Collectors.toList());
+        Assertions.assertEquals(3, fileNames.size());
+        for (String fileName : fileNames) {
+            Assertions.assertTrue(fileName.startsWith("test-"));
+        }
+    }
+
+    @Test
+    public void testDataFilePrefixForPKTable() {
+        spark.sql("CREATE TABLE T (a INT, b INT, c STRING)" + " TBLPROPERTIES ('primary-key'='a')");
+
+        spark.conf().set("spark.paimon.file.prefix", "test-");
+        spark.sql("INSERT INTO T VALUES (1, 1, 'aa')");
+        spark.sql("INSERT INTO T VALUES (2, 2, 'bb')");
+        spark.sql("INSERT INTO T VALUES (1, 3, 'cc')");
+
+        List<Row> data = spark.sql("SELECT * FROM T order by a").collectAsList();
+        assertThat(data.toString()).isEqualTo("[[1,3,cc], [2,2,bb]]");
+
+        List<Row> rows = spark.sql("select file_path from `T$files`").collectAsList();
+        List<String> fileNames =
+                rows.stream().map(x -> x.getString(0)).collect(Collectors.toList());
+        Assertions.assertEquals(3, fileNames.size());
+        for (String fileName : fileNames) {
+            Assertions.assertTrue(fileName.startsWith("test-"));
+        }
     }
 }

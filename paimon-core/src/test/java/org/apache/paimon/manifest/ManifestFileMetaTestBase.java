@@ -133,7 +133,8 @@ public abstract class ManifestFileMetaTestBase {
                                 path,
                                 getPartitionType(),
                                 "default",
-                                CoreOptions.FILE_FORMAT.defaultValue()),
+                                CoreOptions.FILE_FORMAT.defaultValue(),
+                                CoreOptions.FILE_PREFIX.defaultValue()),
                         Long.MAX_VALUE,
                         null)
                 .create();

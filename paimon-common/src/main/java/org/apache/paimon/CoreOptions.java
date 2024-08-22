@@ -171,6 +171,12 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Default file compression zstd level. For higher compression rates, it can be configured to 9, but the read and write speed will significantly decrease.");
 
+    public static final ConfigOption<String> FILE_PREFIX =
+            key("file.prefix")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("Specify the file name prefix of data files.");
+
     public static final ConfigOption<MemorySize> FILE_BLOCK_SIZE =
             key("file.block-size")
                     .memoryType()
@@ -1446,6 +1452,10 @@ public class CoreOptions implements Serializable {
 
     private static String normalizeFileFormat(String fileFormat) {
         return fileFormat.toLowerCase();
+    }
+
+    public String filePrefix() {
+        return options.get(FILE_PREFIX);
     }
 
     public String fieldsDefaultFunc() {

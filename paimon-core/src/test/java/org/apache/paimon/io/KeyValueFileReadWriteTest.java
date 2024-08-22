@@ -248,7 +248,8 @@ public class KeyValueFileReadWriteTest {
                         path,
                         RowType.of(),
                         CoreOptions.PARTITION_DEFAULT_NAME.defaultValue(),
-                        format);
+                        format,
+                        CoreOptions.FILE_PREFIX.defaultValue());
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
         FileIO fileIO = FileIOFinder.find(path);
         Options options = new Options();
@@ -262,7 +263,8 @@ public class KeyValueFileReadWriteTest {
                         path,
                         RowType.of(),
                         CoreOptions.PARTITION_DEFAULT_NAME.defaultValue(),
-                        CoreOptions.FILE_FORMAT.defaultValue().toString()));
+                        CoreOptions.FILE_FORMAT.defaultValue().toString(),
+                        CoreOptions.FILE_PREFIX.defaultValue()));
 
         return KeyValueFileWriterFactory.builder(
                         fileIO,

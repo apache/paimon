@@ -41,6 +41,7 @@ public class FileStorePathFactory {
     private final String uuid;
     private final InternalRowPartitionComputer partitionComputer;
     private final String formatIdentifier;
+    private final String filePrefix;
 
     private final AtomicInteger manifestFileCount;
     private final AtomicInteger manifestListCount;
@@ -49,12 +50,17 @@ public class FileStorePathFactory {
     private final AtomicInteger statsFileCount;
 
     public FileStorePathFactory(
-            Path root, RowType partitionType, String defaultPartValue, String formatIdentifier) {
+            Path root,
+            RowType partitionType,
+            String defaultPartValue,
+            String formatIdentifier,
+            String filePrefix) {
         this.root = root;
         this.uuid = UUID.randomUUID().toString();
 
         this.partitionComputer = getPartitionComputer(partitionType, defaultPartValue);
         this.formatIdentifier = formatIdentifier;
+        this.filePrefix = filePrefix;
 
         this.manifestFileCount = new AtomicInteger(0);
         this.manifestListCount = new AtomicInteger(0);
@@ -97,7 +103,7 @@ public class FileStorePathFactory {
     }
 
     public DataFilePathFactory createDataFilePathFactory(BinaryRow partition, int bucket) {
-        return new DataFilePathFactory(bucketPath(partition, bucket), formatIdentifier);
+        return new DataFilePathFactory(bucketPath(partition, bucket), formatIdentifier, filePrefix);
     }
 
     public Path bucketPath(BinaryRow partition, int bucket) {
