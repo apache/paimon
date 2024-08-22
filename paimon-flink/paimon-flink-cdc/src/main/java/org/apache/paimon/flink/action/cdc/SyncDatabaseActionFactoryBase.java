@@ -51,8 +51,7 @@ public abstract class SyncDatabaseActionFactoryBase<T extends SyncDatabaseAction
         action.withTablePrefix(params.get(TABLE_PREFIX))
                 .withTableSuffix(params.get(TABLE_SUFFIX))
                 .includingTables(params.get(INCLUDING_TABLES))
-                .excludingTables(params.get(EXCLUDING_TABLES))
-                .withPartitionKeys();
+                .excludingTables(params.get(EXCLUDING_TABLES));
 
         if (params.has(PARTITION_KEYS)) {
             action.withPartitionKeys(params.get(PARTITION_KEYS).split(","));
