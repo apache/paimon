@@ -23,22 +23,28 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
 import org.apache.arrow.vector.VectorSchemaRoot;
+import org.apache.arrow.vector.types.pojo.Field;
+import org.apache.arrow.vector.types.pojo.Schema;
 
 import java.util.Iterator;
+import java.util.List;
 
 /** Reader from a {@link VectorSchemaRoot} to paimon rows. */
 public class ArrowBatchReader {
 
     private final VectorizedColumnBatch batch;
     private final Arrow2PaimonVectorConverter[] convertors;
+    private final RowType projectedRowType;
 
     public ArrowBatchReader(RowType rowType) {
         ColumnVector[] columnVectors = new ColumnVector[rowType.getFieldCount()];
         this.convertors = new Arrow2PaimonVectorConverter[rowType.getFieldCount()];
         this.batch = new VectorizedColumnBatch(columnVectors);
+        this.projectedRowType = rowType;
 
         for (int i = 0; i < columnVectors.length; i++) {
             this.convertors[i] = Arrow2PaimonVectorConverter.construct(rowType.getTypeAt(i));
@@ -46,13 +52,26 @@ public class ArrowBatchReader {
     }
 
     public Iterable<InternalRow> readBatch(VectorSchemaRoot vsr) {
-        for (int i = 0; i < batch.columns.length; i++) {
-            batch.columns[i] = convertors[i].convertVector(vsr.getVector(i));
+        int[] mapping = new int[projectedRowType.getFieldCount()];
+        Schema arrowSchema = vsr.getSchema();
+        List<DataField> dataFields = projectedRowType.getFields();
+        for (int i = 0; i < dataFields.size(); ++i) {
+            try {
+                Field field = arrowSchema.findField(dataFields.get(i).name().toLowerCase());
+                int idx = arrowSchema.getFields().indexOf(field);
+                mapping[i] = idx;
+            } catch (IllegalArgumentException e) {
+                throw new RuntimeException(e);
+            }
         }
-        int rowCount = vsr.getRowCount();
 
+        for (int i = 0; i < batch.columns.length; i++) {
+            batch.columns[i] = convertors[i].convertVector(vsr.getVector(mapping[i]));
+        }
+
+        int rowCount = vsr.getRowCount();
         batch.setNumRows(vsr.getRowCount());
-        ColumnarRow columnarRow = new ColumnarRow(batch);
+        final ColumnarRow columnarRow = new ColumnarRow(batch);
         return () ->
                 new Iterator<InternalRow>() {
                     private int position = 0;
