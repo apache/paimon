@@ -48,7 +48,6 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.PARTITION_IDLE_TIME_
 import static org.apache.paimon.flink.FlinkConnectorOptions.PARTITION_MARK_DONE_WHEN_END_INPUT;
 import static org.apache.paimon.flink.FlinkConnectorOptions.PARTITION_TIME_INTERVAL;
 import static org.apache.paimon.utils.PartitionPathUtils.extractPartitionSpecFromPath;
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Trigger to mark partitions done with streaming job. */
 public class PartitionMarkDoneTrigger {
@@ -121,8 +120,9 @@ public class PartitionMarkDoneTrigger {
             return new ArrayList<>(pendingPartitions.keySet());
         }
 
-        checkNotNull(timeInterval);
-        checkNotNull(idleTime);
+        if (timeInterval == null || idleTime == null) {
+            return Collections.emptyList();
+        }
 
         List<String> needDone = new ArrayList<>();
         Iterator<Map.Entry<String, Long>> iter = pendingPartitions.entrySet().iterator();
