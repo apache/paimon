@@ -112,6 +112,7 @@ public class ArrowFormatWriterTest {
                             .isEqualTo(fieldGetter.getFieldOrNull(expectec));
                 }
             }
+            writer.release();
         }
     }
 
@@ -154,6 +155,7 @@ public class ArrowFormatWriterTest {
                             .isEqualTo(fieldGetter.getFieldOrNull(expectec));
                 }
             }
+            writer.release();
         }
     }
 

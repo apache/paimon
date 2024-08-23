@@ -92,10 +92,14 @@ public class ArrowFormatWriter implements AutoCloseable {
         return rowId == 0;
     }
 
-    @Override
-    public void close() {
+    // if c++ code release this, we don't need to release again (release twice may cause a problem)
+    public void release() {
         array.release();
         schema.release();
+    }
+
+    @Override
+    public void close() {
         array.close();
         schema.close();
         vectorSchemaRoot.close();

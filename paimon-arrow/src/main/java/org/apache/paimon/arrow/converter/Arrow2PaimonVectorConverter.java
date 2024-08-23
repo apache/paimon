@@ -113,7 +113,13 @@ public interface Arrow2PaimonVectorConverter {
 
                         @Override
                         public Bytes getBytes(int index) {
-                            byte[] bytes = ((FixedSizeBinaryVector) vector).get(index);
+                            byte[] bytes;
+                            if (vector instanceof FixedSizeBinaryVector) {
+                                bytes = ((FixedSizeBinaryVector) vector).get(index);
+                            } else {
+                                bytes = ((VarCharVector) vector).get(index);
+                            }
+
                             return new Bytes(bytes, 0, bytes.length) {
                                 @Override
                                 public byte[] getBytes() {
