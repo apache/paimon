@@ -70,6 +70,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -95,6 +96,7 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
     private final IcebergPathFactory pathFactory;
     private final FileStorePathFactory fileStorePathFactory;
 
+    private final Supplier<IcebergManifestFile> manifestFileFactory;
     private final IcebergManifestFile manifestFile;
     private final IcebergManifestList manifestList;
 
@@ -114,15 +116,17 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                         + "manifest_entry_data_file:r2,"
                         + "r2_partition:r102");
         FileFormat manifestFileAvro = FileFormat.getFileFormat(manifestFileAvroOptions, "avro");
-        this.manifestFile =
-                new IcebergManifestFile(
-                        table.fileIO(),
-                        partitionType,
-                        manifestFileAvro.createReaderFactory(entryType),
-                        manifestFileAvro.createWriterFactory(entryType),
-                        table.coreOptions().manifestCompression(),
-                        pathFactory.manifestFileFactory(),
-                        table.coreOptions().manifestTargetSize());
+        this.manifestFileFactory =
+                () ->
+                        new IcebergManifestFile(
+                                table.fileIO(),
+                                partitionType,
+                                manifestFileAvro.createReaderFactory(entryType),
+                                manifestFileAvro.createWriterFactory(entryType),
+                                table.coreOptions().manifestCompression(),
+                                pathFactory.manifestFileFactory(),
+                                table.coreOptions().manifestTargetSize());
+        this.manifestFile = manifestFileFactory.get();
 
         Options manifestListAvroOptions = Options.fromMap(table.options());
         // https://github.com/apache/iceberg/blob/main/core/src/main/java/org/apache/iceberg/ManifestLists.java
@@ -557,7 +561,9 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                 meta -> {
                     List<IcebergManifestEntry> entries = new ArrayList<>();
                     for (IcebergManifestEntry entry :
-                            manifestFile.read(new Path(meta.manifestPath()).getName())) {
+                            manifestFileFactory
+                                    .get()
+                                    .read(new Path(meta.manifestPath()).getName())) {
                         if (entry.fileSequenceNumber() == currentSnapshotId
                                 || entry.status() == IcebergManifestEntry.Status.EXISTING) {
                             entries.add(entry);
