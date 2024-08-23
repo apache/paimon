@@ -819,6 +819,20 @@ public class HiveCatalog extends AbstractCatalog {
     private void updateHmsTablePars(Table table, TableSchema schema) {
         if (syncAllProperties()) {
             table.getParameters().putAll(schema.options());
+            if (!schema.primaryKeys().isEmpty()) {
+                table.getParameters()
+                        .put(CoreOptions.PRIMARY_KEY.key(), String.join(",", schema.primaryKeys()));
+            }
+            if (!schema.partitionKeys().isEmpty()) {
+                table.getParameters()
+                        .put(CoreOptions.PARTITION.key(), String.join(",", schema.partitionKeys()));
+            }
+            if (!schema.bucketKeys().isEmpty()) {
+                table.getParameters()
+                        .put(CoreOptions.BUCKET_KEY.key(), String.join(",", schema.bucketKeys()));
+            }
+            table.getParameters()
+                    .put(CoreOptions.BUCKET.key(), String.valueOf(schema.numBuckets()));
         } else {
             table.getParameters()
                     .putAll(convertToPropertiesPrefixKey(schema.options(), HIVE_PREFIX));
