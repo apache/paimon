@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.procedure.ProcedureUtil;
 import org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -301,7 +302,7 @@ public class FlinkCatalog extends AbstractCatalog {
                     "Only support CatalogTable, but is: " + table.getClass());
         }
 
-        if (getDefaultDatabase().equals(tablePath.getDatabaseName())
+        if (Objects.equals(getDefaultDatabase(), tablePath.getDatabaseName())
                 && disableCreateTableInDefaultDatabase) {
             throw new UnsupportedOperationException(
                     "Creating table in default database is disabled, please specify a database name.");
@@ -353,7 +354,18 @@ public class FlinkCatalog extends AbstractCatalog {
         }
 
         // remove table path
-        options.remove(PATH.key());
+        String path = options.remove(PATH.key());
+        if (path != null) {
+            Path expectedPath = catalog.getTableLocation(identifier);
+            if (!new Path(path).equals(expectedPath)) {
+                throw new CatalogException(
+                        String.format(
+                                "You specified the Path when creating the table, "
+                                        + "but the Path '%s' is different from where it should be '%s'. "
+                                        + "Please remove the Path.",
+                                path, expectedPath));
+            }
+        }
 
         return fromCatalogTable(catalogTable.copy(options));
     }
