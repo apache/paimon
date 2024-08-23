@@ -47,18 +47,11 @@ public interface AppendDeletionFileMaintainer {
 
     int getBucket();
 
-    DeletionFile getDeletionFile(String dataFile);
-
-    DeletionVector getDeletionVector(String dataFile);
-
     void notifyNewDeletionVector(String dataFile, DeletionVector deletionVector);
-
-    /** In compaction operation, notify that a deletion file of a data file is dropped. */
-    void notifyRemovedDeletionVector(String dataFile);
 
     List<IndexManifestEntry> persist();
 
-    static AppendDeletionFileMaintainer forBucketedAppend(
+    static BucketedAppendDeletionFileMaintainer forBucketedAppend(
             IndexFileHandler indexFileHandler,
             @Nullable Long snapshotId,
             BinaryRow partition,
@@ -68,13 +61,10 @@ public interface AppendDeletionFileMaintainer {
         DeletionVectorsMaintainer maintainer =
                 new DeletionVectorsMaintainer.Factory(indexFileHandler)
                         .createOrRestore(snapshotId, partition, bucket);
-        Map<String, DeletionFile> deletionFiles =
-                indexFileHandler.scanDVIndex(snapshotId, partition, bucket);
-        return new BucketedAppendDeletionFileMaintainer(
-                partition, bucket, deletionFiles, maintainer);
+        return new BucketedAppendDeletionFileMaintainer(partition, bucket, maintainer);
     }
 
-    static AppendDeletionFileMaintainer forUnawareAppend(
+    static UnawareAppendDeletionFileMaintainer forUnawareAppend(
             IndexFileHandler indexFileHandler, @Nullable Long snapshotId, BinaryRow partition) {
         Map<String, DeletionFile> deletionFiles =
                 indexFileHandler.scanDVIndex(snapshotId, partition, UNAWARE_BUCKET);

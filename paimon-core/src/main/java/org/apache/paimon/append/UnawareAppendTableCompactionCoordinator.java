@@ -144,9 +144,8 @@ public class UnawareAppendTableCompactionCoordinator {
         UnawareAppendDeletionFileMaintainer dvIndexFileMaintainer;
         if (deletionVectorEnabled) {
             dvIndexFileMaintainer =
-                    (UnawareAppendDeletionFileMaintainer)
-                            AppendDeletionFileMaintainer.forUnawareAppend(
-                                    indexFileHandler, snapshotId, partition);
+                    AppendDeletionFileMaintainer.forUnawareAppend(
+                            indexFileHandler, snapshotId, partition);
         } else {
             dvIndexFileMaintainer = null;
         }
@@ -302,8 +301,7 @@ public class UnawareAppendTableCompactionCoordinator {
                 }
             }
 
-            List<List<DataFileMeta>> result = new ArrayList<>();
-            result.addAll(filesWithDV.values());
+            List<List<DataFileMeta>> result = new ArrayList<>(filesWithDV.values());
             if (rest.size() > 1) {
                 result.addAll(pack(rest));
             }

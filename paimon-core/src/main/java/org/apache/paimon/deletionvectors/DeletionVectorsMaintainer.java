@@ -138,6 +138,10 @@ public class DeletionVectorsMaintainer {
         return deletionVectors;
     }
 
+    public static Factory factory(IndexFileHandler handler) {
+        return new Factory(handler);
+    }
+
     /** Factory to restore {@link DeletionVectorsMaintainer}. */
     public static class Factory {
 

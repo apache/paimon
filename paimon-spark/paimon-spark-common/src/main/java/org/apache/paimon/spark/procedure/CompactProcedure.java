@@ -66,8 +66,6 @@ import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -98,8 +96,6 @@ import static org.apache.spark.sql.types.DataTypes.StringType;
  * </code></pre>
  */
 public class CompactProcedure extends BaseProcedure {
-
-    private static final Logger LOG = LoggerFactory.getLogger(CompactProcedure.class.getName());
 
     private static final ProcedureParameter[] PARAMETERS =
             new ProcedureParameter[] {

@@ -94,11 +94,6 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
     @Override
     public AppendOnlyFileStoreWrite newWrite(
             String commitUser, ManifestCacheFilter manifestFilter) {
-        DeletionVectorsMaintainer.Factory deletionVectorsMaintainerFactory = null;
-        if (options.deletionVectorsEnabled()) {
-            deletionVectorsMaintainerFactory =
-                    new DeletionVectorsMaintainer.Factory(newIndexFileHandler());
-        }
         return new AppendOnlyFileStoreWrite(
                 fileIO,
                 newRead(),
@@ -110,7 +105,9 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 newScan(true).withManifestCacheFilter(manifestFilter),
                 options,
                 bucketMode(),
-                deletionVectorsMaintainerFactory,
+                options.deletionVectorsEnabled()
+                        ? DeletionVectorsMaintainer.factory(newIndexFileHandler())
+                        : null,
                 tableName);
     }
 
