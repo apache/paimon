@@ -66,13 +66,9 @@ public class UnawareAppendDeletionFileMaintainer implements AppendDeletionFileMa
         // the deletion of data files is independent
         // just create an empty maintainer
         this.maintainer = new DeletionVectorsMaintainer.Factory(indexFileHandler).create();
-        init(deletionFiles);
-    }
 
-    @VisibleForTesting
-    public void init(Map<String, DeletionFile> dataFileToDeletionFiles) {
         List<String> touchedIndexFileNames =
-                dataFileToDeletionFiles.values().stream()
+                deletionFiles.values().stream()
                         .map(deletionFile -> new Path(deletionFile.path()).getName())
                         .distinct()
                         .collect(Collectors.toList());
@@ -83,8 +79,8 @@ public class UnawareAppendDeletionFileMaintainer implements AppendDeletionFileMa
                                         indexManifestEntry.indexFile().fileName()))
                 .forEach(entry -> indexNameToEntry.put(entry.indexFile().fileName(), entry));
 
-        for (String dataFile : dataFileToDeletionFiles.keySet()) {
-            DeletionFile deletionFile = dataFileToDeletionFiles.get(dataFile);
+        for (String dataFile : deletionFiles.keySet()) {
+            DeletionFile deletionFile = deletionFiles.get(dataFile);
             String indexFileName = new Path(deletionFile.path()).getName();
             if (!indexFileToDeletionFiles.containsKey(indexFileName)) {
                 indexFileToDeletionFiles.put(indexFileName, new HashMap<>());
