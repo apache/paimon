@@ -138,7 +138,7 @@ public class SnapshotManagerTest {
         assertThat(snapshotManager.laterOrEqualWatermark(millis + 999)).isNull();
     }
 
-    public Snapshot createSnapshotWithMillis(long id, long millis) {
+    private Snapshot createSnapshotWithMillis(long id, long millis) {
         return new Snapshot(
                 id,
                 0L,
@@ -365,5 +365,24 @@ public class SnapshotManagerTest {
         Assertions.assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(6);
         Assertions.assertThat(snapshotManager.latestSnapshotId()).isEqualTo(10);
         Assertions.assertThat(snapshotManager.changelog(1)).isNotNull();
+    }
+
+    @Test
+    public void testOverlappedSnapshots() {
+        SnapshotManagerTest snapshotManagerTest = new SnapshotManagerTest();
+        List<Snapshot> taggedSnapshot = new ArrayList<>();
+        long millis = System.currentTimeMillis();
+        long[] snapshotId = new long[] {8, 9, 11, 12, 15};
+        for (long id : snapshotId) {
+            taggedSnapshot.add(snapshotManagerTest.createSnapshotWithMillis(id, millis));
+        }
+
+        int beginInclusive = 10, endExclusive = 15;
+        // overlapped snapshot is [11,12]
+        List<Snapshot> overlappedSnapshots =
+                SnapshotManager.findOverlappedSnapshots(taggedSnapshot, beginInclusive, endExclusive);
+        List<Long> overlappedIds =
+                overlappedSnapshots.stream().map(Snapshot::id).collect(Collectors.toList());
+        assertThat(overlappedIds).containsExactly(11L, 12L);
     }
 }

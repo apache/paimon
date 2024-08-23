@@ -133,25 +133,6 @@ public class TagManagerTest {
         assertThat(tags.get(0).getValue()).contains("tag");
     }
 
-    @Test
-    public void testOverlappedSnapshots() {
-        SnapshotManagerTest snapshotManagerTest = new SnapshotManagerTest();
-        List<Snapshot> taggedSnapshot = new ArrayList<>();
-        long millis = System.currentTimeMillis();
-        long[] snapshotId = new long[] {7, 9, 11, 12};
-        for (long id : snapshotId) {
-            taggedSnapshot.add(snapshotManagerTest.createSnapshotWithMillis(id, millis));
-        }
-
-        int beginInclusive = 10, endExclusive = 15;
-        // overlapped snapshot is [11,12]
-        List<Snapshot> overlappedSnapshots =
-                TagManager.findOverlappedSnapshots(taggedSnapshot, beginInclusive, endExclusive);
-        List<Long> overlappedIds =
-                overlappedSnapshots.stream().map(Snapshot::id).collect(Collectors.toList());
-        assertThat(overlappedIds).containsExactly(11L, 12L);
-    }
-
     private TestFileStore createStore(TestKeyValueGenerator.GeneratorMode mode, int buckets)
             throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
