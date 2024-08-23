@@ -21,32 +21,36 @@ package org.apache.paimon.flink.lookup;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.Split;
-import org.apache.paimon.table.source.StreamTableScan;
+import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
 
 import javax.annotation.Nullable;
 
 import java.util.List;
 import java.util.Set;
 
-/** A streaming reader to load data into {@link LookupTable}. */
-public class LookupStreamingReader extends AbstractLookupReader {
-    private final StreamTableScan scan;
+/** A batch reader to load data into {@link LookupTable}. */
+public class LookupBatchReader extends AbstractLookupReader {
+    private TableScan scan;
+    private Long nextSnapshotId;
 
-    public LookupStreamingReader(
+    public LookupBatchReader(
             Table table,
             int[] projection,
             @Nullable Predicate predicate,
             Set<Integer> requireCachedBucketIds) {
         super(table, projection, predicate, requireCachedBucketIds);
-        scan = readBuilder.newStreamScan();
     }
 
-    public List<Split> nextBatchSplits() {
-        return scan.plan().splits();
+    @Override
+    protected List<Split> nextBatchSplits() {
+        SnapshotReader.Plan plan = (SnapshotReader.Plan) readBuilder.newScan().plan();
+        nextSnapshotId = plan.snapshotId() == null ? 1 : plan.snapshotId() + 1;
+        return readBuilder.newScan().plan().splits();
     }
 
     @Nullable
     public Long nextSnapshotId() {
-        return scan.checkpoint();
+        return nextSnapshotId;
     }
 }

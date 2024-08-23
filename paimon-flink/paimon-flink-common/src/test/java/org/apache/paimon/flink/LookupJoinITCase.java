@@ -32,7 +32,6 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for lookup join. */
 public class LookupJoinITCase extends CatalogITCaseBase {
@@ -518,21 +517,6 @@ public class LookupJoinITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testLookupPartialUpdateIllegal() {
-        sql(
-                "CREATE TABLE DIM2 (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
-                        + " ('merge-engine'='partial-update','continuous.discovery-interval'='1 ms')");
-        String query =
-                "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM2 for system_time as of T.proctime AS D ON T.i = D.i";
-        assertThatThrownBy(() -> sEnv.executeSql(query))
-                .hasRootCauseMessage(
-                        "Partial update streaming"
-                                + " reading is not supported. "
-                                + "You can use 'lookup' or 'full-compaction' changelog producer to support streaming reading. "
-                                + "('input' changelog producer is also supported, but only returns input records.)");
-    }
-
-    @Test
     public void testLookupPartialUpdate() throws Exception {
         testLookupPartialUpdate("none");
         testLookupPartialUpdate("zstd");
@@ -562,6 +546,40 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
         sql("DROP TABLE DIM2");
         sql("TRUNCATE TABLE T");
+    }
+
+    @Test
+    public void testLookupPartialUpdateNoneChangelog() throws Exception {
+        sql(
+                "CREATE TABLE DIM (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH ('continuous.discovery-interval'='1 ms','merge-engine' = 'partial-update','changelog-producer'='none')");
+
+        sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
+        String query =
+                "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM for system_time as of T.proctime AS D ON T.i = D.i";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+
+        sql("INSERT INTO T VALUES (1), (2), (3)");
+        List<Row> result = iterator.collect(3);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111, 1111),
+                        Row.of(2, 22, 222, 2222),
+                        Row.of(3, null, null, null));
+
+        sql("INSERT INTO DIM VALUES (2, 44, cast(NULL as int), 4444),(3,33,333,3333)");
+        sql("INSERT INTO DIM VALUES (2, cast(NULL as int), 444, 4444)");
+        Thread.sleep(2000); // wait refresh
+        sql("INSERT INTO T VALUES (1), (2), (3),(4)");
+
+        result = iterator.collect(4);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111, 1111),
+                        Row.of(2, 44, 444, 4444),
+                        Row.of(3, 33, 333, 3333),
+                        Row.of(4, null, null, null));
+
+        iterator.close();
     }
 
     @ParameterizedTest
