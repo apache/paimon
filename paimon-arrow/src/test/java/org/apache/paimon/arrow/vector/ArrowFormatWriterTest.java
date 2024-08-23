@@ -157,6 +157,41 @@ public class ArrowFormatWriterTest {
         }
     }
 
+    @Test
+    public void testCWriter() {
+        try (ArrowFormatCWriter writer = new ArrowFormatCWriter(PRIMITIVE_TYPE, 4096)) {
+            List<InternalRow> list = new ArrayList<>();
+            List<InternalRow.FieldGetter> fieldGetters = new ArrayList<>();
+
+            for (int i = 0; i < PRIMITIVE_TYPE.getFieldCount(); i++) {
+                fieldGetters.add(InternalRow.createFieldGetter(PRIMITIVE_TYPE.getTypeAt(i), i));
+            }
+            for (int i = 0; i < 1000; i++) {
+                list.add(GenericRow.of(randomRowValues(null)));
+            }
+
+            list.forEach(writer::write);
+
+            writer.flush();
+            VectorSchemaRoot vectorSchemaRoot = writer.getVectorSchemaRoot();
+
+            ArrowBatchReader arrowBatchReader = new ArrowBatchReader(PRIMITIVE_TYPE);
+            Iterable<InternalRow> rows = arrowBatchReader.readBatch(vectorSchemaRoot);
+
+            Iterator<InternalRow> iterator = rows.iterator();
+            for (int i = 0; i < 1000; i++) {
+                InternalRow actual = iterator.next();
+                InternalRow expectec = list.get(i);
+
+                for (InternalRow.FieldGetter fieldGetter : fieldGetters) {
+                    Assertions.assertThat(fieldGetter.getFieldOrNull(actual))
+                            .isEqualTo(fieldGetter.getFieldOrNull(expectec));
+                }
+            }
+            writer.release();
+        }
+    }
+
     private Object[] randomRowValues(boolean[] nullable) {
         Object[] values = new Object[18];
         values[0] = BinaryString.fromString(StringUtils.getRandomString(RND, 10, 10));
