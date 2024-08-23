@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.flink.source.AppendBypassCoordinateOperator;
+import org.apache.paimon.flink.source.AppendBypassCoordinateOperatorFactory;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
@@ -73,7 +73,7 @@ public abstract class UnawareBucketSink<T> extends FlinkWriteSink<T> {
                                     new EitherTypeInfo<>(
                                             new CommittableTypeInfo(),
                                             new CompactionTaskTypeInfo()),
-                                    new AppendBypassCoordinateOperator<>(table))
+                                    new AppendBypassCoordinateOperatorFactory<>(table))
                             .forceNonParallel()
                             .transform(
                                     "Compact Worker: " + table.name(),
