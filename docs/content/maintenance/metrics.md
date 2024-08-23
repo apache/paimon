@@ -335,7 +335,6 @@ When using Flink to read and write, Paimon has implemented some key standard Fli
     </thead>
     <tbody>
         <tr>
-
             <td>currentFetchEventTimeLag</td>
             <td>Flink Source Operator</td>
             <td>Gauge</td>
