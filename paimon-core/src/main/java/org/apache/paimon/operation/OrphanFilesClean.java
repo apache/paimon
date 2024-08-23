@@ -95,9 +95,7 @@ public class OrphanFilesClean {
 
     private static final Logger LOG = LoggerFactory.getLogger(OrphanFilesClean.class);
 
-    private static final ThreadPoolExecutor EXECUTOR =
-            createCachedThreadPool(
-                    Runtime.getRuntime().availableProcessors(), "ORPHAN_FILES_CLEAN");
+    private final ThreadPoolExecutor executor;
 
     private static final int READ_FILE_RETRY_NUM = 3;
     private static final int READ_FILE_RETRY_INTERVAL = 5;
@@ -130,6 +128,9 @@ public class OrphanFilesClean {
                     } catch (IOException ignored) {
                     }
                 };
+        this.executor =
+                createCachedThreadPool(
+                        table.coreOptions().deleteFileThreadNum(), "ORPHAN_FILES_CLEAN");
     }
 
     public OrphanFilesClean olderThan(String timestamp) {
@@ -204,7 +205,7 @@ public class OrphanFilesClean {
 
         return Sets.newHashSet(
                 randomlyExecute(
-                        EXECUTOR, snapshot -> getUsedFiles(branchTable, snapshot), readSnapshots));
+                        executor, snapshot -> getUsedFiles(branchTable, snapshot), readSnapshots));
     }
 
     private List<String> getUsedFiles(FileStoreTable branchTable, Snapshot snapshot) {
@@ -234,7 +235,7 @@ public class OrphanFilesClean {
                                 .filter(this::oldEnough)
                                 .map(FileStatus::getPath)
                                 .collect(Collectors.toList());
-        Iterator<Path> allPaths = randomlyExecute(EXECUTOR, processor, fileDirs);
+        Iterator<Path> allPaths = randomlyExecute(executor, processor, fileDirs);
         Map<String, Path> result = new HashMap<>();
         while (allPaths.hasNext()) {
             Path next = allPaths.next();
@@ -525,7 +526,7 @@ public class OrphanFilesClean {
 
         // dive into the next partition level
         return Lists.newArrayList(
-                randomlyExecute(EXECUTOR, p -> listAndCleanDataDirs(p, level - 1), partitionPaths));
+                randomlyExecute(executor, p -> listAndCleanDataDirs(p, level - 1), partitionPaths));
     }
 
     private List<Path> filterAndCleanDataDirs(
@@ -581,7 +582,10 @@ public class OrphanFilesClean {
     }
 
     public static List<OrphanFilesClean> createOrphanFilesCleans(
-            Catalog catalog, String databaseName, @Nullable String tableName)
+            Catalog catalog,
+            Map<String, String> tableConfig,
+            String databaseName,
+            @Nullable String tableName)
             throws Catalog.DatabaseNotExistException, Catalog.TableNotExistException {
         List<OrphanFilesClean> orphanFilesCleans = new ArrayList<>();
         List<String> tableNames = Collections.singletonList(tableName);
@@ -591,7 +595,7 @@ public class OrphanFilesClean {
 
         for (String t : tableNames) {
             Identifier identifier = new Identifier(databaseName, t);
-            Table table = catalog.getTable(identifier);
+            Table table = catalog.getTable(identifier).copy(tableConfig);
             checkArgument(
                     table instanceof FileStoreTable,
                     "Only FileStoreTable supports remove-orphan-files action. The table type is '%s'.",

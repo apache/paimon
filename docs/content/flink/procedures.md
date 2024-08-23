@@ -214,7 +214,8 @@ All available procedures are listed below.
       <td>
          CALL [catalog.]sys.remove_orphan_files('identifier')<br/><br/>
          CALL [catalog.]sys.remove_orphan_files('identifier', 'olderThan')<br/><br/>
-         CALL [catalog.]sys.remove_orphan_files('identifier', 'olderThan', 'dryRun')
+         CALL [catalog.]sys.remove_orphan_files('identifier', 'olderThan', 'dryRun')<br/><br/>
+         CALL [catalog.]sys.remove_orphan_files('identifier', 'olderThan', 'dryRun','parallelism')
       </td>
       <td>
          To remove the orphan data files and metadata files. Arguments:
@@ -223,10 +224,12 @@ All available procedures are listed below.
                deletes orphan files older than 1 day by default. This argument can modify the interval.
             </li>
             <li>dryRun: when true, view only orphan files, don't actually remove files. Default is false.</li>
+            <li>parallelism: The maximum number of concurrent deleting files. By default is the number of processors available to the Java virtual machine.</li>
       </td>
       <td>CALL remove_orphan_files('default.T', '2023-10-31 12:00:00')<br/><br/>
           CALL remove_orphan_files('default.*', '2023-10-31 12:00:00')<br/><br/>
-          CALL remove_orphan_files('default.T', '2023-10-31 12:00:00', true)
+          CALL remove_orphan_files('default.T', '2023-10-31 12:00:00', true)<br/><br/>
+          CALL remove_orphan_files('default.T', '2023-10-31 12:00:00', false, '5')
       </td>
    </tr>
    <tr>

@@ -18,6 +18,9 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.CoreOptions;
+
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
@@ -29,6 +32,7 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
     public static final String IDENTIFIER = "remove_orphan_files";
     private static final String OLDER_THAN = "older_than";
     private static final String DRY_RUN = "dry_run";
+    private static final String PARALLELISM = "parallelism";
 
     @Override
     public String identifier() {
@@ -44,10 +48,16 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
         String table = params.get(TABLE);
 
         Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
+        Map<String, String> dynamicOptions = new HashMap<>();
+        if (params.has(PARALLELISM)) {
+            dynamicOptions.put(CoreOptions.DELETE_FILE_THREAD_NUM.key(), params.get(PARALLELISM));
+        }
 
         RemoveOrphanFilesAction action;
         try {
-            action = new RemoveOrphanFilesAction(warehouse, database, table, catalogConfig);
+            action =
+                    new RemoveOrphanFilesAction(
+                            warehouse, database, table, catalogConfig, dynamicOptions);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

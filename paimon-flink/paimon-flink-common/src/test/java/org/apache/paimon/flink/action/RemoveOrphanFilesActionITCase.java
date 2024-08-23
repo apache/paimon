@@ -185,6 +185,11 @@ public class RemoveOrphanFilesActionITCase extends ActionITCaseBase {
         RemoveOrphanFilesAction action2 = createAction(RemoveOrphanFilesAction.class, args);
         assertThatCode(action2::run).doesNotThrowAnyException();
 
+        args.add("--parallelism");
+        args.add("5");
+        RemoveOrphanFilesAction action3 = createAction(RemoveOrphanFilesAction.class, args);
+        assertThatCode(action3::run).doesNotThrowAnyException();
+
         String withoutOlderThan =
                 String.format(
                         isNamedArgument
@@ -194,6 +199,11 @@ public class RemoveOrphanFilesActionITCase extends ActionITCaseBase {
                         "*");
         CloseableIterator<Row> withoutOlderThanCollect = callProcedure(withoutOlderThan);
         assertThat(ImmutableList.copyOf(withoutOlderThanCollect).size()).isEqualTo(0);
+
+        String withParallelism =
+                String.format("CALL sys.remove_orphan_files('%s.%s','',true,'5')", database, "*");
+        CloseableIterator<Row> withParallelismCollect = callProcedure(withParallelism);
+        assertThat(ImmutableList.copyOf(withParallelismCollect).size()).isEqualTo(0);
 
         String withDryRun =
                 String.format(
