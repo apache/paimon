@@ -65,13 +65,12 @@ public class NewTableSchemaBuilder implements Serializable {
                         Collections.emptyMap(),
                         null);
         List<String> specifiedPartitionKeys = new ArrayList<>();
-        if (partitionKeys != null && !partitionKeys.isEmpty()) {
+
+        List<String> partitionKeyMultipleList = partitionKeyMultiple.get(record.tableName());
+        if (partitionKeyMultipleList != null && !partitionKeyMultipleList.isEmpty()) {
+            specifiedPartitionKeys = partitionKeyMultipleList;
+        } else if (partitionKeys != null && !partitionKeys.isEmpty()) {
             specifiedPartitionKeys = partitionKeys;
-        } else {
-            List<String> partitionKeyMultipleList = partitionKeyMultiple.get(record.tableName());
-            if (partitionKeyMultipleList != null && !partitionKeyMultipleList.isEmpty()) {
-                specifiedPartitionKeys = partitionKeyMultipleList;
-            }
         }
 
         return Optional.of(
