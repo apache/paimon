@@ -380,7 +380,8 @@ public class SnapshotManagerTest {
         int beginInclusive = 10, endExclusive = 15;
         // overlapped snapshot is [11,12]
         List<Snapshot> overlappedSnapshots =
-                SnapshotManager.findOverlappedSnapshots(taggedSnapshot, beginInclusive, endExclusive);
+                SnapshotManager.findOverlappedSnapshots(
+                        taggedSnapshot, beginInclusive, endExclusive);
         List<Long> overlappedIds =
                 overlappedSnapshots.stream().map(Snapshot::id).collect(Collectors.toList());
         assertThat(overlappedIds).containsExactly(11L, 12L);

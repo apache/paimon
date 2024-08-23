@@ -682,8 +682,7 @@ public class SnapshotManager implements Serializable {
         return -1;
     }
 
-    private static int findNextOrEqualTag(
-            List<Snapshot> sortedSnapshots, long targetSnapshotId) {
+    private static int findNextOrEqualTag(List<Snapshot> sortedSnapshots, long targetSnapshotId) {
         for (int i = 0; i < sortedSnapshots.size(); i++) {
             if (sortedSnapshots.get(i).id() >= targetSnapshotId) {
                 return i;
