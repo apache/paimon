@@ -464,7 +464,6 @@ public abstract class HiveCatalogITCaseBase {
                                 .executeQuery("DESC FORMATTED t02")
                                 .contains("\tbucket              \t3                   "))
                 .isFalse();
-
     }
 
     @Test
@@ -496,15 +495,15 @@ public abstract class HiveCatalogITCaseBase {
                 .isFalse();
 
         assertThat(
-                hiveShell
-                        .executeQuery("DESC FORMATTED t03")
-                        .contains("\tprimary-key         \tcc,aa               "))
+                        hiveShell
+                                .executeQuery("DESC FORMATTED t03")
+                                .contains("\tprimary-key         \tcc,aa               "))
                 .isFalse();
 
         assertThat(
-                hiveShell
-                        .executeQuery("DESC FORMATTED t03")
-                        .contains("\tpartition           \tcc                  "))
+                        hiveShell
+                                .executeQuery("DESC FORMATTED t03")
+                                .contains("\tpartition           \tcc                  "))
                 .isFalse();
 
         tEnv.executeSql(
@@ -528,34 +527,34 @@ public abstract class HiveCatalogITCaseBase {
 
         hiveShell.executeQuery("DESC FORMATTED t03").stream().forEach(System.out::println);
         assertThat(
-                hiveShell
-                        .executeQuery("DESC FORMATTED t03")
-                        .contains("\tfile.format         \tparquet             "))
+                        hiveShell
+                                .executeQuery("DESC FORMATTED t03")
+                                .contains("\tfile.format         \tparquet             "))
                 .isTrue();
 
         assertThat(
-                hiveShell
-                        .executeQuery("DESC FORMATTED t03")
-                        .contains("\tprimary-key         \tcc,aa               "))
+                        hiveShell
+                                .executeQuery("DESC FORMATTED t03")
+                                .contains("\tprimary-key         \tcc,aa               "))
                 .isTrue();
 
         assertThat(
-                hiveShell
-                        .executeQuery("DESC FORMATTED t03")
-                        .contains("\tpartition           \tcc                  "))
+                        hiveShell
+                                .executeQuery("DESC FORMATTED t03")
+                                .contains("\tpartition           \tcc                  "))
                 .isTrue();
 
         assertThat(
-                hiveShell
-                        .executeQuery("DESC FORMATTED t03")
-                        .contains("\tbucket-key          \taa                  "))
+                        hiveShell
+                                .executeQuery("DESC FORMATTED t03")
+                                .contains("\tbucket-key          \taa                  "))
                 .isTrue();
 
         tEnv.executeSql("ALTER TABLE t03 SET ('owner' = 'test')").await();
         assertThat(
-                hiveShell
-                        .executeQuery("DESC FORMATTED t03")
-                        .contains("\towner               \ttest                "))
+                        hiveShell
+                                .executeQuery("DESC FORMATTED t03")
+                                .contains("\towner               \ttest                "))
                 .isTrue();
     }
 
