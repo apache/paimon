@@ -88,7 +88,7 @@ public class AppendBypassCoordinateOperator<CommitT>
         this.getProcessingTimeService().scheduleWithFixedDelay(this, 0, intervalMs);
     }
 
-    public void asyncPlan(UnawareAppendTableCompactionCoordinator coordinator) {
+    private void asyncPlan(UnawareAppendTableCompactionCoordinator coordinator) {
         while (compactTasks.size() < MAX_PENDING_TASKS) {
             List<UnawareAppendCompactionTask> tasks = coordinator.run();
             compactTasks.addAll(tasks);
