@@ -30,6 +30,7 @@ import org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndexFactory;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.io.BatchRecords;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Equal;
@@ -41,6 +42,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
@@ -54,15 +56,18 @@ import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -131,6 +136,49 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                                 "2|21|201|binary|varbinary|mapKey:mapVal|multiset",
                                 "2|22|202|binary|varbinary|mapKey:mapVal|multiset",
                                 "2|21|201|binary|varbinary|mapKey:mapVal|multiset"));
+    }
+
+    @Test
+    public void testBatchRecordsWrite() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        List<InternalRow> list = new ArrayList<>();
+        for (int i = 0; i < 1000; i++) {
+            list.add(rowData(1, 10, 100L));
+        }
+
+        BatchTableWrite write = table.newBatchWriteBuilder().newWrite();
+
+        write.writeBatch(
+                binaryRow(1),
+                0,
+                new BatchRecords() {
+                    @Override
+                    public long rowCount() {
+                        return 1000;
+                    }
+
+                    @Override
+                    public Iterator<InternalRow> iterator() {
+                        return list.iterator();
+                    }
+                });
+
+        List<CommitMessage> commitMessages = write.prepareCommit();
+
+        table.newBatchWriteBuilder().newCommit().commit(commitMessages);
+
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        TableRead read = table.newRead();
+        AtomicInteger i = new AtomicInteger(0);
+        read.createReader(splits)
+                .forEachRemaining(
+                        r -> {
+                            i.incrementAndGet();
+                            assertThat(r.getInt(1)).isEqualTo(10);
+                            assertThat(r.getLong(2)).isEqualTo(100);
+                        });
+        Assertions.assertThat(i.get()).isEqualTo(1000);
     }
 
     @Test
