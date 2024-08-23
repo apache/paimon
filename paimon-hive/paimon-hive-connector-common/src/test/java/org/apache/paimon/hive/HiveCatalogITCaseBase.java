@@ -398,13 +398,13 @@ public abstract class HiveCatalogITCaseBase {
         assertThat(
                         hiveShell
                                 .executeQuery("DESC FORMATTED t01")
-                                .contains("\tpartition-key       \tcc                  "))
+                                .contains("\tpartition           \tcc                  "))
                 .isTrue();
 
         assertThat(
                         hiveShell
                                 .executeQuery("DESC FORMATTED t01")
-                                .contains("\tbucket-id           \taa                  "))
+                                .contains("\tbucket-key          \taa                  "))
                 .isTrue();
 
         assertThat(
@@ -463,13 +463,13 @@ public abstract class HiveCatalogITCaseBase {
         assertThat(
                         hiveShell
                                 .executeQuery("DESC FORMATTED t02")
-                                .contains("\tpartition-key       \tcc                  "))
+                                .contains("\tpartition           \tcc                  "))
                 .isFalse();
 
         assertThat(
                         hiveShell
                                 .executeQuery("DESC FORMATTED t02")
-                                .contains("\tbucket-id           \taa                  "))
+                                .contains("\tbucket-key          \taa                  "))
                 .isFalse();
 
         assertThat(
