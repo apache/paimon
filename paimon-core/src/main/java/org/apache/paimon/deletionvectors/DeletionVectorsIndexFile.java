@@ -121,7 +121,7 @@ public class DeletionVectorsIndexFile extends IndexFile {
         return deletionVectors;
     }
 
-    public DeletionVector readDeletionVector(String dataFile, DeletionFile deletionFile) {
+    public DeletionVector readDeletionVector(DeletionFile deletionFile) {
         String indexFile = deletionFile.path();
         try (SeekableInputStream inputStream = fileIO.newInputStream(new Path(indexFile))) {
             checkVersion(inputStream);

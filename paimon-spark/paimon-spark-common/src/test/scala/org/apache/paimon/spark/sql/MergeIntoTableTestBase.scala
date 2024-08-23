@@ -18,11 +18,11 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.spark.{PaimonPrimaryKeyTable, PaimonSparkTestBase, PaimonTableTest}
 
 import org.apache.spark.sql.Row
 
-abstract class MergeIntoTableTestBase extends PaimonSparkTestBase {
+abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTableTest {
 
   import testImplicits._
 
@@ -31,10 +31,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase {
 
       Seq((1, 100, "c11"), (3, 300, "c33")).toDF("a", "b", "c").createOrReplaceTempView("source")
 
-      spark.sql(s"""
-                   |CREATE TABLE target (a INT, b INT, c STRING)
-                   |TBLPROPERTIES ('primary-key'='a', 'bucket'='2')
-                   |""".stripMargin)
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
       spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
 
       spark.sql(s"""
@@ -56,10 +53,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase {
 
       Seq((1, 100, "c11"), (3, 300, "c33")).toDF("a", "b", "c").createOrReplaceTempView("source")
 
-      spark.sql(s"""
-                   |CREATE TABLE target (a INT, b INT, c STRING)
-                   |TBLPROPERTIES ('primary-key'='a', 'bucket'='2')
-                   |""".stripMargin)
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
       spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
 
       spark.sql(s"""
@@ -78,10 +72,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase {
 
       Seq((1, 100, "c11"), (3, 300, "c33")).toDF("a", "b", "c").createOrReplaceTempView("source")
 
-      spark.sql(s"""
-                   |CREATE TABLE target (a INT, b INT, c STRING)
-                   |TBLPROPERTIES ('primary-key'='a', 'bucket'='2')
-                   |""".stripMargin)
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
       spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
 
       spark.sql(s"""
@@ -103,10 +94,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase {
 
       Seq((1, 100, "c11"), (3, 300, "c33")).toDF("a", "b", "c").createOrReplaceTempView("source")
 
-      spark.sql(s"""
-                   |CREATE TABLE target (a INT, b INT, c STRING)
-                   |TBLPROPERTIES ('primary-key'='a', 'bucket'='2')
-                   |""".stripMargin)
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
       spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
 
       spark.sql(s"""
@@ -130,10 +118,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase {
 
       Seq((1, 100, "c11"), (3, 300, "c33")).toDF("a", "b", "c").createOrReplaceTempView("source")
 
-      spark.sql(s"""
-                   |CREATE TABLE target (a INT, b INT, c STRING)
-                   |TBLPROPERTIES ('primary-key'='a', 'bucket'='2')
-                   |""".stripMargin)
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
       spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
 
       spark.sql(s"""
@@ -157,10 +142,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase {
 
       Seq((1, 100, "c11"), (3, 300, "c33")).toDF("a", "b", "c").createOrReplaceTempView("source")
 
-      spark.sql(s"""
-                   |CREATE TABLE target (a INT, b INT, c STRING)
-                   |TBLPROPERTIES ('primary-key'='a', 'bucket'='2')
-                   |""".stripMargin)
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
       spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2'), (3, 30, 'c3')")
 
       spark.sql(s"""
@@ -186,10 +168,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase {
 
       Seq((1, 100, "c11"), (3, 300, "c33")).toDF("a", "b", "c").createOrReplaceTempView("source")
 
-      spark.sql(s"""
-                   |CREATE TABLE target (a INT, b INT, c STRING)
-                   |TBLPROPERTIES ('primary-key'='a', 'bucket'='2')
-                   |""".stripMargin)
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
       spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
 
       spark.sql(s"""
@@ -213,10 +192,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase {
 
       Seq((1, 100, "c11"), (3, 300, "c33")).toDF("a", "b", "c").createOrReplaceTempView("source")
 
-      spark.sql(s"""
-                   |CREATE TABLE target (a INT, b INT, c STRING)
-                   |TBLPROPERTIES ('primary-key'='a', 'bucket'='2')
-                   |""".stripMargin)
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
       spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
 
       spark.sql(s"""
@@ -240,10 +216,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase {
 
       Seq((1, 100, "c11"), (3, 300, "c33")).toDF("a", "b", "c").createOrReplaceTempView("source")
 
-      spark.sql(s"""
-                   |CREATE TABLE target (a INT, b INT, c STRING)
-                   |TBLPROPERTIES ('primary-key'='a', 'bucket'='2')
-                   |""".stripMargin)
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
       spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
 
       spark.sql(s"""
@@ -269,10 +242,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase {
         .toDF("a", "b", "c")
         .createOrReplaceTempView("source")
 
-      spark.sql(s"""
-                   |CREATE TABLE target (a INT, b INT, c STRING)
-                   |TBLPROPERTIES ('primary-key'='a', 'bucket'='2')
-                   |""".stripMargin)
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
       spark.sql(
         "INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2'), (3, 30, 'c3'), (4, 40, 'c4'), (5, 50, 'c5')")
 
@@ -307,11 +277,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase {
 
       Seq.empty[(Int, Int, String)].toDF("a", "b", "c").createOrReplaceTempView("source")
 
-      spark.sql(s"""
-                   |CREATE TABLE target (a INT, b INT, c STRING)
-                   |TBLPROPERTIES ('primary-key'='a', 'bucket'='2')
-                   |""".stripMargin)
-
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
       spark.sql(s"""
                    |MERGE INTO target
                    |USING source
@@ -331,10 +297,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase {
 
       Seq((1, 100, "c11"), (3, 300, "c33")).toDF("a", "b", "c").createOrReplaceTempView("source")
 
-      spark.sql(s"""
-                   |CREATE TABLE target (a INT, b INT, c STRING)
-                   |TBLPROPERTIES ('primary-key'='a', 'bucket'='2')
-                   |""".stripMargin)
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
       spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
 
       spark.sql(s"""
@@ -358,10 +321,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase {
 
       Seq((1, 100, "c11"), (3, 300, "c33")).toDF("a", "b", "c").createOrReplaceTempView("source")
 
-      spark.sql(s"""
-                   |CREATE TABLE target (a INT, b INT, c STRING)
-                   |TBLPROPERTIES ('primary-key'='a', 'bucket'='2')
-                   |""".stripMargin)
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
       spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
 
       spark.sql(s"""
@@ -385,10 +345,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase {
 
       Seq((1, 100, "c11"), (3, 300, "c33")).toDF("a", "b", "c").createOrReplaceTempView("source")
 
-      spark.sql(s"""
-                   |CREATE TABLE target (a INT, b INT, c STRING)
-                   |TBLPROPERTIES ('primary-key'='a', 'bucket'='2')
-                   |""".stripMargin)
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
       spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
 
       spark.sql(s"""
@@ -412,10 +369,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase {
 
       Seq((1, 100, "c11"), (3, 300, "c33")).toDF("a", "b", "c").createOrReplaceTempView("source")
 
-      spark.sql(s"""
-                   |CREATE TABLE target (a INT, b INT, c STRING)
-                   |TBLPROPERTIES ('primary-key'='a', 'bucket'='2')
-                   |""".stripMargin)
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
       spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
 
       val error = intercept[RuntimeException] {
@@ -440,10 +394,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase {
         .toDF("a", "b", "c")
         .createOrReplaceTempView("source")
 
-      spark.sql(s"""
-                   |CREATE TABLE target (a INT, b INT, c STRING)
-                   |TBLPROPERTIES ('primary-key'='a', 'bucket'='2')
-                   |""".stripMargin)
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
       spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
 
       spark.sql(s"""
@@ -469,10 +420,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase {
         .toDF("a", "b", "c")
         .createOrReplaceTempView("source")
 
-      spark.sql(s"""
-                   |CREATE TABLE target (a INT, b INT, c STRING)
-                   |TBLPROPERTIES ('primary-key'='a', 'bucket'='2')
-                   |""".stripMargin)
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
       spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
 
       val error = intercept[RuntimeException] {
@@ -495,10 +443,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase {
 
       Seq((1, 100, "c11"), (3, 300, "c33")).toDF("a", "b", "c").createOrReplaceTempView("source")
 
-      spark.sql(s"""
-                   |CREATE TABLE target (a INT, b INT, c STRING)
-                   |TBLPROPERTIES ('primary-key'='a', 'bucket'='2')
-                   |""".stripMargin)
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
       spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
 
       val error1 = intercept[RuntimeException] {
@@ -536,10 +481,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase {
         .toDF("a", "b", "c1", "c2")
         .createOrReplaceTempView("source")
 
-      spark.sql(s"""
-                   |CREATE TABLE target (a INT, b INT, c STRUCT<c1:STRING, c2:STRING>)
-                   |TBLPROPERTIES ('primary-key'='a', 'bucket'='2')
-                   |""".stripMargin)
+      createTable("target", "a INT, b INT, c STRUCT<c1:STRING, c2:STRING>", Seq("a"))
       spark.sql("INSERT INTO target values (1, 10, struct('x', 'y')), (2, 20, struct('x', 'y'))")
 
       spark.sql(s"""
@@ -555,6 +497,30 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase {
         Row(1, 10, Row("x1", "y")) :: Row(2, 20, Row("x", "y")) :: Nil)
     }
   }
+  test(s"Paimon MergeInto: update on source eq target condition") {
+    withTable("source", "target") {
+      Seq((1, 100, "c11"), (3, 300, "c33")).toDF("a", "b", "c").createOrReplaceTempView("source")
+
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
+      sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
+
+      sql(s"""
+             |MERGE INTO target
+             |USING source
+             |ON source.a = target.a
+             |WHEN MATCHED THEN
+             |UPDATE SET a = source.a, b = source.b, c = source.c
+             |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT * FROM target ORDER BY a, b"),
+        Row(1, 100, "c11") :: Row(2, 20, "c2") :: Nil)
+    }
+  }
+}
+
+trait MergeIntoPrimaryKeyTableTest extends PaimonSparkTestBase with PaimonPrimaryKeyTable {
+  import testImplicits._
 
   test("Paimon MergeInto: fail in case that maybe update primary key column") {
     withTable("source", "target") {
@@ -563,10 +529,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase {
         .toDF("a", "b", "c")
         .createOrReplaceTempView("source")
 
-      spark.sql(s"""
-                   |CREATE TABLE target (a INT, b INT, c STRING)
-                   |TBLPROPERTIES ('primary-key'='a', 'bucket'='2')
-                   |""".stripMargin)
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
       spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
 
       val error = intercept[RuntimeException] {
@@ -594,55 +557,6 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase {
       checkAnswer(
         spark.sql("SELECT * FROM target ORDER BY a, b"),
         Row(1, 10, "c111") :: Row(2, 20, "c2") :: Row(103, 30, "c333") :: Nil)
-    }
-  }
-
-  test("Paimon MergeInto: not support in table without primary keys") {
-    withTable("source", "target") {
-
-      Seq((1, 100, "c11"), (3, 300, "c33")).toDF("a", "b", "c").createOrReplaceTempView("source")
-
-      spark.sql(s"""
-                   |CREATE TABLE target (a INT, b INT, c STRING)
-                   |""".stripMargin)
-      spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
-
-      val error = intercept[RuntimeException] {
-        spark.sql(s"""
-                     |MERGE INTO target
-                     |USING source
-                     |ON target.a = source.a
-                     |WHEN MATCHED THEN
-                     |UPDATE SET a = source.a, b = source.b, c = source.c
-                     |WHEN NOT MATCHED
-                     |THEN INSERT (a, b, c) values (a, b, c)
-                     |""".stripMargin)
-      }.getMessage
-      assert(error.contains("Only support to MergeInto table with primary keys."))
-    }
-  }
-
-  test(s"Paimon MergeInto: update on source eq target condition") {
-    withTable("source", "target") {
-      Seq((1, 100, "c11"), (3, 300, "c33")).toDF("a", "b", "c").createOrReplaceTempView("source")
-
-      sql(s"""
-             |CREATE TABLE target (a INT, b INT, c STRING)
-             |TBLPROPERTIES ('primary-key'='a')
-             |""".stripMargin)
-      sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
-
-      sql(s"""
-             |MERGE INTO target
-             |USING source
-             |ON source.a = target.a
-             |WHEN MATCHED THEN
-             |UPDATE SET a = source.a, b = source.b, c = source.c
-             |""".stripMargin)
-
-      checkAnswer(
-        sql("SELECT * FROM target ORDER BY a, b"),
-        Row(1, 100, "c11") :: Row(2, 20, "c2") :: Nil)
     }
   }
 }

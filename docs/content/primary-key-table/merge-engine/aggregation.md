@@ -71,8 +71,14 @@ Current supported aggregate functions and data types are:
   It supports DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, and DOUBLE data types.
 
 ### count
-  The count function counts the values across multiple rows.
-  It supports INTEGER, BIGINT data types.
+  In scenarios where counting rows that match a specific condition is required, you can use the SUM function to achieve this. By expressing a condition as a Boolean value (TRUE or FALSE) and converting it into a numerical value, you can effectively count the rows. In this approach, TRUE is converted to 1, and FALSE is converted to 0.
+
+  For example, if you have a table orders and want to count the number of rows that meet a specific condition, you can use the following query:
+  ```sql
+  SELECT SUM(CASE WHEN condition THEN 1 ELSE 0 END) AS count
+  FROM orders;
+  ```
+
 
 ### max
   The max function identifies and retains the maximum value.
@@ -93,6 +99,7 @@ Current supported aggregate functions and data types are:
 ### listagg
   The listagg function concatenates multiple string values into a single string.
   It supports STRING data type.
+  Each field not part of the primary keys can be given a list agg delimiter, specified by the fields.<field-name>.list-agg-delimiter table property, otherwise it will use "," as default.
 
 ### bool_and
   The bool_and function evaluates whether all values in a boolean set are true.
@@ -194,7 +201,90 @@ Current supported aggregate functions and data types are:
 ### merge_map
   The merge_map function merge input maps. It only supports MAP type.
 
-### theta_sketch
+### Types of cardinality sketches
+
+ Paimon uses the [Apache DataSketches](https://datasketches.apache.org/) library of stochastic streaming algorithms to implement sketch modules. The DataSketches library includes various types of sketches, each one designed to solve a different sort of problem. Paimon supports HyperLogLog (HLL) and Theta cardinality sketches.
+
+#### HyperLogLog
+
+ The HyperLogLog (HLL) sketch aggregator is a very compact sketch algorithm for approximate distinct counting.  You can also use the HLL aggregator to calculate a union of HLL sketches. 
+
+#### Theta
+
+ The Theta sketch is a sketch algorithm for approximate distinct counting with set operations. Theta sketches let you count the overlap between sets, so that you can compute the union, intersection, or set difference between sketch objects.
+
+#### Choosing a sketch type
+
+  HLL and Theta sketches both support approximate distinct counting; however, the HLL sketch produces more accurate results and consumes less storage space. Theta sketches are more flexible but require significantly more memory.
+
+When choosing an approximation algorithm for your use case, consider the following:
+
+If your use case entails distinct counting and merging sketch objects, use the HLL sketch.
+If you need to evaluate union, intersection, or difference set operations, use the Theta sketch.
+You cannot merge HLL sketches with Theta sketches.
+
+#### hll_sketch
+
+The hll_sketch function aggregates multiple serialized Sketch objects into a single Sketch.
+It supports VARBINARY data type.
+
+An example:
+
+{{< tabs "nested_update-example" >}}
+
+{{< tab "Flink" >}}
+
+  ```sql
+  -- source table
+  CREATE TABLE VISITS (
+    id INT PRIMARY KEY NOT ENFORCED,
+    user_id STRING
+  );
+  
+  -- agg table
+  CREATE TABLE UV_AGG (
+    id INT PRIMARY KEY NOT ENFORCED,
+    uv VARBINARY
+  ) WITH (
+    'merge-engine' = 'aggregation',
+    'fields.f0.aggregate-function' = 'hll_sketch'
+  );
+  
+  -- Register the following class as a Flink function with the name "HLL_SKETCH" 
+  -- which is used to transform input to sketch bytes array:
+  --
+  -- public static class HllSketchFunction extends ScalarFunction {
+  --   public byte[] eval(String user_id) {
+  --     HllSketch hllSketch = new HllSketch();
+  --     hllSketch.update(id);
+  --     return hllSketch.toCompactByteArray();
+  --   }
+  -- }
+  --
+  INSERT INTO UV_AGG SELECT id, HLL_SKETCH(user_id) FROM VISITS;
+
+  -- Register the following class as a Flink function with the name "HLL_SKETCH_COUNT"
+  -- which is used to get cardinality from sketch bytes array:
+  -- 
+  -- public static class HllSketchCountFunction extends ScalarFunction { 
+  --   public Double eval(byte[] sketchBytes) {
+  --     if (sketchBytes == null) {
+  --       return 0d; 
+  --     } 
+  --     return HllSketch.heapify(sketchBytes).getEstimate(); 
+  --   } 
+  -- }
+  --
+  -- Then we can get user cardinality based on the aggregated field.
+  SELECT id, HLL_SKETCH_COUNT(UV) as uv FROM UV_AGG;
+  ```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
+
+#### theta_sketch
   The theta_sketch function aggregates multiple serialized Sketch objects into a single Sketch.
   It supports VARBINARY data type.
 
@@ -220,10 +310,10 @@ Current supported aggregate functions and data types are:
     'fields.f0.aggregate-function' = 'theta_sketch'
   );
   
-  -- Register the following class as a Flink function with the name "SKETCH" 
+  -- Register the following class as a Flink function with the name "THETA_SKETCH" 
   -- which is used to transform input to sketch bytes array:
   --
-  -- public static class SketchFunction extends ScalarFunction {
+  -- public static class ThetaSketchFunction extends ScalarFunction {
   --   public byte[] eval(String user_id) {
   --     UpdateSketch updateSketch = UpdateSketch.builder().build();
   --     updateSketch.update(user_id);
@@ -231,12 +321,12 @@ Current supported aggregate functions and data types are:
   --   }
   -- }
   --
-  INSERT INTO UV_AGG SELECT id, SKETCH(user_id) FROM VISITS;
+  INSERT INTO UV_AGG SELECT id, THETA_SKETCH(user_id) FROM VISITS;
 
-  -- Register the following class as a Flink function with the name "SKETCH_COUNT"
+  -- Register the following class as a Flink function with the name "THETA_SKETCH_COUNT"
   -- which is used to get cardinality from sketch bytes array:
   -- 
-  -- public static class SketchCountFunction extends ScalarFunction { 
+  -- public static class ThetaSketchCountFunction extends ScalarFunction { 
   --   public Double eval(byte[] sketchBytes) {
   --     if (sketchBytes == null) {
   --       return 0d; 
@@ -246,7 +336,7 @@ Current supported aggregate functions and data types are:
   -- }
   --
   -- Then we can get user cardinality based on the aggregated field.
-  SELECT id, SKETCH_COUNT(UV) as uv FROM UV_AGG;
+  SELECT id, THETA_SKETCH_COUNT(UV) as uv FROM UV_AGG;
   ```
 
   {{< /tab >}}
@@ -260,7 +350,7 @@ For streaming queries, `aggregation` merge engine must be used together with `lo
 
 ## Retraction
 
-Only `sum`, `product`, `count`, `collect`, `merge_map`, `nested_update`, `last_value` and `last_non_null_value` supports retraction (`UPDATE_BEFORE` and `DELETE`), others aggregate functions do not support retraction.
+Only `sum`, `product`, `collect`, `merge_map`, `nested_update`, `last_value` and `last_non_null_value` supports retraction (`UPDATE_BEFORE` and `DELETE`), others aggregate functions do not support retraction.
 If you allow some functions to ignore retraction messages, you can configure:
 `'fields.${field_name}.ignore-retract'='true'`.
 

@@ -19,6 +19,7 @@
 package org.apache.paimon.mergetree.compact.aggregate;
 
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.options.Options;
@@ -35,6 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for aggregate merge function. */
 class AggregateMergeFunctionTest {
+
     @Test
     void testDefaultAggFunc() {
         Options options = new Options();
@@ -62,8 +64,89 @@ class AggregateMergeFunctionTest {
         assertThat(aggregateFunction.getResult().value()).isEqualTo(GenericRow.of(1, 2, 13, 1, 1));
     }
 
+    @Test
+    void tesListAggFunc() {
+        Options options = new Options();
+        options.set("fields.a.aggregate-function", "listagg");
+        options.set("fields.b.aggregate-function", "listagg");
+        options.set("fields.b.list-agg-delimiter", "-");
+        options.set("fields.d.aggregate-function", "listagg");
+        options.set("fields.d.list-agg-delimiter", "/");
+
+        MergeFunction<KeyValue> aggregateFunction =
+                AggregateMergeFunction.factory(
+                                options,
+                                Arrays.asList("k", "a", "b", "c", "d"),
+                                Arrays.asList(
+                                        DataTypes.INT(),
+                                        DataTypes.STRING(),
+                                        DataTypes.STRING(),
+                                        DataTypes.INT(),
+                                        DataTypes.STRING()),
+                                Collections.singletonList("k"))
+                        .create();
+        aggregateFunction.reset();
+
+        aggregateFunction.add(
+                value(
+                        1,
+                        BinaryString.fromString("1"),
+                        BinaryString.fromString("1"),
+                        1,
+                        BinaryString.fromString("1")));
+        aggregateFunction.add(
+                value(
+                        1,
+                        BinaryString.fromString("2"),
+                        BinaryString.fromString("2"),
+                        2,
+                        BinaryString.fromString("2")));
+        aggregateFunction.add(
+                value(
+                        1,
+                        BinaryString.fromString("3"),
+                        BinaryString.fromString("3"),
+                        3,
+                        BinaryString.fromString("3")));
+        aggregateFunction.add(
+                value(
+                        1,
+                        BinaryString.fromString("4"),
+                        BinaryString.fromString("4"),
+                        4,
+                        BinaryString.fromString("4")));
+        aggregateFunction.add(
+                value(
+                        1,
+                        BinaryString.fromString("5"),
+                        BinaryString.fromString("5"),
+                        5,
+                        BinaryString.fromString("5")));
+        assertThat(aggregateFunction.getResult().value())
+                .isEqualTo(
+                        GenericRow.of(
+                                1,
+                                BinaryString.fromString("1,2,3,4,5"),
+                                BinaryString.fromString("1-2-3-4-5"),
+                                5,
+                                BinaryString.fromString("1/2/3/4/5")));
+    }
+
     private KeyValue value(Integer... values) {
         return new KeyValue()
                 .replace(GenericRow.of(values[0]), RowKind.INSERT, GenericRow.of(values));
+    }
+
+    private KeyValue value(
+            Integer value1,
+            BinaryString value2,
+            BinaryString value3,
+            Integer value4,
+            BinaryString value5) {
+        return new KeyValue()
+                .replace(
+                        GenericRow.of(value1),
+                        RowKind.INSERT,
+                        GenericRow.of(value1, value2, value3, value4, value5));
     }
 }

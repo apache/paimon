@@ -620,7 +620,7 @@ public class TestFileStore extends KeyValueFileStore {
         }
 
         // manifests
-        List<ManifestFileMeta> manifests = snapshot.allManifests(manifestList);
+        List<ManifestFileMeta> manifests = manifestList.readAllManifests(snapshot);
         manifests.forEach(m -> result.add(pathFactory.toManifestFilePath(m.fileName())));
 
         // data file
@@ -639,7 +639,8 @@ public class TestFileStore extends KeyValueFileStore {
         // but it can only be cleaned after this snapshot expired, so we should add it to the file
         // use list.
         if (changelogDecoupled && !produceChangelog) {
-            entries = scan.withManifestList(snapshot.deltaManifests(manifestList)).plan().files();
+            entries =
+                    scan.withManifestList(manifestList.readDeltaManifests(snapshot)).plan().files();
             for (ManifestEntry entry : entries) {
                 // append delete file are delayed to delete
                 if (entry.kind() == FileKind.DELETE
@@ -686,9 +687,9 @@ public class TestFileStore extends KeyValueFileStore {
 
         // manifests
         List<ManifestFileMeta> manifests =
-                new ArrayList<>(changelog.changelogManifests(manifestList));
+                new ArrayList<>(manifestList.readChangelogManifests(changelog));
         if (!produceChangelog) {
-            manifests.addAll(changelog.dataManifests(manifestList));
+            manifests.addAll(manifestList.readDataManifests(changelog));
         }
 
         manifests.forEach(m -> result.add(pathFactory.toManifestFilePath(m.fileName())));
@@ -701,7 +702,9 @@ public class TestFileStore extends KeyValueFileStore {
         // delta file
         if (!produceChangelog) {
             for (ManifestEntry entry :
-                    scan.withManifestList(changelog.deltaManifests(manifestList)).plan().files()) {
+                    scan.withManifestList(manifestList.readDeltaManifests(changelog))
+                            .plan()
+                            .files()) {
                 if (entry.file().fileSource().orElse(FileSource.APPEND) == FileSource.APPEND) {
                     result.add(
                             new Path(
@@ -712,7 +715,7 @@ public class TestFileStore extends KeyValueFileStore {
         } else {
             // changelog
             for (ManifestEntry entry :
-                    scan.withManifestList(changelog.changelogManifests(manifestList))
+                    scan.withManifestList(manifestList.readChangelogManifests(changelog))
                             .plan()
                             .files()) {
                 result.add(

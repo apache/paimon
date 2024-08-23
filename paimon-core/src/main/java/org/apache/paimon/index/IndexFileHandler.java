@@ -21,7 +21,6 @@ package org.apache.paimon.index;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.DeletionVector;
-import org.apache.paimon.deletionvectors.DeletionVectorIndexFileMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -197,26 +196,6 @@ public class IndexFileHandler {
         return result;
     }
 
-    public List<IndexManifestEntry> scanEntries(String indexType, BinaryRow partition, int bucket) {
-        Snapshot snapshot = snapshotManager.latestSnapshot();
-        if (snapshot == null) {
-            return Collections.emptyList();
-        }
-        String indexManifest = snapshot.indexManifest();
-        if (indexManifest == null) {
-            return Collections.emptyList();
-        }
-        List<IndexManifestEntry> result = new ArrayList<>();
-        for (IndexManifestEntry file : indexManifestFile.read(indexManifest)) {
-            if (file.indexFile().indexType().equals(indexType)
-                    && file.partition().equals(partition)
-                    && file.bucket() == bucket) {
-                result.add(file);
-            }
-        }
-        return result;
-    }
-
     public Path filePath(IndexFileMeta file) {
         return pathFactory.toPath(file.fileName());
     }
@@ -289,11 +268,6 @@ public class IndexFileHandler {
 
     public void deleteManifest(String indexManifest) {
         indexManifestFile.delete(indexManifest);
-    }
-
-    public DeletionVectorIndexFileMaintainer createDVIndexFileMaintainer(
-            Long snapshotId, BinaryRow partition, int bucket, boolean restore) {
-        return new DeletionVectorIndexFileMaintainer(this, snapshotId, partition, bucket, restore);
     }
 
     public Map<String, DeletionVector> readAllDeletionVectors(List<IndexFileMeta> fileMetas) {

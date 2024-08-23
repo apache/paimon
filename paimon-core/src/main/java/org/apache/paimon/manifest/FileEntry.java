@@ -21,7 +21,6 @@ package org.apache.paimon.manifest;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Preconditions;
-import org.apache.paimon.utils.ScanParallelExecutor;
 
 import javax.annotation.Nullable;
 
@@ -30,7 +29,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.stream.Collectors;
+
+import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedExecute;
 
 /** Entry representing a file. */
 public interface FileEntry {
@@ -156,22 +156,9 @@ public interface FileEntry {
             ManifestFile manifestFile,
             List<ManifestFileMeta> manifestFiles,
             @Nullable Integer manifestReadParallelism) {
-        return ScanParallelExecutor.parallelismBatchIterable(
-                files ->
-                        files.parallelStream()
-                                .flatMap(
-                                        m -> manifestFile.read(m.fileName(), m.fileSize()).stream())
-                                .collect(Collectors.toList()),
+        return sequentialBatchedExecute(
+                file -> manifestFile.read(file.fileName(), file.fileSize()),
                 manifestFiles,
                 manifestReadParallelism);
-    }
-
-    static <T extends FileEntry> void assertNoDelete(Collection<T> entries) {
-        for (T entry : entries) {
-            Preconditions.checkState(
-                    entry.kind() != FileKind.DELETE,
-                    "Trying to delete file %s which is not previously added.",
-                    entry.fileName());
-        }
     }
 }

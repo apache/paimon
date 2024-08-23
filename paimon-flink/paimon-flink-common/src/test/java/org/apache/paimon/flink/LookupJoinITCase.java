@@ -326,6 +326,149 @@ public class LookupJoinITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testLookupUpdateAfterLeafPredicate0() throws Exception {
+        sql(
+                "CREATE TABLE fact (\n"
+                        + "  name string,\n"
+                        + "  k string,\n"
+                        + "  proctime as PROCTIME()\n"
+                        + ")\n"
+                        + "WITH (\n"
+                        + "    'bucket' = '1',\n"
+                        + "    'bucket-key'='name'\n"
+                        + ");");
+        sql(
+                "CREATE TABLE dim (\n"
+                        + "  id bigint,\n"
+                        + "  k string,\n"
+                        + "  v string,\n"
+                        + "  PRIMARY KEY (id) NOT ENFORCED \n"
+                        + ")\n"
+                        + "WITH (\n"
+                        + "    'bucket' = '1'\n"
+                        + ");");
+        String query =
+                "select \n"
+                        + "a.name,\n"
+                        + "a.k as ak,\n"
+                        + "b.k as bk,\n"
+                        + "b.v\n"
+                        + "from fact  /*+ OPTIONS('scan.mode'='latest','continuous.discovery-interval'='1s') */ a\n"
+                        + "left join dim /*+ OPTIONS('continuous.discovery-interval'='3s') */ FOR SYSTEM_TIME AS OF a.proctime AS b \n"
+                        + "on a.k = b.k and b.v<'y'";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+
+        sql("INSERT INTO dim VALUES (1,'k','x')");
+        sql("INSERT INTO fact VALUES ('r1','k')");
+        iterator.collect(1);
+        sql("INSERT INTO dim VALUES (1,'k','y')");
+        sql("INSERT INTO fact VALUES ('r2','k')");
+        sql("INSERT INTO fact VALUES ('r3','k')");
+        List<Row> result = iterator.collect(2);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of("r2", "k", "k", "x"), Row.of("r3", "k", "k", "x"));
+
+        iterator.close();
+    }
+
+    @Test
+    public void testLookupUpdateAfterLeafPredicate1() throws Exception {
+        sql(
+                "CREATE TABLE fact (\n"
+                        + "  name string,\n"
+                        + "  k string,\n"
+                        + "  proctime as PROCTIME()\n"
+                        + ")\n"
+                        + "WITH (\n"
+                        + "    'bucket' = '1',\n"
+                        + "    'bucket-key'='name'\n"
+                        + ");");
+        sql(
+                "CREATE TABLE dim (\n"
+                        + "  id bigint,\n"
+                        + "  k string,\n"
+                        + "  v string,\n"
+                        + "  PRIMARY KEY (id) NOT ENFORCED \n"
+                        + ")\n"
+                        + "WITH (\n"
+                        + "    'bucket' = '1'\n"
+                        + ");");
+        String query =
+                "select \n"
+                        + "a.name,\n"
+                        + "a.k as ak,\n"
+                        + "b.k as bk,\n"
+                        + "b.v\n"
+                        + "from fact  /*+ OPTIONS('scan.mode'='latest','continuous.discovery-interval'='1s') */ a\n"
+                        + "left join dim /*+ OPTIONS('continuous.discovery-interval'='3s') */ FOR SYSTEM_TIME AS OF a.proctime AS b \n"
+                        + "on a.k = b.k and b.v<'y'";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+
+        sql("INSERT INTO dim VALUES (1,'k','x')");
+        sql("INSERT INTO fact VALUES ('r1','k')");
+        Thread.sleep(5000);
+        sql("INSERT INTO dim VALUES (1,'k','y')");
+        sql("INSERT INTO fact VALUES ('r2','k')");
+        sql("INSERT INTO fact VALUES ('r3','k')");
+        List<Row> result = iterator.collect(3);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of("r1", "k", "k", "x"),
+                        Row.of("r2", "k", null, null),
+                        Row.of("r3", "k", null, null));
+
+        iterator.close();
+    }
+
+    @Test
+    public void testLookupUpdateAfterLeafPredicate2() throws Exception {
+        sql("CREATE TABLE fact (name STRING, i INT, `proctime` AS PROCTIME())");
+        sql(
+                "CREATE TABLE dim (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
+                        + " ('continuous.discovery-interval'='1 ms')");
+
+        String query =
+                "SELECT fact.name, fact.i, D.k1 FROM fact LEFT JOIN dim for system_time as of fact.proctime AS D ON fact.i = D.j AND D.k1 > 100";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+
+        sql("INSERT INTO dim VALUES (1, 11, 111, 1111)");
+        sql("INSERT INTO fact VALUES ('a',11)");
+        List<Row> result = iterator.collect(1);
+        assertThat(result).containsExactlyInAnyOrder(Row.of("a", 11, 111));
+
+        sql("INSERT INTO dim VALUES (1,11,100,1111)");
+        sql("INSERT INTO fact VALUES ('b',11)");
+        result = iterator.collect(1);
+        assertThat(result).containsExactlyInAnyOrder(Row.of("b", 11, null));
+        iterator.close();
+    }
+
+    @Test
+    public void testLookupUpdateAfterCompoundPredicate() throws Exception {
+        sql("CREATE TABLE fact (name STRING, i INT, `proctime` AS PROCTIME())");
+        sql(
+                "CREATE TABLE dim (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
+                        + " ('continuous.discovery-interval'='1 ms')");
+
+        String query =
+                "SELECT fact.name, fact.i, D.k1, D.k2 FROM fact LEFT JOIN dim for system_time as of fact.proctime AS D ON fact.i = D.j AND D.k1 > 100 AND D.k2>1000";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+
+        sql("INSERT INTO dim VALUES (1, 11, 111, 1111)");
+        sql("INSERT INTO dim VALUES (2, 11, 111, 1000)");
+        sql("INSERT INTO fact VALUES ('a',11)");
+        List<Row> result = iterator.collect(1);
+        assertThat(result).containsExactlyInAnyOrder(Row.of("a", 11, 111, 1111));
+
+        sql("INSERT INTO dim VALUES (1,11,100,1111)");
+        sql("INSERT INTO fact VALUES ('b',11)");
+        result = iterator.collect(1);
+        assertThat(result).containsExactlyInAnyOrder(Row.of("b", 11, null, null));
+        iterator.close();
+    }
+
+    @Test
     public void testNonPkLookup() throws Exception {
         initTable(LookupCacheMode.AUTO);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
@@ -641,25 +784,28 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @Test
-    public void testLookupMaxPtPartitionedTablePartialCache() throws Exception {
-        innerTestLookupMaxPtPartitionedTable(LookupCacheMode.AUTO);
-    }
-
-    @Test
-    public void testLookupMaxPtPartitionedTableFullCache() throws Exception {
-        innerTestLookupMaxPtPartitionedTable(LookupCacheMode.FULL);
-    }
-
-    private void innerTestLookupMaxPtPartitionedTable(LookupCacheMode mode) throws Exception {
-        tEnv.executeSql(
-                "CREATE TABLE PARTITIONED_DIM (pt STRING, k INT, v INT, PRIMARY KEY (pt, k) NOT ENFORCED)"
+    @ParameterizedTest
+    @EnumSource(LookupCacheMode.class)
+    public void testLookupMaxPtPartitionedTable(LookupCacheMode mode) throws Exception {
+        boolean testDynamicBucket = ThreadLocalRandom.current().nextBoolean();
+        String primaryKeys;
+        String bucket;
+        if (testDynamicBucket) {
+            primaryKeys = "k";
+            bucket = "-1";
+        } else {
+            primaryKeys = "pt, k";
+            bucket = "1";
+        }
+        sql(
+                "CREATE TABLE PARTITIONED_DIM (pt STRING, k INT, v INT, PRIMARY KEY (%s) NOT ENFORCED)"
                         + "PARTITIONED BY (`pt`) WITH ("
-                        + "'bucket' = '1', "
+                        + "'bucket' = '%s', "
                         + "'lookup.dynamic-partition' = 'max_pt()', "
                         + "'lookup.dynamic-partition.refresh-interval' = '1 ms', "
-                        + String.format("'lookup.cache' = '%s', ", mode)
-                        + "'continuous.discovery-interval'='1 ms')");
+                        + "'lookup.cache' = '%s', "
+                        + "'continuous.discovery-interval'='1 ms')",
+                primaryKeys, bucket, mode);
         String query =
                 "SELECT T.i, D.v FROM T LEFT JOIN PARTITIONED_DIM for system_time as of T.proctime AS D ON T.i = D.k";
         BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());

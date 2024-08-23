@@ -28,15 +28,32 @@ import org.apache.paimon.utils.Pair;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Objects;
 
 import static org.apache.paimon.utils.SerializationUtils.newStringType;
 
 /** Metadata of index file. */
 public class IndexFileMeta {
+
+    public static final RowType SCHEMA =
+            new RowType(
+                    false,
+                    Arrays.asList(
+                            new DataField(0, "_INDEX_TYPE", newStringType(false)),
+                            new DataField(1, "_FILE_NAME", newStringType(false)),
+                            new DataField(2, "_FILE_SIZE", new BigIntType(false)),
+                            new DataField(3, "_ROW_COUNT", new BigIntType(false)),
+                            new DataField(
+                                    4,
+                                    "_DELETION_VECTORS_RANGES",
+                                    new ArrayType(
+                                            true,
+                                            RowType.of(
+                                                    newStringType(false),
+                                                    new IntType(false),
+                                                    new IntType(false))))));
 
     private final String indexType;
     private final String fileName;
@@ -122,24 +139,5 @@ public class IndexFileMeta {
                 + ", deletionVectorsRanges="
                 + deletionVectorsRanges
                 + '}';
-    }
-
-    public static RowType schema() {
-        List<DataField> fields = new ArrayList<>();
-        fields.add(new DataField(0, "_INDEX_TYPE", newStringType(false)));
-        fields.add(new DataField(1, "_FILE_NAME", newStringType(false)));
-        fields.add(new DataField(2, "_FILE_SIZE", new BigIntType(false)));
-        fields.add(new DataField(3, "_ROW_COUNT", new BigIntType(false)));
-        fields.add(
-                new DataField(
-                        4,
-                        "_DELETION_VECTORS_RANGES",
-                        new ArrayType(
-                                true,
-                                RowType.of(
-                                        newStringType(false),
-                                        new IntType(false),
-                                        new IntType(false)))));
-        return new RowType(fields);
     }
 }

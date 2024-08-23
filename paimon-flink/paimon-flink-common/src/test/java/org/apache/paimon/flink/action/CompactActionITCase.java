@@ -39,6 +39,8 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -169,6 +171,79 @@ public class CompactActionITCase extends CompactActionITCaseBase {
                 String.format("Cannot validate snapshot expiration in %s milliseconds.", 60_000));
     }
 
+    @ParameterizedTest(name = "mode = {0}")
+    @ValueSource(booleans = {true, false})
+    @Timeout(60)
+    public void testHistoryPartitionCompact(boolean mode) throws Exception {
+        String partitionIdleTime = "5s";
+        FileStoreTable table;
+        if (mode) {
+            table =
+                    prepareTable(
+                            Arrays.asList("dt", "hh"),
+                            Arrays.asList("dt", "hh", "k"),
+                            Collections.emptyList(),
+                            Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "true"));
+        } else {
+            // for unaware bucket table
+            Map<String, String> tableOptions = new HashMap<>();
+            tableOptions.put(CoreOptions.BUCKET.key(), "-1");
+            tableOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+            tableOptions.put(CoreOptions.COMPACTION_MAX_FILE_NUM.key(), "2");
+
+            table =
+                    prepareTable(
+                            Arrays.asList("dt", "hh"),
+                            Collections.emptyList(),
+                            Collections.emptyList(),
+                            tableOptions);
+        }
+
+        writeData(
+                rowData(1, 100, 15, BinaryString.fromString("20221208")),
+                rowData(1, 100, 16, BinaryString.fromString("20221208")),
+                rowData(1, 100, 15, BinaryString.fromString("20221209")));
+
+        writeData(
+                rowData(2, 100, 15, BinaryString.fromString("20221208")),
+                rowData(2, 100, 16, BinaryString.fromString("20221208")),
+                rowData(2, 100, 15, BinaryString.fromString("20221209")));
+
+        Thread.sleep(5000);
+        writeData(rowData(3, 100, 16, BinaryString.fromString("20221208")));
+        checkLatestSnapshot(table, 3, Snapshot.CommitKind.APPEND);
+
+        CompactAction action =
+                createAction(
+                        CompactAction.class,
+                        "compact",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--partition_idle_time",
+                        partitionIdleTime);
+        StreamExecutionEnvironment env = streamExecutionEnvironmentBuilder().batchMode().build();
+        action.withStreamExecutionEnvironment(env).build();
+        env.execute();
+
+        checkLatestSnapshot(table, 4, Snapshot.CommitKind.COMPACT);
+
+        List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
+        assertThat(splits.size()).isEqualTo(3);
+        for (DataSplit split : splits) {
+            if (split.partition().getInt(1) == 15) {
+                // compacted
+                assertThat(split.dataFiles().size()).isEqualTo(1);
+            } else {
+                // not compacted
+                assertThat(split.dataFiles().size()).isEqualTo(3);
+            }
+        }
+    }
+
     @Test
     public void testUnawareBucketStreamingCompact() throws Exception {
         Map<String, String> tableOptions = new HashMap<>();
@@ -292,6 +367,39 @@ public class CompactActionITCase extends CompactActionITCaseBase {
 
         Assertions.assertThatThrownBy(() -> runAction(false))
                 .hasMessage("Only parition key can be specialized in compaction action.");
+    }
+
+    @Test
+    public void testWrongUsage() throws Exception {
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+        tableOptions.put(CoreOptions.BUCKET.key(), "-1");
+
+        prepareTable(
+                Collections.singletonList("v"),
+                Arrays.asList(),
+                Collections.emptyList(),
+                tableOptions);
+
+        // partition_idle_time can not be used with order-strategy
+        Assertions.assertThatThrownBy(
+                        () ->
+                                createAction(
+                                        CompactAction.class,
+                                        "compact",
+                                        "--warehouse",
+                                        warehouse,
+                                        "--database",
+                                        database,
+                                        "--table",
+                                        tableName,
+                                        "--partition_idle_time",
+                                        "5s",
+                                        "--order_strategy",
+                                        "zorder",
+                                        "--order_by",
+                                        "dt,hh"))
+                .hasMessage("sort compact do not support 'partition_idle_time'.");
     }
 
     private FileStoreTable prepareTable(

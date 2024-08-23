@@ -24,7 +24,6 @@ import org.apache.paimon.data.safe.SafeBinaryRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.stats.SimpleStats;
-import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
@@ -62,8 +61,8 @@ public class DataFileMeta08Serializer implements Serializable {
         fields.add(new DataField(2, "_ROW_COUNT", new BigIntType(false)));
         fields.add(new DataField(3, "_MIN_KEY", newBytesType(false)));
         fields.add(new DataField(4, "_MAX_KEY", newBytesType(false)));
-        fields.add(new DataField(5, "_KEY_STATS", SimpleStatsConverter.schema()));
-        fields.add(new DataField(6, "_VALUE_STATS", SimpleStatsConverter.schema()));
+        fields.add(new DataField(5, "_KEY_STATS", SimpleStats.SCHEMA));
+        fields.add(new DataField(6, "_VALUE_STATS", SimpleStats.SCHEMA));
         fields.add(new DataField(7, "_MIN_SEQUENCE_NUMBER", new BigIntType(false)));
         fields.add(new DataField(8, "_MAX_SEQUENCE_NUMBER", new BigIntType(false)));
         fields.add(new DataField(9, "_SCHEMA_ID", new BigIntType(false)));

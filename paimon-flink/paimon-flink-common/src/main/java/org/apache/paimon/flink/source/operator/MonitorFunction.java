@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.source.operator;
 
 import org.apache.paimon.flink.utils.JavaTypeInfo;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
@@ -38,6 +39,7 @@ import org.apache.flink.runtime.state.FunctionInitializationContext;
 import org.apache.flink.runtime.state.FunctionSnapshotContext;
 import org.apache.flink.streaming.api.checkpoint.CheckpointedFunction;
 import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.source.RichSourceFunction;
 import org.apache.flink.streaming.api.watermark.Watermark;
@@ -51,6 +53,8 @@ import java.util.List;
 import java.util.NavigableMap;
 import java.util.OptionalLong;
 import java.util.TreeMap;
+
+import static org.apache.paimon.table.BucketMode.BUCKET_UNAWARE;
 
 /**
  * This is the single (non-parallel) monitoring task, it is responsible for:
@@ -229,19 +233,45 @@ public class MonitorFunction extends RichSourceFunction<Split>
             TypeInformation<RowData> typeInfo,
             ReadBuilder readBuilder,
             long monitorInterval,
-            boolean emitSnapshotWatermark) {
-        return env.addSource(
-                        new MonitorFunction(readBuilder, monitorInterval, emitSnapshotWatermark),
-                        name + "-Monitor",
-                        new JavaTypeInfo<>(Split.class))
-                .forceNonParallel()
-                .partitionCustom(
-                        (key, numPartitions) ->
-                                ChannelComputer.select(key.f0, key.f1, numPartitions),
-                        split -> {
-                            DataSplit dataSplit = (DataSplit) split;
-                            return Tuple2.of(dataSplit.partition(), dataSplit.bucket());
-                        })
-                .transform(name + "-Reader", typeInfo, new ReadOperator(readBuilder));
+            boolean emitSnapshotWatermark,
+            boolean shuffleBucketWithPartition,
+            BucketMode bucketMode) {
+        SingleOutputStreamOperator<Split> singleOutputStreamOperator =
+                env.addSource(
+                                new MonitorFunction(
+                                        readBuilder, monitorInterval, emitSnapshotWatermark),
+                                name + "-Monitor",
+                                new JavaTypeInfo<>(Split.class))
+                        .forceNonParallel();
+
+        DataStream<Split> sourceDataStream =
+                bucketMode == BUCKET_UNAWARE
+                        ? shuffleUnwareBucket(singleOutputStreamOperator)
+                        : shuffleNonUnwareBucket(
+                                singleOutputStreamOperator, shuffleBucketWithPartition);
+
+        return sourceDataStream.transform(
+                name + "-Reader", typeInfo, new ReadOperator(readBuilder));
+    }
+
+    private static DataStream<Split> shuffleUnwareBucket(
+            SingleOutputStreamOperator<Split> singleOutputStreamOperator) {
+        return singleOutputStreamOperator.rebalance();
+    }
+
+    private static DataStream<Split> shuffleNonUnwareBucket(
+            SingleOutputStreamOperator<Split> singleOutputStreamOperator,
+            boolean shuffleBucketWithPartition) {
+        return singleOutputStreamOperator.partitionCustom(
+                (key, numPartitions) -> {
+                    if (shuffleBucketWithPartition) {
+                        return ChannelComputer.select(key.f0, key.f1, numPartitions);
+                    }
+                    return ChannelComputer.select(key.f1, numPartitions);
+                },
+                split -> {
+                    DataSplit dataSplit = (DataSplit) split;
+                    return Tuple2.of(dataSplit.partition(), dataSplit.bucket());
+                });
     }
 }

@@ -46,12 +46,13 @@ This section introduce all available spark procedures about paimon.
             <li>where: partition predicate. Left empty for all partitions. (Can't be used together with "partitions")</li>          
             <li>order_strategy: 'order' or 'zorder' or 'hilbert' or 'none'. Left empty for 'none'.</li>
             <li>order_columns: the columns need to be sort. Left empty if 'order_strategy' is 'none'.</li>
-            <li>max_concurrent_jobs: when sort compact is used, files in one partition are grouped and submitted as a single spark compact job. This parameter controls the maximum number of jobs that can be submitted simultaneously. The default value is 15.</li>
+            <li>partition_idle_time: this is used to do a full compaction for partition which had not received any new data for 'partition_idle_time'. And only these partitions will be compacted. This argument can not be used with order compact.</li>
       </td>
       <td>
          SET spark.sql.shuffle.partitions=10; --set the compact parallelism <br/><br/>
          CALL sys.compact(table => 'T', partitions => 'p=0;p=1',  order_strategy => 'zorder', order_by => 'a,b') <br/><br/>
-         CALL sys.compact(table => 'T', where => 'p>0 and p<3', order_strategy => 'zorder', order_by => 'a,b')
+         CALL sys.compact(table => 'T', where => 'p>0 and p<3', order_strategy => 'zorder', order_by => 'a,b') <br/><br/>
+         CALL sys.compact(table => 'T', partition_idle_time => '60s')
       </td>
     </tr>
     <tr>
@@ -73,9 +74,11 @@ This section introduce all available spark procedures about paimon.
             <li>table: the target table identifier. Cannot be empty.</li>
             <li>expiration_time: the expiration interval of a partition. A partition will be expired if it‘s lifetime is over this value. Partition time is extracted from the partition value.</li>
             <li>timestamp_formatter: the formatter to format timestamp from string.</li>
+            <li>timestamp_pattern: the pattern to get a timestamp from partitions.</li>
             <li>expire_strategy: specifies the expiration strategy for partition expiration, possible values: 'values-time' or 'update-time' , 'values-time' as default.</li>
       </td>
-      <td>CALL sys.expire_partitions(table => 'default.T', expiration_time => '1 d', timestamp_formatter => 'yyyy-MM-dd', expire_strategy => 'values-time')</td>
+      <td>CALL sys.expire_partitions(table => 'default.T', expiration_time => '1 d', timestamp_formatter => 
+'yyyy-MM-dd', timestamp_pattern => '$dt', expire_strategy => 'values-time')</td>
     </tr>
     <tr>
       <td>create_tag</td>
@@ -123,8 +126,9 @@ This section introduce all available spark procedures about paimon.
             <li>options: the table options of the paimon table to migrate.</li>
             <li>target_table: name of the target paimon table to migrate. If not set would keep the same name with origin table</li>
             <li>delete_origin: If had set target_table, can set delete_origin to decide whether delete the origin table metadata from hms after migrate. Default is true</li>
+            <li>options_map: Options map for adding key-value options which is a map.</li>      
       </td>
-      <td>CALL sys.migrate_table(source_type => 'hive', table => 'default.T', options => 'file.format=parquet')</td>
+      <td>CALL sys.migrate_table(source_type => 'hive', table => 'default.T', options => 'file.format=parquet', options_map => map('k1','v1'))</td>
     </tr>
     <tr>
       <td>migrate_file</td>
@@ -169,12 +173,10 @@ This section introduce all available spark procedures about paimon.
             <li>table: the target table identifier. Cannot be empty.</li>
             <li>branch: name of the branch to be merged.</li>
             <li>tag: name of the new tag. Cannot be empty.</li>
-            <li>snapshot(Long):  id of the snapshot which the new tag is based on.</li>
       </td>
       <td>
           CALL sys.create_branch(table => 'test_db.T', branch => 'test_branch')<br/><br/>
           CALL sys.create_branch(table => 'test_db.T', branch => 'test_branch', tag => 'my_tag')<br/><br/>
-          CALL sys.create_branch(table => 'test_db.T', branch => 'test_branch', snapshot => 10)
       </td>
     </tr>
     <tr>

@@ -47,6 +47,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.FileStorePathFactory;
 
+import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -169,7 +170,7 @@ public class LookupLevelsTest {
         assertThat(lookupLevels.lookupFiles().estimatedSize()).isEqualTo(0);
     }
 
-    @Test
+    @RepeatedTest(value = 10)
     public void testMaxDiskSize() throws IOException {
         List<DataFileMeta> files = new ArrayList<>();
         int fileNum = 10;

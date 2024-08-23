@@ -112,6 +112,10 @@ public class DataSplit implements Split {
         return this.dataFiles.stream().mapToLong(DataFileMeta::creationTimeEpochMillis).max();
     }
 
+    public OptionalLong earliestFileCreationEpochMillis() {
+        return this.dataFiles.stream().mapToLong(DataFileMeta::creationTimeEpochMillis).min();
+    }
+
     @Override
     public long rowCount() {
         long rowCount = 0;

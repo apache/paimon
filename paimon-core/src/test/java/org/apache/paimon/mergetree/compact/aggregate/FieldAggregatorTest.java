@@ -18,6 +18,7 @@
 
 package org.apache.paimon.mergetree.compact.aggregate;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
@@ -40,8 +41,11 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.SmallIntType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.HllSketchUtil;
 import org.apache.paimon.utils.RoaringBitmap32;
 import org.apache.paimon.utils.RoaringBitmap64;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import org.junit.jupiter.api.Test;
 
@@ -123,12 +127,28 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldListaggAgg() {
-        FieldListaggAgg fieldListaggAgg = new FieldListaggAgg(new VarCharType());
+    public void testFieldListAggWithDefaultDelimiter() {
+        FieldListaggAgg fieldListaggAgg =
+                new FieldListaggAgg(
+                        new VarCharType(), new CoreOptions(new HashMap<>()), "fieldName");
         BinaryString accumulator = BinaryString.fromString("user1");
         BinaryString inputField = BinaryString.fromString("user2");
         assertThat(fieldListaggAgg.agg(accumulator, inputField).toString())
                 .isEqualTo("user1,user2");
+    }
+
+    @Test
+    public void testFieldListAggWithCustomDelimiter() {
+        FieldListaggAgg fieldListaggAgg =
+                new FieldListaggAgg(
+                        new VarCharType(),
+                        CoreOptions.fromMap(
+                                ImmutableMap.of("fields.fieldName.list-agg-delimiter", "-")),
+                        "fieldName");
+        BinaryString accumulator = BinaryString.fromString("user1");
+        BinaryString inputField = BinaryString.fromString("user2");
+        assertThat(fieldListaggAgg.agg(accumulator, inputField).toString())
+                .isEqualTo("user1-user2");
     }
 
     @Test
@@ -154,37 +174,6 @@ public class FieldAggregatorTest {
         assertThat(fieldSumAgg.agg(1, 10)).isEqualTo(11);
         assertThat(fieldSumAgg.retract(10, 5)).isEqualTo(5);
         assertThat(fieldSumAgg.retract(null, 5)).isEqualTo(-5);
-    }
-
-    @Test
-    public void testFieldCountIntAgg() {
-        FieldCountAgg fieldCountAggInt = new FieldCountAgg(new IntType());
-        assertThat(fieldCountAggInt.agg(null, null)).isEqualTo(0);
-        assertThat(fieldCountAggInt.agg(1, null)).isEqualTo(1);
-        assertThat(fieldCountAggInt.agg(null, 15)).isEqualTo(1);
-        assertThat(fieldCountAggInt.agg(1, 0)).isEqualTo(2);
-        assertThat(fieldCountAggInt.agg(3, 6)).isEqualTo(4);
-
-        FieldCountAgg fieldCountAggLong = new FieldCountAgg(new BigIntType());
-        assertThat(fieldCountAggLong.agg(null, null)).isEqualTo(0);
-        assertThat(fieldCountAggLong.agg((long) 1, null)).isEqualTo((long) 1);
-        assertThat(fieldCountAggLong.agg(null, (long) 15)).isEqualTo(1);
-        assertThat(fieldCountAggLong.agg((long) 1, 0)).isEqualTo((long) 2);
-        assertThat(fieldCountAggLong.agg((long) 3, (long) 6)).isEqualTo((long) 4);
-
-        FieldCountAgg fieldCountAggByte = new FieldCountAgg(new TinyIntType());
-        assertThat(fieldCountAggByte.agg(null, null)).isEqualTo(0);
-        assertThat(fieldCountAggByte.agg((byte) 1, null)).isEqualTo((byte) 1);
-        assertThat(fieldCountAggByte.agg(null, (byte) 15)).isEqualTo(1);
-        assertThat(fieldCountAggByte.agg((byte) 1, 0)).isEqualTo((byte) 2);
-        assertThat(fieldCountAggByte.agg((byte) 3, (byte) 6)).isEqualTo((byte) 4);
-
-        FieldCountAgg fieldCountAggShort = new FieldCountAgg(new SmallIntType());
-        assertThat(fieldCountAggShort.agg(null, null)).isEqualTo(0);
-        assertThat(fieldCountAggShort.agg((short) 1, null)).isEqualTo((short) 1);
-        assertThat(fieldCountAggShort.agg(null, (short) 15)).isEqualTo(1);
-        assertThat(fieldCountAggShort.agg((short) 1, 0)).isEqualTo((short) 2);
-        assertThat(fieldCountAggShort.agg((short) 3, (short) 6)).isEqualTo((short) 4);
     }
 
     @Test
@@ -736,6 +725,29 @@ public class FieldAggregatorTest {
         byte[] inputVal = sketchOf(1);
         byte[] acc1 = sketchOf(2, 3);
         byte[] acc2 = sketchOf(1, 2, 3);
+
+        assertThat(agg.agg(null, null)).isNull();
+
+        byte[] result1 = (byte[]) agg.agg(null, inputVal);
+        assertThat(inputVal).isEqualTo(result1);
+
+        byte[] result2 = (byte[]) agg.agg(acc1, null);
+        assertThat(result2).isEqualTo(acc1);
+
+        byte[] result3 = (byte[]) agg.agg(acc1, inputVal);
+        assertThat(result3).isEqualTo(acc2);
+
+        byte[] result4 = (byte[]) agg.agg(acc2, inputVal);
+        assertThat(result4).isEqualTo(acc2);
+    }
+
+    @Test
+    public void testFieldHllSketchAgg() {
+        FieldHllSketchAgg agg = new FieldHllSketchAgg(DataTypes.VARBINARY(20));
+
+        byte[] inputVal = HllSketchUtil.sketchOf(1);
+        byte[] acc1 = HllSketchUtil.sketchOf(2, 3);
+        byte[] acc2 = HllSketchUtil.sketchOf(1, 2, 3);
 
         assertThat(agg.agg(null, null)).isNull();
 

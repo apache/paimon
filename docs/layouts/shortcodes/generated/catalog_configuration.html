@@ -45,6 +45,24 @@ under the License.
             <td>Controls the duration for which databases and tables in the catalog are cached.</td>
         </tr>
         <tr>
+            <td><h5>cache.manifest.max-memory</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>Controls the maximum memory to cache manifest content.</td>
+        </tr>
+        <tr>
+            <td><h5>cache.manifest.small-file-memory</h5></td>
+            <td style="word-wrap: break-word;">128 mb</td>
+            <td>MemorySize</td>
+            <td>Controls the cache memory to cache small manifest files.</td>
+        </tr>
+        <tr>
+            <td><h5>cache.manifest.small-file-threshold</h5></td>
+            <td style="word-wrap: break-word;">1 mb</td>
+            <td>MemorySize</td>
+            <td>Controls the threshold of small manifest file.</td>
+        </tr>
+        <tr>
             <td><h5>client-pool-size</h5></td>
             <td style="word-wrap: break-word;">2</td>
             <td>Integer</td>
@@ -76,7 +94,7 @@ under the License.
         </tr>
         <tr>
             <td><h5>lock.enabled</h5></td>
-            <td style="word-wrap: break-word;">false</td>
+            <td style="word-wrap: break-word;">(none)</td>
             <td>Boolean</td>
             <td>Enable Catalog Lock.</td>
         </tr>
@@ -91,6 +109,12 @@ under the License.
             <td style="word-wrap: break-word;">"filesystem"</td>
             <td>String</td>
             <td>Metastore of paimon catalog, supports filesystem, hive and jdbc.</td>
+        </tr>
+        <tr>
+            <td><h5>sync-all-properties</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Sync all table properties to hive metastore</td>
         </tr>
         <tr>
             <td><h5>table.type</h5></td>

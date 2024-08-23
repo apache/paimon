@@ -35,6 +35,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Test case for append-only managed table. */
 public class AppendOnlyTableITCase extends CatalogITCaseBase {
@@ -83,6 +84,22 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
         rows = batchSql("SELECT data from append_table");
         assertThat(rows.size()).isEqualTo(2);
         assertThat(rows).containsExactlyInAnyOrder(Row.of("AAA"), Row.of("BBB"));
+    }
+
+    @Test
+    public void testReadUnwareBucketTableWithRebalanceShuffle() throws Exception {
+        batchSql(
+                "CREATE TABLE append_scalable_table (id INT, data STRING) "
+                        + "WITH ('bucket' = '-1', 'consumer-id' = 'test', 'consumer.expiration-time' = '365 d', 'target-file-size' = '1 B', 'source.split.target-size' = '1 B', 'scan.parallelism' = '4')");
+        batchSql("INSERT INTO append_scalable_table VALUES (1, 'AAA'), (2, 'BBB')");
+        batchSql("INSERT INTO append_scalable_table VALUES (1, 'AAA'), (2, 'BBB')");
+        batchSql("INSERT INTO append_scalable_table VALUES (1, 'AAA'), (2, 'BBB')");
+        batchSql("INSERT INTO append_scalable_table VALUES (1, 'AAA'), (2, 'BBB')");
+
+        BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(streamSqlIter(("SELECT id FROM append_scalable_table")));
+        assertThat(iterator.collect(2)).containsExactlyInAnyOrder(Row.of(1), Row.of(2));
+        iterator.close();
     }
 
     @Test
@@ -228,6 +245,16 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     public void testComplexType() {
         batchSql("INSERT INTO complex_table VALUES (1, CAST(NULL AS MAP<INT, INT>))");
         assertThat(batchSql("SELECT * FROM complex_table")).containsExactly(Row.of(1, null));
+    }
+
+    @Test
+    public void testNestedTypeDDL() {
+        assertThrows(
+                RuntimeException.class,
+                () ->
+                        batchSql(
+                                "CREATE TABLE IF NOT EXISTS nested_table (id INT, data MAP<INT, INT>) WITH ('bucket' = '1', 'bucket-key'='id,data')"),
+                "nested type can not in bucket-key, in your table these key are [data]");
     }
 
     @Test

@@ -79,6 +79,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                                 changelogRow("+I", 3L, "Paimon")))
                 .close();
 
+        Thread.sleep(1000);
         ConsumerManager consumerManager = new ConsumerManager(table.fileIO(), table.location());
         Optional<Consumer> consumer1 = consumerManager.consumer("myid");
         assertThat(consumer1).isPresent();
@@ -145,8 +146,9 @@ public class ConsumerActionITCase extends ActionITCaseBase {
         writeData(rowData(2L, BinaryString.fromString("Hello")));
         writeData(rowData(3L, BinaryString.fromString("Paimon")));
 
+        table.createTag("tag", 3);
         String branchName = "b1";
-        table.createBranch("b1", 3);
+        table.createBranch("b1", "tag");
         String branchTableName = tableName + "$branch_b1";
 
         // use consumer streaming read table

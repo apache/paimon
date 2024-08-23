@@ -255,6 +255,12 @@ under the License.
             <td>If the new snapshot has not been generated when the checkpoint starts to trigger, the enumerator will block the checkpoint and wait for the new snapshot. Set the maximum waiting time to avoid infinite waiting, if timeout, the checkpoint will fail. Note that it should be set smaller than the checkpoint timeout.</td>
         </tr>
         <tr>
+            <td><h5>streaming-read.shuffle-bucket-with-partition</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether shuffle by partition and bucket when streaming read.</td>
+        </tr>
+        <tr>
             <td><h5>unaware-bucket.compaction.parallelism</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>

@@ -26,6 +26,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.spark.catalog.SparkBaseCatalog;
+import org.apache.paimon.spark.catalog.SupportFunction;
 
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.analysis.NamespaceAlreadyExistsException;
@@ -37,6 +38,7 @@ import org.apache.spark.sql.connector.catalog.NamespaceChange;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.connector.catalog.TableChange;
 import org.apache.spark.sql.connector.expressions.FieldReference;
+import org.apache.spark.sql.connector.expressions.IdentityTransform;
 import org.apache.spark.sql.connector.expressions.NamedReference;
 import org.apache.spark.sql.connector.expressions.Transform;
 import org.apache.spark.sql.internal.SessionState;
@@ -46,6 +48,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -61,7 +64,7 @@ import static org.apache.paimon.spark.util.OptionUtils.mergeSQLConf;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Spark {@link TableCatalog} for paimon. */
-public class SparkCatalog extends SparkBaseCatalog {
+public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
 
     private static final Logger LOG = LoggerFactory.getLogger(SparkCatalog.class);
 
@@ -354,7 +357,7 @@ public class SparkCatalog extends SparkBaseCatalog {
             TableChange.UpdateColumnType update = (TableChange.UpdateColumnType) change;
             validateAlterNestedField(update.fieldNames());
             return SchemaChange.updateColumnType(
-                    update.fieldNames()[0], toPaimonType(update.newDataType()));
+                    update.fieldNames()[0], toPaimonType(update.newDataType()), true);
         } else if (change instanceof TableChange.UpdateColumnNullability) {
             TableChange.UpdateColumnNullability update =
                     (TableChange.UpdateColumnNullability) change;
@@ -387,15 +390,10 @@ public class SparkCatalog extends SparkBaseCatalog {
 
     private Schema toInitialSchema(
             StructType schema, Transform[] partitions, Map<String, String> properties) {
-        checkArgument(
-                Arrays.stream(partitions)
-                        .allMatch(
-                                partition -> {
-                                    NamedReference[] references = partition.references();
-                                    return references.length == 1
-                                            && references[0] instanceof FieldReference;
-                                }));
         Map<String, String> normalizedProperties = mergeSQLConf(properties);
+        if (!normalizedProperties.containsKey(TableCatalog.PROP_PROVIDER)) {
+            normalizedProperties.put(TableCatalog.PROP_PROVIDER, SparkSource.NAME());
+        }
         normalizedProperties.remove(PRIMARY_KEY_IDENTIFIER);
         normalizedProperties.remove(TableCatalog.PROP_COMMENT);
         String pkAsString = properties.get(PRIMARY_KEY_IDENTIFIER);
@@ -409,10 +407,7 @@ public class SparkCatalog extends SparkBaseCatalog {
                 Schema.newBuilder()
                         .options(normalizedProperties)
                         .primaryKey(primaryKeys)
-                        .partitionKeys(
-                                Arrays.stream(partitions)
-                                        .map(partition -> partition.references()[0].describe())
-                                        .collect(Collectors.toList()))
+                        .partitionKeys(convertPartitionTransforms(partitions))
                         .comment(properties.getOrDefault(TableCatalog.PROP_COMMENT, null));
 
         for (StructField field : schema.fields()) {
@@ -472,6 +467,23 @@ public class SparkCatalog extends SparkBaseCatalog {
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(ident);
         }
+    }
+
+    protected List<String> convertPartitionTransforms(Transform[] transforms) {
+        List<String> partitionColNames = new ArrayList<>(transforms.length);
+        for (Transform transform : transforms) {
+            if (!(transform instanceof IdentityTransform)) {
+                throw new UnsupportedOperationException(
+                        "Unsupported partition transform: " + transform);
+            }
+            NamedReference ref = ((IdentityTransform) transform).ref();
+            if (!(ref instanceof FieldReference || ref.fieldNames().length != 1)) {
+                throw new UnsupportedOperationException(
+                        "Unsupported partition transform: " + transform);
+            }
+            partitionColNames.add(ref.fieldNames()[0]);
+        }
+        return partitionColNames;
     }
 
     // --------------------- unsupported methods ----------------------------

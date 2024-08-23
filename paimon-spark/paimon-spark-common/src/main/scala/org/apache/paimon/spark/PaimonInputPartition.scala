@@ -20,16 +20,36 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.table.source.Split
 
-import org.apache.spark.sql.connector.read.InputPartition
+import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.expressions.GenericInternalRow
+import org.apache.spark.sql.connector.read.{HasPartitionKey, InputPartition, SupportsReportPartitioning}
 
-case class PaimonInputPartition(splits: Seq[Split]) extends InputPartition {
+trait PaimonInputPartition extends InputPartition {
+  def splits: Seq[Split]
+
   def rowCount(): Long = {
     splits.map(_.rowCount()).sum
   }
+
+  // Used to avoid checking [[PaimonBucketedInputPartition]] to workaround for multi Spark version
+  def bucketed = false
 }
 
+case class SimplePaimonInputPartition(splits: Seq[Split]) extends PaimonInputPartition
 object PaimonInputPartition {
   def apply(split: Split): PaimonInputPartition = {
-    PaimonInputPartition(Seq(split))
+    SimplePaimonInputPartition(Seq(split))
   }
+
+  def apply(splits: Seq[Split]): PaimonInputPartition = {
+    SimplePaimonInputPartition(splits)
+  }
+}
+
+/** Bucketed input partition should work with [[SupportsReportPartitioning]] together. */
+case class PaimonBucketedInputPartition(splits: Seq[Split], bucket: Int)
+  extends PaimonInputPartition
+  with HasPartitionKey {
+  override def partitionKey(): InternalRow = new GenericInternalRow(Array(bucket.asInstanceOf[Any]))
+  override def bucketed: Boolean = true
 }

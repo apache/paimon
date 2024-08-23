@@ -33,7 +33,7 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 public class IndexManifestEntrySerializer extends VersionedObjectSerializer<IndexManifestEntry> {
 
     public IndexManifestEntrySerializer() {
-        super(IndexManifestEntry.schema());
+        super(IndexManifestEntry.SCHEMA);
     }
 
     @Override

@@ -23,6 +23,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.iceberg.AppendOnlyIcebergCommitCallback;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.operation.AppendOnlyFileStoreScan;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
@@ -32,6 +33,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.query.LocalTableQuery;
+import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.AbstractDataTableRead;
 import org.apache.paimon.table.source.AppendOnlySplitGenerator;
@@ -43,6 +45,7 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.Preconditions;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.function.BiConsumer;
 
 /** {@link FileStoreTable} for append table. */
@@ -135,9 +138,7 @@ class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     @Override
     public TableWriteImpl<InternalRow> newWrite(
             String commitUser, ManifestCacheFilter manifestFilter) {
-        // if this table is unaware-bucket table, we skip compaction and restored files searching
-        AppendOnlyFileStoreWrite writer =
-                store().newWrite(commitUser, manifestFilter).withBucketMode(bucketMode());
+        AppendOnlyFileStoreWrite writer = store().newWrite(commitUser, manifestFilter);
         return new TableWriteImpl<>(
                 rowType(),
                 writer,
@@ -156,5 +157,17 @@ class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     @Override
     public LocalTableQuery newLocalTableQuery() {
         throw new UnsupportedOperationException();
+    }
+
+    @Override
+    protected List<CommitCallback> createCommitCallbacks(String commitUser) {
+        List<CommitCallback> callbacks = super.createCommitCallbacks(commitUser);
+        CoreOptions options = coreOptions();
+
+        if (options.metadataIcebergCompatible()) {
+            callbacks.add(new AppendOnlyIcebergCommitCallback(this, commitUser));
+        }
+
+        return callbacks;
     }
 }

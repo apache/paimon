@@ -68,6 +68,7 @@ All available procedures are listed below.
             <li>order_by(optional): the columns need to be sort. Left empty if 'order_strategy' is 'none'.</li>
             <li>options(optional): additional dynamic options of the table.</li>
             <li>where(optional): partition predicate(Can't be used together with "partitions"). Note: as where is a keyword,a pair of backticks need to add around like `where`.</li>
+            <li>partition_idle_time(optional): this is used to do a full compaction for partition which had not received any new data for 'partition_idle_time'. And only these partitions will be compacted. This argument can not be used with order compact.</li>
       </td>
       <td>
          -- use partition filter <br/>
@@ -85,6 +86,7 @@ All available procedures are listed below.
          CALL [catalog.]sys.compact_database('includingDatabases', 'mode', 'includingTables') <br/><br/> 
          CALL [catalog.]sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables') <br/><br/>
          CALL [catalog.]sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables', 'tableOptions')
+         CALL [catalog.]sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables', 'tableOptions', 'partitionIdleTime')
       </td>
       <td>
          To compact databases. Arguments:
@@ -95,6 +97,7 @@ All available procedures are listed below.
             <li>includingTables: to specify tables. You can use regular expression.</li>
             <li>excludingTables: to specify tables that are not compacted. You can use regular expression.</li>
             <li>tableOptions: additional dynamic options of the table.</li>
+            <li>partition_idle_time: this is used to do a full compaction for partition which had not received any new data for 'partition_idle_time'. And only these partitions will be compacted.</li>
       </td>
       <td>
          CALL sys.compact_database('db1|db2', 'combined', 'table_.*', 'ignore', 'sink.parallelism=4')
@@ -258,13 +261,15 @@ All available procedures are listed below.
             <li>table: the target table identifier. Cannot be empty.</li>
             <li>expiration_time: the expiration interval of a partition. A partition will be expired if it‘s lifetime is over this value. Partition time is extracted from the partition value.</li>
             <li>timestamp_formatter: the formatter to format timestamp from string.</li>
+            <li>timestamp_pattern: the pattern to get a timestamp from partitions.</li>
             <li>expire_strategy: specifies the expiration strategy for partition expiration, possible values: 'values-time' or 'update-time' , 'values-time' as default.</li>
       </td>
       <td>
          -- for Flink 1.18<br/><br/>
-         CALL sys.expire_partitions('default.T', '1 d', 'yyyy-MM-dd', 'values-time')<br/><br/>
+         CALL sys.expire_partitions('default.T', '1 d', 'yyyy-MM-dd', '$dt', 'values-time')<br/><br/>
          -- for Flink 1.19 and later<br/><br/>
-         CALL sys.expire_partitions(`table` => 'default.T', expiration_time => '1 d', timestamp_formatter => 'yyyy-MM-dd', expire_strategy => 'values-time')<br/><br/>
+         CALL sys.expire_partitions(`table` => 'default.T', expiration_time => '1 d', timestamp_formatter => 'yyyy-MM-dd', expire_strategy => 'values-time')<br/>
+         CALL sys.expire_partitions(`table` => 'default.T', expiration_time => '1 d', timestamp_formatter => 'yyyy-MM-dd HH:mm', timestamp_pattern => '$dt $hm', expire_strategy => 'values-time')<br/><br/>
       </td>
    </tr>
     <tr>
@@ -306,22 +311,18 @@ All available procedures are listed below.
    <tr>
       <td>create_branch</td>
       <td>
-         -- based on the specified snapshot <br/>
-         CALL [catalog.]sys.create_branch('identifier', 'branchName', snapshotId) <br/>
          -- based on the specified tag <br/>
          CALL [catalog.]sys.create_branch('identifier', 'branchName', 'tagName')
          -- create empty branch <br/>
          CALL [catalog.]sys.create_branch('identifier', 'branchName')
       </td>
       <td>
-         To create a branch based on given snapshot / tag, or just create empty branch. Arguments:
+         To create a branch based on given tag, or just create empty branch. Arguments:
             <li>identifier: the target table identifier. Cannot be empty.</li>
             <li>branchName: name of the new branch.</li>
-            <li>snapshotId (Long): id of the snapshot which the new branch is based on.</li>
             <li>tagName: name of the tag which the new branch is based on.</li>
       </td>
       <td>
-         CALL sys.create_branch('default.T', 'branch1', 10)<br/><br/>
          CALL sys.create_branch('default.T', 'branch1', 'tag1')<br/><br/>
          CALL sys.create_branch('default.T', 'branch1')<br/><br/>
       </td>

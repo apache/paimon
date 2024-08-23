@@ -130,5 +130,11 @@ More options:
             <td>String</td>
             <td>You can specify a pattern to get a timestamp from partitions. The formatter pattern is defined by 'partition.timestamp-formatter'.<ul><li>By default, read from the first field.</li><li>If the timestamp in the partition is a single field called 'dt', you can use '$dt'.</li><li>If it is spread across multiple fields for year, month, day, and hour, you can use '$year-$month-$day $hour:00:00'.</li><li>If the timestamp is in fields dt and hour, you can use '$dt $hour:00:00'.</li></ul></td>
         </tr>
+        <tr>
+            <td><h5>end-input.check-partition-expire</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether check partition expire after batch mode or bounded stream job finish.</li></ul></td>
+        </tr>
     </tbody>
 </table>

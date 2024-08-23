@@ -20,17 +20,17 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.fs.FileIO;
 
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 
-import static org.apache.paimon.utils.ThreadUtils.newDaemonThreadFactory;
+import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 
 /** Thread pool to delete files using {@link FileIO}. */
 public class FileDeletionThreadPool {
 
+    private static final String THREAD_NAME = "DELETE-FILE-THREAD-POOL";
+
     private static ThreadPoolExecutor executorService =
-            createCachedThreadPool(Runtime.getRuntime().availableProcessors());
+            createCachedThreadPool(Runtime.getRuntime().availableProcessors(), THREAD_NAME);
 
     public static synchronized ThreadPoolExecutor getExecutorService(int threadNum) {
         if (threadNum <= executorService.getMaximumPoolSize()) {
@@ -38,21 +38,8 @@ public class FileDeletionThreadPool {
         }
         // we don't need to close previous pool
         // it is just cached pool
-        executorService = createCachedThreadPool(threadNum);
+        executorService = createCachedThreadPool(threadNum, THREAD_NAME);
 
         return executorService;
-    }
-
-    private static ThreadPoolExecutor createCachedThreadPool(int threadNum) {
-        ThreadPoolExecutor executor =
-                new ThreadPoolExecutor(
-                        threadNum,
-                        threadNum,
-                        1,
-                        TimeUnit.MINUTES,
-                        new LinkedBlockingQueue<>(),
-                        newDaemonThreadFactory("DELETE-FILE-THREAD-POOL"));
-        executor.allowCoreThreadTimeOut(true);
-        return executor;
     }
 }

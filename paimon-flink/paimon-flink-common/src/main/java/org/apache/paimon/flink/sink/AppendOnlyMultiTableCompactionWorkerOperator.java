@@ -18,8 +18,8 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.append.AppendOnlyCompactionTask;
-import org.apache.paimon.append.MultiTableAppendOnlyCompactionTask;
+import org.apache.paimon.append.MultiTableUnawareAppendCompactionTask;
+import org.apache.paimon.append.UnawareAppendCompactionTask;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.compact.UnawareBucketCompactor;
@@ -42,11 +42,12 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Operator to execute {@link AppendOnlyCompactionTask} passed for support compacting multi unaware
- * bucket tables in combined mode.
+ * Operator to execute {@link UnawareAppendCompactionTask} passed for support compacting multi
+ * unaware bucket tables in combined mode.
  */
 public class AppendOnlyMultiTableCompactionWorkerOperator
-        extends PrepareCommitOperator<MultiTableAppendOnlyCompactionTask, MultiTableCommittable> {
+        extends PrepareCommitOperator<
+                MultiTableUnawareAppendCompactionTask, MultiTableCommittable> {
 
     private static final Logger LOG =
             LoggerFactory.getLogger(AppendOnlyMultiTableCompactionWorkerOperator.class);
@@ -99,7 +100,7 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
     }
 
     @Override
-    public void processElement(StreamRecord<MultiTableAppendOnlyCompactionTask> element)
+    public void processElement(StreamRecord<MultiTableUnawareAppendCompactionTask> element)
             throws Exception {
         Identifier identifier = element.getValue().tableIdentifier();
         compactorContainer

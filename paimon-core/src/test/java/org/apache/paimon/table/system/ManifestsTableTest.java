@@ -96,14 +96,14 @@ public class ManifestsTableTest extends TableTestBase {
 
     @Test
     public void testReadManifestsFromLatest() throws Exception {
-        List<InternalRow> expectedRow = getExceptedResult(2L);
+        List<InternalRow> expectedRow = getExpectedResult(2L);
         List<InternalRow> result = read(manifestsTable);
         assertThat(result).containsExactlyElementsOf(expectedRow);
     }
 
     @Test
     public void testReadManifestsFromSpecifiedSnapshot() throws Exception {
-        List<InternalRow> expectedRow = getExceptedResult(1L);
+        List<InternalRow> expectedRow = getExpectedResult(1L);
         manifestsTable =
                 (ManifestsTable)
                         manifestsTable.copy(
@@ -122,13 +122,13 @@ public class ManifestsTableTest extends TableTestBase {
         assertThat(result).isEmpty();
     }
 
-    private List<InternalRow> getExceptedResult(long snapshotId) {
+    private List<InternalRow> getExpectedResult(long snapshotId) {
         if (!snapshotManager.snapshotExists(snapshotId)) {
             return Collections.emptyList();
         }
 
         Snapshot snapshot = snapshotManager.snapshot(snapshotId);
-        List<ManifestFileMeta> allManifestMeta = snapshot.allManifests(manifestList);
+        List<ManifestFileMeta> allManifestMeta = manifestList.readAllManifests(snapshot);
 
         List<InternalRow> expectedRow = new ArrayList<>();
         for (ManifestFileMeta manifestFileMeta : allManifestMeta) {

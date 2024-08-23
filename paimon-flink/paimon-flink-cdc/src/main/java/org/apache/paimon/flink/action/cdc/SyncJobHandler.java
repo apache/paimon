@@ -28,11 +28,11 @@ import org.apache.paimon.flink.action.cdc.postgres.PostgresRecordParser;
 import org.apache.paimon.flink.action.cdc.pulsar.PulsarActionUtils;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 
-import com.ververica.cdc.connectors.mongodb.source.config.MongoDBSourceOptions;
-import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
-import com.ververica.cdc.connectors.postgres.source.config.PostgresSourceOptions;
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.api.connector.source.Source;
+import org.apache.flink.cdc.connectors.mongodb.source.config.MongoDBSourceOptions;
+import org.apache.flink.cdc.connectors.mysql.source.config.MySqlSourceOptions;
+import org.apache.flink.cdc.connectors.postgres.source.config.PostgresSourceOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.pulsar.common.config.PulsarOptions;
 import org.apache.flink.connector.pulsar.source.PulsarSourceOptions;
@@ -183,9 +183,13 @@ public class SyncJobHandler {
     public Source<CdcSourceRecord, ?, ?> provideSource() {
         switch (sourceType) {
             case KAFKA:
-                return KafkaActionUtils.buildKafkaSource(cdcSourceConfig);
+                return KafkaActionUtils.buildKafkaSource(
+                        cdcSourceConfig,
+                        provideDataFormat().createKafkaDeserializer(cdcSourceConfig));
             case PULSAR:
-                return PulsarActionUtils.buildPulsarSource(cdcSourceConfig);
+                return PulsarActionUtils.buildPulsarSource(
+                        cdcSourceConfig,
+                        provideDataFormat().createPulsarDeserializer(cdcSourceConfig));
             default:
                 throw new UnsupportedOperationException(
                         "Cannot get source from source type" + sourceType);
@@ -229,9 +233,13 @@ public class SyncJobHandler {
     public MessageQueueSchemaUtils.ConsumerWrapper provideConsumer() {
         switch (sourceType) {
             case KAFKA:
-                return KafkaActionUtils.getKafkaEarliestConsumer(cdcSourceConfig);
+                return KafkaActionUtils.getKafkaEarliestConsumer(
+                        cdcSourceConfig,
+                        provideDataFormat().createKafkaDeserializer(cdcSourceConfig));
             case PULSAR:
-                return PulsarActionUtils.createPulsarConsumer(cdcSourceConfig);
+                return PulsarActionUtils.createPulsarConsumer(
+                        cdcSourceConfig,
+                        provideDataFormat().createPulsarDeserializer(cdcSourceConfig));
             default:
                 throw new UnsupportedOperationException(
                         "Cannot get consumer from source type" + sourceType);

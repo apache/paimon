@@ -68,7 +68,7 @@ public class FileFormatTest {
         for (InternalRow row : expected) {
             writer.addElement(row);
         }
-        writer.finish();
+        writer.close();
         out.close();
 
         // read

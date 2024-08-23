@@ -74,7 +74,7 @@ public abstract class FieldAggregator implements Serializable {
                         fieldAggregator = new FieldLastValueAgg(fieldType);
                         break;
                     case FieldListaggAgg.NAME:
-                        fieldAggregator = new FieldListaggAgg(fieldType);
+                        fieldAggregator = new FieldListaggAgg(fieldType, options, field);
                         break;
                     case FieldBoolOrAgg.NAME:
                         fieldAggregator = new FieldBoolOrAgg(fieldType);
@@ -88,9 +88,6 @@ public abstract class FieldAggregator implements Serializable {
                     case FieldFirstNonNullValueAgg.NAME:
                     case FieldFirstNonNullValueAgg.LEGACY_NAME:
                         fieldAggregator = new FieldFirstNonNullValueAgg(fieldType);
-                        break;
-                    case FieldCountAgg.NAME:
-                        fieldAggregator = new FieldCountAgg(fieldType);
                         break;
                     case FieldProductAgg.NAME:
                         fieldAggregator = new FieldProductAgg(fieldType);
@@ -123,6 +120,13 @@ public abstract class FieldAggregator implements Serializable {
                                 "Data type for theta sketch column must be 'VarBinaryType' but was '%s'.",
                                 fieldType);
                         fieldAggregator = new FieldThetaSketchAgg((VarBinaryType) fieldType);
+                        break;
+                    case FieldHllSketchAgg.NAME:
+                        checkArgument(
+                                fieldType instanceof VarBinaryType,
+                                "Data type for hll sketch column must be 'VarBinaryType' but was '%s'.",
+                                fieldType);
+                        fieldAggregator = new FieldHllSketchAgg((VarBinaryType) fieldType);
                         break;
                     case FieldRoaringBitmap32Agg.NAME:
                         checkArgument(

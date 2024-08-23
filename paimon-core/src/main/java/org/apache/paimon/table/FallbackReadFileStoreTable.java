@@ -23,6 +23,9 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
@@ -34,9 +37,11 @@ import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.SimpleFileReader;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -62,46 +67,6 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
 
         Preconditions.checkArgument(!(main instanceof FallbackReadFileStoreTable));
         Preconditions.checkArgument(!(fallback instanceof FallbackReadFileStoreTable));
-
-        String mainBranch = main.coreOptions().branch();
-        String fallbackBranch = fallback.coreOptions().branch();
-        RowType mainRowType = main.schema().logicalRowType();
-        RowType fallbackRowType = fallback.schema().logicalRowType();
-        Preconditions.checkArgument(
-                mainRowType.equals(fallbackRowType),
-                "Branch %s and %s does not have the same row type.\n"
-                        + "Row type of branch %s is %s.\n"
-                        + "Row type of branch %s is %s.",
-                mainBranch,
-                fallbackBranch,
-                mainBranch,
-                mainRowType,
-                fallbackBranch,
-                fallbackRowType);
-
-        List<String> mainPrimaryKeys = main.schema().primaryKeys();
-        List<String> fallbackPrimaryKeys = fallback.schema().primaryKeys();
-        if (!mainPrimaryKeys.isEmpty()) {
-            if (fallbackPrimaryKeys.isEmpty()) {
-                throw new IllegalArgumentException(
-                        "Branch "
-                                + mainBranch
-                                + " has primary keys while fallback branch "
-                                + fallbackBranch
-                                + " does not. This is not allowed.");
-            }
-            Preconditions.checkArgument(
-                    mainPrimaryKeys.equals(fallbackPrimaryKeys),
-                    "Branch %s and %s both have primary keys but are not the same.\n"
-                            + "Primary keys of %s are %s.\n"
-                            + "Primary keys of %s are %s.",
-                    mainBranch,
-                    fallbackBranch,
-                    mainBranch,
-                    mainPrimaryKeys,
-                    fallbackBranch,
-                    fallbackPrimaryKeys);
-        }
     }
 
     @Override
@@ -109,6 +74,16 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         return new FallbackReadFileStoreTable(
                 wrapped.copy(dynamicOptions),
                 fallback.copy(rewriteFallbackOptions(dynamicOptions)));
+    }
+
+    @Override
+    public SimpleFileReader<ManifestFileMeta> manifestListReader() {
+        return wrapped.manifestListReader();
+    }
+
+    @Override
+    public SimpleFileReader<ManifestEntry> manifestFileReader() {
+        return wrapped.manifestFileReader();
     }
 
     @Override
@@ -132,8 +107,19 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
                 wrapped.copyWithLatestSchema(), fallback.copyWithLatestSchema());
     }
 
+    @Override
+    public FileStoreTable switchToBranch(String branchName) {
+        return new FallbackReadFileStoreTable(wrapped.switchToBranch(branchName), fallback);
+    }
+
     private Map<String, String> rewriteFallbackOptions(Map<String, String> options) {
         Map<String, String> result = new HashMap<>(options);
+
+        // branch of fallback table should never change
+        String branchKey = CoreOptions.BRANCH.key();
+        if (options.containsKey(branchKey)) {
+            result.put(branchKey, fallback.options().get(branchKey));
+        }
 
         // snapshot ids may be different between the main branch and the fallback branch,
         // so we need to convert main branch snapshot id to millisecond,
@@ -161,7 +147,64 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
 
     @Override
     public DataTableScan newScan() {
+        validateSchema();
         return new Scan();
+    }
+
+    private void validateSchema() {
+        String mainBranch = wrapped.coreOptions().branch();
+        String fallbackBranch = fallback.coreOptions().branch();
+        RowType mainRowType = wrapped.schema().logicalRowType();
+        RowType fallbackRowType = fallback.schema().logicalRowType();
+        Preconditions.checkArgument(
+                sameRowTypeIgnoreNullable(mainRowType, fallbackRowType),
+                "Branch %s and %s does not have the same row type.\n"
+                        + "Row type of branch %s is %s.\n"
+                        + "Row type of branch %s is %s.",
+                mainBranch,
+                fallbackBranch,
+                mainBranch,
+                mainRowType,
+                fallbackBranch,
+                fallbackRowType);
+
+        List<String> mainPrimaryKeys = wrapped.schema().primaryKeys();
+        List<String> fallbackPrimaryKeys = fallback.schema().primaryKeys();
+        if (!mainPrimaryKeys.isEmpty()) {
+            if (fallbackPrimaryKeys.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "Branch "
+                                + mainBranch
+                                + " has primary keys while fallback branch "
+                                + fallbackBranch
+                                + " does not. This is not allowed.");
+            }
+            Preconditions.checkArgument(
+                    mainPrimaryKeys.equals(fallbackPrimaryKeys),
+                    "Branch %s and %s both have primary keys but are not the same.\n"
+                            + "Primary keys of %s are %s.\n"
+                            + "Primary keys of %s are %s.",
+                    mainBranch,
+                    fallbackBranch,
+                    mainBranch,
+                    mainPrimaryKeys,
+                    fallbackBranch,
+                    fallbackPrimaryKeys);
+        }
+    }
+
+    private boolean sameRowTypeIgnoreNullable(RowType mainRowType, RowType fallbackRowType) {
+        if (mainRowType.getFieldCount() != fallbackRowType.getFieldCount()) {
+            return false;
+        }
+        for (int i = 0; i < mainRowType.getFieldCount(); i++) {
+            DataType mainType = mainRowType.getFields().get(i).type();
+            DataType fallbackType = fallbackRowType.getFields().get(i).type();
+            if (!mainType.equalsIgnoreNullable(fallbackType)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private class Scan implements DataTableScan {
@@ -258,6 +301,20 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
             Set<BinaryRow> partitions = new LinkedHashSet<>(mainScan.listPartitions());
             partitions.addAll(fallbackScan.listPartitions());
             return new ArrayList<>(partitions);
+        }
+
+        @Override
+        public List<PartitionEntry> listPartitionEntries() {
+            List<PartitionEntry> partitionEntries = mainScan.listPartitionEntries();
+            Set<BinaryRow> partitions =
+                    partitionEntries.stream()
+                            .map(PartitionEntry::partition)
+                            .collect(Collectors.toSet());
+            List<PartitionEntry> fallBackPartitionEntries = fallbackScan.listPartitionEntries();
+            fallBackPartitionEntries.stream()
+                    .filter(e -> !partitions.contains(e.partition()))
+                    .forEach(partitionEntries::add);
+            return partitionEntries;
         }
     }
 

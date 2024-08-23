@@ -18,24 +18,29 @@
 
 package org.apache.paimon.spark.commands
 
-import org.apache.paimon.options.Options
-import org.apache.paimon.spark.{InsertInto, SparkTable}
+import org.apache.paimon.spark.SparkTable
+import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
-import org.apache.paimon.spark.schema.SparkSystemColumns
-import org.apache.paimon.spark.util.EncoderUtils
+import org.apache.paimon.spark.schema.{PaimonMetadataColumn, SparkSystemColumns}
+import org.apache.paimon.spark.schema.PaimonMetadataColumn.{FILE_PATH, FILE_PATH_COLUMN, ROW_INDEX, ROW_INDEX_COLUMN}
+import org.apache.paimon.spark.util.{EncoderUtils, SparkRowUtils}
 import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.table.sink.CommitMessage
 import org.apache.paimon.types.RowKind
 
 import org.apache.spark.sql.{Column, Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils._
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
-import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, BasePredicate, Expression, Literal, UnsafeProjection}
+import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, BasePredicate, EqualTo, Expression, Literal, Or, UnsafeProjection}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.expressions.codegen.GeneratePredicate
-import org.apache.spark.sql.catalyst.plans.logical.{DeleteAction, Filter, InsertAction, LogicalPlan, MergeAction, UpdateAction}
+import org.apache.spark.sql.catalyst.plans.logical._
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.{col, lit, monotonically_increasing_id, sum}
 import org.apache.spark.sql.types.{ByteType, StructField, StructType}
+
+import scala.collection.mutable
 
 /** Command for Merge Into. */
 case class MergeIntoPaimonTable(
@@ -53,35 +58,142 @@ case class MergeIntoPaimonTable(
 
   override val table: FileStoreTable = v2Table.getTable.asInstanceOf[FileStoreTable]
 
+  lazy val relation: DataSourceV2Relation = PaimonRelation.getPaimonRelation(targetTable)
+
   lazy val tableSchema: StructType = v2Table.schema
 
-  lazy val filteredTargetPlan: LogicalPlan = {
+  private lazy val writer = PaimonSparkWriter(table)
+
+  private lazy val (targetOnlyCondition, filteredTargetPlan): (Option[Expression], LogicalPlan) = {
     val filtersOnlyTarget = getExpressionOnlyRelated(mergeCondition, targetTable)
-    filtersOnlyTarget
-      .map(Filter.apply(_, targetTable))
-      .getOrElse(targetTable)
+    (
+      filtersOnlyTarget,
+      filtersOnlyTarget
+        .map(Filter.apply(_, targetTable))
+        .getOrElse(targetTable))
   }
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
-
     // Avoid that more than one source rows match the same target row.
     checkMatchRationality(sparkSession)
-
-    val changed = constructChangedRows(sparkSession)
-
-    WriteIntoPaimonTable(
-      table,
-      InsertInto,
-      changed,
-      new Options()
-    ).run(sparkSession)
-
+    val commitMessages = if (withPrimaryKeys) {
+      performMergeForPkTable(sparkSession)
+    } else {
+      performMergeForNonPkTable(sparkSession)
+    }
+    writer.commit(commitMessages)
     Seq.empty[Row]
   }
 
-  /** Get a Dataset where each of Row has an additional column called _row_kind_. */
-  private def constructChangedRows(sparkSession: SparkSession): Dataset[Row] = {
+  private def performMergeForPkTable(sparkSession: SparkSession): Seq[CommitMessage] = {
+    writer.write(
+      constructChangedRows(
+        sparkSession,
+        createDataset(sparkSession, filteredTargetPlan),
+        remainDeletedRow = true))
+  }
+
+  private def performMergeForNonPkTable(sparkSession: SparkSession): Seq[CommitMessage] = {
     val targetDS = createDataset(sparkSession, filteredTargetPlan)
+    val sourceDS = createDataset(sparkSession, sourceTable)
+
+    // Step1: get the candidate data splits which are filtered by Paimon Predicate.
+    val candidateDataSplits =
+      findCandidateDataSplits(targetOnlyCondition.getOrElse(TrueLiteral), relation.output)
+    val dataFilePathToMeta = candidateFileMap(candidateDataSplits)
+
+    if (deletionVectorsEnabled) {
+      // Step2: generate dataset that should contains ROW_KIND, FILE_PATH, ROW_INDEX columns
+      val metadataCols = Seq(FILE_PATH, ROW_INDEX)
+      val filteredRelation = createDataset(
+        sparkSession,
+        createNewScanPlan(
+          candidateDataSplits,
+          targetOnlyCondition.getOrElse(TrueLiteral),
+          relation,
+          metadataCols))
+      val ds = constructChangedRows(
+        sparkSession,
+        filteredRelation,
+        remainDeletedRow = true,
+        metadataCols = metadataCols)
+
+      ds.cache()
+      try {
+        val rowKindAttribute = ds.queryExecution.analyzed.output
+          .find(attr => sparkSession.sessionState.conf.resolver(attr.name, ROW_KIND_COL))
+          .getOrElse(throw new RuntimeException("Can not find _row_kind_ column."))
+
+        // Step3: filter rows that should be marked as DELETED in Deletion Vector mode.
+        val dvDS = ds.where(
+          s"$ROW_KIND_COL = ${RowKind.DELETE.toByteValue} or $ROW_KIND_COL = ${RowKind.UPDATE_AFTER.toByteValue}")
+        val deletionVectors = collectDeletionVectors(dataFilePathToMeta, dvDS, sparkSession)
+        val indexCommitMsg = writer.persistDeletionVectors(deletionVectors)
+
+        // Step4: filter rows that should be written as the inserted/updated data.
+        val toWriteDS = ds
+          .where(
+            s"$ROW_KIND_COL = ${RowKind.INSERT.toByteValue} or $ROW_KIND_COL = ${RowKind.UPDATE_AFTER.toByteValue}")
+          .drop(FILE_PATH_COLUMN, ROW_INDEX_COLUMN)
+        val addCommitMessage = writer.write(toWriteDS)
+
+        // Step5: commit index and data commit messages
+        addCommitMessage ++ indexCommitMsg
+      } finally {
+        ds.unpersist()
+      }
+    } else {
+      val touchedFilePathsSet = mutable.Set.empty[String]
+      def hasUpdate(actions: Seq[MergeAction]): Boolean = {
+        actions.exists {
+          case _: UpdateAction | _: DeleteAction => true
+          case _ => false
+        }
+      }
+      if (hasUpdate(matchedActions)) {
+        touchedFilePathsSet ++= findTouchedFiles(
+          targetDS.join(sourceDS, new Column(mergeCondition), "inner"),
+          sparkSession)
+      }
+      if (hasUpdate(notMatchedBySourceActions)) {
+        touchedFilePathsSet ++= findTouchedFiles(
+          targetDS.join(sourceDS, new Column(mergeCondition), "left_anti"),
+          sparkSession)
+      }
+
+      val targetFilePaths: Array[String] = findTouchedFiles(targetDS, sparkSession)
+      val touchedFilePaths: Array[String] = touchedFilePathsSet.toArray
+      val unTouchedFilePaths = targetFilePaths.filterNot(touchedFilePaths.contains)
+
+      val (touchedFiles, touchedFileRelation) =
+        createNewRelation(touchedFilePaths, dataFilePathToMeta, relation)
+      val (_, unTouchedFileRelation) =
+        createNewRelation(unTouchedFilePaths, dataFilePathToMeta, relation)
+
+      // Add FILE_TOUCHED_COL to mark the row as coming from the touched file, if the row has not been
+      // modified and was from touched file, it should be kept too.
+      val targetDSWithFileTouchedCol = createDataset(sparkSession, touchedFileRelation)
+        .withColumn(FILE_TOUCHED_COL, lit(true))
+        .union(createDataset(sparkSession, unTouchedFileRelation)
+          .withColumn(FILE_TOUCHED_COL, lit(false)))
+
+      val toWriteDS =
+        constructChangedRows(sparkSession, targetDSWithFileTouchedCol).drop(ROW_KIND_COL)
+      val addCommitMessage = writer.write(toWriteDS)
+      val deletedCommitMessage = buildDeletedCommitMessage(touchedFiles)
+
+      addCommitMessage ++ deletedCommitMessage
+    }
+  }
+
+  /** Get a Dataset where each of Row has an additional column called _row_kind_. */
+  private def constructChangedRows(
+      sparkSession: SparkSession,
+      targetDataset: Dataset[Row],
+      remainDeletedRow: Boolean = false,
+      deletionVectorEnabled: Boolean = false,
+      metadataCols: Seq[PaimonMetadataColumn] = Seq.empty): Dataset[Row] = {
+    val targetDS = targetDataset
       .withColumn(TARGET_ROW_COL, lit(true))
 
     val sourceDS = createDataset(sparkSession, sourceTable)
@@ -100,30 +212,38 @@ case class MergeIntoPaimonTable(
     val matchedExprs = matchedActions.map(_.condition.getOrElse(TrueLiteral))
     val notMatchedExprs = notMatchedActions.map(_.condition.getOrElse(TrueLiteral))
     val notMatchedBySourceExprs = notMatchedBySourceActions.map(_.condition.getOrElse(TrueLiteral))
-    val matchedOutputs = matchedActions.map {
-      case UpdateAction(_, assignments) =>
-        assignments.map(_.value) :+ Literal(RowKind.UPDATE_AFTER.toByteValue)
-      case DeleteAction(_) =>
-        targetOutput :+ Literal(RowKind.DELETE.toByteValue)
-      case _ =>
-        throw new RuntimeException("should not be here.")
-    }
-    val notMatchedBySourceOutputs = notMatchedBySourceActions.map {
-      case UpdateAction(_, assignments) =>
-        assignments.map(_.value) :+ Literal(RowKind.UPDATE_AFTER.toByteValue)
-      case DeleteAction(_) =>
-        targetOutput :+ Literal(RowKind.DELETE.toByteValue)
-      case _ =>
-        throw new RuntimeException("should not be here.")
-    }
-    val notMatchedOutputs = notMatchedActions.map {
-      case InsertAction(_, assignments) =>
-        assignments.map(_.value) :+ Literal(RowKind.INSERT.toByteValue)
-      case _ =>
-        throw new RuntimeException("should not be here.")
-    }
     val noopOutput = targetOutput :+ Alias(Literal(NOOP_ROW_KIND_VALUE), ROW_KIND_COL)()
-    val outputSchema = StructType(tableSchema.fields :+ StructField(ROW_KIND_COL, ByteType))
+    val keepOutput = targetOutput :+ Alias(Literal(RowKind.INSERT.toByteValue), ROW_KIND_COL)()
+
+    val resolver = sparkSession.sessionState.conf.resolver
+    val metadataAttributes = metadataCols.flatMap {
+      metadataCol => joinedPlan.output.find(attr => resolver(metadataCol.name, attr.name))
+    }
+    def processMergeActions(actions: Seq[MergeAction]): Seq[Seq[Expression]] = {
+      val columnExprs = actions.map {
+        case UpdateAction(_, assignments) =>
+          assignments.map(_.value) :+ Literal(RowKind.UPDATE_AFTER.toByteValue)
+        case DeleteAction(_) =>
+          if (remainDeletedRow || deletionVectorEnabled) {
+            targetOutput :+ Literal(RowKind.DELETE.toByteValue)
+          } else {
+            // If RowKind = NOOP_ROW_KIND_VALUE, then these rows will be dropped in MergeIntoProcessor.processPartition by default.
+            // If these rows still need to be remained, set MergeIntoProcessor.remainNoopRow true.
+            noopOutput
+          }
+        case InsertAction(_, assignments) =>
+          assignments.map(_.value) :+ Literal(RowKind.INSERT.toByteValue)
+      }
+      columnExprs.map(exprs => exprs ++ metadataAttributes)
+    }
+
+    val matchedOutputs = processMergeActions(matchedActions)
+    val notMatchedBySourceOutputs = processMergeActions(notMatchedBySourceActions)
+    val notMatchedOutputs = processMergeActions(notMatchedActions)
+    val outputFields = mutable.ArrayBuffer(tableSchema.fields: _*)
+    outputFields += StructField(ROW_KIND_COL, ByteType)
+    outputFields ++= metadataCols.map(_.toStructField)
+    val outputSchema = StructType(outputFields)
 
     val joinedRowEncoder = EncoderUtils.encode(joinedPlan.schema)
     val outputEncoder = EncoderUtils.encode(outputSchema).resolveAndBind()
@@ -139,10 +259,11 @@ case class MergeIntoPaimonTable(
       notMatchedExprs,
       notMatchedOutputs,
       noopOutput,
+      keepOutput,
       joinedRowEncoder,
       outputEncoder
     )
-    joinedDS.mapPartitions(processor.processPartition)(outputEncoder)
+    joinedDS.mapPartitions(processor.processPartition)(outputEncoder).toDF()
   }
 
   private def checkMatchRationality(sparkSession: SparkSession): Unit = {
@@ -159,21 +280,23 @@ case class MergeIntoPaimonTable(
         .count()
       if (count > 0) {
         throw new RuntimeException(
-          "Can't execute this MergeInto when there are some target rows that each of them match more then one source rows. It may lead to an unexpected result.")
+          "Can't execute this MergeInto when there are some target rows that each of " +
+            "them match more then one source rows. It may lead to an unexpected result.")
       }
     }
   }
 }
 
 object MergeIntoPaimonTable {
-  val ROW_ID_COL = "_row_id_"
-  val SOURCE_ROW_COL = "_source_row_"
-  val TARGET_ROW_COL = "_target_row_"
+  private val ROW_ID_COL = "_row_id_"
+  private val SOURCE_ROW_COL = "_source_row_"
+  private val TARGET_ROW_COL = "_target_row_"
+  private val FILE_TOUCHED_COL = "_file_touched_col_"
   // +I, +U, -U, -D
-  val ROW_KIND_COL: String = SparkSystemColumns.ROW_KIND_COL
-  val NOOP_ROW_KIND_VALUE: Byte = "-1".toByte
+  private val ROW_KIND_COL: String = SparkSystemColumns.ROW_KIND_COL
+  private val NOOP_ROW_KIND_VALUE: Byte = "-1".toByte
 
-  case class MergeIntoProcessor(
+  private case class MergeIntoProcessor(
       joinedAttributes: Seq[Attribute],
       targetRowHasNoMatch: Expression,
       sourceRowHasNoMatch: Expression,
@@ -184,9 +307,15 @@ object MergeIntoPaimonTable {
       notMatchedConditions: Seq[Expression],
       notMatchedOutputs: Seq[Seq[Expression]],
       noopCopyOutput: Seq[Expression],
+      keepOutput: Seq[Expression],
       joinedRowEncoder: ExpressionEncoder[Row],
       outputRowEncoder: ExpressionEncoder[Row]
   ) extends Serializable {
+
+    private val rowKindColumnIndex: Int = outputRowEncoder.schema.fieldIndex(ROW_KIND_COL)
+
+    private val fileTouchedColumnIndex: Int =
+      SparkRowUtils.getFieldIndex(joinedRowEncoder.schema, FILE_TOUCHED_COL)
 
     private def generateProjection(exprs: Seq[Expression]): UnsafeProjection = {
       UnsafeProjection.create(exprs, joinedAttributes)
@@ -196,8 +325,12 @@ object MergeIntoPaimonTable {
       GeneratePredicate.generate(expr, joinedAttributes)
     }
 
+    private def fromTouchedFile(row: InternalRow): Boolean = {
+      fileTouchedColumnIndex != -1 && row.getBoolean(fileTouchedColumnIndex)
+    }
+
     private def unusedRow(row: InternalRow): Boolean = {
-      row.getByte(outputRowEncoder.schema.fieldIndex(ROW_KIND_COL)) == NOOP_ROW_KIND_VALUE
+      row.getByte(rowKindColumnIndex) == NOOP_ROW_KIND_VALUE
     }
 
     def processPartition(rowIterator: Iterator[Row]): Iterator[Row] = {
@@ -210,38 +343,30 @@ object MergeIntoPaimonTable {
       val notMatchedPreds = notMatchedConditions.map(generatePredicate)
       val notMatchedProjs = notMatchedOutputs.map(generateProjection)
       val noopCopyProj = generateProjection(noopCopyOutput)
+      val keepProj = generateProjection(keepOutput)
       val outputProj = UnsafeProjection.create(outputRowEncoder.schema)
 
       def processRow(inputRow: InternalRow): InternalRow = {
+        def applyPreds(preds: Seq[BasePredicate], projs: Seq[UnsafeProjection]): InternalRow = {
+          preds.zip(projs).find { case (predicate, _) => predicate.eval(inputRow) } match {
+            case Some((_, projections)) =>
+              projections.apply(inputRow)
+            case None =>
+              // keep the row if it is from touched file and not be matched
+              if (fromTouchedFile(inputRow)) {
+                keepProj.apply(inputRow)
+              } else {
+                noopCopyProj.apply(inputRow)
+              }
+          }
+        }
+
         if (targetRowHasNoMatchPred.eval(inputRow)) {
-          val pair = notMatchedBySourcePreds.zip(notMatchedBySourceProjs).find {
-            case (predicate, _) => predicate.eval(inputRow)
-          }
-
-          pair match {
-            case Some((_, projections)) =>
-              projections.apply(inputRow)
-            case None => noopCopyProj.apply(inputRow)
-          }
+          applyPreds(notMatchedBySourcePreds, notMatchedBySourceProjs)
         } else if (sourceRowHasNoMatchPred.eval(inputRow)) {
-          val pair = notMatchedPreds.zip(notMatchedProjs).find {
-            case (predicate, _) => predicate.eval(inputRow)
-          }
-
-          pair match {
-            case Some((_, projections)) =>
-              projections.apply(inputRow)
-            case None => noopCopyProj.apply(inputRow)
-          }
+          applyPreds(notMatchedPreds, notMatchedProjs)
         } else {
-          val pair =
-            matchedPreds.zip(matchedProjs).find { case (predicate, _) => predicate.eval(inputRow) }
-
-          pair match {
-            case Some((_, projections)) =>
-              projections.apply(inputRow)
-            case None => noopCopyProj.apply(inputRow)
-          }
+          applyPreds(matchedPreds, matchedProjs)
         }
       }
 

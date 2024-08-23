@@ -30,7 +30,7 @@ public class ManifestFileMetaSerializer extends VersionedObjectSerializer<Manife
     private static final long serialVersionUID = 1L;
 
     public ManifestFileMetaSerializer() {
-        super(ManifestFileMeta.schema());
+        super(ManifestFileMeta.SCHEMA);
     }
 
     @Override

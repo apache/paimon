@@ -19,6 +19,7 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -41,8 +42,6 @@ import org.apache.paimon.utils.FailingFileIO;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-
-import javax.annotation.Nullable;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -180,8 +179,8 @@ public class TableCommitTest {
         }
 
         @Override
-        public void call(List<ManifestEntry> entries, long identifier, @Nullable Long watermark) {
-            commitCallbackResult.get(testId).add(identifier);
+        public void call(List<ManifestEntry> entries, Snapshot snapshot) {
+            commitCallbackResult.get(testId).add(snapshot.commitIdentifier());
         }
 
         @Override

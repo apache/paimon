@@ -21,6 +21,8 @@ package org.apache.paimon.privilege;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.manifest.ManifestCacheFilter;
+import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.DelegatedFileStoreTable;
@@ -35,6 +37,7 @@ import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.SimpleFileReader;
 import org.apache.paimon.utils.TagManager;
 
 import java.time.Duration;
@@ -92,6 +95,16 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
     }
 
     @Override
+    public SimpleFileReader<ManifestFileMeta> manifestListReader() {
+        return wrapped.manifestListReader();
+    }
+
+    @Override
+    public SimpleFileReader<ManifestEntry> manifestFileReader() {
+        return wrapped.manifestFileReader();
+    }
+
+    @Override
     public FileStoreTable copy(TableSchema newTableSchema) {
         return new PrivilegedFileStoreTable(
                 wrapped.copy(newTableSchema), privilegeChecker, identifier);
@@ -143,12 +156,6 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
     public void createBranch(String branchName) {
         privilegeChecker.assertCanInsert(identifier);
         wrapped.createBranch(branchName);
-    }
-
-    @Override
-    public void createBranch(String branchName, long snapshotId) {
-        privilegeChecker.assertCanInsert(identifier);
-        wrapped.createBranch(branchName, snapshotId);
     }
 
     @Override
@@ -239,6 +246,12 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
     public LocalTableQuery newLocalTableQuery() {
         privilegeChecker.assertCanSelect(identifier);
         return wrapped.newLocalTableQuery();
+    }
+
+    @Override
+    public FileStoreTable switchToBranch(String branchName) {
+        return new PrivilegedFileStoreTable(
+                wrapped.switchToBranch(branchName), privilegeChecker, identifier);
     }
 
     @Override

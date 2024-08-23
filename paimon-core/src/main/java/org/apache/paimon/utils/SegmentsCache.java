@@ -23,9 +23,10 @@ import org.apache.paimon.options.MemorySize;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
-import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
 
-import java.util.function.Function;
+import javax.annotation.Nullable;
+
+import static org.apache.paimon.CoreOptions.PAGE_SIZE;
 
 /** Cache {@link Segments}. */
 public class SegmentsCache<T> {
@@ -34,26 +35,59 @@ public class SegmentsCache<T> {
 
     private final int pageSize;
     private final Cache<T, Segments> cache;
+    private final MemorySize maxMemorySize;
+    private final long maxElementSize;
 
-    public SegmentsCache(int pageSize, MemorySize maxMemorySize) {
+    public SegmentsCache(int pageSize, MemorySize maxMemorySize, long maxElementSize) {
         this.pageSize = pageSize;
         this.cache =
                 Caffeine.newBuilder()
+                        .softValues()
                         .weigher(this::weigh)
                         .maximumWeight(maxMemorySize.getBytes())
-                        .executor(MoreExecutors.directExecutor())
+                        .executor(Runnable::run)
                         .build();
+        this.maxMemorySize = maxMemorySize;
+        this.maxElementSize = maxElementSize;
     }
 
     public int pageSize() {
         return pageSize;
     }
 
-    public Segments getSegments(T key, Function<T, Segments> viewFunction) {
-        return cache.get(key, viewFunction);
+    public MemorySize maxMemorySize() {
+        return maxMemorySize;
+    }
+
+    public long maxElementSize() {
+        return maxElementSize;
+    }
+
+    @Nullable
+    public Segments getIfPresents(T key) {
+        return cache.getIfPresent(key);
+    }
+
+    public void put(T key, Segments segments) {
+        cache.put(key, segments);
     }
 
     private int weigh(T cacheKey, Segments segments) {
         return OBJECT_MEMORY_SIZE + segments.segments().size() * pageSize;
+    }
+
+    @Nullable
+    public static <T> SegmentsCache<T> create(MemorySize maxMemorySize, long maxElementSize) {
+        return create((int) PAGE_SIZE.defaultValue().getBytes(), maxMemorySize, maxElementSize);
+    }
+
+    @Nullable
+    public static <T> SegmentsCache<T> create(
+            int pageSize, MemorySize maxMemorySize, long maxElementSize) {
+        if (maxMemorySize.getBytes() == 0) {
+            return null;
+        }
+
+        return new SegmentsCache<>(pageSize, maxMemorySize, maxElementSize);
     }
 }

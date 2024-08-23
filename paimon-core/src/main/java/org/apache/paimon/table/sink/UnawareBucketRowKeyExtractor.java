@@ -20,6 +20,7 @@ package org.apache.paimon.table.sink;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.BucketMode;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -37,6 +38,6 @@ public class UnawareBucketRowKeyExtractor extends RowKeyExtractor {
 
     @Override
     public int bucket() {
-        return 0;
+        return BucketMode.UNAWARE_BUCKET;
     }
 }

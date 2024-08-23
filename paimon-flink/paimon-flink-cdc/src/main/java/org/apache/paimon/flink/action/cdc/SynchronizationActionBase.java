@@ -184,7 +184,7 @@ public abstract class SynchronizationActionBase extends ActionBase {
 
         // remove immutable options and options with equal values
         Map<String, String> oldOptions = table.options();
-        Set<String> immutableOptionKeys = CoreOptions.getImmutableOptionKeys();
+        Set<String> immutableOptionKeys = CoreOptions.IMMUTABLE_OPTIONS;
         dynamicOptions
                 .entrySet()
                 .removeIf(

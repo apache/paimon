@@ -20,6 +20,7 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestCacheFilter;
@@ -35,6 +36,7 @@ import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -98,6 +100,11 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public void setManifestCache(SegmentsCache<Path> manifestCache) {
+        wrapped.setManifestCache(manifestCache);
+    }
+
+    @Override
     public TableSchema schema() {
         return wrapped.schema();
     }
@@ -105,11 +112,6 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     @Override
     public FileStore<?> store() {
         return wrapped.store();
-    }
-
-    @Override
-    public BucketMode bucketMode() {
-        return wrapped.bucketMode();
     }
 
     @Override
@@ -125,6 +127,11 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     @Override
     public OptionalLong latestSnapshotId() {
         return wrapped.latestSnapshotId();
+    }
+
+    @Override
+    public Snapshot snapshot(long snapshotId) {
+        return wrapped.snapshot(snapshotId);
     }
 
     @Override
@@ -165,11 +172,6 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     @Override
     public void createBranch(String branchName) {
         wrapped.createBranch(branchName);
-    }
-
-    @Override
-    public void createBranch(String branchName, long snapshotId) {
-        wrapped.createBranch(branchName, snapshotId);
     }
 
     @Override

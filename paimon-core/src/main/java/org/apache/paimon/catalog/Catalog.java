@@ -20,6 +20,7 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -48,9 +49,9 @@ public interface Catalog extends AutoCloseable {
 
     String DEFAULT_DATABASE = "default";
 
-    String BRANCH_PREFIX = "$branch_";
     String SYSTEM_TABLE_SPLITTER = "$";
     String SYSTEM_DATABASE_NAME = "sys";
+    String SYSTEM_BRANCH_PREFIX = "branch_";
     String COMMENT_PROP = "comment";
     String TABLE_DEFAULT_OPTION_PREFIX = "table-default.";
     String DB_LOCATION_PROP = "location";
@@ -158,6 +159,14 @@ public interface Catalog extends AutoCloseable {
      * @throws TableNotExistException if the target does not exist
      */
     Table getTable(Identifier identifier) throws TableNotExistException;
+
+    /**
+     * Get the table location in this catalog. If the table exists, return the location of the
+     * table; If the table does not exist, construct the location for table.
+     *
+     * @return the table location
+     */
+    Path getTableLocation(Identifier identifier);
 
     /**
      * Get names of all tables under this database. An empty list is returned if none exists.

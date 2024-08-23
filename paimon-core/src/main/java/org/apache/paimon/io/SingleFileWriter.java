@@ -19,8 +19,10 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.BatchFormatWriter;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.fs.AsyncPositionOutputStream;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
@@ -58,13 +60,17 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
             FormatWriterFactory factory,
             Path path,
             Function<T, InternalRow> converter,
-            String compression) {
+            String compression,
+            boolean asyncWrite) {
         this.fileIO = fileIO;
         this.path = path;
         this.converter = converter;
 
         try {
             out = fileIO.newOutputStream(path, false);
+            if (asyncWrite) {
+                out = new AsyncPositionOutputStream(out);
+            }
             writer = factory.create(out, compression);
         } catch (IOException e) {
             LOG.warn(
@@ -87,6 +93,27 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
     @Override
     public void write(T record) throws IOException {
         writeImpl(record);
+    }
+
+    public void writeBatch(BatchRecords batchRecords) throws IOException {
+        if (closed) {
+            throw new RuntimeException("Writer has already closed!");
+        }
+
+        try {
+            if (writer instanceof BatchFormatWriter) {
+                ((BatchFormatWriter) writer).writeBatch(batchRecords);
+            } else {
+                for (InternalRow row : batchRecords) {
+                    writer.addElement(row);
+                }
+            }
+            recordCount += batchRecords.rowCount();
+        } catch (Throwable e) {
+            LOG.warn("Exception occurs when writing file " + path + ". Cleaning up.", e);
+            abort();
+            throw e;
+        }
     }
 
     protected InternalRow writeImpl(T record) throws IOException {
@@ -140,13 +167,11 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
         }
 
         try {
-            writer.flush();
-            writer.finish();
-
+            writer.close();
             out.flush();
             out.close();
         } catch (IOException e) {
-            LOG.warn("Exception occurs when closing file " + path + ". Cleaning up.", e);
+            LOG.warn("Exception occurs when closing file {}. Cleaning up.", path, e);
             abort();
             throw e;
         } finally {

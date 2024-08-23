@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.ActionITCaseBase;
 import org.apache.paimon.flink.action.cdc.kafka.KafkaSyncDatabaseActionFactory;
@@ -30,6 +31,7 @@ import org.apache.paimon.flink.action.cdc.postgres.PostgresSyncTableActionFactor
 import org.apache.paimon.flink.action.cdc.pulsar.PulsarSyncDatabaseActionFactory;
 import org.apache.paimon.flink.action.cdc.pulsar.PulsarSyncTableActionFactory;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataField;
@@ -51,7 +53,9 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -108,6 +112,18 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
 
     protected void assertTableNotExists(String... tableNames) throws Exception {
         assertThat(catalog.listTables(database)).doesNotContain(tableNames);
+    }
+
+    protected void assertTablePartitionKeys(Map<String, String> partitionKeyMultiple)
+            throws Exception {
+        // get All tableNames;
+        Set<String> tableNames = partitionKeyMultiple.keySet();
+        for (String tableName : tableNames) {
+            Table table = catalog.getTable(new Identifier(database, tableName));
+            String actual = table.partitionKeys().stream().collect(Collectors.joining(","));
+            String expected = partitionKeyMultiple.get(tableName);
+            assertThat(actual).isEqualTo(expected);
+        }
     }
 
     protected void waitForResult(
@@ -366,6 +382,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
         private final List<String> partitionKeys = new ArrayList<>();
         private final List<String> primaryKeys = new ArrayList<>();
         private final List<String> metadataColumn = new ArrayList<>();
+        protected Map<String, String> partitionKeyMultiple = new HashMap<>();
 
         public SyncDatabaseActionBuilder(Class<T> clazz, Map<String, String> sourceConfig) {
             this.clazz = clazz;
@@ -437,6 +454,14 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
             return this;
         }
 
+        public SyncDatabaseActionBuilder<T> withPartitionKeyMultiple(
+                Map<String, String> partitionKeyMultiple) {
+            if (partitionKeyMultiple != null) {
+                this.partitionKeyMultiple = partitionKeyMultiple;
+            }
+            return this;
+        }
+
         public T build() {
             List<String> args =
                     new ArrayList<>(
@@ -461,6 +486,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
 
             args.addAll(listToArgs("--type-mapping", typeMappingModes));
             args.addAll(listToArgs("--partition-keys", partitionKeys));
+            args.addAll(mapToArgs("--multiple-table-partition-keys", partitionKeyMultiple));
             args.addAll(listToArgs("--primary-keys", primaryKeys));
             args.addAll(listToArgs("--metadata-column", metadataColumn));
 

@@ -112,4 +112,30 @@ public class TestBitmapFileIndex {
                 (BitmapIndexResultLazy) reader.visitNotIn(fieldRef, Arrays.asList(1, 0));
         assert result5.get().equals(RoaringBitmap32.bitmapOf(2));
     }
+
+    @Test
+    public void testBitmapIndex3() {
+
+        IntType intType = new IntType();
+        FieldRef fieldRef = new FieldRef(0, "", intType);
+        BitmapFileIndex bitmapFileIndex = new BitmapFileIndex(intType, null);
+        FileIndexWriter writer = bitmapFileIndex.createWriter();
+
+        // test only one null-value
+        Object[] arr = {1, 2, 1, 2, 1, 3, null};
+
+        for (Object o : arr) {
+            writer.write(o);
+        }
+        byte[] bytes = writer.serializedBytes();
+        ByteArraySeekableStream seekableStream = new ByteArraySeekableStream(bytes);
+        FileIndexReader reader = bitmapFileIndex.createReader(seekableStream, 0, bytes.length);
+
+        BitmapIndexResultLazy result1 = (BitmapIndexResultLazy) reader.visitEqual(fieldRef, 1);
+        assert result1.get().equals(RoaringBitmap32.bitmapOf(0, 2, 4));
+
+        // test read singleton bitmap
+        BitmapIndexResultLazy result2 = (BitmapIndexResultLazy) reader.visitIsNull(fieldRef);
+        assert result2.get().equals(RoaringBitmap32.bitmapOf(6));
+    }
 }

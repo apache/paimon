@@ -32,9 +32,8 @@ public class RowUnawareBucketSink extends UnawareBucketSink<InternalRow> {
             FileStoreTable table,
             Map<String, String> overwritePartitions,
             LogSinkFunction logSinkFunction,
-            Integer parallelism,
-            boolean boundedInput) {
-        super(table, overwritePartitions, logSinkFunction, parallelism, boundedInput);
+            Integer parallelism) {
+        super(table, overwritePartitions, logSinkFunction, parallelism);
     }
 
     @Override

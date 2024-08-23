@@ -37,6 +37,59 @@ class DeletionVectorTest extends PaimonSparkTestBase {
 
   bucketModes.foreach {
     bucket =>
+      test(s"Paimon DeletionVector: merge into with bucket = $bucket") {
+        withTable("source", "target") {
+          val bucketKey = if (bucket > 1) {
+            ", 'bucket-key' = 'a'"
+          } else {
+            ""
+          }
+          Seq((1, 100, "c11"), (3, 300, "c33"), (5, 500, "c55"), (7, 700, "c77"), (9, 900, "c99"))
+            .toDF("a", "b", "c")
+            .createOrReplaceTempView("source")
+
+          spark.sql(
+            s"""
+               |CREATE TABLE target (a INT, b INT, c STRING)
+               |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'bucket' = '$bucket' $bucketKey)
+               |""".stripMargin)
+          spark.sql(
+            "INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2'), (3, 30, 'c3'), (4, 40, 'c4'), (5, 50, 'c5')")
+
+          val table = loadTable("target")
+          val dvMaintainerFactory =
+            new DeletionVectorsMaintainer.Factory(table.store().newIndexFileHandler())
+          spark.sql(s"""
+                       |MERGE INTO target
+                       |USING source
+                       |ON target.a = source.a
+                       |WHEN MATCHED AND target.a = 5 THEN
+                       |UPDATE SET b = source.b + target.b
+                       |WHEN MATCHED AND source.c > 'c2' THEN
+                       |UPDATE SET *
+                       |WHEN MATCHED THEN
+                       |DELETE
+                       |WHEN NOT MATCHED AND c > 'c9' THEN
+                       |INSERT (a, b, c) VALUES (a, b * 1.1, c)
+                       |WHEN NOT MATCHED THEN
+                       |INSERT *
+                       |""".stripMargin)
+
+          checkAnswer(
+            spark.sql("SELECT * FROM target ORDER BY a, b"),
+            Row(2, 20, "c2") :: Row(3, 300, "c33") :: Row(4, 40, "c4") :: Row(5, 550, "c5") :: Row(
+              7,
+              700,
+              "c77") :: Row(9, 990, "c99") :: Nil
+          )
+          val deletionVectors = getAllLatestDeletionVectors(table, dvMaintainerFactory)
+          Assertions.assertTrue(deletionVectors.nonEmpty)
+        }
+      }
+  }
+
+  bucketModes.foreach {
+    bucket =>
       test(
         s"Paimon DeletionVector: update for append non-partitioned table with bucket = $bucket") {
         withTable("T") {
@@ -45,18 +98,20 @@ class DeletionVectorTest extends PaimonSparkTestBase {
           } else {
             ""
           }
-          spark.sql(
-            s"""
-               |CREATE TABLE T (id INT, name STRING)
-               |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'bucket' = '$bucket' $bucketKey)
-               |""".stripMargin)
+          spark.sql(s"""
+                       |CREATE TABLE T (id INT, name STRING)
+                       |TBLPROPERTIES (
+                       |  'deletion-vectors.enabled' = 'true',
+                       |  'compaction.max.file-num' = '50',
+                       |  'bucket' = '$bucket' $bucketKey)
+                       |""".stripMargin)
 
           val table = loadTable("T")
           val dvMaintainerFactory =
             new DeletionVectorsMaintainer.Factory(table.store().newIndexFileHandler())
 
           spark.sql("INSERT INTO T VALUES (1, 'a'), (2, 'b'), (3, 'c')")
-          val deletionVectors1 = getLatestDeletionVectors(table, dvMaintainerFactory)
+          val deletionVectors1 = getAllLatestDeletionVectors(table, dvMaintainerFactory)
           Assertions.assertEquals(0, deletionVectors1.size)
 
           val cond1 = "id = 2"
@@ -65,7 +120,7 @@ class DeletionVectorTest extends PaimonSparkTestBase {
           checkAnswer(
             spark.sql(s"SELECT * from T ORDER BY id"),
             Row(1, "a") :: Row(2, "b_2") :: Row(3, "c") :: Nil)
-          val deletionVectors2 = getLatestDeletionVectors(table, dvMaintainerFactory)
+          val deletionVectors2 = getAllLatestDeletionVectors(table, dvMaintainerFactory)
           Assertions.assertEquals(1, deletionVectors2.size)
           deletionVectors2
             .foreach {
@@ -77,7 +132,7 @@ class DeletionVectorTest extends PaimonSparkTestBase {
           checkAnswer(
             spark.sql(s"SELECT * from T ORDER BY id"),
             Row(1, "a") :: Row(2, "b_2") :: Row(3, "c") :: Row(4, "d") :: Row(5, "e") :: Nil)
-          val deletionVectors3 = getLatestDeletionVectors(table, dvMaintainerFactory)
+          val deletionVectors3 = getAllLatestDeletionVectors(table, dvMaintainerFactory)
           Assertions.assertTrue(deletionVectors2 == deletionVectors3)
 
           val cond2 = "id % 2 = 1"
@@ -87,6 +142,16 @@ class DeletionVectorTest extends PaimonSparkTestBase {
             Row(1, "a_2") :: Row(2, "b_2") :: Row(3, "c_2") :: Row(4, "d") :: Row(5, "e_2") :: Nil)
 
           spark.sql(s"UPDATE T SET name = '_all'")
+          checkAnswer(
+            spark.sql(s"SELECT * from T ORDER BY id"),
+            Row(1, "_all") :: Row(2, "_all") :: Row(3, "_all") :: Row(4, "_all") :: Row(
+              5,
+              "_all") :: Nil)
+
+          spark.sql("CALL sys.compact('T')")
+          val deletionVectors4 = getAllLatestDeletionVectors(table, dvMaintainerFactory)
+          // After compaction, deletionVectors should be empty
+          Assertions.assertTrue(deletionVectors4.isEmpty)
           checkAnswer(
             spark.sql(s"SELECT * from T ORDER BY id"),
             Row(1, "_all") :: Row(2, "_all") :: Row(3, "_all") :: Row(4, "_all") :: Row(
@@ -118,7 +183,7 @@ class DeletionVectorTest extends PaimonSparkTestBase {
 
           spark.sql(
             "INSERT INTO T VALUES (1, 'a', '2024'), (2, 'b', '2024'), (3, 'c', '2025'), (4, 'd', '2025')")
-          val deletionVectors1 = getLatestDeletionVectors(table, dvMaintainerFactory)
+          val deletionVectors1 = getAllLatestDeletionVectors(table, dvMaintainerFactory)
           Assertions.assertEquals(0, deletionVectors1.size)
 
           val cond1 = "id = 2"
@@ -167,6 +232,17 @@ class DeletionVectorTest extends PaimonSparkTestBase {
               case (filePath, dv) =>
                 rowMetaInfo2(filePath).foreach(index => Assertions.assertTrue(dv.isDeleted(index)))
             }
+
+          spark.sql("CALL sys.compact('T')")
+          val deletionVectors5 = getAllLatestDeletionVectors(table, dvMaintainerFactory)
+          // After compaction, deletionVectors should be empty
+          Assertions.assertTrue(deletionVectors5.isEmpty)
+          checkAnswer(
+            spark.sql(s"SELECT * from T ORDER BY id"),
+            Row(1, "a", "2024") :: Row(2, "b_2", "2024") :: Row(3, "c_2", "2025") :: Row(
+              4,
+              "d_2",
+              "2025") :: Nil)
         }
       }
   }
@@ -192,14 +268,14 @@ class DeletionVectorTest extends PaimonSparkTestBase {
             new DeletionVectorsMaintainer.Factory(table.store().newIndexFileHandler())
 
           spark.sql("INSERT INTO T VALUES (1, 'a'), (2, 'b')")
-          val deletionVectors1 = getLatestDeletionVectors(table, dvMaintainerFactory)
+          val deletionVectors1 = getAllLatestDeletionVectors(table, dvMaintainerFactory)
           Assertions.assertEquals(0, deletionVectors1.size)
 
           val cond1 = "id = 2"
           val rowMetaInfo1 = getFilePathAndRowIndex(cond1)
           spark.sql(s"DELETE FROM T WHERE $cond1")
           checkAnswer(spark.sql(s"SELECT * from T ORDER BY id"), Row(1, "a") :: Nil)
-          val deletionVectors2 = getLatestDeletionVectors(table, dvMaintainerFactory)
+          val deletionVectors2 = getAllLatestDeletionVectors(table, dvMaintainerFactory)
           Assertions.assertEquals(1, deletionVectors2.size)
           deletionVectors2
             .foreach {
@@ -211,11 +287,17 @@ class DeletionVectorTest extends PaimonSparkTestBase {
           checkAnswer(
             spark.sql(s"SELECT * from T ORDER BY id"),
             Row(1, "a") :: Row(2, "bb") :: Row(3, "c") :: Row(4, "d") :: Nil)
-          val deletionVectors3 = getLatestDeletionVectors(table, dvMaintainerFactory)
+          val deletionVectors3 = getAllLatestDeletionVectors(table, dvMaintainerFactory)
           Assertions.assertTrue(deletionVectors2 == deletionVectors3)
 
           val cond2 = "id % 2 = 1"
           spark.sql(s"DELETE FROM T WHERE $cond2")
+          checkAnswer(spark.sql(s"SELECT * from T ORDER BY id"), Row(2, "bb") :: Row(4, "d") :: Nil)
+
+          spark.sql("CALL sys.compact('T')")
+          val deletionVectors4 = getAllLatestDeletionVectors(table, dvMaintainerFactory)
+          // After compaction, deletionVectors should be empty
+          Assertions.assertTrue(deletionVectors4.isEmpty)
           checkAnswer(spark.sql(s"SELECT * from T ORDER BY id"), Row(2, "bb") :: Row(4, "d") :: Nil)
         }
       }
@@ -241,9 +323,16 @@ class DeletionVectorTest extends PaimonSparkTestBase {
           val dvMaintainerFactory =
             new DeletionVectorsMaintainer.Factory(table.store().newIndexFileHandler())
 
+          def getDeletionVectors(ptValues: Seq[String]): Map[String, DeletionVector] = {
+            getLatestDeletionVectors(
+              table,
+              dvMaintainerFactory,
+              ptValues.map(BinaryRow.singleColumn))
+          }
+
           spark.sql(
             "INSERT INTO T VALUES (1, 'a', '2024'), (2, 'b', '2024'), (3, 'c', '2025'), (4, 'd', '2025')")
-          val deletionVectors1 = getLatestDeletionVectors(table, dvMaintainerFactory)
+          val deletionVectors1 = getAllLatestDeletionVectors(table, dvMaintainerFactory)
           Assertions.assertEquals(0, deletionVectors1.size)
 
           val cond1 = "id = 2"
@@ -252,11 +341,7 @@ class DeletionVectorTest extends PaimonSparkTestBase {
           checkAnswer(
             spark.sql(s"SELECT * from T ORDER BY id"),
             Row(1, "a", "2024") :: Row(3, "c", "2025") :: Row(4, "d", "2025") :: Nil)
-          val deletionVectors2 =
-            getLatestDeletionVectors(
-              table,
-              dvMaintainerFactory,
-              Seq(BinaryRow.singleColumn("2024"), BinaryRow.singleColumn("2025")))
+          val deletionVectors2 = getDeletionVectors(Seq("2024", "2025"))
           Assertions.assertEquals(1, deletionVectors2.size)
           deletionVectors2
             .foreach {
@@ -270,22 +355,28 @@ class DeletionVectorTest extends PaimonSparkTestBase {
           checkAnswer(
             spark.sql(s"SELECT * from T ORDER BY id"),
             Row(1, "a", "2024") :: Row(4, "d", "2025") :: Nil)
-          val deletionVectors3 =
-            getLatestDeletionVectors(
-              table,
-              dvMaintainerFactory,
-              Seq(BinaryRow.singleColumn("2024")))
+          val deletionVectors3 = getDeletionVectors(Seq("2024"))
           Assertions.assertTrue(deletionVectors2 == deletionVectors3)
-          val deletionVectors4 =
-            getLatestDeletionVectors(
-              table,
-              dvMaintainerFactory,
-              Seq(BinaryRow.singleColumn("2024"), BinaryRow.singleColumn("2025")))
+          val deletionVectors4 = getDeletionVectors(Seq("2024", "2025"))
           deletionVectors4
             .foreach {
               case (filePath, dv) =>
                 rowMetaInfo2(filePath).foreach(index => Assertions.assertTrue(dv.isDeleted(index)))
             }
+
+          spark.sql("""CALL sys.compact(table => 'T', partitions => "pt = '2024'")""")
+          Assertions.assertTrue(getDeletionVectors(Seq("2024")).isEmpty)
+          Assertions.assertTrue(getDeletionVectors(Seq("2025")).nonEmpty)
+          checkAnswer(
+            spark.sql(s"SELECT * from T ORDER BY id"),
+            Row(1, "a", "2024") :: Row(4, "d", "2025") :: Nil)
+
+          spark.sql("""CALL sys.compact(table => 'T', where => "pt = '2025'")""")
+          Assertions.assertTrue(getDeletionVectors(Seq("2025")).isEmpty)
+          Assertions.assertTrue(getDeletionVectors(Seq("2025")).isEmpty)
+          checkAnswer(
+            spark.sql(s"SELECT * from T ORDER BY id"),
+            Row(1, "a", "2024") :: Row(4, "d", "2025") :: Nil)
         }
       }
   }
@@ -315,7 +406,7 @@ class DeletionVectorTest extends PaimonSparkTestBase {
       val dvMaintainerFactory =
         new DeletionVectorsMaintainer.Factory(table.store().newIndexFileHandler())
 
-      val deletionVectors1 = getLatestDeletionVectors(table, dvMaintainerFactory)
+      val deletionVectors1 = getAllLatestDeletionVectors(table, dvMaintainerFactory)
       // 1, 3 deleted, their row positions are 0, 2
       Assertions.assertEquals(1, deletionVectors1.size)
       deletionVectors1
@@ -328,7 +419,7 @@ class DeletionVectorTest extends PaimonSparkTestBase {
       // Compact
       // f3 (1, 2, 3), no deletion
       spark.sql("CALL sys.compact('T')")
-      val deletionVectors2 = getLatestDeletionVectors(table, dvMaintainerFactory)
+      val deletionVectors2 = getAllLatestDeletionVectors(table, dvMaintainerFactory)
       // After compaction, deletionVectors should be empty
       Assertions.assertTrue(deletionVectors2.isEmpty)
 
@@ -340,7 +431,7 @@ class DeletionVectorTest extends PaimonSparkTestBase {
         spark.sql(s"SELECT * from T ORDER BY id"),
         Row(1, "a_new1") :: Row(2, "b_new2") :: Row(3, "c_new1") :: Nil)
 
-      val deletionVectors3 = getLatestDeletionVectors(table, dvMaintainerFactory)
+      val deletionVectors3 = getAllLatestDeletionVectors(table, dvMaintainerFactory)
       // 2 deleted, row positions is 1
       Assertions.assertEquals(1, deletionVectors3.size)
       deletionVectors3
@@ -486,7 +577,7 @@ class DeletionVectorTest extends PaimonSparkTestBase {
     new Path(path).getName
   }
 
-  private def getLatestDeletionVectors(
+  private def getAllLatestDeletionVectors(
       table: FileStoreTable,
       dvMaintainerFactory: DeletionVectorsMaintainer.Factory): Map[String, DeletionVector] = {
     getLatestDeletionVectors(table, dvMaintainerFactory, Seq(BinaryRow.EMPTY_ROW))

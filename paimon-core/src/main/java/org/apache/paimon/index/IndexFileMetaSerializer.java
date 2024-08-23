@@ -33,7 +33,7 @@ import java.util.LinkedHashMap;
 public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
 
     public IndexFileMetaSerializer() {
-        super(IndexFileMeta.schema());
+        super(IndexFileMeta.SCHEMA);
     }
 
     @Override

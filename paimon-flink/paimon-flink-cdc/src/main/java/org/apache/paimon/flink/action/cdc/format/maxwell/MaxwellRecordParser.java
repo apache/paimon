@@ -20,7 +20,7 @@ package org.apache.paimon.flink.action.cdc.format.maxwell;
 
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
-import org.apache.paimon.flink.action.cdc.format.RecordParser;
+import org.apache.paimon.flink.action.cdc.format.AbstractJsonRecordParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.RowKind;
 
@@ -30,11 +30,11 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The {@code MaxwellRecordParser} class extends the abstract {@link RecordParser} and is designed
- * to parse records from Maxwell's JSON change data capture (CDC) format. Maxwell is a CDC solution
- * for MySQL databases that captures row-level changes to database tables and outputs them in JSON
- * format. This parser extracts relevant information from the Maxwell-JSON format and converts it
- * into a list of {@link RichCdcMultiplexRecord} objects.
+ * The {@code MaxwellRecordParser} class extends the abstract {@link AbstractJsonRecordParser} and
+ * is designed to parse records from Maxwell's JSON change data capture (CDC) format. Maxwell is a
+ * CDC solution for MySQL databases that captures row-level changes to database tables and outputs
+ * them in JSON format. This parser extracts relevant information from the Maxwell-JSON format and
+ * converts it into a list of {@link RichCdcMultiplexRecord} objects.
  *
  * <p>The class supports various database operations such as INSERT, UPDATE, and DELETE, and creates
  * corresponding {@link RichCdcMultiplexRecord} objects to represent these changes.
@@ -42,7 +42,7 @@ import java.util.List;
  * <p>Validation is performed to ensure that the JSON records contain all necessary fields, and the
  * class also supports schema extraction for the Kafka topic.
  */
-public class MaxwellRecordParser extends RecordParser {
+public class MaxwellRecordParser extends AbstractJsonRecordParser {
 
     private static final String FIELD_OLD = "old";
     private static final String FIELD_TYPE = "type";

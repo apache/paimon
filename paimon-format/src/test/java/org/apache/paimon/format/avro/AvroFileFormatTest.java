@@ -116,8 +116,7 @@ public class AvroFileFormatTest {
             for (int i = 0; i < 1000000; i++) {
                 writer.addElement(GenericRow.of(i));
             }
-            writer.flush();
-            writer.finish();
+            writer.close();
         }
 
         try (RecordReader<InternalRow> reader =

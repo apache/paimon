@@ -160,6 +160,13 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon DDL: create table without using paimon") {
+    withTable("paimon_tbl") {
+      sql("CREATE TABLE paimon_tbl (id int)")
+      assert(loadTable("paimon_tbl").options().get("provider").equals("paimon"))
+    }
+  }
+
   fileFormats.foreach {
     format =>
       test(s"Paimon DDL: create table with char/varchar/string, file.format: $format") {
@@ -445,5 +452,15 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
           }
         }
     }
+  }
+
+  test("Paimon DDL: create table with unsupported partitioned by") {
+    val error = intercept[RuntimeException] {
+      sql(s"""
+             |CREATE TABLE T (id STRING, name STRING, pt STRING)
+             |PARTITIONED BY (substr(pt, 1, 2))
+             |""".stripMargin)
+    }.getMessage
+    assert(error.contains("Unsupported partition transform"))
   }
 }

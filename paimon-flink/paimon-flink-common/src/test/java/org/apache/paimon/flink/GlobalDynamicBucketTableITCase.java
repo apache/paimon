@@ -19,6 +19,7 @@
 package org.apache.paimon.flink;
 
 import org.apache.flink.types.Row;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -160,5 +161,15 @@ public class GlobalDynamicBucketTableITCase extends CatalogITCaseBase {
         sql("insert into large_t select * from src");
         sql("insert into large_t select * from src");
         assertThat(sql("select k, count(*) from large_t group by k having count(*) > 1")).isEmpty();
+    }
+
+    @Disabled // TODO support this
+    @Test
+    public void testPkContainsPartialPartitionFields() {
+        sql(
+                "create table partial_part (pt1 int, pt2 int, k int, v int, primary key (k, pt1) not enforced) partitioned by (pt1, pt2)");
+        sql("insert into partial_part values (1, 1, 1, 1)");
+        sql("insert into partial_part values (1, 2, 1, 2)");
+        assertThat(sql("select * from partial_part")).containsExactlyInAnyOrder(Row.of(1, 2, 1, 2));
     }
 }

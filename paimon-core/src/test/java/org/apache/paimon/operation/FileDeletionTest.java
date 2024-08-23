@@ -315,7 +315,7 @@ public class FileDeletionTest {
         for (String tagName : Arrays.asList("tag1", "tag2")) {
             Snapshot snapshot = tagManager.taggedSnapshot(tagName);
             List<Path> manifestFilePaths =
-                    snapshot.dataManifests(manifestList).stream()
+                    manifestList.readDataManifests(snapshot).stream()
                             .map(ManifestFileMeta::fileName)
                             .map(pathFactory::toManifestFilePath)
                             .collect(Collectors.toList());
@@ -370,7 +370,7 @@ public class FileDeletionTest {
         Snapshot tag1 = tagManager.taggedSnapshot("tag1");
         ManifestList manifestList = store.manifestListFactory().create();
         List<Path> manifestFilePaths =
-                tag1.dataManifests(manifestList).stream()
+                manifestList.readDataManifests(tag1).stream()
                         .map(ManifestFileMeta::fileName)
                         .map(pathFactory::toManifestFilePath)
                         .collect(Collectors.toList());
@@ -409,9 +409,9 @@ public class FileDeletionTest {
 
         ManifestList manifestList = store.manifestListFactory().create();
         Snapshot snapshot1 = snapshotManager.snapshot(1);
-        List<ManifestFileMeta> snapshot1Data = snapshot1.dataManifests(manifestList);
+        List<ManifestFileMeta> snapshot1Data = manifestList.readDataManifests(snapshot1);
         Snapshot snapshot3 = snapshotManager.snapshot(3);
-        List<ManifestFileMeta> snapshot3Data = snapshot3.dataManifests(manifestList);
+        List<ManifestFileMeta> snapshot3Data = manifestList.readDataManifests(snapshot3);
 
         List<String> manifestLists =
                 Arrays.asList(snapshot1.baseManifestList(), snapshot1.deltaManifestList());
@@ -486,7 +486,7 @@ public class FileDeletionTest {
 
         ManifestList manifestList = store.manifestListFactory().create();
         Snapshot snapshot2 = snapshotManager.snapshot(2);
-        List<ManifestFileMeta> snapshot2Data = snapshot2.dataManifests(manifestList);
+        List<ManifestFileMeta> snapshot2Data = manifestList.readDataManifests(snapshot2);
 
         List<String> manifestLists =
                 Arrays.asList(snapshot2.baseManifestList(), snapshot2.deltaManifestList());
@@ -521,8 +521,8 @@ public class FileDeletionTest {
         // check manifests
         Snapshot tag1 = tagManager.taggedSnapshot("tag1");
         Snapshot tag3 = tagManager.taggedSnapshot("tag3");
-        List<ManifestFileMeta> existing = tag1.dataManifests(manifestList);
-        existing.addAll(tag3.dataManifests(manifestList));
+        List<ManifestFileMeta> existing = manifestList.readDataManifests(tag1);
+        existing.addAll(manifestList.readDataManifests(tag3));
         for (ManifestFileMeta manifestFileMeta : snapshot2Data) {
             Path path = pathFactory.toManifestFilePath(manifestFileMeta.fileName());
             if (existing.contains(manifestFileMeta)) {

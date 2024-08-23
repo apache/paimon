@@ -166,7 +166,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             // expire merge tree files and collect changed buckets
             Predicate<ManifestEntry> skipper;
             try {
-                skipper = snapshotDeletion.dataFileSkipper(taggedSnapshots, id);
+                skipper = snapshotDeletion.createDataFileSkipperForTags(taggedSnapshots, id);
             } catch (Exception e) {
                 LOG.info(
                         String.format(
@@ -198,7 +198,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
 
         // delete manifests and indexFiles
         List<Snapshot> skippingSnapshots =
-                TagManager.findOverlappedSnapshots(
+                SnapshotManager.findOverlappedSnapshots(
                         taggedSnapshots, beginInclusiveId, endExclusiveId);
         skippingSnapshots.add(snapshotManager.snapshot(endExclusiveId));
         Set<String> skippingSet = snapshotDeletion.manifestSkippingSet(skippingSnapshots);

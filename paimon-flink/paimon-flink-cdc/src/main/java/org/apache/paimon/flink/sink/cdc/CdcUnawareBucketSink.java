@@ -29,7 +29,7 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 public class CdcUnawareBucketSink extends UnawareBucketSink<CdcRecord> {
 
     public CdcUnawareBucketSink(FileStoreTable table, Integer parallelism) {
-        super(table, null, null, parallelism, false);
+        super(table, null, null, parallelism);
     }
 
     @Override

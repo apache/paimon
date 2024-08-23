@@ -61,6 +61,10 @@ public class PartitionValuesTimeExpireStrategy extends PartitionExpireStrategy {
                 .readPartitionEntries();
     }
 
+    public boolean isExpired(LocalDateTime expireDateTime, BinaryRow partition) {
+        return new PartitionValuesTimePredicate(expireDateTime).test(partition);
+    }
+
     /** The expired partition predicate uses the date-format value of the partition. */
     private class PartitionValuesTimePredicate implements PartitionPredicate {
 

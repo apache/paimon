@@ -57,7 +57,7 @@ public class CatalogOptions {
     public static final ConfigOption<Boolean> LOCK_ENABLED =
             ConfigOptions.key("lock.enabled")
                     .booleanType()
-                    .defaultValue(false)
+                    .noDefaultValue()
                     .withDescription("Enable Catalog Lock.");
 
     public static final ConfigOption<String> LOCK_TYPE =
@@ -105,6 +105,24 @@ public class CatalogOptions {
                     .withDescription(
                             "Controls the duration for which databases and tables in the catalog are cached.");
 
+    public static final ConfigOption<MemorySize> CACHE_MANIFEST_SMALL_FILE_MEMORY =
+            key("cache.manifest.small-file-memory")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(128))
+                    .withDescription("Controls the cache memory to cache small manifest files.");
+
+    public static final ConfigOption<MemorySize> CACHE_MANIFEST_SMALL_FILE_THRESHOLD =
+            key("cache.manifest.small-file-threshold")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(1))
+                    .withDescription("Controls the threshold of small manifest file.");
+
+    public static final ConfigOption<MemorySize> CACHE_MANIFEST_MAX_MEMORY =
+            key("cache.manifest.max-memory")
+                    .memoryType()
+                    .noDefaultValue()
+                    .withDescription("Controls the maximum memory to cache manifest content.");
+
     public static final ConfigOption<String> LINEAGE_META =
             key("lineage-meta")
                     .stringType()
@@ -132,4 +150,10 @@ public class CatalogOptions {
                     .withDescription(
                             "Indicates whether this catalog allow upper case, "
                                     + "its default value depends on the implementation of the specific catalog.");
+
+    public static final ConfigOption<Boolean> SYNC_ALL_PROPERTIES =
+            ConfigOptions.key("sync-all-properties")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Sync all table properties to hive metastore");
 }

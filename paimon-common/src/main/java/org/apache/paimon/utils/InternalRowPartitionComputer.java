@@ -79,7 +79,7 @@ public class InternalRowPartitionComputer {
         return partValues;
     }
 
-    public static String toSimpleString(
+    public static String partToSimpleString(
             RowType partitionType, BinaryRow partition, String delimiter, int maxLength) {
         InternalRow.FieldGetter[] getters = partitionType.fieldGetters();
         StringBuilder builder = new StringBuilder();

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.system;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -71,14 +72,19 @@ public class ConsumersTable implements ReadonlyTable {
 
     private final FileIO fileIO;
     private final Path location;
+    private final String branch;
 
     public ConsumersTable(FileStoreTable dataTable) {
-        this(dataTable.fileIO(), dataTable.location());
+        this(
+                dataTable.fileIO(),
+                dataTable.location(),
+                CoreOptions.branch(dataTable.schema().options()));
     }
 
-    public ConsumersTable(FileIO fileIO, Path location) {
+    public ConsumersTable(FileIO fileIO, Path location, String branchName) {
         this.fileIO = fileIO;
         this.location = location;
+        this.branch = branchName;
     }
 
     @Override
@@ -108,7 +114,7 @@ public class ConsumersTable implements ReadonlyTable {
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new ConsumersTable(fileIO, location);
+        return new ConsumersTable(fileIO, location, branch);
     }
 
     private class ConsumersScan extends ReadOnceTableScan {
@@ -154,7 +160,7 @@ public class ConsumersTable implements ReadonlyTable {
     }
 
     /** {@link TableRead} implementation for {@link ConsumersTable}. */
-    private static class ConsumersRead implements InnerTableRead {
+    private class ConsumersRead implements InnerTableRead {
 
         private final FileIO fileIO;
         private int[][] projection;
@@ -185,7 +191,7 @@ public class ConsumersTable implements ReadonlyTable {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
             Path location = ((ConsumersTable.ConsumersSplit) split).location;
-            Map<String, Long> consumers = new ConsumerManager(fileIO, location).consumers();
+            Map<String, Long> consumers = new ConsumerManager(fileIO, location, branch).consumers();
             Iterator<InternalRow> rows =
                     Iterators.transform(consumers.entrySet().iterator(), this::toRow);
             if (projection != null) {

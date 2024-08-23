@@ -373,7 +373,7 @@ public class StringUtils {
      * @return an array of parsed Strings, {@code null} if null String input
      */
     public static String[] split(final String str, final String separatorChars) {
-        return splitWorker(str, separatorChars, -1, false);
+        return split(str, separatorChars, -1, false);
     }
 
     /**
@@ -388,7 +388,7 @@ public class StringUtils {
      *     separators; if {@code false}, adjacent separators are treated as one separator.
      * @return an array of parsed Strings, {@code null} if null String input
      */
-    private static String[] splitWorker(
+    public static String[] split(
             final String str,
             final String separatorChars,
             final int max,
@@ -549,6 +549,10 @@ public class StringUtils {
             }
         }
         return true;
+    }
+
+    public static String quote(String str) {
+        return "`" + str + "`";
     }
 
     public static String caseSensitiveConversion(String str, boolean allowUpperCase) {

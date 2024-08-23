@@ -67,6 +67,7 @@ under the License.
         <module>paimon-spark</module>
         <module>paimon-service</module>
         <module>paimon-test-utils</module>
+        <module>paimon-arrow</module>
         <module>tools/ci/paimon-ci-tools</module>
     </modules>
 
@@ -81,8 +82,8 @@ under the License.
         <hadoop.version>2.8.5</hadoop.version>
         <scala.version>2.12.15</scala.version>
         <scala.binary.version>2.12</scala.binary.version>
-        <snappy.version>1.1.8.3</snappy.version>
-        <airlift.version>0.21</airlift.version>
+        <snappy.version>1.1.8.4</snappy.version>
+        <airlift.version>0.27</airlift.version>
         <lz4.version>1.8.0</lz4.version>
         <slf4j.version>1.7.32</slf4j.version>
         <log4j.version>2.17.1</log4j.version>
@@ -100,10 +101,11 @@ under the License.
         <!-- Can be set to any value to reproduce a specific build. -->
         <test.randomization.seed/>
         <test.unit.pattern>**/*Test.*</test.unit.pattern>
-        <test.flink.main.version>1.19</test.flink.main.version>
-        <test.flink.version>1.19.1</test.flink.version>
+        <test.flink.main.version>1.20</test.flink.main.version>
+        <test.flink.version>1.20.0</test.flink.version>
         <!-- TODO upgrade after connector releases x-1.19 version -->
         <test.flink.connector.kafka.version>3.0.1-1.18</test.flink.connector.kafka.version>
+        <test.mysql.connector.java.version>8.0.27</test.mysql.connector.java.version>
 
         <zstd-jni.version>1.5.5-11</zstd-jni.version>
         <janino.version>3.0.11</janino.version>
@@ -834,6 +836,9 @@ under the License.
                             </licenseHeader>
                         </java>
                         <scala>
+                            <!--  make it works `// spotless:off`  -->
+                            <toggleOffOn />
+
                             <scalafmt>
                                 <version>3.4.3</version>
                                 <file>${maven.multiModuleProjectDirectory}/.scalafmt.conf</file>

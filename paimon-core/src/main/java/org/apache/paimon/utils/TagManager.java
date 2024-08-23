@@ -33,6 +33,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -303,9 +304,10 @@ public class TagManager {
                 }
                 // If the tag file is not found, it might be deleted by
                 // other processes, so just skip this tag
-                Snapshot snapshot = Snapshot.safelyFromPath(fileIO, path);
-                if (snapshot != null) {
+                try {
+                    Snapshot snapshot = Snapshot.fromJson(fileIO.readFileUtf8(path));
                     tags.computeIfAbsent(snapshot, s -> new ArrayList<>()).add(tagName);
+                } catch (FileNotFoundException ignored) {
                 }
             }
         } catch (IOException e) {
@@ -365,37 +367,5 @@ public class TagManager {
                 String.format(
                         "Didn't find tag with snapshot id '%s'.This is unexpected.",
                         taggedSnapshot.id()));
-    }
-
-    public static List<Snapshot> findOverlappedSnapshots(
-            List<Snapshot> taggedSnapshots, long beginInclusive, long endExclusive) {
-        List<Snapshot> snapshots = new ArrayList<>();
-        int right = findPreviousTag(taggedSnapshots, endExclusive);
-        if (right >= 0) {
-            int left = Math.max(findPreviousOrEqualTag(taggedSnapshots, beginInclusive), 0);
-            for (int i = left; i <= right; i++) {
-                snapshots.add(taggedSnapshots.get(i));
-            }
-        }
-        return snapshots;
-    }
-
-    public static int findPreviousTag(List<Snapshot> taggedSnapshots, long targetSnapshotId) {
-        for (int i = taggedSnapshots.size() - 1; i >= 0; i--) {
-            if (taggedSnapshots.get(i).id() < targetSnapshotId) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
-    private static int findPreviousOrEqualTag(
-            List<Snapshot> taggedSnapshots, long targetSnapshotId) {
-        for (int i = taggedSnapshots.size() - 1; i >= 0; i--) {
-            if (taggedSnapshots.get(i).id() <= targetSnapshotId) {
-                return i;
-            }
-        }
-        return -1;
     }
 }

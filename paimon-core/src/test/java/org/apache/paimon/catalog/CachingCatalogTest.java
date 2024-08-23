@@ -18,9 +18,18 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.FakeTicker;
@@ -31,6 +40,7 @@ import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.io.FileNotFoundException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -41,6 +51,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.apache.paimon.data.BinaryString.fromString;
+import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_MAX_MEMORY;
+import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE_MEMORY;
+import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE_THRESHOLD;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -284,5 +298,72 @@ class CachingCatalogTest extends CatalogTestBase {
         return SystemTableLoader.SYSTEM_TABLES.stream()
                 .map(type -> Identifier.fromString(tableIdent.getFullName() + "$" + type))
                 .toArray(Identifier[]::new);
+    }
+
+    @Test
+    public void testManifestCache() throws Exception {
+        innerTestManifestCache(Long.MAX_VALUE);
+        assertThatThrownBy(() -> innerTestManifestCache(10))
+                .hasRootCauseInstanceOf(FileNotFoundException.class);
+    }
+
+    private void innerTestManifestCache(long manifestCacheThreshold) throws Exception {
+        Catalog catalog =
+                new CachingCatalog(
+                        this.catalog,
+                        Duration.ofSeconds(10),
+                        MemorySize.ofMebiBytes(1),
+                        manifestCacheThreshold);
+        Identifier tableIdent = new Identifier("db", "tbl");
+        catalog.dropTable(tableIdent, true);
+        catalog.createTable(tableIdent, DEFAULT_TABLE_SCHEMA, false);
+
+        // write
+        Table table = catalog.getTable(tableIdent);
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(1, fromString("1"), fromString("1")));
+            write.write(GenericRow.of(2, fromString("2"), fromString("2")));
+            commit.commit(write.prepareCommit());
+        }
+
+        // repeat read
+        for (int i = 0; i < 5; i++) {
+            table = catalog.getTable(tableIdent);
+            ReadBuilder readBuilder = table.newReadBuilder();
+            TableScan scan = readBuilder.newScan();
+            TableRead read = readBuilder.newRead();
+            read.createReader(scan.plan()).forEachRemaining(r -> {});
+
+            // delete manifest to validate cache
+            if (i == 0) {
+                Path manifestPath = new Path(table.options().get("path"), "manifest");
+                assertThat(fileIO.exists(manifestPath)).isTrue();
+                fileIO.deleteDirectoryQuietly(manifestPath);
+            }
+        }
+    }
+
+    @Test
+    public void testManifestCacheOptions() {
+        Options options = new Options();
+
+        CachingCatalog caching = (CachingCatalog) CachingCatalog.tryToCreate(catalog, options);
+        assertThat(caching.manifestCache.maxMemorySize())
+                .isEqualTo(CACHE_MANIFEST_SMALL_FILE_MEMORY.defaultValue());
+        assertThat(caching.manifestCache.maxElementSize())
+                .isEqualTo(CACHE_MANIFEST_SMALL_FILE_THRESHOLD.defaultValue().getBytes());
+
+        options.set(CACHE_MANIFEST_SMALL_FILE_MEMORY, MemorySize.ofMebiBytes(100));
+        options.set(CACHE_MANIFEST_SMALL_FILE_THRESHOLD, MemorySize.ofBytes(100));
+        caching = (CachingCatalog) CachingCatalog.tryToCreate(catalog, options);
+        assertThat(caching.manifestCache.maxMemorySize()).isEqualTo(MemorySize.ofMebiBytes(100));
+        assertThat(caching.manifestCache.maxElementSize()).isEqualTo(100);
+
+        options.set(CACHE_MANIFEST_MAX_MEMORY, MemorySize.ofMebiBytes(256));
+        caching = (CachingCatalog) CachingCatalog.tryToCreate(catalog, options);
+        assertThat(caching.manifestCache.maxMemorySize()).isEqualTo(MemorySize.ofMebiBytes(256));
+        assertThat(caching.manifestCache.maxElementSize()).isEqualTo(Long.MAX_VALUE);
     }
 }

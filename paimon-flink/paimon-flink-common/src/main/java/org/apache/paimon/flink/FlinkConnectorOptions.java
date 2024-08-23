@@ -217,6 +217,13 @@ public class FlinkConnectorOptions {
                                     + " Note: This is dangerous and is likely to cause data errors if downstream"
                                     + " is used to calculate aggregation and the input is not complete changelog.");
 
+    public static final ConfigOption<Boolean> STREAMING_READ_SHUFFLE_BUCKET_WITH_PARTITION =
+            key("streaming-read.shuffle-bucket-with-partition")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether shuffle by partition and bucket when streaming read.");
+
     /**
      * Weight of writer buffer in managed memory, Flink will compute the memory size for writer
      * according to the weight, the actual memory used depends on the running environment.

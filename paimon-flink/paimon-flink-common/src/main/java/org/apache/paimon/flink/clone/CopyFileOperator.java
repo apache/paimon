@@ -34,8 +34,6 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 
-import static org.apache.paimon.CoreOptions.PATH;
-
 /** A Operator to copy files. */
 public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
         implements OneInputStreamOperator<CloneFileInfo, CloneFileInfo> {
@@ -69,19 +67,11 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
         FileIO sourceTableFileIO = sourceCatalog.fileIO();
         FileIO targetTableFileIO = targetCatalog.fileIO();
         Path sourceTableRootPath =
-                new Path(
-                        sourceCatalog
-                                .getTable(
-                                        Identifier.fromString(cloneFileInfo.getSourceIdentifier()))
-                                .options()
-                                .get(PATH.key()));
+                sourceCatalog.getTableLocation(
+                        Identifier.fromString(cloneFileInfo.getSourceIdentifier()));
         Path targetTableRootPath =
-                new Path(
-                        targetCatalog
-                                .getTable(
-                                        Identifier.fromString(cloneFileInfo.getTargetIdentifier()))
-                                .options()
-                                .get(PATH.key()));
+                targetCatalog.getTableLocation(
+                        Identifier.fromString(cloneFileInfo.getTargetIdentifier()));
 
         String filePathExcludeTableRoot = cloneFileInfo.getFilePathExcludeTableRoot();
         Path sourcePath = new Path(sourceTableRootPath + filePathExcludeTableRoot);

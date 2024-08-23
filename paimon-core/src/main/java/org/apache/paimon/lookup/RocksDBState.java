@@ -29,7 +29,6 @@ import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
-import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
 
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.RocksDB;
@@ -80,8 +79,9 @@ public abstract class RocksDBState<K, V, CacheV> {
         this.writeOptions = new WriteOptions().setDisableWAL(true);
         this.cache =
                 Caffeine.newBuilder()
+                        .softValues()
                         .maximumSize(lruCacheSize)
-                        .executor(MoreExecutors.directExecutor())
+                        .executor(Runnable::run)
                         .build();
     }
 

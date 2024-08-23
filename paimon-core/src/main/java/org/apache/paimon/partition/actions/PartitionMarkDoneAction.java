@@ -39,8 +39,7 @@ public interface PartitionMarkDoneAction extends Closeable {
 
     static List<PartitionMarkDoneAction> createActions(
             FileStoreTable fileStoreTable, CoreOptions options) {
-        return Arrays.asList(options.toConfiguration().get(PARTITION_MARK_DONE_ACTION).split(","))
-                .stream()
+        return Arrays.stream(options.toConfiguration().get(PARTITION_MARK_DONE_ACTION).split(","))
                 .map(
                         action -> {
                             switch (action) {

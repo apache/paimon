@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.append.MultiTableAppendOnlyCompactionTask;
+import org.apache.paimon.append.MultiTableUnawareAppendCompactionTask;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.TableTestBase;
@@ -48,7 +48,7 @@ public class AppendOnlyMultiTableCompactionWorkerOperatorTest extends TableTestB
                 new AppendOnlyMultiTableCompactionWorkerOperator(
                         () -> catalog, "user", new Options());
 
-        List<StreamRecord<MultiTableAppendOnlyCompactionTask>> records = new ArrayList<>();
+        List<StreamRecord<MultiTableUnawareAppendCompactionTask>> records = new ArrayList<>();
         // create table and write
         for (String table : tables) {
             Identifier identifier = identifier(table);
@@ -61,7 +61,7 @@ public class AppendOnlyMultiTableCompactionWorkerOperatorTest extends TableTestB
                     .map(
                             task ->
                                     new StreamRecord<>(
-                                            new MultiTableAppendOnlyCompactionTask(
+                                            new MultiTableUnawareAppendCompactionTask(
                                                     task.partition(),
                                                     task.compactBefore(),
                                                     identifier)))
@@ -71,7 +71,7 @@ public class AppendOnlyMultiTableCompactionWorkerOperatorTest extends TableTestB
         Assertions.assertThat(records.size()).isEqualTo(8);
         workerOperator.open();
 
-        for (StreamRecord<MultiTableAppendOnlyCompactionTask> record : records) {
+        for (StreamRecord<MultiTableUnawareAppendCompactionTask> record : records) {
             workerOperator.processElement(record);
         }
 

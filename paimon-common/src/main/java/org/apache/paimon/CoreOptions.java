@@ -47,8 +47,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -79,6 +79,8 @@ public class CoreOptions implements Serializable {
     public static final String NESTED_KEY = "nested-key";
 
     public static final String DISTINCT = "distinct";
+
+    public static final String LIST_AGG_DELIMITER = "list-agg-delimiter";
 
     public static final String FILE_INDEX = "file-index";
 
@@ -410,7 +412,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Integer> WRITE_MAX_WRITERS_TO_SPILL =
             key("write-max-writers-to-spill")
                     .intType()
-                    .defaultValue(5)
+                    .defaultValue(10)
                     .withDescription(
                             "When in batch append inserting, if the writer number is greater than this option, we open the buffer cache and spill function to avoid out-of-memory. ");
 
@@ -521,12 +523,18 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Integer> COMPACTION_MAX_FILE_NUM =
             key("compaction.max.file-num")
                     .intType()
-                    .defaultValue(50)
+                    .noDefaultValue()
                     .withFallbackKeys("compaction.early-max.file-num")
                     .withDescription(
-                            "For file set [f_0,...,f_N], the maximum file number to trigger a compaction "
-                                    + "for append-only table, even if sum(size(f_i)) < targetFileSize. This value "
-                                    + "avoids pending too much small files, which slows down the performance.");
+                            Description.builder()
+                                    .text(
+                                            "For file set [f_0,...,f_N], the maximum file number to trigger a compaction "
+                                                    + "for append-only table, even if sum(size(f_i)) < targetFileSize. This value "
+                                                    + "avoids pending too much small files.")
+                                    .list(
+                                            text("Default value of Append Table is '50'."),
+                                            text("Default value of Bucketed Append Table is '5'."))
+                                    .build());
 
     public static final ConfigOption<ChangelogProducer> CHANGELOG_PRODUCER =
             key("changelog-producer")
@@ -955,6 +963,13 @@ public class CoreOptions implements Serializable {
                             "Read incremental changes between start timestamp (exclusive) and end timestamp, "
                                     + "for example, 't1,t2' means changes between timestamp t1 and timestamp t2.");
 
+    public static final ConfigOption<Boolean> END_INPUT_CHECK_PARTITION_EXPIRE =
+            key("end-input.check-partition-expire")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Optional endInput check partition expire used in case of batch mode or bounded stream.");
+
     public static final String STATS_MODE_SUFFIX = "stats-mode";
 
     public static final ConfigOption<String> METADATA_STATS_MODE =
@@ -1034,8 +1049,10 @@ public class CoreOptions implements Serializable {
                                     .text(
                                             "2. 'done-partition': add 'xxx.done' partition to metastore.")
                                     .linebreak()
+                                    .text("3. 'mark-event': mark partition event to metastore.")
+                                    .linebreak()
                                     .text(
-                                            "Both can be configured at the same time: 'done-partition,success-file'.")
+                                            "Both can be configured at the same time: 'done-partition,success-file,mark-event'.")
                                     .build());
 
     public static final ConfigOption<Boolean> METASTORE_PARTITIONED_TABLE =
@@ -1235,8 +1252,14 @@ public class CoreOptions implements Serializable {
             key("record-level.time-field")
                     .stringType()
                     .noDefaultValue()
+                    .withDescription("Time field for record level expire.");
+
+    public static final ConfigOption<TimeFieldType> RECORD_LEVEL_TIME_FIELD_TYPE =
+            key("record-level.time-field-type")
+                    .enumType(TimeFieldType.class)
+                    .defaultValue(TimeFieldType.SECONDS_INT)
                     .withDescription(
-                            "Time field for record level expire, it should be a seconds INT.");
+                            "Time field type for record level expire, it can be seconds-int or millis-long.");
 
     public static final ConfigOption<String> FIELDS_DEFAULT_AGG_FUNC =
             key(FIELDS_PREFIX + "." + DEFAULT_AGG_FUNCTION)
@@ -1250,6 +1273,13 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .noDefaultValue()
                     .withDescription("Specifies the commit user prefix.");
+
+    @Immutable
+    public static final ConfigOption<Boolean> FORCE_LOOKUP =
+            key("force-lookup")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to force the use of lookup for compaction.");
 
     public static final ConfigOption<Boolean> LOOKUP_WAIT =
             key("lookup-wait")
@@ -1282,6 +1312,13 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "When a batch job queries from a table, if a partition does not exist in the current branch, "
                                     + "the reader will try to get this partition from this fallback branch.");
+
+    public static final ConfigOption<Boolean> ASYNC_FILE_WRITE =
+            key("async-file-write")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to enable asynchronous IO writing when writing files.");
 
     private final Options options;
 
@@ -1453,6 +1490,13 @@ public class CoreOptions implements Serializable {
                         .defaultValue(false));
     }
 
+    public String fieldListAggDelimiter(String fieldName) {
+        return options.get(
+                key(FIELDS_PREFIX + "." + fieldName + "." + LIST_AGG_DELIMITER)
+                        .stringType()
+                        .defaultValue(","));
+    }
+
     @Nullable
     public String fileCompression() {
         return options.get(FILE_COMPRESSION);
@@ -1510,6 +1554,10 @@ public class CoreOptions implements Serializable {
     public int deleteFileThreadNum() {
         return options.getOptional(DELETE_FILE_THREAD_NUM)
                 .orElseGet(() -> Runtime.getRuntime().availableProcessors());
+    }
+
+    public boolean endInputCheckPartitionExpire() {
+        return options.get(END_INPUT_CHECK_PARTITION_EXPIRE);
     }
 
     public ExpireConfig expireConfig() {
@@ -1671,8 +1719,8 @@ public class CoreOptions implements Serializable {
         return options.get(COMPACTION_MIN_FILE_NUM);
     }
 
-    public int compactionMaxFileNum() {
-        return options.get(COMPACTION_MAX_FILE_NUM);
+    public Optional<Integer> compactionMaxFileNum() {
+        return options.getOptional(COMPACTION_MAX_FILE_NUM);
     }
 
     public long dynamicBucketTargetRowNum() {
@@ -1691,7 +1739,8 @@ public class CoreOptions implements Serializable {
         return LookupStrategy.from(
                 mergeEngine().equals(MergeEngine.FIRST_ROW),
                 changelogProducer().equals(ChangelogProducer.LOOKUP),
-                deletionVectorsEnabled());
+                deletionVectorsEnabled(),
+                options.get(FORCE_LOOKUP));
     }
 
     public boolean changelogRowDeduplicate() {
@@ -1952,7 +2001,11 @@ public class CoreOptions implements Serializable {
                 continue;
             }
 
-            String param = options.get(callbackParam.key().replace("#", className));
+            String originParamKey = callbackParam.key().replace("#", className);
+            String param = options.get(originParamKey);
+            if (param == null) {
+                param = options.get(originParamKey.toLowerCase(Locale.ROOT));
+            }
             result.put(className, param);
         }
         return result;
@@ -2012,12 +2065,21 @@ public class CoreOptions implements Serializable {
         return options.get(RECORD_LEVEL_TIME_FIELD);
     }
 
+    @Nullable
+    public TimeFieldType recordLevelTimeFieldType() {
+        return options.get(RECORD_LEVEL_TIME_FIELD_TYPE);
+    }
+
     public boolean prepareCommitWaitCompaction() {
         if (!needLookup()) {
             return false;
         }
 
         return options.get(LOOKUP_WAIT);
+    }
+
+    public boolean asyncFileWrite() {
+        return options.get(ASYNC_FILE_WRITE);
     }
 
     public boolean metadataIcebergCompatible() {
@@ -2392,21 +2454,21 @@ public class CoreOptions implements Serializable {
         return list;
     }
 
-    public static Set<String> getImmutableOptionKeys() {
-        final Field[] fields = CoreOptions.class.getFields();
-        final Set<String> immutableKeys = new HashSet<>(fields.length);
-        for (Field field : fields) {
-            if (ConfigOption.class.isAssignableFrom(field.getType())
-                    && field.getAnnotation(Immutable.class) != null) {
-                try {
-                    immutableKeys.add(((ConfigOption<?>) field.get(CoreOptions.class)).key());
-                } catch (IllegalAccessException e) {
-                    throw new RuntimeException(e);
-                }
-            }
-        }
-        return immutableKeys;
-    }
+    public static final Set<String> IMMUTABLE_OPTIONS =
+            Arrays.stream(CoreOptions.class.getFields())
+                    .filter(
+                            f ->
+                                    ConfigOption.class.isAssignableFrom(f.getType())
+                                            && f.getAnnotation(Immutable.class) != null)
+                    .map(
+                            f -> {
+                                try {
+                                    return ((ConfigOption<?>) f.get(CoreOptions.class)).key();
+                                } catch (IllegalAccessException e) {
+                                    throw new RuntimeException(e);
+                                }
+                            })
+                    .collect(Collectors.toSet());
 
     /** Specifies the sort engine for table with primary key. */
     public enum SortEngine implements DescribedEnum {
@@ -2618,6 +2680,31 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         LookupLocalFileType(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** Time field type for record level expire. */
+    public enum TimeFieldType implements DescribedEnum {
+        SECONDS_INT("seconds-int", "Timestamps in seconds should be INT type."),
+
+        MILLIS_LONG("millis-long", "Timestamps in milliseconds should be BIGINT type.");
+
+        private final String value;
+        private final String description;
+
+        TimeFieldType(String value, String description) {
             this.value = value;
             this.description = description;
         }

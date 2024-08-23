@@ -123,6 +123,7 @@ public class AvroFileFormat extends FileFormat {
                                 DataFileWriter<InternalRow> dataFileWriter =
                                         new DataFileWriter<>(datumWriter);
                                 dataFileWriter.setCodec(createCodecFactory(compression));
+                                dataFileWriter.setFlushOnEveryBlock(false);
                                 dataFileWriter.create(schema, out);
                                 return dataFileWriter;
                             });
@@ -140,13 +141,8 @@ public class AvroFileFormat extends FileFormat {
                 }
 
                 @Override
-                public void flush() throws IOException {
-                    writer.flush();
-                }
-
-                @Override
-                public void finish() throws IOException {
-                    writer.finish();
+                public void close() throws IOException {
+                    writer.close();
                 }
 
                 @Override

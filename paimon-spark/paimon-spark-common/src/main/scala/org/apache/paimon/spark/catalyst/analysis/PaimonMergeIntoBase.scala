@@ -18,7 +18,6 @@
 
 package org.apache.paimon.spark.catalyst.analysis
 
-import org.apache.paimon.CoreOptions
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.commands.MergeIntoPaimonTable
@@ -27,6 +26,8 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, AttributeSet, Expression, SubqueryExpression}
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.rules.Rule
+
+import scala.collection.JavaConverters._
 
 trait PaimonMergeIntoBase
   extends Rule[LogicalPlan]
@@ -52,13 +53,14 @@ trait PaimonMergeIntoBase
         merge.notMatchedActions.flatMap(_.condition).foreach(checkCondition)
 
         val updateActions = merge.matchedActions.collect { case a: UpdateAction => a }
-        val primaryKeys = v2Table.properties().get(CoreOptions.PRIMARY_KEY.key).split(",")
-        checkUpdateActionValidity(
-          AttributeSet(targetOutput),
-          merge.mergeCondition,
-          updateActions,
-          primaryKeys)
-
+        val primaryKeys = v2Table.getTable.primaryKeys().asScala
+        if (primaryKeys.nonEmpty) {
+          checkUpdateActionValidity(
+            AttributeSet(targetOutput),
+            merge.mergeCondition,
+            updateActions,
+            primaryKeys)
+        }
         val alignedMatchedActions =
           merge.matchedActions.map(checkAndAlignActionAssignment(_, targetOutput))
         val alignedNotMatchedActions =

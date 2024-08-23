@@ -137,7 +137,8 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
         List<Snapshot> taggedSnapshots = tagManager.taggedSnapshots();
 
         List<Snapshot> skippingSnapshots =
-                TagManager.findOverlappedSnapshots(taggedSnapshots, earliestId, endExclusiveId);
+                SnapshotManager.findOverlappedSnapshots(
+                        taggedSnapshots, earliestId, endExclusiveId);
         skippingSnapshots.add(snapshotManager.changelog(endExclusiveId));
         Set<String> manifestSkippSet = changelogDeletion.manifestSkippingSet(skippingSnapshots);
         for (long id = earliestId; id < endExclusiveId; id++) {
@@ -147,7 +148,7 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
             Changelog changelog = snapshotManager.longLivedChangelog(id);
             Predicate<ManifestEntry> skipper;
             try {
-                skipper = changelogDeletion.dataFileSkipper(taggedSnapshots, id);
+                skipper = changelogDeletion.createDataFileSkipperForTags(taggedSnapshots, id);
             } catch (Exception e) {
                 LOG.info(
                         String.format(
