@@ -21,6 +21,7 @@ package org.apache.paimon.flink.action.cdc.kafka;
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
+import org.apache.paimon.flink.action.cdc.format.DataFormatFactory;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.configuration.Configuration;
@@ -242,7 +243,8 @@ public class KafkaActionUtils {
     }
 
     public static DataFormat getDataFormat(Configuration kafkaConfig) {
-        return DataFormat.fromConfigString(kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT));
+        return DataFormatFactory.createDataFormat(
+                kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT));
     }
 
     public static MessageQueueSchemaUtils.ConsumerWrapper getKafkaEarliestConsumer(
