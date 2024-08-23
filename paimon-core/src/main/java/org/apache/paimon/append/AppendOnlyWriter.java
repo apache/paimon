@@ -62,7 +62,7 @@ import java.util.concurrent.ExecutionException;
  * A {@link RecordWriter} implementation that only accepts records which are always insert
  * operations and don't have any unique keys or sort keys.
  */
-public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner, BatchRecordWriter {
+public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
 
     private final FileIO fileIO;
     private final long schemaId;

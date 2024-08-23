@@ -18,10 +18,11 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.BatchRecords;
 
 /** Write {@link BatchRecords} directly. */
-public interface BatchRecordWriter {
+public interface BatchRecordWriter extends RecordWriter<InternalRow> {
 
     /** Add a batch elemens to the writer. */
     void writeBatch(BatchRecords record) throws Exception;
