@@ -69,6 +69,7 @@ import org.apache.arrow.vector.BitVector;
 import org.apache.arrow.vector.DateDayVector;
 import org.apache.arrow.vector.DecimalVector;
 import org.apache.arrow.vector.FieldVector;
+import org.apache.arrow.vector.FixedSizeBinaryVector;
 import org.apache.arrow.vector.Float4Vector;
 import org.apache.arrow.vector.Float8Vector;
 import org.apache.arrow.vector.IntVector;
@@ -112,7 +113,7 @@ public interface Arrow2PaimonVectorConverter {
 
                         @Override
                         public Bytes getBytes(int index) {
-                            byte[] bytes = ((VarCharVector) vector).get(index);
+                            byte[] bytes = ((FixedSizeBinaryVector) vector).get(index);
                             return new Bytes(bytes, 0, bytes.length) {
                                 @Override
                                 public byte[] getBytes() {
