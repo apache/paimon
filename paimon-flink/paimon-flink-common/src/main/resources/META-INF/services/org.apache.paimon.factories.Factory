@@ -35,6 +35,7 @@ org.apache.paimon.flink.action.CreateBranchActionFactory
 org.apache.paimon.flink.action.DeleteBranchActionFactory
 org.apache.paimon.flink.action.FastForwardActionFactory
 org.apache.paimon.flink.action.RepairActionFactory
+org.apache.paimon.flink.action.RewriteFileIndexActionFactory
 
 ### procedure factories
 org.apache.paimon.flink.procedure.CompactDatabaseProcedure
