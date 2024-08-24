@@ -26,7 +26,6 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.catalog.SupportsFormatTables;
 import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
@@ -101,7 +100,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
 
 /** A catalog implementation for Hive. */
-public class HiveCatalog extends AbstractCatalog implements SupportsFormatTables {
+public class HiveCatalog extends AbstractCatalog {
 
     private static final Logger LOG = LoggerFactory.getLogger(HiveCatalog.class);
 
