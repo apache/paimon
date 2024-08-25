@@ -39,8 +39,8 @@ public class OneElementFieldVectorGenerator implements AutoCloseable {
 
     public OneElementFieldVectorGenerator(
             BufferAllocator bufferAllocator, DataField dataField, Object value) {
-        fieldVector = createVector(dataField, bufferAllocator, false);
-        writer =
+        this.fieldVector = createVector(dataField, bufferAllocator, false);
+        this.writer =
                 dataField
                         .type()
                         .accept(ArrowFieldWriterFactoryVisitor.INSTANCE)
@@ -49,7 +49,7 @@ public class OneElementFieldVectorGenerator implements AutoCloseable {
         row.setField(0, value);
     }
 
-    FieldVector get(int rowCount) {
+    public FieldVector get(int rowCount) {
         if (rowCount > pos) {
             for (int i = pos; i < rowCount; i++) {
                 writer.write(i, row, 0);
