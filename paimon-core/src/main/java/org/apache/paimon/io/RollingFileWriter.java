@@ -95,15 +95,15 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
         }
     }
 
-    public void writeBatch(BatchRecords batch) throws IOException {
+    public void writeBundle(BundleRecords bundle) throws IOException {
         try {
             // Open the current writer if write the first record or roll over happen before.
             if (currentWriter == null) {
                 openCurrentWriter();
             }
 
-            currentWriter.writeBatch(batch);
-            recordCount += batch.rowCount();
+            currentWriter.writeBundle(bundle);
+            recordCount += bundle.rowCount();
 
             if (rollingFile()) {
                 closeCurrentWriter();

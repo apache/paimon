@@ -19,11 +19,11 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.io.BatchRecords;
+import org.apache.paimon.io.BundleRecords;
 
-/** Write {@link BatchRecords} directly. */
+/** Write {@link BundleRecords} directly. */
 public interface BatchRecordWriter extends RecordWriter<InternalRow> {
 
     /** Add a batch elemens to the writer. */
-    void writeBatch(BatchRecords record) throws Exception;
+    void writeBundle(BundleRecords record) throws Exception;
 }

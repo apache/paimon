@@ -18,18 +18,18 @@
 
 package org.apache.paimon.format;
 
-import org.apache.paimon.io.BatchRecords;
+import org.apache.paimon.io.BundleRecords;
 
 import java.io.IOException;
 
-/** Format write with batch interface. */
-public interface BatchFormatWriter extends FormatWriter {
+/** Format write with bundle interface. */
+public interface BundleFormatWriter extends FormatWriter {
 
     /**
-     * Write a batch of records directly.
+     * Write a bundle of records directly.
      *
-     * @param batchRecords the records to be written
+     * @param bundle the records to be written
      * @throws IOException if exception happens
      */
-    void writeBatch(BatchRecords batchRecords) throws IOException;
+    void writeBundle(BundleRecords bundle) throws IOException;
 }

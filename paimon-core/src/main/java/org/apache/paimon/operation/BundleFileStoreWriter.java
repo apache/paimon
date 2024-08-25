@@ -19,18 +19,19 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.io.BatchRecords;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.io.BundleRecords;
 
-/** Whether the writer could write batch. */
-public interface BatchWriter {
+/** Whether the writer could write bundle. */
+public interface BundleFileStoreWriter extends FileStoreWrite<InternalRow> {
 
     /**
      * Write the batch data to the store according to the partition and bucket.
      *
      * @param partition the partition of the data
      * @param bucket the bucket id of the data
-     * @param data the given data
+     * @param bundle the given data
      * @throws Exception the thrown exception when writing the record
      */
-    void writeBatch(BinaryRow partition, int bucket, BatchRecords data) throws Exception;
+    void writeBundle(BinaryRow partition, int bucket, BundleRecords bundle) throws Exception;
 }

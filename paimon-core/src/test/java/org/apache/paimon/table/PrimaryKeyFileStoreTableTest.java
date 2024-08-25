@@ -29,7 +29,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.io.BatchRecords;
+import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.MemorySize;
@@ -240,10 +240,10 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
 
         BatchTableWrite write = table.newBatchWriteBuilder().newWrite();
 
-        write.writeBatch(
+        write.writeBundle(
                 binaryRow(1),
                 0,
-                new BatchRecords() {
+                new BundleRecords() {
                     @Override
                     public long rowCount() {
                         return 1000;

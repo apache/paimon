@@ -18,10 +18,18 @@
 
 package org.apache.paimon.io;
 
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.InternalRow;
 
-/** Interface of Batch records. */
-public interface BatchRecords extends Iterable<InternalRow> {
+/**
+ * Interface of bundle records. Its general implementation is Arrow Vectors. If the format is also
+ * adapted to the corresponding bundle implementation, it can greatly improve the performance of
+ * writing.
+ *
+ * @since 0.9.0
+ */
+@Public
+public interface BundleRecords extends Iterable<InternalRow> {
 
     /**
      * The total row count of this batch.
