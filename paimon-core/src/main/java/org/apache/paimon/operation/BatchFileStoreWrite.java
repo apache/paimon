@@ -19,10 +19,11 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.BatchRecords;
 
 /** Whether the writer could write batch. */
-public interface BatchWriter {
+public interface BatchFileStoreWrite extends FileStoreWrite<InternalRow> {
 
     /**
      * Write the batch data to the store according to the partition and bucket.

@@ -28,7 +28,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.metrics.MetricRegistry;
-import org.apache.paimon.operation.BatchWriter;
+import org.apache.paimon.operation.BatchFileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite.State;
 import org.apache.paimon.table.BucketMode;
@@ -154,8 +154,8 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
 
     @Override
     public void writeBatch(BinaryRow partition, int bucket, BatchRecords batch) throws Exception {
-        if (write instanceof BatchWriter) {
-            ((BatchWriter) write).writeBatch(partition, bucket, batch);
+        if (write instanceof BatchFileStoreWrite) {
+            ((BatchFileStoreWrite) write).writeBatch(partition, bucket, batch);
         } else {
             for (InternalRow row : batch) {
                 write(row, bucket);

@@ -64,7 +64,7 @@ import java.util.function.Function;
 
 /** {@link FileStoreWrite} for {@link AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow>
-        implements BatchWriter {
+        implements BatchFileStoreWrite {
 
     private static final Logger LOG = LoggerFactory.getLogger(AppendOnlyFileStoreWrite.class);
 
