@@ -31,17 +31,26 @@ public class ManifestReadThreadPool {
 
     private static final String THREAD_NAME = "MANIFEST-READ-THREAD-POOL";
 
-    private static ThreadPoolExecutor executorService =
-            createCachedThreadPool(Runtime.getRuntime().availableProcessors(), THREAD_NAME);
+    private static volatile ThreadPoolExecutor executorService;
 
-    public static synchronized ThreadPoolExecutor getExecutorService(@Nullable Integer threadNum) {
-        if (threadNum == null || threadNum <= executorService.getMaximumPoolSize()) {
-            return executorService;
+    public static ThreadPoolExecutor getExecutorService(@Nullable Integer threadNum) {
+        if (executorService == null) {
+            synchronized (ManifestReadThreadPool.class) {
+                if (executorService == null) {
+                    threadNum =
+                            threadNum == null
+                                    ? Runtime.getRuntime().availableProcessors()
+                                    : threadNum;
+                    executorService = createCachedThreadPool(threadNum, THREAD_NAME);
+                }
+            }
+        } else {
+            if (threadNum != null && threadNum > executorService.getMaximumPoolSize()) {
+                synchronized (ManifestReadThreadPool.class) {
+                    executorService = createCachedThreadPool(threadNum, THREAD_NAME);
+                }
+            }
         }
-        // we don't need to close previous pool
-        // it is just cached pool
-        executorService = createCachedThreadPool(threadNum, THREAD_NAME);
-
         return executorService;
     }
 
