@@ -47,6 +47,8 @@ public class ManifestReadThreadPool {
         } else {
             if (threadNum != null && threadNum > executorService.getMaximumPoolSize()) {
                 synchronized (ManifestReadThreadPool.class) {
+                    // we don't need to close previous pool
+                    // it is just cached pool
                     executorService = createCachedThreadPool(threadNum, THREAD_NAME);
                 }
             }
