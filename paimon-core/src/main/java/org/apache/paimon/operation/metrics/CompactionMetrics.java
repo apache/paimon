@@ -26,7 +26,9 @@ import org.apache.paimon.metrics.MetricRegistry;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Queue;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.stream.DoubleStream;
 import java.util.stream.LongStream;
 
@@ -38,16 +40,20 @@ public class CompactionMetrics {
     public static final String MAX_LEVEL0_FILE_COUNT = "maxLevel0FileCount";
     public static final String AVG_LEVEL0_FILE_COUNT = "avgLevel0FileCount";
     public static final String COMPACTION_THREAD_BUSY = "compactionThreadBusy";
+    public static final String AVG_COMPACTION_TIME = "avgCompactionTime";
     private static final long BUSY_MEASURE_MILLIS = 60_000;
+    private static final int COMPACTION_TIME_WINDOW = 100;
 
     private final MetricGroup metricGroup;
     private final Map<PartitionAndBucket, ReporterImpl> reporters;
     private final Map<Long, CompactTimer> compactTimers;
+    private final Queue<Long> compactionTimes;
 
     public CompactionMetrics(MetricRegistry registry, String tableName) {
         this.metricGroup = registry.tableMetricGroup(GROUP_NAME, tableName);
         this.reporters = new HashMap<>();
         this.compactTimers = new ConcurrentHashMap<>();
+        this.compactionTimes = new ConcurrentLinkedQueue<>();
 
         registerGenericCompactionMetrics();
     }
@@ -61,7 +67,8 @@ public class CompactionMetrics {
         metricGroup.gauge(MAX_LEVEL0_FILE_COUNT, () -> getLevel0FileCountStream().max().orElse(-1));
         metricGroup.gauge(
                 AVG_LEVEL0_FILE_COUNT, () -> getLevel0FileCountStream().average().orElse(-1));
-
+        metricGroup.gauge(
+                AVG_COMPACTION_TIME, () -> getCompactionTimeStream().average().orElse(0.0));
         metricGroup.gauge(COMPACTION_THREAD_BUSY, () -> getCompactBusyStream().sum());
     }
 
@@ -74,6 +81,10 @@ public class CompactionMetrics {
                 .mapToDouble(t -> 100.0 * t.calculateLength() / BUSY_MEASURE_MILLIS);
     }
 
+    private DoubleStream getCompactionTimeStream() {
+        return compactionTimes.stream().mapToDouble(Long::doubleValue);
+    }
+
     public void close() {
         metricGroup.close();
     }
@@ -84,6 +95,8 @@ public class CompactionMetrics {
         CompactTimer getCompactTimer();
 
         void reportLevel0FileCount(long count);
+
+        void reportCompactionTime(long time);
 
         void unregister();
     }
@@ -103,6 +116,16 @@ public class CompactionMetrics {
             return compactTimers.computeIfAbsent(
                     Thread.currentThread().getId(),
                     ignore -> new CompactTimer(BUSY_MEASURE_MILLIS));
+        }
+
+        @Override
+        public void reportCompactionTime(long time) {
+            synchronized (compactionTimes) {
+                compactionTimes.add(time);
+                if (compactionTimes.size() > COMPACTION_TIME_WINDOW) {
+                    compactionTimes.poll();
+                }
+            }
         }
 
         @Override
