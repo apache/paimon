@@ -49,8 +49,8 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link UnawareAppendTableCompactionCoordinator}. */
-public class AppendOnlyTableCompactionITTest {
+/** Test for append table compaction. */
+public class AppendOnlyTableCompactionTest {
 
     @TempDir private Path tempDir;
     private FileStoreTable appendOnlyFileStoreTable;
