@@ -343,10 +343,12 @@ case class PaimonSparkWriter(table: FileStoreTable) {
             val rowProject = CodeGenUtils.newProjection(rowType, primaryKeys)
             val bootstrapSer = InternalSerializers.create(bootstrapType)
             val rowSer = InternalSerializers.create(rowType)
-            new IndexBootstrap(table)
+            val bootstrapIterator = new IndexBootstrap(table)
               .bootstrap(numSparkPartitions, sparkPartitionId)
               .toCloseableIterator
-              .asScala
+            TaskContext.get().addTaskCompletionListener[Unit](_ => bootstrapIterator.close())
+
+            bootstrapIterator.asScala
               .map(
                 row => {
                   val bytes: Array[Byte] =
