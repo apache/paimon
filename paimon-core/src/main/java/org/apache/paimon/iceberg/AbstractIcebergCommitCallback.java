@@ -18,11 +18,11 @@
 
 package org.apache.paimon.iceberg;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.iceberg.manifest.IcebergConversions;
 import org.apache.paimon.iceberg.manifest.IcebergDataFileMeta;
@@ -62,6 +62,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -70,7 +71,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -96,53 +96,24 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
     private final IcebergPathFactory pathFactory;
     private final FileStorePathFactory fileStorePathFactory;
 
-    private final Supplier<IcebergManifestFile> manifestFileFactory;
     private final IcebergManifestFile manifestFile;
     private final IcebergManifestList manifestList;
+
+    // -------------------------------------------------------------------------------------
+    // Public interface
+    // -------------------------------------------------------------------------------------
 
     public AbstractIcebergCommitCallback(FileStoreTable table, String commitUser) {
         this.table = table;
         this.commitUser = commitUser;
         this.pathFactory = new IcebergPathFactory(table.location());
         this.fileStorePathFactory = table.store().pathFactory();
-
-        RowType partitionType = table.schema().logicalPartitionType();
-        RowType entryType = IcebergManifestEntry.schema(partitionType);
-        Options manifestFileAvroOptions = Options.fromMap(table.options());
-        // https://github.com/apache/iceberg/blob/main/core/src/main/java/org/apache/iceberg/ManifestReader.java
-        manifestFileAvroOptions.set(
-                "avro.row-name-mapping",
-                "org.apache.paimon.avro.generated.record:manifest_entry,"
-                        + "manifest_entry_data_file:r2,"
-                        + "r2_partition:r102");
-        FileFormat manifestFileAvro = FileFormat.getFileFormat(manifestFileAvroOptions, "avro");
-        this.manifestFileFactory =
-                () ->
-                        new IcebergManifestFile(
-                                table.fileIO(),
-                                partitionType,
-                                manifestFileAvro.createReaderFactory(entryType),
-                                manifestFileAvro.createWriterFactory(entryType),
-                                table.coreOptions().manifestCompression(),
-                                pathFactory.manifestFileFactory(),
-                                table.coreOptions().manifestTargetSize());
-        this.manifestFile = manifestFileFactory.get();
-
-        Options manifestListAvroOptions = Options.fromMap(table.options());
-        // https://github.com/apache/iceberg/blob/main/core/src/main/java/org/apache/iceberg/ManifestLists.java
-        manifestListAvroOptions.set(
-                "avro.row-name-mapping",
-                "org.apache.paimon.avro.generated.record:manifest_file,"
-                        + "manifest_file_partitions:r508");
-        FileFormat manifestListAvro = FileFormat.getFileFormat(manifestListAvroOptions, "avro");
-        this.manifestList =
-                new IcebergManifestList(
-                        table.fileIO(),
-                        manifestListAvro.createReaderFactory(IcebergManifestFileMeta.schema()),
-                        manifestListAvro.createWriterFactory(IcebergManifestFileMeta.schema()),
-                        table.coreOptions().manifestCompression(),
-                        pathFactory.manifestListFactory());
+        this.manifestFile = IcebergManifestFile.create(table, pathFactory);
+        this.manifestList = IcebergManifestList.create(table, pathFactory);
     }
+
+    @Override
+    public void close() throws Exception {}
 
     @Override
     public void call(List<ManifestEntry> committedEntries, Snapshot snapshot) {
@@ -184,10 +155,7 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
 
             Path baseMetadataPath = pathFactory.toMetadataPath(snapshotId - 1);
             if (table.fileIO().exists(baseMetadataPath)) {
-                createMetadataWithBase(
-                        fileChangesCollector,
-                        snapshotId,
-                        IcebergMetadata.fromPath(table.fileIO(), baseMetadataPath));
+                createMetadataWithBase(fileChangesCollector, snapshotId, baseMetadataPath);
             } else {
                 createMetadataWithoutBase(snapshotId);
             }
@@ -195,6 +163,10 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
             throw new UncheckedIOException(e);
         }
     }
+
+    // -------------------------------------------------------------------------------------
+    // Create metadata afresh
+    // -------------------------------------------------------------------------------------
 
     private void createMetadataWithoutBase(long snapshotId) throws IOException {
         SnapshotReader snapshotReader = table.newSnapshotReader().withSnapshot(snapshotId);
@@ -242,6 +214,8 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                 .overwriteFileUtf8(
                         new Path(pathFactory.metadataDirectory(), VERSION_HINT_FILENAME),
                         String.valueOf(snapshotId));
+
+        expireAllBefore(snapshotId);
     }
 
     private List<IcebergManifestEntry> dataSplitToManifestEntries(
@@ -267,11 +241,24 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
         return result;
     }
 
+    private List<IcebergPartitionField> getPartitionFields(RowType partitionType) {
+        List<IcebergPartitionField> result = new ArrayList<>();
+        int fieldId = IcebergPartitionField.FIRST_FIELD_ID;
+        for (DataField field : partitionType.getFields()) {
+            result.add(new IcebergPartitionField(field, fieldId));
+            fieldId++;
+        }
+        return result;
+    }
+
+    // -------------------------------------------------------------------------------------
+    // Create metadata based on old ones
+    // -------------------------------------------------------------------------------------
+
     private void createMetadataWithBase(
-            FileChangesCollector fileChangesCollector,
-            long snapshotId,
-            IcebergMetadata baseMetadata)
+            FileChangesCollector fileChangesCollector, long snapshotId, Path baseMetadataPath)
             throws IOException {
+        IcebergMetadata baseMetadata = IcebergMetadata.fromPath(table.fileIO(), baseMetadataPath);
         List<IcebergManifestFileMeta> baseManifestFileMetas =
                 manifestList.read(baseMetadata.currentSnapshot().manifestList());
 
@@ -328,6 +315,18 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                         pathFactory.toManifestListPath(manifestListFileName).toString(),
                         schemaId));
 
+        // all snapshots in this list, except the last one, need to expire
+        List<IcebergSnapshot> toExpireExceptLast = new ArrayList<>();
+        for (int i = 0; i + 1 < snapshots.size(); i++) {
+            toExpireExceptLast.add(snapshots.get(i));
+            // commit callback is called before expire, so we cannot use current earliest snapshot
+            // and have to check expire condition by ourselves
+            if (!shouldExpire(snapshots.get(i), snapshotId)) {
+                snapshots = snapshots.subList(i, snapshots.size());
+                break;
+            }
+        }
+
         IcebergMetadata metadata =
                 new IcebergMetadata(
                         baseMetadata.tableUuid(),
@@ -345,6 +344,13 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                 .overwriteFileUtf8(
                         new Path(pathFactory.metadataDirectory(), VERSION_HINT_FILENAME),
                         String.valueOf(snapshotId));
+
+        table.fileIO().deleteQuietly(baseMetadataPath);
+        for (int i = 0; i + 1 < toExpireExceptLast.size(); i++) {
+            expireManifestList(
+                    new Path(toExpireExceptLast.get(i).manifestList()).getName(),
+                    new Path(toExpireExceptLast.get(i + 1).manifestList()).getName());
+        }
     }
 
     private interface FileChangesCollector {
@@ -522,15 +528,9 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
         return Pair.of(newManifestFileMetas, snapshotSummary);
     }
 
-    private List<IcebergPartitionField> getPartitionFields(RowType partitionType) {
-        List<IcebergPartitionField> result = new ArrayList<>();
-        int fieldId = IcebergPartitionField.FIRST_FIELD_ID;
-        for (DataField field : partitionType.getFields()) {
-            result.add(new IcebergPartitionField(field, fieldId));
-            fieldId++;
-        }
-        return result;
-    }
+    // -------------------------------------------------------------------------------------
+    // Compact
+    // -------------------------------------------------------------------------------------
 
     private List<IcebergManifestFileMeta> compactMetadataIfNeeded(
             List<IcebergManifestFileMeta> toCompact, long currentSnapshotId) throws IOException {
@@ -561,8 +561,7 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                 meta -> {
                     List<IcebergManifestEntry> entries = new ArrayList<>();
                     for (IcebergManifestEntry entry :
-                            manifestFileFactory
-                                    .get()
+                            IcebergManifestFile.create(table, pathFactory)
                                     .read(new Path(meta.manifestPath()).getName())) {
                         if (entry.fileSequenceNumber() == currentSnapshotId
                                 || entry.status() == IcebergManifestEntry.Status.EXISTING) {
@@ -600,6 +599,65 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
         return result;
     }
 
-    @Override
-    public void close() throws Exception {}
+    // -------------------------------------------------------------------------------------
+    // Expire
+    // -------------------------------------------------------------------------------------
+
+    private boolean shouldExpire(IcebergSnapshot snapshot, long currentSnapshotId) {
+        Options options = new Options(table.options());
+        if (snapshot.snapshotId()
+                > currentSnapshotId - options.get(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN)) {
+            return false;
+        }
+        if (snapshot.snapshotId()
+                <= currentSnapshotId - options.get(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX)) {
+            return true;
+        }
+        return snapshot.timestampMs()
+                < System.currentTimeMillis()
+                        - options.get(CoreOptions.SNAPSHOT_TIME_RETAINED).toMillis();
+    }
+
+    private void expireManifestList(String toExpire, String next) {
+        Set<IcebergManifestFileMeta> metaInUse = new HashSet<>(manifestList.read(next));
+        for (IcebergManifestFileMeta meta : manifestList.read(toExpire)) {
+            if (metaInUse.contains(meta)) {
+                continue;
+            }
+            table.fileIO().deleteQuietly(new Path(meta.manifestPath()));
+        }
+        table.fileIO().deleteQuietly(pathFactory.toManifestListPath(toExpire));
+    }
+
+    private void expireAllBefore(long snapshotId) throws IOException {
+        Set<String> expiredManifestLists = new HashSet<>();
+        Set<String> expiredManifestFileMetas = new HashSet<>();
+        Iterator<Path> it =
+                pathFactory.getAllMetadataPathBefore(table.fileIO(), snapshotId).iterator();
+
+        while (it.hasNext()) {
+            Path path = it.next();
+            IcebergMetadata metadata = IcebergMetadata.fromPath(table.fileIO(), path);
+
+            for (IcebergSnapshot snapshot : metadata.snapshots()) {
+                Path listPath = new Path(snapshot.manifestList());
+                String listName = listPath.getName();
+                if (expiredManifestLists.contains(listName)) {
+                    continue;
+                }
+                expiredManifestLists.add(listName);
+
+                for (IcebergManifestFileMeta meta : manifestList.read(listName)) {
+                    String metaName = new Path(meta.manifestPath()).getName();
+                    if (expiredManifestFileMetas.contains(metaName)) {
+                        continue;
+                    }
+                    expiredManifestFileMetas.add(metaName);
+                    table.fileIO().deleteQuietly(new Path(meta.manifestPath()));
+                }
+                table.fileIO().deleteQuietly(listPath);
+            }
+            table.fileIO().deleteQuietly(path);
+        }
+    }
 }

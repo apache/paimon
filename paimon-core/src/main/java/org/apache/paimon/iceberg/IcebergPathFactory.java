@@ -18,10 +18,15 @@
 
 package org.apache.paimon.iceberg;
 
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.PathFactory;
 
+import java.io.IOException;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 /** Path factory for Iceberg metadata files. */
 public class IcebergPathFactory {
@@ -61,6 +66,21 @@ public class IcebergPathFactory {
 
     public Path toMetadataPath(long snapshotId) {
         return new Path(metadataDirectory(), String.format("v%d.metadata.json", snapshotId));
+    }
+
+    public Stream<Path> getAllMetadataPathBefore(FileIO fileIO, long snapshotId)
+            throws IOException {
+        return FileUtils.listVersionedFileStatus(fileIO, metadataDirectory, "v")
+                .map(FileStatus::getPath)
+                .filter(
+                        path -> {
+                            try {
+                                String id = path.getName().split("\\.")[0].substring(1);
+                                return Long.parseLong(id) < snapshotId;
+                            } catch (NumberFormatException e) {
+                                return false;
+                            }
+                        });
     }
 
     public PathFactory manifestFileFactory() {
