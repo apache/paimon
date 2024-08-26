@@ -158,7 +158,7 @@ public class CombinedTableCompactorSink implements Serializable {
                                         false,
                                         options.get(SINK_COMMITTER_OPERATOR_CHAINING),
                                         commitUser,
-                                        createCommitterFactory(),
+                                        createCommitterFactory(isStreaming),
                                         createCommittableStateManager(),
                                         options.get(END_INPUT_WATERMARK)))
                         .setParallelism(written.getParallelism());
@@ -179,9 +179,14 @@ public class CombinedTableCompactorSink implements Serializable {
     }
 
     protected Committer.Factory<MultiTableCommittable, WrappedManifestCommittable>
-            createCommitterFactory() {
+            createCommitterFactory(boolean isStreaming) {
         Map<String, String> dynamicOptions = options.toMap();
         dynamicOptions.put(CoreOptions.WRITE_ONLY.key(), "false");
+        if (isStreaming) {
+            dynamicOptions.put(CoreOptions.NUM_SORTED_RUNS_STOP_TRIGGER.key(), "2147483647");
+            dynamicOptions.put(CoreOptions.SORT_SPILL_THRESHOLD.key(), "10");
+            dynamicOptions.put(CoreOptions.LOOKUP_WAIT.key(), "false");
+        }
         return context -> new StoreMultiCommitter(catalogLoader, context, true, dynamicOptions);
     }
 

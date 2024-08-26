@@ -36,7 +36,6 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
 
 import java.io.IOException;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -215,10 +214,19 @@ public class MultiTablesStoreCompactOperator
             while (true) {
                 try {
                     table = (FileStoreTable) catalog.getTable(tableId);
-                    table =
-                            table.copy(
-                                    Collections.singletonMap(
-                                            CoreOptions.WRITE_ONLY.key(), "false"));
+                    HashMap<String, String> dynamicOptions =
+                            new HashMap<String, String>() {
+                                {
+                                    put(CoreOptions.WRITE_ONLY.key(), "false");
+                                }
+                            };
+                    if (isStreaming) {
+                        dynamicOptions.put(
+                                CoreOptions.NUM_SORTED_RUNS_STOP_TRIGGER.key(), "2147483647");
+                        dynamicOptions.put(CoreOptions.SORT_SPILL_THRESHOLD.key(), "10");
+                        dynamicOptions.put(CoreOptions.LOOKUP_WAIT.key(), "false");
+                    }
+                    table = table.copy(dynamicOptions);
                     tables.put(tableId, table);
                     break;
                 } catch (Catalog.TableNotExistException e) {
