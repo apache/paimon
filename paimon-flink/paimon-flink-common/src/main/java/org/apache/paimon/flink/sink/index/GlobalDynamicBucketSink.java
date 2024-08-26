@@ -112,7 +112,7 @@ public class GlobalDynamicBucketSink extends FlinkWriteSink<Tuple2<InternalRow, 
         DataStream<Tuple2<InternalRow, Integer>> bucketAssigned =
                 partitionByKeyHash
                         .transform(
-                                "dynamic-bucket-assigner",
+                                "cross-partition-bucket-assigner",
                                 rowWithBucketType,
                                 GlobalIndexAssignerOperator.forRowData(table))
                         .setParallelism(partitionByKeyHash.getParallelism());
