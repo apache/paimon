@@ -149,7 +149,6 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
             } else {
                 nextSnapshotId = currentSnapshotId + 1;
             }
-
             isFullPhaseEnd =
                     boundedChecker.shouldEndInput(snapshotManager.snapshot(currentSnapshotId));
             return scannedResult.plan();
