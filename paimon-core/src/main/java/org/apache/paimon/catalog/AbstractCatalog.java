@@ -199,12 +199,7 @@ public abstract class AbstractCatalog implements Catalog {
             throw new DatabaseNotExistException(databaseName);
         }
 
-        List<String> tables =
-                listTablesImpl(databaseName).stream().sorted().collect(Collectors.toList());
-        if (formatTableEnabled()) {
-            tables.addAll(listFormatTables(databaseName));
-        }
-        return tables;
+        return listTablesImpl(databaseName).stream().sorted().collect(Collectors.toList());
     }
 
     protected abstract List<String> listTablesImpl(String databaseName);
@@ -345,10 +340,7 @@ public abstract class AbstractCatalog implements Catalog {
             try {
                 return getDataTable(identifier);
             } catch (TableNotExistException e) {
-                if (formatTableEnabled()) {
-                    return getFormatTable(identifier);
-                }
-                throw e;
+                return getFormatTable(identifier);
             }
         }
     }
@@ -366,6 +358,17 @@ public abstract class AbstractCatalog implements Catalog {
                                 lockFactory().orElse(null), lockContext().orElse(null), identifier),
                         metastoreClientFactory(identifier).orElse(null),
                         lineageMetaFactory));
+    }
+
+    /**
+     * Return a {@link FormatTable} identified by the given {@link Identifier}.
+     *
+     * @param identifier Path of the table
+     * @return The requested table
+     * @throws Catalog.TableNotExistException if the target does not exist
+     */
+    public FormatTable getFormatTable(Identifier identifier) throws Catalog.TableNotExistException {
+        throw new Catalog.TableNotExistException(identifier);
     }
 
     /**
@@ -540,34 +543,5 @@ public abstract class AbstractCatalog implements Catalog {
                                 return s;
                             }
                         });
-    }
-
-    // ===================== format tables ======================
-
-    /** Whether format table is enabled. */
-    public boolean formatTableEnabled() {
-        return false;
-    }
-
-    /**
-     * Get names of all format tables under this database. An empty list is returned if none exists.
-     *
-     * @return a list of the names of all format tables in this database
-     * @throws Catalog.DatabaseNotExistException if the database does not exist
-     */
-    public List<String> listFormatTables(String databaseName)
-            throws Catalog.DatabaseNotExistException {
-        throw new UnsupportedOperationException();
-    }
-
-    /**
-     * Return a {@link FormatTable} identified by the given {@link Identifier}.
-     *
-     * @param identifier Path of the table
-     * @return The requested table
-     * @throws Catalog.TableNotExistException if the target does not exist
-     */
-    public FormatTable getFormatTable(Identifier identifier) throws Catalog.TableNotExistException {
-        throw new UnsupportedOperationException();
     }
 }

@@ -158,36 +158,8 @@ public class HiveCatalog extends AbstractCatalog {
         this.clients = new CachedClientPool(hiveConf, options, clientClassName);
     }
 
-    @Override
-    public boolean formatTableEnabled() {
+    private boolean formatTableEnabled() {
         return options.get(FORMAT_TABLE_ENABLED);
-    }
-
-    @Override
-    public List<String> listFormatTables(String databaseName) throws DatabaseNotExistException {
-        if (!databaseExists(databaseName)) {
-            throw new DatabaseNotExistException(databaseName);
-        }
-
-        List<String> allTables;
-        try {
-            allTables = clients.run(client -> client.getAllTables(databaseName));
-        } catch (TException e) {
-            throw new RuntimeException("Failed to list all tables in database " + databaseName, e);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException("Interrupted in call to listTables " + databaseName, e);
-        }
-
-        List<String> formatTables = new ArrayList<>();
-        for (String table : allTables) {
-            try {
-                getFormatTable(new Identifier(databaseName, table));
-                formatTables.add(table);
-            } catch (TableNotExistException ignored) {
-            }
-        }
-        return formatTables;
     }
 
     @Override
@@ -449,10 +421,26 @@ public class HiveCatalog extends AbstractCatalog {
                     "Interrupted in call to tableExists " + identifier.getFullName(), e);
         }
 
-        return isPaimonTable(table)
-                && tableSchemaInFileSystem(
-                                getTableLocation(identifier), identifier.getBranchNameOrDefault())
-                        .isPresent();
+        boolean isDataTable =
+                isPaimonTable(table)
+                        && tableSchemaInFileSystem(
+                                        getTableLocation(identifier),
+                                        identifier.getBranchNameOrDefault())
+                                .isPresent();
+        if (isDataTable) {
+            return true;
+        }
+
+        if (formatTableEnabled()) {
+            try {
+                HiveFormatTableUtils.convertToFormatTable(table);
+                return true;
+            } catch (UnsupportedOperationException e) {
+                return false;
+            }
+        }
+
+        return false;
     }
 
     private static boolean isPaimonTable(Table table) {
@@ -475,6 +463,10 @@ public class HiveCatalog extends AbstractCatalog {
 
     @Override
     public FormatTable getFormatTable(Identifier identifier) throws TableNotExistException {
+        if (!formatTableEnabled()) {
+            throw new TableNotExistException(identifier);
+        }
+
         Table table;
         try {
             table =
