@@ -19,18 +19,22 @@
 package org.apache.paimon.iceberg.manifest;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.format.SimpleStatsCollector;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.iceberg.IcebergPathFactory;
 import org.apache.paimon.iceberg.manifest.IcebergManifestFileMeta.Content;
 import org.apache.paimon.iceberg.metadata.IcebergPartitionSpec;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.io.SingleFileWriter;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ObjectsFile;
@@ -76,6 +80,27 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
         this.partitionType = partitionType;
         this.writerFactory = writerFactory;
         this.targetFileSize = targetFileSize;
+    }
+
+    public static IcebergManifestFile create(FileStoreTable table, IcebergPathFactory pathFactory) {
+        RowType partitionType = table.schema().logicalPartitionType();
+        RowType entryType = IcebergManifestEntry.schema(partitionType);
+        Options manifestFileAvroOptions = Options.fromMap(table.options());
+        // https://github.com/apache/iceberg/blob/main/core/src/main/java/org/apache/iceberg/ManifestReader.java
+        manifestFileAvroOptions.set(
+                "avro.row-name-mapping",
+                "org.apache.paimon.avro.generated.record:manifest_entry,"
+                        + "manifest_entry_data_file:r2,"
+                        + "r2_partition:r102");
+        FileFormat manifestFileAvro = FileFormat.getFileFormat(manifestFileAvroOptions, "avro");
+        return new IcebergManifestFile(
+                table.fileIO(),
+                partitionType,
+                manifestFileAvro.createReaderFactory(entryType),
+                manifestFileAvro.createWriterFactory(entryType),
+                table.coreOptions().manifestCompression(),
+                pathFactory.manifestFileFactory(),
+                table.coreOptions().manifestTargetSize());
     }
 
     public List<IcebergManifestFileMeta> rollingWrite(

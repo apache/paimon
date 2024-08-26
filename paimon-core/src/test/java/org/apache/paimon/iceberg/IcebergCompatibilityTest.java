@@ -29,6 +29,9 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.iceberg.manifest.IcebergManifestFileMeta;
+import org.apache.paimon.iceberg.manifest.IcebergManifestList;
+import org.apache.paimon.iceberg.metadata.IcebergMetadata;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
@@ -58,9 +61,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiFunction;
@@ -244,6 +249,110 @@ public class IcebergCompatibilityTest {
 
         write.close();
         commit.close();
+    }
+
+    @Test
+    public void testIcebergSnapshotExpire() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        Map<String, String> options = new HashMap<>();
+        options.put(AbstractIcebergCommitCallback.SNAPSHOT_NUM_RETAINED.key(), "3");
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        1,
+                        options);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(false, 1));
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(1L);
+        IcebergMetadata metadata =
+                IcebergMetadata.fromPath(
+                        table.fileIO(), new Path(table.location(), "metadata/v1.metadata.json"));
+        assertThat(metadata.snapshots()).hasSize(1);
+        assertThat(metadata.currentSnapshotId()).isEqualTo(1);
+
+        write.write(GenericRow.of(1, 11));
+        write.write(GenericRow.of(3, 30));
+        write.compact(BinaryRow.EMPTY_ROW, 0, true);
+        commit.commit(2, write.prepareCommit(true, 2));
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(3L);
+        metadata =
+                IcebergMetadata.fromPath(
+                        table.fileIO(), new Path(table.location(), "metadata/v3.metadata.json"));
+        assertThat(metadata.snapshots()).hasSize(3);
+        assertThat(metadata.currentSnapshotId()).isEqualTo(3);
+
+        // Number of snapshots will become 5 with the next commit, however only 3 Iceberg snapshots
+        // are kept. So the first 2 Iceberg snapshots will be expired.
+
+        IcebergPathFactory pathFactory = new IcebergPathFactory(table.location());
+        IcebergManifestList manifestList = IcebergManifestList.create(table, pathFactory);
+        Set<String> usingManifests = new HashSet<>();
+        for (IcebergManifestFileMeta fileMeta :
+                manifestList.read(new Path(metadata.currentSnapshot().manifestList()).getName())) {
+            usingManifests.add(fileMeta.manifestPath());
+        }
+
+        Set<String> unusedFiles = new HashSet<>();
+        for (int i = 0; i < 2; i++) {
+            unusedFiles.add(metadata.snapshots().get(i).manifestList());
+            for (IcebergManifestFileMeta fileMeta :
+                    manifestList.read(
+                            new Path(metadata.snapshots().get(i).manifestList()).getName())) {
+                String p = fileMeta.manifestPath();
+                if (!usingManifests.contains(p)) {
+                    unusedFiles.add(p);
+                }
+            }
+        }
+
+        write.write(GenericRow.of(2, 21));
+        write.write(GenericRow.of(3, 31));
+        write.compact(BinaryRow.EMPTY_ROW, 0, true);
+        commit.commit(3, write.prepareCommit(true, 3));
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(5L);
+        metadata =
+                IcebergMetadata.fromPath(
+                        table.fileIO(), new Path(table.location(), "metadata/v5.metadata.json"));
+        assertThat(metadata.snapshots()).hasSize(3);
+        assertThat(metadata.currentSnapshotId()).isEqualTo(5);
+
+        write.close();
+        commit.close();
+
+        // The old metadata.json is removed when the new metadata.json is created.
+        for (int i = 1; i <= 4; i++) {
+            unusedFiles.add(pathFactory.toMetadataPath(i).toString());
+        }
+
+        for (String path : unusedFiles) {
+            assertThat(table.fileIO().exists(new Path(path))).isFalse();
+        }
+
+        // Test all existing Iceberg snapshots are valid.
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(1, 11)", "Record(2, 21)", "Record(3, 31)");
+        assertThat(
+                        getIcebergResult(
+                                icebergTable ->
+                                        IcebergGenerics.read(icebergTable).useSnapshot(3).build(),
+                                Record::toString))
+                .containsExactlyInAnyOrder("Record(1, 11)", "Record(2, 20)", "Record(3, 30)");
+        assertThat(
+                        getIcebergResult(
+                                icebergTable ->
+                                        IcebergGenerics.read(icebergTable).useSnapshot(4).build(),
+                                Record::toString))
+                .containsExactlyInAnyOrder("Record(1, 11)", "Record(2, 20)", "Record(3, 30)");
     }
 
     // ------------------------------------------------------------------------
@@ -513,7 +622,11 @@ public class IcebergCompatibilityTest {
             }
             commit.commit(r, write.prepareCommit(true, r));
 
-            assertThat(getIcebergResult(icebergRecordToString)).hasSameElementsAs(expected.get(r));
+            assertThat(
+                            getIcebergResult(
+                                    icebergTable -> IcebergGenerics.read(icebergTable).build(),
+                                    icebergRecordToString))
+                    .hasSameElementsAs(expected.get(r));
         }
 
         write.close();
@@ -570,15 +683,18 @@ public class IcebergCompatibilityTest {
     }
 
     private List<String> getIcebergResult() throws Exception {
-        return getIcebergResult(Record::toString);
+        return getIcebergResult(
+                icebergTable -> IcebergGenerics.read(icebergTable).build(), Record::toString);
     }
 
-    private List<String> getIcebergResult(Function<Record, String> icebergRecordToString)
+    private List<String> getIcebergResult(
+            Function<org.apache.iceberg.Table, CloseableIterable<Record>> query,
+            Function<Record, String> icebergRecordToString)
             throws Exception {
         HadoopCatalog icebergCatalog = new HadoopCatalog(new Configuration(), tempDir.toString());
         TableIdentifier icebergIdentifier = TableIdentifier.of("mydb.db", "t");
         org.apache.iceberg.Table icebergTable = icebergCatalog.loadTable(icebergIdentifier);
-        CloseableIterable<Record> result = IcebergGenerics.read(icebergTable).build();
+        CloseableIterable<Record> result = query.apply(icebergTable);
         List<String> actual = new ArrayList<>();
         for (Record record : result) {
             actual.add(icebergRecordToString.apply(record));
