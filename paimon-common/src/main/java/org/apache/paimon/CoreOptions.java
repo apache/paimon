@@ -658,6 +658,12 @@ public class CoreOptions implements Serializable {
                                     + "Note: Scale-up this parameter will increase memory usage while scanning manifest files. "
                                     + "We can consider downsize it when we encounter an out of memory exception while scanning");
 
+    public static final ConfigOption<Duration> SCAN_DELAY_READ_DURATION =
+            key("scan.stream.delay.read.duration")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription("The delay duration of stream read when scan snapshots");
+
     @ExcludeFromDocumentation("Confused without log system")
     public static final ConfigOption<LogConsistency> LOG_CONSISTENCY =
             key("log.consistency")
@@ -1844,6 +1850,10 @@ public class CoreOptions implements Serializable {
 
     public Integer scanManifestParallelism() {
         return options.get(SCAN_MANIFEST_PARALLELISM);
+    }
+
+    public Duration scanDelayDuration() {
+        return options.get(SCAN_DELAY_READ_DURATION);
     }
 
     public Integer dynamicBucketInitialBuckets() {

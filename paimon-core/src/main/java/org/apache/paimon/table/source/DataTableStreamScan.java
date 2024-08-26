@@ -149,11 +149,21 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
             } else {
                 nextSnapshotId = currentSnapshotId + 1;
             }
+
+            if (checkDelaySnapshot(nextSnapshotId)) {
+                // reset nextSnapshotId for tryFirstPlan
+                nextSnapshotId = null;
+                return SnapshotNotExistPlan.INSTANCE;
+            }
             isFullPhaseEnd =
                     boundedChecker.shouldEndInput(snapshotManager.snapshot(currentSnapshotId));
             return scannedResult.plan();
         } else if (result instanceof StartingScanner.NextSnapshot) {
             nextSnapshotId = ((StartingScanner.NextSnapshot) result).nextSnapshotId();
+            if (checkDelaySnapshot(nextSnapshotId)) {
+                return SnapshotNotExistPlan.INSTANCE;
+            }
+
             isFullPhaseEnd =
                     snapshotManager.snapshotExists(nextSnapshotId - 1)
                             && boundedChecker.shouldEndInput(
@@ -177,6 +187,10 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
                 throw new EndOfScanException();
             }
 
+            if (checkDelaySnapshot(nextSnapshotId)) {
+                continue;
+            }
+
             // first check changes of overwrite
             if (snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE
                     && supportStreamingReadOverwrite) {
@@ -196,6 +210,19 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
                 nextSnapshotId++;
             }
         }
+    }
+
+    private boolean checkDelaySnapshot(long snapshotId) {
+        if (options.scanDelayDuration() == null) {
+            return false;
+        }
+        long delayMillis = options.scanDelayDuration().toMillis();
+        long snapshotMills = System.currentTimeMillis() - delayMillis;
+        if (snapshotManager.snapshotExists(snapshotId)
+                && snapshotManager.snapshot(snapshotId).timeMillis() > snapshotMills) {
+            return true;
+        }
+        return false;
     }
 
     private FollowUpScanner createFollowUpScanner() {
