@@ -30,6 +30,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -256,6 +257,15 @@ public class FlinkCatalog extends AbstractCatalog {
             table = catalog.getTable(toIdentifier(tablePath));
         } catch (Catalog.TableNotExistException e) {
             throw new TableNotExistException(getName(), tablePath);
+        }
+
+        if (table instanceof FormatTable) {
+            if (timestamp != null) {
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Format table %s cannot support as of timestamp.", tablePath));
+            }
+            return new FormatCatalogTable((FormatTable) table);
         }
 
         if (timestamp != null) {

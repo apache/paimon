@@ -34,6 +34,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.system.SystemTableLoader;
@@ -336,7 +337,11 @@ public abstract class AbstractCatalog implements Catalog {
             }
             return table;
         } else {
-            return getDataTable(identifier);
+            try {
+                return getDataTable(identifier);
+            } catch (TableNotExistException e) {
+                return getFormatTable(identifier);
+            }
         }
     }
 
@@ -353,6 +358,17 @@ public abstract class AbstractCatalog implements Catalog {
                                 lockFactory().orElse(null), lockContext().orElse(null), identifier),
                         metastoreClientFactory(identifier).orElse(null),
                         lineageMetaFactory));
+    }
+
+    /**
+     * Return a {@link FormatTable} identified by the given {@link Identifier}.
+     *
+     * @param identifier Path of the table
+     * @return The requested table
+     * @throws Catalog.TableNotExistException if the target does not exist
+     */
+    public FormatTable getFormatTable(Identifier identifier) throws Catalog.TableNotExistException {
+        throw new Catalog.TableNotExistException(identifier);
     }
 
     /**
