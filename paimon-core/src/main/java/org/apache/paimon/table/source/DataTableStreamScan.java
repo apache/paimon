@@ -150,20 +150,11 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
                 nextSnapshotId = currentSnapshotId + 1;
             }
 
-            if (checkDelaySnapshot(nextSnapshotId)) {
-                // reset nextSnapshotId for tryFirstPlan
-                nextSnapshotId = null;
-                return SnapshotNotExistPlan.INSTANCE;
-            }
             isFullPhaseEnd =
                     boundedChecker.shouldEndInput(snapshotManager.snapshot(currentSnapshotId));
             return scannedResult.plan();
         } else if (result instanceof StartingScanner.NextSnapshot) {
             nextSnapshotId = ((StartingScanner.NextSnapshot) result).nextSnapshotId();
-            if (checkDelaySnapshot(nextSnapshotId)) {
-                return SnapshotNotExistPlan.INSTANCE;
-            }
-
             isFullPhaseEnd =
                     snapshotManager.snapshotExists(nextSnapshotId - 1)
                             && boundedChecker.shouldEndInput(
