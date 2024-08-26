@@ -19,10 +19,14 @@
 package org.apache.paimon.spark.procedure
 
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.utils.SnapshotManager
 
 import org.apache.spark.sql.{Dataset, Row}
 import org.apache.spark.sql.execution.streaming.MemoryStream
 import org.apache.spark.sql.streaming.StreamTest
+import org.assertj.core.api.Assertions.{assertThat, assertThatIllegalArgumentException}
+
+import java.sql.Timestamp
 
 class ExpireSnapshotsProcedureTest extends PaimonSparkTestBase with StreamTest {
 
@@ -135,5 +139,67 @@ class ExpireSnapshotsProcedureTest extends PaimonSparkTestBase with StreamTest {
           }
       }
     }
+  }
+
+  test("test parameter order_than with old timestamp type and new string type") {
+    sql(
+      "CREATE TABLE T (a INT, b STRING) " +
+        "TBLPROPERTIES ( 'num-sorted-run.compaction-trigger' = '999' )")
+    val table = loadTable("T")
+    val snapshotManager = table.snapshotManager
+
+    // generate 5 snapshot
+    for (i <- 1 to 5) {
+      sql(s"INSERT INTO T VALUES ($i, '$i')")
+    }
+    checkSnapshots(snapshotManager, 1, 5)
+
+    // older_than with old timestamp type, like "1724664000000"
+    val nanosecond: Long = snapshotManager.latestSnapshot().timeMillis * 1000
+    spark.sql(
+      s"CALL paimon.sys.expire_snapshots(table => 'test.T', older_than => $nanosecond, max_deletes => 2)")
+    checkSnapshots(snapshotManager, 3, 5)
+
+    // older_than with new string type, like "2024-08-26 17:20:00"
+    val timestamp = new Timestamp(snapshotManager.latestSnapshot().timeMillis)
+    spark.sql(
+      s"CALL paimon.sys.expire_snapshots(table => 'test.T', older_than => '${timestamp.toString}', max_deletes => 2)")
+    checkSnapshots(snapshotManager, 5, 5)
+  }
+
+  test("test new parameter time_retained") {
+    sql(
+      "CREATE TABLE T (a INT, b STRING) " +
+        "TBLPROPERTIES ( 'num-sorted-run.compaction-trigger' = '999' )")
+    val table = loadTable("T")
+    val snapshotManager = table.snapshotManager
+
+    // generate 5 snapshot
+    for (i <- 1 to 5) {
+      sql(s"INSERT INTO T VALUES ($i, '$i')")
+    }
+    checkSnapshots(snapshotManager, 1, 5)
+
+    // no snapshots expired
+    spark.sql(s"CALL paimon.sys.expire_snapshots(table => 'test.T', time_retained => '1h')")
+    checkSnapshots(snapshotManager, 1, 5)
+
+    // expire assert throw exception
+    val timestamp = snapshotManager.latestSnapshot().timeMillis
+    assertThrows[IllegalArgumentException] {
+      spark.sql(
+        s"CALL paimon.sys.expire_snapshots(table => 'test.T', older_than => '${timestamp.toString}', time_retained => '1h')")
+    }
+
+    // all snapshot are expired, keep latest snapshot
+    Thread.sleep(1000)
+    spark.sql(s"CALL paimon.sys.expire_snapshots(table => 'test.T', time_retained => '1s')")
+    checkSnapshots(snapshotManager, 5, 5)
+  }
+
+  def checkSnapshots(sm: SnapshotManager, earliest: Int, latest: Int): Unit = {
+    assertThat(sm.snapshotCount).isEqualTo(latest - earliest + 1)
+    assertThat(sm.earliestSnapshotId).isEqualTo(earliest)
+    assertThat(sm.latestSnapshotId).isEqualTo(latest)
   }
 }
