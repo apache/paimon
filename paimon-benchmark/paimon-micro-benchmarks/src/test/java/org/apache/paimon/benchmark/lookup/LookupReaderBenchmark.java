@@ -20,27 +20,38 @@ package org.apache.paimon.benchmark.lookup;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.benchmark.Benchmark;
+import org.apache.paimon.data.serializer.RowCompactedSerializer;
+import org.apache.paimon.io.cache.CacheManager;
+import org.apache.paimon.lookup.LookupStoreFactory;
+import org.apache.paimon.lookup.LookupStoreReader;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
 import org.apache.paimon.testutils.junit.parameterized.Parameters;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
 
 import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.CoreOptions.LOOKUP_LOCAL_FILE_TYPE;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Benchmark for measuring the throughput of writing for lookup. */
 @ExtendWith(ParameterizedTestExtension.class)
-public class LookupWriterBenchmark extends AbstractLookupBenchmark {
+public class LookupReaderBenchmark extends AbstractLookupBenchmark {
+    private static final int QUERY_KEY_COUNT = 10000;
     private final int recordCount;
     @TempDir Path tempDir;
 
-    public LookupWriterBenchmark(int recordCount) {
+    public LookupReaderBenchmark(int recordCount) {
         this.recordCount = recordCount;
     }
 
@@ -50,18 +61,16 @@ public class LookupWriterBenchmark extends AbstractLookupBenchmark {
     }
 
     @TestTemplate
-    void testLookupWriterSameValue() {
-        writeLookupDataBenchmark(generateSequenceInputs(0, recordCount), true);
+    void testLookupReader() throws IOException {
+        readLookupDataBenchmark(
+                generateSequenceInputs(0, recordCount),
+                generateRandomInputs(0, recordCount, QUERY_KEY_COUNT));
     }
 
-    @TestTemplate
-    void testLookupWriterDiffValue() {
-        writeLookupDataBenchmark(generateSequenceInputs(0, recordCount), false);
-    }
-
-    private void writeLookupDataBenchmark(byte[][] inputs, boolean sameValue) {
+    private void readLookupDataBenchmark(byte[][] inputs, byte[][] randomInputs)
+            throws IOException {
         Benchmark benchmark =
-                new Benchmark("writer-" + inputs.length, inputs.length)
+                new Benchmark("reader-" + randomInputs.length, randomInputs.length)
                         .setNumWarmupIters(1)
                         .setOutputPerIteration(true);
         for (int valueLength : VALUE_LENGTHS) {
@@ -71,14 +80,16 @@ public class LookupWriterBenchmark extends AbstractLookupBenchmark {
                         CoreOptions.fromMap(
                                 Collections.singletonMap(
                                         LOOKUP_LOCAL_FILE_TYPE.key(), fileType.name()));
+                Pair<String, LookupStoreFactory.Context> pair =
+                        writeData(tempDir, options, inputs, valueLength, false);
                 benchmark.addCase(
                         String.format(
-                                "%s-write-%dB-value-%d-num",
-                                fileType.name(), valueLength, inputs.length),
+                                "%s-read-%dB-value-%d-num",
+                                fileType.name(), valueLength, randomInputs.length),
                         5,
                         () -> {
                             try {
-                                writeData(tempDir, options, inputs, valueLength, sameValue);
+                                readData(options, randomInputs, pair.getLeft(), pair.getRight());
                             } catch (IOException e) {
                                 throw new RuntimeException(e);
                             }
@@ -87,5 +98,26 @@ public class LookupWriterBenchmark extends AbstractLookupBenchmark {
         }
 
         benchmark.run();
+    }
+
+    private void readData(
+            CoreOptions options,
+            byte[][] randomInputs,
+            String filePath,
+            LookupStoreFactory.Context context)
+            throws IOException {
+        LookupStoreFactory factory =
+                LookupStoreFactory.create(
+                        options,
+                        new CacheManager(MemorySize.ofMebiBytes(10)),
+                        new RowCompactedSerializer(RowType.of(new IntType()))
+                                .createSliceComparator());
+
+        File file = new File(filePath);
+        LookupStoreReader reader = factory.createReader(file, context);
+        for (byte[] input : randomInputs) {
+            assertThat(reader.lookup(input)).isNotNull();
+        }
+        reader.close();
     }
 }
