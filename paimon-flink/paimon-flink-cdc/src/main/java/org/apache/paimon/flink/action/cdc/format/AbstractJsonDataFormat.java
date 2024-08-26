@@ -19,33 +19,29 @@
 package org.apache.paimon.flink.action.cdc.format;
 
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
-import org.apache.paimon.flink.action.cdc.ComputedColumn;
-import org.apache.paimon.flink.action.cdc.TypeMapping;
+import org.apache.paimon.flink.action.cdc.kafka.KafkaDebeziumJsonDeserializationSchema;
+import org.apache.paimon.flink.action.cdc.serialization.CdcJsonDeserializationSchema;
 
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
 
-import java.util.List;
+import java.util.function.Function;
 
 /**
- * Supports the message queue's data format and provides definitions for the message queue's record
- * deserialization class and parsing class {@link AbstractRecordParser}.
+ * The message queue's record json deserialization class common implementation of {@link
+ * DataFormat}.
  */
-public interface DataFormat {
+public abstract class AbstractJsonDataFormat extends AbstractDataFormat {
 
-    /**
-     * Creates a new instance of {@link AbstractRecordParser} for this data format with the
-     * specified configurations.
-     *
-     * @param computedColumns List of computed columns to be considered by the parser.
-     * @return A new instance of {@link AbstractRecordParser}.
-     */
-    AbstractRecordParser createParser(
-            TypeMapping typeMapping, List<ComputedColumn> computedColumns);
+    @Override
+    protected Function<Configuration, KafkaDeserializationSchema<CdcSourceRecord>>
+            kafkaDeserializer() {
+        return KafkaDebeziumJsonDeserializationSchema::new;
+    }
 
-    KafkaDeserializationSchema<CdcSourceRecord> createKafkaDeserializer(
-            Configuration cdcSourceConfig);
-
-    DeserializationSchema<CdcSourceRecord> createPulsarDeserializer(Configuration cdcSourceConfig);
+    @Override
+    protected Function<Configuration, DeserializationSchema<CdcSourceRecord>> pulsarDeserializer() {
+        return CdcJsonDeserializationSchema::new;
+    }
 }

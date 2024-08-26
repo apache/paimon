@@ -27,25 +27,37 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
 
 import java.util.List;
+import java.util.function.Function;
 
-/**
- * Supports the message queue's data format and provides definitions for the message queue's record
- * deserialization class and parsing class {@link AbstractRecordParser}.
- */
-public interface DataFormat {
+/** Data format common implementation of {@link DataFormat}. */
+public abstract class AbstractDataFormat implements DataFormat {
 
-    /**
-     * Creates a new instance of {@link AbstractRecordParser} for this data format with the
-     * specified configurations.
-     *
-     * @param computedColumns List of computed columns to be considered by the parser.
-     * @return A new instance of {@link AbstractRecordParser}.
-     */
-    AbstractRecordParser createParser(
-            TypeMapping typeMapping, List<ComputedColumn> computedColumns);
+    /** Factory for creating AbstractRecordParser. */
+    protected abstract RecordParserFactory parser();
 
-    KafkaDeserializationSchema<CdcSourceRecord> createKafkaDeserializer(
-            Configuration cdcSourceConfig);
+    /** Deserializer for Kafka Record. */
+    protected abstract Function<Configuration, KafkaDeserializationSchema<CdcSourceRecord>>
+            kafkaDeserializer();
 
-    DeserializationSchema<CdcSourceRecord> createPulsarDeserializer(Configuration cdcSourceConfig);
+    /** Deserializer for Pulsar Record. */
+    protected abstract Function<Configuration, DeserializationSchema<CdcSourceRecord>>
+            pulsarDeserializer();
+
+    @Override
+    public AbstractRecordParser createParser(
+            TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
+        return parser().createParser(typeMapping, computedColumns);
+    }
+
+    @Override
+    public KafkaDeserializationSchema<CdcSourceRecord> createKafkaDeserializer(
+            Configuration cdcSourceConfig) {
+        return kafkaDeserializer().apply(cdcSourceConfig);
+    }
+
+    @Override
+    public DeserializationSchema<CdcSourceRecord> createPulsarDeserializer(
+            Configuration cdcSourceConfig) {
+        return pulsarDeserializer().apply(cdcSourceConfig);
+    }
 }
