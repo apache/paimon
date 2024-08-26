@@ -78,7 +78,7 @@ public class CachedClientPool implements ClientPool<IMetaStoreClient, TException
         this.conf = conf;
         this.clientPoolSize = options.get(CLIENT_POOL_SIZE);
         this.evictionInterval = options.get(CLIENT_POOL_CACHE_EVICTION_INTERVAL_MS);
-        this.key = extractKey(options.get(CLIENT_POOL_CACHE_KEYS), conf);
+        this.key = extractKey(clientClassName, options.get(CLIENT_POOL_CACHE_KEYS), conf);
         this.clientClassName = clientClassName;
         init();
         // set ugi information to hms client
@@ -152,9 +152,10 @@ public class CachedClientPool implements ClientPool<IMetaStoreClient, TException
     }
 
     @VisibleForTesting
-    static Key extractKey(String cacheKeys, Configuration conf) {
+    static Key extractKey(String clientClassName, String cacheKeys, Configuration conf) {
         // generate key elements in a certain order, so that the Key instances are comparable
         List<Object> elements = Lists.newArrayList();
+        elements.add(clientClassName);
         elements.add(conf.get(HiveConf.ConfVars.METASTOREURIS.varname, ""));
         elements.add(HiveCatalogOptions.IDENTIFIER);
         if (cacheKeys == null || cacheKeys.isEmpty()) {
