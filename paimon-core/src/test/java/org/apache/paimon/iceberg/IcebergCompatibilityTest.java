@@ -257,7 +257,8 @@ public class IcebergCompatibilityTest {
                 RowType.of(
                         new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
         Map<String, String> options = new HashMap<>();
-        options.put(AbstractIcebergCommitCallback.SNAPSHOT_NUM_RETAINED.key(), "3");
+        options.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "3");
+        options.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "3");
         FileStoreTable table =
                 createPaimonTable(
                         rowType,

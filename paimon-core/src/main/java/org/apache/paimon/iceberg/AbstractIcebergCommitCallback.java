@@ -18,6 +18,7 @@
 
 package org.apache.paimon.iceberg;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericArray;
@@ -89,8 +90,6 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
             ConfigOptions.key("metadata.iceberg.compaction.max.file-num")
                     .intType()
                     .defaultValue(50);
-    static final ConfigOption<Integer> SNAPSHOT_NUM_RETAINED =
-            ConfigOptions.key("metadata.iceberg.snapshot.num-retained").intType().defaultValue(10);
 
     protected final FileStoreTable table;
     private final String commitUser;
@@ -316,13 +315,16 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                         pathFactory.toManifestListPath(manifestListFileName).toString(),
                         schemaId));
 
-        Options options = new Options(table.options());
-        IcebergSnapshot toExpire = null;
-        IcebergSnapshot nextNotExpire = null;
-        if (snapshots.size() > options.get(SNAPSHOT_NUM_RETAINED)) {
-            toExpire = snapshots.get(0);
-            nextNotExpire = snapshots.get(1);
-            snapshots.remove(0);
+        // all snapshots in this list, except the last one, need to expire
+        List<IcebergSnapshot> toExpireExceptLast = new ArrayList<>();
+        for (int i = 0; i + 1 < snapshots.size(); i++) {
+            toExpireExceptLast.add(snapshots.get(i));
+            // commit callback is called before expire, so we cannot use current earliest snapshot
+            // and have to check expire condition by ourselves
+            if (!shouldExpire(snapshots.get(i), snapshotId)) {
+                snapshots = snapshots.subList(i, snapshots.size());
+                break;
+            }
         }
 
         IcebergMetadata metadata =
@@ -344,10 +346,10 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                         String.valueOf(snapshotId));
 
         table.fileIO().deleteQuietly(baseMetadataPath);
-        if (toExpire != null) {
+        for (int i = 0; i + 1 < toExpireExceptLast.size(); i++) {
             expireManifestList(
-                    new Path(toExpire.manifestList()).getName(),
-                    new Path(nextNotExpire.manifestList()).getName());
+                    new Path(toExpireExceptLast.get(i).manifestList()).getName(),
+                    new Path(toExpireExceptLast.get(i + 1).manifestList()).getName());
         }
     }
 
@@ -600,6 +602,21 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
     // -------------------------------------------------------------------------------------
     // Expire
     // -------------------------------------------------------------------------------------
+
+    private boolean shouldExpire(IcebergSnapshot snapshot, long currentSnapshotId) {
+        Options options = new Options(table.options());
+        if (snapshot.snapshotId()
+                > currentSnapshotId - options.get(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN)) {
+            return false;
+        }
+        if (snapshot.snapshotId()
+                <= currentSnapshotId - options.get(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX)) {
+            return true;
+        }
+        return snapshot.timestampMs()
+                < System.currentTimeMillis()
+                        - options.get(CoreOptions.SNAPSHOT_TIME_RETAINED).toMillis();
+    }
 
     private void expireManifestList(String toExpire, String next) {
         Set<IcebergManifestFileMeta> metaInUse = new HashSet<>(manifestList.read(next));
