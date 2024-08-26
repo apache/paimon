@@ -518,20 +518,8 @@ public class HiveCatalog extends AbstractCatalog {
         if (syncAllProperties()) {
             tblProperties = new HashMap<>(tableSchema.options());
 
-            // add primary-key, partition-key, bucket-id to tblproperties
-            if (!tableSchema.primaryKeys().isEmpty()) {
-                tblProperties.put(
-                        CoreOptions.PRIMARY_KEY.key(), String.join(",", tableSchema.primaryKeys()));
-            }
-            if (!tableSchema.partitionKeys().isEmpty()) {
-                tblProperties.put(
-                        CoreOptions.PARTITION.key(), String.join(",", tableSchema.partitionKeys()));
-            }
-            if (!tableSchema.bucketKeys().isEmpty()) {
-                tblProperties.put(
-                        CoreOptions.BUCKET_KEY.key(), String.join(",", tableSchema.bucketKeys()));
-            }
-            tblProperties.put(CoreOptions.BUCKET.key(), String.valueOf(tableSchema.numBuckets()));
+            // add primary-key, partition-key to tblproperties
+            tblProperties.putAll(convertToPropertiesTableKey(tableSchema));
         } else {
             tblProperties = convertToPropertiesPrefixKey(tableSchema.options(), HIVE_PREFIX);
         }
@@ -691,7 +679,8 @@ public class HiveCatalog extends AbstractCatalog {
                         isPaimonTable(table),
                         "Table %s is not a paimon table in hive metastore.",
                         identifier.getFullName());
-                if (!newTable.getSd().getCols().equals(table.getSd().getCols())) {
+                if (!newTable.getSd().getCols().equals(table.getSd().getCols())
+                        || !newTable.getParameters().equals(table.getParameters())) {
                     alterTableToHms(table, identifier, tableSchema);
                 }
             } catch (NoSuchObjectException e) {
@@ -819,10 +808,28 @@ public class HiveCatalog extends AbstractCatalog {
     private void updateHmsTablePars(Table table, TableSchema schema) {
         if (syncAllProperties()) {
             table.getParameters().putAll(schema.options());
+            table.getParameters().putAll(convertToPropertiesTableKey(schema));
         } else {
             table.getParameters()
                     .putAll(convertToPropertiesPrefixKey(schema.options(), HIVE_PREFIX));
         }
+    }
+
+    private Map<String, String> convertToPropertiesTableKey(TableSchema tableSchema) {
+        Map<String, String> properties = new HashMap<>();
+        if (!tableSchema.primaryKeys().isEmpty()) {
+            properties.put(
+                    CoreOptions.PRIMARY_KEY.key(), String.join(",", tableSchema.primaryKeys()));
+        }
+        if (!tableSchema.partitionKeys().isEmpty()) {
+            properties.put(
+                    CoreOptions.PARTITION.key(), String.join(",", tableSchema.partitionKeys()));
+        }
+        if (!tableSchema.bucketKeys().isEmpty()) {
+            properties.put(
+                    CoreOptions.BUCKET_KEY.key(), String.join(",", tableSchema.bucketKeys()));
+        }
+        return properties;
     }
 
     @VisibleForTesting
