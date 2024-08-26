@@ -1161,9 +1161,9 @@ public class PreAggregationITCase {
     /** IT Test for aggregation merge engine. */
     public static class BasicAggregateITCase extends CatalogITCaseBase {
 
-        @Test
-        public void testLocalMerge() {
-            sql(
+        @Override
+        protected List<String> ddl() {
+            return Collections.singletonList(
                     "CREATE TABLE T ("
                             + "k INT,"
                             + "v INT,"
@@ -1173,10 +1173,26 @@ public class PreAggregationITCase {
                             + "'fields.v.aggregate-function'='sum',"
                             + "'local-merge-buffer-size'='1m'"
                             + ");");
+        }
 
+        @Test
+        public void testLocalMerge() {
             sql("INSERT INTO T VALUES(1, 1, 1), (2, 1, 1), (1, 2, 1)");
             assertThat(batchSql("SELECT * FROM T"))
                     .containsExactlyInAnyOrder(Row.of(1, 3, 1), Row.of(2, 1, 1));
+        }
+
+        @Test
+        public void testMergeRead() {
+            sql("INSERT INTO T VALUES(1, 1, 1), (2, 1, 1)");
+            sql("INSERT INTO T VALUES(1, 2, 1)");
+            assertThat(batchSql("SELECT * FROM T"))
+                    .containsExactlyInAnyOrder(Row.of(1, 3, 1), Row.of(2, 1, 1));
+            // filter
+            assertThat(batchSql("SELECT * FROM T where v = 3"))
+                    .containsExactlyInAnyOrder(Row.of(1, 3, 1));
+            assertThat(batchSql("SELECT * FROM T where v = 1"))
+                    .containsExactlyInAnyOrder(Row.of(2, 1, 1));
         }
     }
 

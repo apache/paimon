@@ -80,6 +80,10 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
 
         // projection
         assertThat(batchSql("SELECT a FROM T")).containsExactlyInAnyOrder(Row.of(4));
+
+        // filter
+        assertThat(batchSql("SELECT * FROM T where b = 5 and c = '6'"))
+                .containsExactlyInAnyOrder(Row.of(1, 2, 4, 5, "6"));
     }
 
     @Test
