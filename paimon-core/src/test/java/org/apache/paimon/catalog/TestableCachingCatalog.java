@@ -36,7 +36,7 @@ public class TestableCachingCatalog extends CachingCatalog {
     private final Duration cacheExpirationInterval;
 
     public TestableCachingCatalog(Catalog catalog, Duration expirationInterval, Ticker ticker) {
-        super(catalog, expirationInterval, MemorySize.ZERO, Long.MAX_VALUE, ticker);
+        super(catalog, expirationInterval, true, MemorySize.ZERO, Long.MAX_VALUE, ticker);
         this.cacheExpirationInterval = expirationInterval;
     }
 

@@ -47,6 +47,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.paimon.catalog.AbstractCatalog.isSpecifiedSystemTable;
+import static org.apache.paimon.options.CatalogOptions.CACHE_CASE_SENSITIVE;
 import static org.apache.paimon.options.CatalogOptions.CACHE_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.CACHE_EXPIRATION_INTERVAL_MS;
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_MAX_MEMORY;
@@ -62,11 +63,13 @@ public class CachingCatalog extends DelegateCatalog {
     protected final Cache<String, Map<String, String>> databaseCache;
     protected final Cache<Identifier, Table> tableCache;
     @Nullable protected final SegmentsCache<Path> manifestCache;
+    private final boolean caseSensitive;
 
     public CachingCatalog(Catalog wrapped) {
         this(
                 wrapped,
                 CACHE_EXPIRATION_INTERVAL_MS.defaultValue(),
+                CACHE_CASE_SENSITIVE.defaultValue(),
                 CACHE_MANIFEST_SMALL_FILE_MEMORY.defaultValue(),
                 CACHE_MANIFEST_SMALL_FILE_THRESHOLD.defaultValue().getBytes());
     }
@@ -74,11 +77,13 @@ public class CachingCatalog extends DelegateCatalog {
     public CachingCatalog(
             Catalog wrapped,
             Duration expirationInterval,
+            boolean caseSensitive,
             MemorySize manifestMaxMemory,
             long manifestCacheThreshold) {
         this(
                 wrapped,
                 expirationInterval,
+                caseSensitive,
                 manifestMaxMemory,
                 manifestCacheThreshold,
                 Ticker.systemTicker());
@@ -87,6 +92,7 @@ public class CachingCatalog extends DelegateCatalog {
     public CachingCatalog(
             Catalog wrapped,
             Duration expirationInterval,
+            boolean caseSensitive,
             MemorySize manifestMaxMemory,
             long manifestCacheThreshold,
             Ticker ticker) {
@@ -112,6 +118,7 @@ public class CachingCatalog extends DelegateCatalog {
                         .ticker(ticker)
                         .build();
         this.manifestCache = SegmentsCache.create(manifestMaxMemory, manifestCacheThreshold);
+        this.caseSensitive = caseSensitive;
     }
 
     public static Catalog tryToCreate(Catalog catalog, Options options) {
@@ -130,6 +137,7 @@ public class CachingCatalog extends DelegateCatalog {
         return new CachingCatalog(
                 catalog,
                 options.get(CACHE_EXPIRATION_INTERVAL_MS),
+                options.get(CACHE_CASE_SENSITIVE),
                 manifestMaxMemory,
                 manifestThreshold);
     }
@@ -137,13 +145,14 @@ public class CachingCatalog extends DelegateCatalog {
     @Override
     public Map<String, String> loadDatabaseProperties(String databaseName)
             throws DatabaseNotExistException {
-        Map<String, String> properties = databaseCache.getIfPresent(databaseName);
+        String normalized = normalize(databaseName);
+        Map<String, String> properties = databaseCache.getIfPresent(normalized);
         if (properties != null) {
             return properties;
         }
 
         properties = super.loadDatabaseProperties(databaseName);
-        databaseCache.put(databaseName, properties);
+        databaseCache.put(normalized, properties);
         return properties;
     }
 
@@ -151,11 +160,12 @@ public class CachingCatalog extends DelegateCatalog {
     public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
             throws DatabaseNotExistException, DatabaseNotEmptyException {
         super.dropDatabase(name, ignoreIfNotExists, cascade);
-        databaseCache.invalidate(name);
+        String normalized = normalize(name);
+        databaseCache.invalidate(normalized);
         if (cascade) {
             List<Identifier> tables = new ArrayList<>();
             for (Identifier identifier : tableCache.asMap().keySet()) {
-                if (identifier.getDatabaseName().equals(name)) {
+                if (identifier.getDatabaseName().equals(normalized)) {
                     tables.add(identifier);
                 }
             }
@@ -187,22 +197,19 @@ public class CachingCatalog extends DelegateCatalog {
 
     @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {
-        Table table = tableCache.getIfPresent(identifier);
+        Identifier normalized = normalizeIdentifier(identifier);
+        Table table = tableCache.getIfPresent(normalized);
         if (table != null) {
             return table;
         }
 
         if (isSpecifiedSystemTable(identifier)) {
-            Identifier originIdentifier =
-                    new Identifier(
-                            identifier.getDatabaseName(),
-                            identifier.getTableName(),
-                            identifier.getBranchName(),
-                            null);
-            Table originTable = tableCache.getIfPresent(originIdentifier);
+            Identifier originNormalized = normalized.withoutSystemTable();
+            Identifier originIdentifier = identifier.withoutSystemTable();
+            Table originTable = tableCache.getIfPresent(originNormalized);
             if (originTable == null) {
                 originTable = wrapped.getTable(originIdentifier);
-                putTableCache(originIdentifier, originTable);
+                putTableCache(originNormalized, originTable);
             }
             table =
                     SystemTableLoader.load(
@@ -211,12 +218,12 @@ public class CachingCatalog extends DelegateCatalog {
             if (table == null) {
                 throw new TableNotExistException(identifier);
             }
-            putTableCache(identifier, table);
+            putTableCache(normalized, table);
             return table;
         }
 
         table = wrapped.getTable(identifier);
-        putTableCache(identifier, table);
+        putTableCache(normalized, table);
         return table;
     }
 
@@ -239,8 +246,25 @@ public class CachingCatalog extends DelegateCatalog {
 
     @Override
     public void invalidateTable(Identifier identifier) {
-        tableCache.invalidate(identifier);
-        tryInvalidateSysTables(identifier);
+        Identifier normalized = normalizeIdentifier(identifier);
+        tableCache.invalidate(normalized);
+        tryInvalidateSysTables(normalized);
+    }
+
+    private String normalize(String name) {
+        if (caseSensitive) {
+            return name;
+        } else {
+            return name.toLowerCase();
+        }
+    }
+
+    private Identifier normalizeIdentifier(Identifier tableIdentifier) {
+        if (caseSensitive) {
+            return tableIdentifier;
+        } else {
+            return tableIdentifier.toLowerCase();
+        }
     }
 
     private void tryInvalidateSysTables(Identifier identifier) {

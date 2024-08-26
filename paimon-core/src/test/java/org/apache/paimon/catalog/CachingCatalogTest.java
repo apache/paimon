@@ -19,9 +19,11 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -45,6 +47,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -52,6 +55,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.paimon.data.BinaryString.fromString;
+import static org.apache.paimon.options.CatalogOptions.CACHE_CASE_SENSITIVE;
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_MAX_MEMORY;
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE_MEMORY;
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE_THRESHOLD;
@@ -312,6 +316,7 @@ class CachingCatalogTest extends CatalogTestBase {
                 new CachingCatalog(
                         this.catalog,
                         Duration.ofSeconds(10),
+                        true,
                         MemorySize.ofMebiBytes(1),
                         manifestCacheThreshold);
         Identifier tableIdent = new Identifier("db", "tbl");
@@ -365,5 +370,61 @@ class CachingCatalogTest extends CatalogTestBase {
         caching = (CachingCatalog) CachingCatalog.tryToCreate(catalog, options);
         assertThat(caching.manifestCache.maxMemorySize()).isEqualTo(MemorySize.ofMebiBytes(256));
         assertThat(caching.manifestCache.maxElementSize()).isEqualTo(Long.MAX_VALUE);
+    }
+
+    @Test
+    public void testCaseInSensitiveTableCache() throws Exception {
+        Options options = new Options();
+        options.set(CACHE_CASE_SENSITIVE, false);
+        catalog = new FakeCaseInSensitiveCatalog(fileIO, new Path(warehouse), options);
+        CachingCatalog caching = (CachingCatalog) CachingCatalog.tryToCreate(catalog, options);
+
+        caching.createDatabase("db1", false);
+        // cache database
+        caching.loadDatabaseProperties("db1");
+        caching.dropDatabase("dB1", false, false);
+        assertThat(caching.databaseExists("db1")).isEqualTo(false);
+
+        Identifier t1 = new Identifier("db", "t1");
+        Identifier newT1 = new Identifier("dB", "T1");
+        caching.createTable(t1, DEFAULT_TABLE_SCHEMA, false);
+        caching.dropTable(newT1, false);
+        caching.createTable(newT1, DEFAULT_TABLE_SCHEMA, false);
+        Table newTable1 = caching.getTable(t1);
+        Table newTable2 = caching.getTable(newT1);
+        assertThat(newTable1).isSameAs(newTable2);
+        caching.dropTable(newT1, false);
+        assertThat(caching.tableExists(t1)).isEqualTo(false);
+    }
+
+    static class FakeCaseInSensitiveCatalog extends FileSystemCatalog {
+        public FakeCaseInSensitiveCatalog(FileIO fileIO, Path warehouse, Options options) {
+            super(fileIO, warehouse, options);
+        }
+
+        @Override
+        public void createDatabase(
+                String name, boolean ignoreIfExists, Map<String, String> properties)
+                throws DatabaseAlreadyExistException {
+            super.createDatabase(name.toLowerCase(), ignoreIfExists, properties);
+        }
+
+        @Override
+        public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
+                throws DatabaseNotEmptyException, DatabaseNotExistException {
+            super.dropDatabase(name.toLowerCase(), ignoreIfNotExists, cascade);
+        }
+
+        @Override
+        public void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
+                throws TableAlreadyExistException, DatabaseNotExistException {
+            super.createTable(identifier.toLowerCase(), schema, ignoreIfExists);
+        }
+
+        @Override
+        public void dropTable(Identifier identifier, boolean ignoreIfNotExists)
+                throws TableNotExistException {
+            super.dropTable(identifier.toLowerCase(), ignoreIfNotExists);
+        }
     }
 }

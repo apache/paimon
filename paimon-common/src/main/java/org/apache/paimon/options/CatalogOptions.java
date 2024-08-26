@@ -98,6 +98,12 @@ public class CatalogOptions {
                     .withDescription(
                             "Controls whether the catalog will cache databases, tables and manifests.");
 
+    public static final ConfigOption<Boolean> CACHE_CASE_SENSITIVE =
+            ConfigOptions.key("cache.case-sensitive")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription("Indicates the caching catalog is case sensitive or not.");
+
     public static final ConfigOption<Duration> CACHE_EXPIRATION_INTERVAL_MS =
             key("cache.expiration-interval")
                     .durationType()

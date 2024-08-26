@@ -80,15 +80,15 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
         Map<String, String> newOptions = new HashMap<>(options.asCaseSensitiveMap());
         SessionState sessionState = SparkSession.active().sessionState();
 
-        CatalogContext catalogContext =
-                CatalogContext.create(Options.fromMap(options), sessionState.newHadoopConf());
-
-        // if spark is case-insensitive, set allow upper case to catalog
+        // If spark is case-insensitive, set allow upper case to catalog.
+        // The reason is that, we do not support uppercase if is case insensitive,
+        // but the Spark default behavior is case insensitive.
         if (!sessionState.conf().caseSensitiveAnalysis()) {
             newOptions.put(ALLOW_UPPER_CASE.key(), "true");
         }
-        options = new CaseInsensitiveStringMap(newOptions);
 
+        CatalogContext catalogContext =
+                CatalogContext.create(Options.fromMap(newOptions), sessionState.newHadoopConf());
         this.catalog = CatalogFactory.createCatalog(catalogContext);
         this.defaultDatabase =
                 options.getOrDefault(DEFAULT_DATABASE.key(), DEFAULT_DATABASE.defaultValue());

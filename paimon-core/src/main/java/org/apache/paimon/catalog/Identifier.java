@@ -159,6 +159,19 @@ public class Identifier implements Serializable {
                 "%c%s%c.%c%s%c", escapeChar, database, escapeChar, escapeChar, object, escapeChar);
     }
 
+    public Identifier toLowerCase() {
+        splitObjectName();
+        return new Identifier(
+                database.toLowerCase(),
+                table.toLowerCase(),
+                branch == null ? branch : branch.toLowerCase(),
+                systemTable == null ? systemTable : systemTable.toLowerCase());
+    }
+
+    public Identifier withoutSystemTable() {
+        return new Identifier(database, table, branch, null);
+    }
+
     public static Identifier create(String db, String object) {
         return new Identifier(db, object);
     }
