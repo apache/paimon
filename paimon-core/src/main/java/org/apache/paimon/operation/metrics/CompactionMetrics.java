@@ -41,6 +41,8 @@ public class CompactionMetrics {
     public static final String AVG_LEVEL0_FILE_COUNT = "avgLevel0FileCount";
     public static final String COMPACTION_THREAD_BUSY = "compactionThreadBusy";
     public static final String AVG_COMPACTION_TIME = "avgCompactionTime";
+    public static final String MIN_COMPACTION_TIME = "minCompactionTime";
+    public static final String MAX_COMPACTION_TIME = "maxCompactionTime";
     private static final long BUSY_MEASURE_MILLIS = 60_000;
     private static final int COMPACTION_TIME_WINDOW = 100;
 
@@ -48,6 +50,9 @@ public class CompactionMetrics {
     private final Map<PartitionAndBucket, ReporterImpl> reporters;
     private final Map<Long, CompactTimer> compactTimers;
     private final Queue<Long> compactionTimes;
+
+    private long minCompactionTime = Long.MAX_VALUE;
+    private long maxCompactionTime = Long.MIN_VALUE;
 
     public CompactionMetrics(MetricRegistry registry, String tableName) {
         this.metricGroup = registry.tableMetricGroup(GROUP_NAME, tableName);
@@ -70,6 +75,12 @@ public class CompactionMetrics {
         metricGroup.gauge(
                 AVG_COMPACTION_TIME, () -> getCompactionTimeStream().average().orElse(0.0));
         metricGroup.gauge(COMPACTION_THREAD_BUSY, () -> getCompactBusyStream().sum());
+        metricGroup.gauge(
+                MIN_COMPACTION_TIME,
+                () -> minCompactionTime == Long.MAX_VALUE ? 0 : minCompactionTime);
+        metricGroup.gauge(
+                MAX_COMPACTION_TIME,
+                () -> maxCompactionTime == Long.MIN_VALUE ? 0 : maxCompactionTime);
     }
 
     private LongStream getLevel0FileCountStream() {
@@ -124,6 +135,13 @@ public class CompactionMetrics {
                 compactionTimes.add(time);
                 if (compactionTimes.size() > COMPACTION_TIME_WINDOW) {
                     compactionTimes.poll();
+                }
+
+                if (time < minCompactionTime) {
+                    minCompactionTime = time;
+                }
+                if (time > maxCompactionTime) {
+                    maxCompactionTime = time;
                 }
             }
         }

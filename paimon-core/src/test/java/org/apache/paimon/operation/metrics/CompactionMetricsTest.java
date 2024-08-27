@@ -36,6 +36,8 @@ public class CompactionMetricsTest {
         assertThat(getMetric(metrics, CompactionMetrics.AVG_LEVEL0_FILE_COUNT)).isEqualTo(-1.0);
         assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_THREAD_BUSY)).isEqualTo(0.0);
         assertThat(getMetric(metrics, CompactionMetrics.AVG_COMPACTION_TIME)).isEqualTo(0.0);
+        assertThat(getMetric(metrics, CompactionMetrics.MIN_COMPACTION_TIME)).isEqualTo(0L);
+        assertThat(getMetric(metrics, CompactionMetrics.MAX_COMPACTION_TIME)).isEqualTo(0L);
         CompactionMetrics.Reporter[] reporters = new CompactionMetrics.Reporter[3];
         for (int i = 0; i < reporters.length; i++) {
             reporters[i] = metrics.createReporter(BinaryRow.EMPTY_ROW, i);
@@ -60,6 +62,8 @@ public class CompactionMetricsTest {
         reporters[0].reportCompactionTime(270000);
         assertThat(getMetric(metrics, CompactionMetrics.AVG_COMPACTION_TIME))
                 .isEqualTo(273333.3333333333);
+        assertThat(getMetric(metrics, CompactionMetrics.MAX_COMPACTION_TIME)).isEqualTo(300000L);
+        assertThat(getMetric(metrics, CompactionMetrics.MIN_COMPACTION_TIME)).isEqualTo(250000L);
     }
 
     private Object getMetric(CompactionMetrics metrics, String metricName) {
