@@ -51,7 +51,7 @@ public class CreateTagFromTimestampActionITTest extends ActionITCaseBase {
     }
 
     @Test
-    public void testExpirePartitionsAction() throws Exception {
+    public void testCreateTagFromTimestampAction() throws Exception {
         FileStoreTable table = prepareTable();
         TableScan.Plan plan = table.newReadBuilder().newScan().plan();
         List<String> actual = getResult(table.newReadBuilder().newRead(), plan.splits(), ROW_TYPE);
