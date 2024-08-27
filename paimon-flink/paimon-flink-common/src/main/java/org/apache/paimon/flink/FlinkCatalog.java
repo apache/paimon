@@ -25,6 +25,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.procedure.ProcedureUtil;
 import org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -45,6 +46,7 @@ import org.apache.flink.table.catalog.CatalogDatabase;
 import org.apache.flink.table.catalog.CatalogDatabaseImpl;
 import org.apache.flink.table.catalog.CatalogFunction;
 import org.apache.flink.table.catalog.CatalogPartition;
+import org.apache.flink.table.catalog.CatalogPartitionImpl;
 import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.CatalogTableImpl;
@@ -126,12 +128,16 @@ import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.deseriali
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.nonPhysicalColumnsCount;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.serializeNewWatermarkSpec;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Catalog for paimon. */
 public class FlinkCatalog extends AbstractCatalog {
 
     private static final Logger LOG = LoggerFactory.getLogger(FlinkCatalog.class);
-
+    public static final String NUM_ROWS_KEY = "partition.numRows";
+    public static final String LAST_UPDATE_TIME_KEY = "partition.lastUpdateTime";
+    public static final String FILE_SIZE_IN_BYTES_KEY = "partition.fileSizeInBytes";
+    public static final String FILE_COUNT_KEY = "partition.fileCount";
     private final ClassLoader classLoader;
 
     private final Catalog catalog;
@@ -922,7 +928,36 @@ public class FlinkCatalog extends AbstractCatalog {
     @Override
     public CatalogPartition getPartition(ObjectPath tablePath, CatalogPartitionSpec partitionSpec)
             throws PartitionNotExistException, CatalogException {
-        throw new PartitionNotExistException(getName(), tablePath, partitionSpec);
+        checkNotNull(partitionSpec, "partition spec shouldn't be null");
+        Identifier identifier = toIdentifier(tablePath);
+        try {
+            Table table = catalog().getTable(identifier);
+            FileStoreTable fileStoreTable = (FileStoreTable) table;
+
+            if (fileStoreTable.partitionKeys() == null
+                    || fileStoreTable.partitionKeys().size() == 0) {
+                throw new PartitionNotExistException(getName(), tablePath, partitionSpec);
+            }
+
+            ReadBuilder readBuilder = table.newReadBuilder();
+            readBuilder.withPartitionFilter(checkNotNull(partitionSpec.getPartitionSpec()));
+            List<PartitionEntry> partitionEntries = readBuilder.newScan().listPartitionEntries();
+            if (partitionEntries.isEmpty()) {
+                throw new PartitionNotExistException(getName(), tablePath, partitionSpec);
+            }
+            // This was already filtered by the expected partition.
+            PartitionEntry partitionEntry = partitionEntries.get(0);
+            Map<String, String> properties = new HashMap<>();
+            properties.put(NUM_ROWS_KEY, String.valueOf(partitionEntry.recordCount()));
+            properties.put(
+                    LAST_UPDATE_TIME_KEY, String.valueOf(partitionEntry.lastFileCreationTime()));
+            properties.put(FILE_COUNT_KEY, String.valueOf(partitionEntry.fileCount()));
+            properties.put(
+                    FILE_SIZE_IN_BYTES_KEY, String.valueOf(partitionEntry.fileSizeInBytes()));
+            return new CatalogPartitionImpl(properties, "");
+        } catch (Catalog.TableNotExistException e) {
+            throw new CatalogException("table not exist", e);
+        }
     }
 
     @Override
