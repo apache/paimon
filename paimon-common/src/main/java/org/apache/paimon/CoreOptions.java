@@ -658,7 +658,7 @@ public class CoreOptions implements Serializable {
                                     + "Note: Scale-up this parameter will increase memory usage while scanning manifest files. "
                                     + "We can consider downsize it when we encounter an out of memory exception while scanning");
 
-    public static final ConfigOption<Duration> SCAN_DELAY_READ_DURATION =
+    public static final ConfigOption<Duration> STREAMING_READ_SNAPSHOT_DELAY =
             key("streaming.read.snapshot.delay")
                     .durationType()
                     .noDefaultValue()
@@ -1853,8 +1853,8 @@ public class CoreOptions implements Serializable {
         return options.get(SCAN_MANIFEST_PARALLELISM);
     }
 
-    public Duration scanDelayDuration() {
-        return options.get(SCAN_DELAY_READ_DURATION);
+    public Duration streamingReadDelay() {
+        return options.get(STREAMING_READ_SNAPSHOT_DELAY);
     }
 
     public Integer dynamicBucketInitialBuckets() {

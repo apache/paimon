@@ -182,8 +182,8 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
                 throw new EndOfScanException();
             }
 
-            if (checkDelaySnapshot(nextSnapshotId)) {
-                continue;
+            if (shouldDelaySnapshot(nextSnapshotId)) {
+                return SnapshotNotExistPlan.INSTANCE;
             }
 
             // first check changes of overwrite
@@ -207,7 +207,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
         }
     }
 
-    private boolean checkDelaySnapshot(long snapshotId) {
+    private boolean shouldDelaySnapshot(long snapshotId) {
         if (scanDelayMillis == null) {
             return false;
         }
@@ -260,7 +260,9 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
     }
 
     private Long getScanDelayMillis() {
-        return options.scanDelayDuration() == null ? null : options.scanDelayDuration().toMillis();
+        return options.streamingReadDelay() == null
+                ? null
+                : options.streamingReadDelay().toMillis();
     }
 
     @Nullable
