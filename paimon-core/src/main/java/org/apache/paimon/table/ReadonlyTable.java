@@ -19,6 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.stats.Statistics;
@@ -137,6 +138,14 @@ public interface ReadonlyTable extends InnerTable {
         throw new UnsupportedOperationException(
                 String.format(
                         "Readonly Table %s does not support manifestFileReader.",
+                        this.getClass().getSimpleName()));
+    }
+
+    @Override
+    default SimpleFileReader<IndexManifestEntry> indexManifestFileReader() {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support indexManifestFileReader.",
                         this.getClass().getSimpleName()));
     }
 

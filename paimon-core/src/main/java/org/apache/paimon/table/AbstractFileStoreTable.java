@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.metastore.AddPartitionCommitCallback;
@@ -136,6 +137,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public SimpleFileReader<ManifestEntry> manifestFileReader() {
         return store().manifestFileFactory().create();
+    }
+
+    @Override
+    public SimpleFileReader<IndexManifestEntry> indexManifestFileReader() {
+        return store().indexManifestFileFactory().create();
     }
 
     @Override

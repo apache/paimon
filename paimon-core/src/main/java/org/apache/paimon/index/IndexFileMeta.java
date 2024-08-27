@@ -18,6 +18,7 @@
 
 package org.apache.paimon.index;
 
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
@@ -34,7 +35,12 @@ import java.util.Objects;
 
 import static org.apache.paimon.utils.SerializationUtils.newStringType;
 
-/** Metadata of index file. */
+/**
+ * Metadata of index file.
+ *
+ * @since 0.9.0
+ */
+@Public
 public class IndexFileMeta {
 
     public static final RowType SCHEMA =

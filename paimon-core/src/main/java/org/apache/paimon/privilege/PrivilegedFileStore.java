@@ -23,6 +23,7 @@ import org.apache.paimon.FileStore;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
@@ -104,6 +105,11 @@ public class PrivilegedFileStore<T> implements FileStore<T> {
     @Override
     public ManifestFile.Factory manifestFileFactory() {
         return wrapped.manifestFileFactory();
+    }
+
+    @Override
+    public IndexManifestFile.Factory indexManifestFileFactory() {
+        return wrapped.indexManifestFileFactory();
     }
 
     @Override
