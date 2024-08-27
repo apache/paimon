@@ -52,7 +52,7 @@ public class CreateTagFromWatermarkProcedureITCase extends CatalogITCaseBase {
                                         "CALL sys.create_tag_from_watermark("
                                                 + "`table` => 'default.T',"
                                                 + "`tag` => 'tag1',"
-                                                + "`timestamp` => %s )",
+                                                + "`watermark` => %s )",
                                         1000))
                 .withRootCauseInstanceOf(SnapshotNotExistException.class)
                 .withMessageContaining(
@@ -86,7 +86,7 @@ public class CreateTagFromWatermarkProcedureITCase extends CatalogITCaseBase {
                                         "CALL sys.create_tag_from_watermark("
                                                 + "`table` => 'default.T',"
                                                 + "`tag` => 'tag2',"
-                                                + "`timestamp` => %s)",
+                                                + "`watermark` => %s)",
                                         watermark2 - 1)
                                 .stream()
                                 .map(Row::toString))
@@ -98,7 +98,7 @@ public class CreateTagFromWatermarkProcedureITCase extends CatalogITCaseBase {
                                         "CALL sys.create_tag_from_watermark("
                                                 + "`table` => 'default.T',"
                                                 + "`tag` => 'tag3',"
-                                                + "`timestamp` => %s)",
+                                                + "`watermark` => %s)",
                                         watermark2 + 1)
                                 .stream()
                                 .map(Row::toString))
@@ -112,7 +112,7 @@ public class CreateTagFromWatermarkProcedureITCase extends CatalogITCaseBase {
                                         "CALL sys.create_tag_from_watermark("
                                                 + "`table` => 'default.T',"
                                                 + "`tag` => 'tag4',"
-                                                + "`timestamp` => %s )",
+                                                + "`watermark` => %s )",
                                         watermark3 + 1))
                 .withRootCauseInstanceOf(SnapshotNotExistException.class)
                 .withMessageContaining(
@@ -165,7 +165,7 @@ public class CreateTagFromWatermarkProcedureITCase extends CatalogITCaseBase {
                                         "CALL sys.create_tag_from_watermark("
                                                 + "`table` => 'default.T',"
                                                 + "`tag` => 'tag2',"
-                                                + "`timestamp` => %s)",
+                                                + "`watermark` => %s)",
                                         tagsWatermark - 1)
                                 .stream()
                                 .map(Row::toString))
@@ -177,7 +177,7 @@ public class CreateTagFromWatermarkProcedureITCase extends CatalogITCaseBase {
                                         "CALL sys.create_tag_from_watermark("
                                                 + "`table` => 'default.T',"
                                                 + "`tag` => 'tag3',"
-                                                + "`timestamp` => %s)",
+                                                + "`watermark` => %s)",
                                         watermark2 - 1)
                                 .stream()
                                 .map(Row::toString))

@@ -45,7 +45,7 @@ public class CreateTagFromWatermarkProcedure extends ProcedureBase {
             argument = {
                 @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
                 @ArgumentHint(name = "tag", type = @DataTypeHint(value = "STRING")),
-                @ArgumentHint(name = "timestamp", type = @DataTypeHint("bigint")),
+                @ArgumentHint(name = "watermark", type = @DataTypeHint("bigint")),
                 @ArgumentHint(
                         name = "time_retained",
                         type = @DataTypeHint("STRING"),
@@ -56,18 +56,18 @@ public class CreateTagFromWatermarkProcedure extends ProcedureBase {
             ProcedureContext procedureContext,
             String tableId,
             String tagName,
-            Long timestamp,
+            Long watermark,
             @Nullable String timeRetained)
             throws Catalog.TableNotExistException {
         FileStoreTable fileStoreTable = (FileStoreTable) table(tableId);
         SnapshotManager snapshotManager = fileStoreTable.snapshotManager();
 
-        Snapshot snapshot = snapshotManager.laterOrEqualWatermark(timestamp);
+        Snapshot snapshot = snapshotManager.laterOrEqualWatermark(watermark);
 
         Set<Snapshot> sortedTagsSnapshots = fileStoreTable.tagManager().tags().keySet();
 
         for (Snapshot tagSnapshot : sortedTagsSnapshots) {
-            if (tagSnapshot.watermark() != null && timestamp <= tagSnapshot.watermark()) {
+            if (tagSnapshot.watermark() != null && watermark <= tagSnapshot.watermark()) {
                 if (snapshot == null
                         || snapshot.watermark() == null
                         || tagSnapshot.watermark() < snapshot.watermark()) {
@@ -80,7 +80,7 @@ public class CreateTagFromWatermarkProcedure extends ProcedureBase {
         SnapshotNotExistException.checkNotNull(
                 snapshot,
                 String.format(
-                        "Could not find any snapshot whose watermark later than %s.", timestamp));
+                        "Could not find any snapshot whose watermark later than %s.", watermark));
 
         fileStoreTable.createTag(tagName, snapshot.id(), toDuration(timeRetained));
 
