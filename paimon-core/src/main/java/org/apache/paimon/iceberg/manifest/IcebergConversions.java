@@ -128,6 +128,14 @@ public class IcebergConversions {
                 DecimalType decimalType = (DecimalType) type;
                 return Decimal.fromUnscaledBytes(
                         bytes, decimalType.getPrecision(), decimalType.getScale());
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+                TimestampType timestampType = (TimestampType) type;
+                return convertBytesToTimestamp(bytes, timestampType.getPrecision());
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                LocalZonedTimestampType localTimestampType = (LocalZonedTimestampType) type;
+                return convertBytesToTimestamp(bytes, localTimestampType.getPrecision());
+            case TIME_WITHOUT_TIME_ZONE:
+                return ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getLong() * 1000;
             default:
                 throw new UnsupportedOperationException("Cannot deserialize type: " + type);
         }
@@ -143,5 +151,16 @@ public class IcebergConversions {
                     timestamp.getMillisecond() * 1_000_000 + timestamp.getNanoOfMillisecond();
         }
         return ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putLong(timestampValue);
+    }
+
+    private static Timestamp convertBytesToTimestamp(byte[] bytes, int precision) {
+        long timestampValue = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getLong();
+        long milliseconds = timestampValue / 1_000_000;
+        int nanosOfMillisecond = (int) (timestampValue % 1_000_000);
+        if (precision <= 3) {
+            return Timestamp.fromEpochMillis(milliseconds);
+        } else {
+            return Timestamp.fromEpochMillis(milliseconds, nanosOfMillisecond);
+        }
     }
 }

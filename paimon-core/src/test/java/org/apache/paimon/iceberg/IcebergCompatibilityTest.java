@@ -26,8 +26,8 @@ import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.MemorySize;
@@ -37,7 +37,6 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.types.DataType;
@@ -320,8 +319,8 @@ public class IcebergCompatibilityTest {
                     return b;
                 };
 
-        int numRounds = 2;
-        int numRecords = 1;
+        int numRounds = 20;
+        int numRecords = 500;
         ThreadLocalRandom random = ThreadLocalRandom.current();
         boolean samePartitionEachRound = random.nextBoolean();
 
@@ -369,25 +368,26 @@ public class IcebergCompatibilityTest {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
-                                DataTypes.TIMESTAMP(6),
-                                DataTypes.STRING(),
-                                DataTypes.INT(),
-                                DataTypes.BIGINT()
+                            DataTypes.TIMESTAMP(6),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.INT(),
+                            DataTypes.BIGINT()
                         },
-                        new String[] {"pt", "k", "v1", "v2"});
+                        new String[] {"pt1", "pt2", "k", "v1", "v2"});
 
         BiFunction<Timestamp, String, BinaryRow> binaryRow =
-                (pt, k) -> {
+                (pt1, pt2) -> {
                     BinaryRow b = new BinaryRow(2);
                     BinaryRowWriter writer = new BinaryRowWriter(b);
-                    writer.writeTimestamp(0, pt, 6);
-                    writer.writeString(1, BinaryString.fromString(k));
+                    writer.writeTimestamp(0, pt1, 6);
+                    writer.writeString(1, BinaryString.fromString(pt2));
                     writer.complete();
                     return b;
                 };
 
-        int numRounds = 2;
-        int numRecords = 1;
+        int numRounds = 20;
+        int numRecords = 100;
         ThreadLocalRandom random = ThreadLocalRandom.current();
 
         List<List<TestRecord>> testRecords = new ArrayList<>();
@@ -397,18 +397,25 @@ public class IcebergCompatibilityTest {
         for (int r = 0; r < numRounds; r++) {
             List<TestRecord> round = new ArrayList<>();
             for (int i = 0; i < numRecords; i++) {
-                Timestamp pt = generateRandomTimestamp(random, random.nextBoolean() ? 3 : 6);
+                Timestamp pt1 = generateRandomTimestamp(random, random.nextBoolean() ? 3 : 6);
+                String pt2 = String.valueOf(random.nextInt(10, 12));
                 String k = String.valueOf(random.nextInt(0, 100));
                 int v1 = random.nextInt();
                 long v2 = random.nextLong();
 
                 round.add(
                         new TestRecord(
-                                binaryRow.apply(pt, k),
-                                GenericRow.of(pt, BinaryString.fromString(k), v1, v2)));
+                                binaryRow.apply(pt1, pt2),
+                                GenericRow.of(
+                                        pt1,
+                                        BinaryString.fromString(pt2),
+                                        BinaryString.fromString(k),
+                                        v1,
+                                        v2)));
 
                 expectedMap.put(
-                        String.format("%s, %s", pt.toInstant().atOffset(ZoneOffset.UTC), k),
+                        String.format(
+                                "%s, %s, %s", pt1.toInstant().atOffset(ZoneOffset.UTC), pt2, k),
                         String.format("%d, %d", v1, v2));
             }
 
@@ -421,15 +428,15 @@ public class IcebergCompatibilityTest {
 
         runCompatibilityTest(
                 rowType,
-                Arrays.asList("pt"),
-                Arrays.asList("pt", "k"),
+                Arrays.asList("pt1", "pt2"),
+                Arrays.asList("pt1", "pt2", "k"),
                 testRecords,
                 expected,
                 Record::toString);
     }
 
     private Timestamp generateRandomTimestamp(ThreadLocalRandom random, int precision) {
-        long milliseconds = random.nextLong(0, 10_000_000_000_000L);
+        long milliseconds = random.nextLong(0, Long.MAX_VALUE / 1000_000 - 1_000 * 1000);
         int nanoAdjustment;
         switch (precision) {
             case 3:
@@ -594,11 +601,8 @@ public class IcebergCompatibilityTest {
                     }
                 }
             }
-
             commit.commit(r, write.prepareCommit(true, r));
-            Thread.sleep(500);
-            System.out.println("结果："+getIcebergResult(icebergRecordToString));
-           // assertThat(getIcebergResult(icebergRecordToString)).hasSameElementsAs(expected.get(r));
+            assertThat(getIcebergResult(icebergRecordToString)).hasSameElementsAs(expected.get(r));
         }
 
         write.close();
