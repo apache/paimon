@@ -21,6 +21,7 @@ package org.apache.paimon.table;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.stats.Statistics;
@@ -232,6 +233,11 @@ public interface FormatTable extends Table {
 
     @Override
     default SimpleFileReader<ManifestEntry> manifestFileReader() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    default SimpleFileReader<IndexManifestEntry> indexManifestFileReader() {
         throw new UnsupportedOperationException();
     }
 

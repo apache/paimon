@@ -20,6 +20,7 @@ package org.apache.paimon;
 
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
@@ -69,6 +70,8 @@ public interface FileStore<T> {
     ManifestList.Factory manifestListFactory();
 
     ManifestFile.Factory manifestFileFactory();
+
+    IndexManifestFile.Factory indexManifestFileFactory();
 
     IndexFileHandler newIndexFileHandler();
 

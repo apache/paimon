@@ -21,6 +21,7 @@ package org.apache.paimon.table;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.stats.Statistics;
@@ -93,6 +94,10 @@ public interface Table extends Serializable {
     /** Reader to read manifest entry from manifest file. */
     @Experimental
     SimpleFileReader<ManifestEntry> manifestFileReader();
+
+    /** Reader to read index manifest entry from index manifest file. */
+    @Experimental
+    SimpleFileReader<IndexManifestEntry> indexManifestFileReader();
 
     /** Rollback table's state to a specific snapshot. */
     @Experimental

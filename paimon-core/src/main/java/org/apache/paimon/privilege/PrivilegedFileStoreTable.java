@@ -20,6 +20,7 @@ package org.apache.paimon.privilege;
 
 import org.apache.paimon.FileStore;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -102,6 +103,11 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
     @Override
     public SimpleFileReader<ManifestEntry> manifestFileReader() {
         return wrapped.manifestFileReader();
+    }
+
+    @Override
+    public SimpleFileReader<IndexManifestEntry> indexManifestFileReader() {
+        return wrapped.indexManifestFileReader();
     }
 
     @Override
