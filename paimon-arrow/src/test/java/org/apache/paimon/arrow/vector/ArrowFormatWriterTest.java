@@ -18,6 +18,7 @@
 
 package org.apache.paimon.arrow.vector;
 
+import org.apache.paimon.arrow.ArrowBundleRecords;
 import org.apache.paimon.arrow.reader.ArrowBatchReader;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
@@ -145,6 +146,38 @@ public class ArrowFormatWriterTest {
             Iterable<InternalRow> rows = arrowBatchReader.readBatch(new VectorSchemaRoot(vectors));
 
             Iterator<InternalRow> iterator = rows.iterator();
+            for (int i = 0; i < 1000; i++) {
+                InternalRow actual = iterator.next();
+                InternalRow expectec = list.get(i);
+
+                for (InternalRow.FieldGetter fieldGetter : fieldGetters) {
+                    Assertions.assertThat(fieldGetter.getFieldOrNull(actual))
+                            .isEqualTo(fieldGetter.getFieldOrNull(expectec));
+                }
+            }
+        }
+    }
+
+    @Test
+    public void testArrowBundleRecords() {
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(PRIMITIVE_TYPE, 4096)) {
+            List<InternalRow> list = new ArrayList<>();
+            List<InternalRow.FieldGetter> fieldGetters = new ArrayList<>();
+
+            for (int i = 0; i < PRIMITIVE_TYPE.getFieldCount(); i++) {
+                fieldGetters.add(InternalRow.createFieldGetter(PRIMITIVE_TYPE.getTypeAt(i), i));
+            }
+            for (int i = 0; i < 1000; i++) {
+                list.add(GenericRow.of(randomRowValues(null)));
+            }
+
+            list.forEach(writer::write);
+
+            writer.flush();
+            VectorSchemaRoot vectorSchemaRoot = writer.getVectorSchemaRoot();
+
+            Iterator<InternalRow> iterator =
+                    new ArrowBundleRecords(vectorSchemaRoot, PRIMITIVE_TYPE).iterator();
             for (int i = 0; i < 1000; i++) {
                 InternalRow actual = iterator.next();
                 InternalRow expectec = list.get(i);
