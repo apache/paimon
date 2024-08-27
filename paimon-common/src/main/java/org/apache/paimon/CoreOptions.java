@@ -659,10 +659,11 @@ public class CoreOptions implements Serializable {
                                     + "We can consider downsize it when we encounter an out of memory exception while scanning");
 
     public static final ConfigOption<Duration> SCAN_DELAY_READ_DURATION =
-            key("scan.stream.delay.read.duration")
+            key("streaming.read.snapshot.delay")
                     .durationType()
                     .noDefaultValue()
-                    .withDescription("The delay duration of stream read when scan snapshots");
+                    .withDescription(
+                            "The delay duration of stream read when scan incremental snapshots.");
 
     @ExcludeFromDocumentation("Confused without log system")
     public static final ConfigOption<LogConsistency> LOG_CONSISTENCY =

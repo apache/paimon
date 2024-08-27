@@ -67,6 +67,8 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
     @Nullable private Long currentWatermark;
     @Nullable private Long nextSnapshotId;
 
+    @Nullable private Long scanDelayMillis;
+
     public DataTableStreamScan(
             CoreOptions options,
             SnapshotReader snapshotReader,
@@ -118,6 +120,9 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
         }
         if (boundedChecker == null) {
             boundedChecker = createBoundedChecker();
+        }
+        if (scanDelayMillis == null) {
+            scanDelayMillis = getScanDelayMillis();
         }
         initialized = true;
     }
@@ -203,11 +208,11 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
     }
 
     private boolean checkDelaySnapshot(long snapshotId) {
-        if (options.scanDelayDuration() == null) {
+        if (scanDelayMillis == null) {
             return false;
         }
-        long delayMillis = options.scanDelayDuration().toMillis();
-        long snapshotMills = System.currentTimeMillis() - delayMillis;
+
+        long snapshotMills = System.currentTimeMillis() - scanDelayMillis;
         if (snapshotManager.snapshotExists(snapshotId)
                 && snapshotManager.snapshot(snapshotId).timeMillis() > snapshotMills) {
             return true;
@@ -252,6 +257,10 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
         return boundedWatermark != null
                 ? BoundedChecker.watermark(boundedWatermark)
                 : BoundedChecker.neverEnd();
+    }
+
+    private Long getScanDelayMillis() {
+        return options.scanDelayDuration() == null ? null : options.scanDelayDuration().toMillis();
     }
 
     @Nullable
