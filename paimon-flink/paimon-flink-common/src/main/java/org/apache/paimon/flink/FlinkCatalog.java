@@ -931,16 +931,14 @@ public class FlinkCatalog extends AbstractCatalog {
         checkNotNull(partitionSpec, "partition spec shouldn't be null");
         Identifier identifier = toIdentifier(tablePath);
         try {
-            Table table = catalog().getTable(identifier);
-            FileStoreTable fileStoreTable = (FileStoreTable) table;
-
-            if (fileStoreTable.partitionKeys() == null
-                    || fileStoreTable.partitionKeys().size() == 0) {
+            Table table = catalog.getTable(identifier);
+            if (table.partitionKeys() == null || table.partitionKeys().size() == 0) {
                 throw new PartitionNotExistException(getName(), tablePath, partitionSpec);
             }
 
-            ReadBuilder readBuilder = table.newReadBuilder();
-            readBuilder.withPartitionFilter(checkNotNull(partitionSpec.getPartitionSpec()));
+            ReadBuilder readBuilder =
+                    table.newReadBuilder()
+                            .withPartitionFilter(checkNotNull(partitionSpec.getPartitionSpec()));
             List<PartitionEntry> partitionEntries = readBuilder.newScan().listPartitionEntries();
             if (partitionEntries.isEmpty()) {
                 throw new PartitionNotExistException(getName(), tablePath, partitionSpec);
