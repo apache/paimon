@@ -36,6 +36,7 @@ public class PartitionEntry {
     private final long recordCount;
     private final long fileSizeInBytes;
     private final long fileCount;
+    private final long level0FileCount;
     private final long lastFileCreationTime;
 
     public PartitionEntry(
@@ -43,11 +44,13 @@ public class PartitionEntry {
             long recordCount,
             long fileSizeInBytes,
             long fileCount,
+            long level0FileCount,
             long lastFileCreationTime) {
         this.partition = partition;
         this.recordCount = recordCount;
         this.fileSizeInBytes = fileSizeInBytes;
         this.fileCount = fileCount;
+        this.level0FileCount = level0FileCount;
         this.lastFileCreationTime = lastFileCreationTime;
     }
 
@@ -71,12 +74,17 @@ public class PartitionEntry {
         return lastFileCreationTime;
     }
 
+    public long level0FileCount() {
+        return level0FileCount;
+    }
+
     public PartitionEntry merge(PartitionEntry entry) {
         return new PartitionEntry(
                 partition,
                 recordCount + entry.recordCount,
                 fileSizeInBytes + entry.fileSizeInBytes,
                 fileCount + entry.fileCount,
+                level0FileCount + entry.level0FileCount,
                 Math.max(lastFileCreationTime, entry.lastFileCreationTime));
     }
 
@@ -84,16 +92,23 @@ public class PartitionEntry {
         long recordCount = entry.file().rowCount();
         long fileSizeInBytes = entry.file().fileSize();
         long fileCount = 1;
+        long level0FileCount = 0;
+
+        if (entry.level() == 0) {
+            level0FileCount = 1;
+        }
         if (entry.kind() == DELETE) {
             recordCount = -recordCount;
             fileSizeInBytes = -fileSizeInBytes;
             fileCount = -fileCount;
+            level0FileCount = -level0FileCount;
         }
         return new PartitionEntry(
                 entry.partition(),
                 recordCount,
                 fileSizeInBytes,
                 fileCount,
+                level0FileCount,
                 entry.file().creationTimeEpochMillis());
     }
 
@@ -126,6 +141,7 @@ public class PartitionEntry {
         return recordCount == that.recordCount
                 && fileSizeInBytes == that.fileSizeInBytes
                 && fileCount == that.fileCount
+                && level0FileCount == that.level0FileCount
                 && lastFileCreationTime == that.lastFileCreationTime
                 && Objects.equals(partition, that.partition);
     }
@@ -133,6 +149,11 @@ public class PartitionEntry {
     @Override
     public int hashCode() {
         return Objects.hash(
-                partition, recordCount, fileSizeInBytes, fileCount, lastFileCreationTime);
+                partition,
+                recordCount,
+                fileSizeInBytes,
+                fileCount,
+                level0FileCount,
+                lastFileCreationTime);
     }
 }

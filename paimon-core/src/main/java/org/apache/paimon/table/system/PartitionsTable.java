@@ -73,7 +73,8 @@ public class PartitionsTable implements ReadonlyTable {
                             new DataField(1, "record_count", new BigIntType(false)),
                             new DataField(2, "file_size_in_bytes", new BigIntType(false)),
                             new DataField(3, "file_count", new BigIntType(false)),
-                            new DataField(4, "last_update_time", DataTypes.TIMESTAMP_MILLIS())));
+                            new DataField(4, "level0_file_count", new BigIntType(false)),
+                            new DataField(5, "last_update_time", DataTypes.TIMESTAMP_MILLIS())));
 
     private final FileStoreTable storeTable;
 
@@ -206,6 +207,7 @@ public class PartitionsTable implements ReadonlyTable {
                     entry.recordCount(),
                     entry.fileSizeInBytes(),
                     entry.fileCount(),
+                    entry.level0FileCount(),
                     Timestamp.fromLocalDateTime(
                             LocalDateTime.ofInstant(
                                     Instant.ofEpochMilli(entry.lastFileCreationTime()),
