@@ -47,10 +47,10 @@ public class CreateTagFromTimestampAction extends ActionBase {
 
     @Override
     public void run() throws Exception {
-        CreateTagFromTimestampProcedure migrateTableProcedure =
+        CreateTagFromTimestampProcedure createTagFromTimestampProcedure =
                 new CreateTagFromTimestampProcedure();
-        migrateTableProcedure.withCatalog(catalog);
-        migrateTableProcedure.call(
+        createTagFromTimestampProcedure.withCatalog(catalog);
+        createTagFromTimestampProcedure.call(
                 new DefaultProcedureContext(env), table, tag, timestamp, timeRetained);
     }
 }
