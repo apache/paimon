@@ -239,18 +239,16 @@ public class StartupModeTest extends ScannerTestBase {
         // streaming Mode
         StreamTableScan dataTableScan = table.newStreamScan();
         TableScan.Plan firstPlan = dataTableScan.plan();
-
-        long startTime = System.currentTimeMillis();
-        TableScan.Plan secondPlan = dataTableScan.plan();
-        long endTime = System.currentTimeMillis();
-        long duration = endTime - startTime;
-
-        // delay stream read time is 5000 mills
-        assertThat(duration).isGreaterThan(4500);
-        assertThat(duration).isLessThan(5500);
-
         assertThat(firstPlan.splits()).isEmpty();
-        assertThat(secondPlan.splits())
+
+        Thread.sleep(3000);
+        TableScan.Plan secondPlan = dataTableScan.plan();
+        assertThat(secondPlan.splits()).isEmpty();
+
+        Thread.sleep(5000);
+        TableScan.Plan thirdPlan = dataTableScan.plan();
+
+        assertThat(thirdPlan.splits())
                 .isEqualTo(snapshotReader.withSnapshot(2).withMode(ScanMode.DELTA).read().splits());
     }
 

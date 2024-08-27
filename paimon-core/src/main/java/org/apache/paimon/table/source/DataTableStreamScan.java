@@ -183,12 +183,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
             }
 
             if (shouldDelaySnapshot(nextSnapshotId)) {
-                try {
-                    Thread.sleep(this.scanDelayMillis);
-                } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
-                }
-                continue;
+                return SnapshotNotExistPlan.INSTANCE;
             }
 
             // first check changes of overwrite
