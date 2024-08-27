@@ -21,6 +21,8 @@ package org.apache.paimon.flink.procedure;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.CompactAction;
 import org.apache.paimon.flink.action.SortCompactAction;
+import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.TimeUtils;
 
 import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
@@ -52,7 +54,11 @@ public class CompactProcedure extends ProcedureBase {
                         isOptional = true),
                 @ArgumentHint(name = "order_by", type = @DataTypeHint("STRING"), isOptional = true),
                 @ArgumentHint(name = "options", type = @DataTypeHint("STRING"), isOptional = true),
-                @ArgumentHint(name = "where", type = @DataTypeHint("STRING"), isOptional = true)
+                @ArgumentHint(name = "where", type = @DataTypeHint("STRING"), isOptional = true),
+                @ArgumentHint(
+                        name = "partition_idle_time",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true)
             })
     public String[] call(
             ProcedureContext procedureContext,
@@ -61,7 +67,8 @@ public class CompactProcedure extends ProcedureBase {
             String orderStrategy,
             String orderByColumns,
             String tableOptions,
-            String where)
+            String where,
+            String partitionIdleTime)
             throws Exception {
         String warehouse = catalog.warehouse();
         Map<String, String> catalogOptions = catalog.options();
@@ -80,8 +87,14 @@ public class CompactProcedure extends ProcedureBase {
                             identifier.getObjectName(),
                             catalogOptions,
                             tableConf);
+            if (!isBlank(partitionIdleTime)) {
+                action.withPartitionIdleTime(TimeUtils.parseDuration(partitionIdleTime));
+            }
             jobName = "Compact Job";
         } else if (!isBlank(orderStrategy) && !isBlank(orderByColumns)) {
+            Preconditions.checkArgument(
+                    isBlank(partitionIdleTime),
+                    "sort compact do not support 'partition_idle_time'.");
             action =
                     new SortCompactAction(
                                     warehouse,
