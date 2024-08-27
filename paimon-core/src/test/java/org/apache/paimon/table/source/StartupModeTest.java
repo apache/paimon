@@ -232,7 +232,7 @@ public class StartupModeTest extends ScannerTestBase {
     public void testStartFromSnapshotWithDelayDuration() throws Exception {
         Map<String, String> properties = new HashMap<>();
         properties.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "2");
-        properties.put(CoreOptions.SCAN_DELAY_READ_DURATION.key(), "5 s");
+        properties.put(CoreOptions.STREAMING_READ_SNAPSHOT_DELAY.key(), "5 s");
         initializeTable(StartupMode.FROM_SNAPSHOT, properties);
         initializeTestData(); // initialize 3 commits
 
