@@ -18,78 +18,49 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.sink.PrepareCommitOperator;
+import org.apache.paimon.flink.sink.StateValueFilter;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
-import org.apache.paimon.flink.sink.TableWriteOperator;
-import org.apache.paimon.options.ConfigOption;
-import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.flink.sink.StoreSinkWriteWithUnionListState;
 import org.apache.paimon.table.FileStoreTable;
 
+import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.runtime.state.StateInitializationContext;
-import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
-
-import java.io.IOException;
-import java.time.Duration;
-import java.util.Optional;
-
-import static org.apache.paimon.flink.sink.cdc.CdcRecordUtils.toGenericRow;
+import org.apache.flink.runtime.state.StateSnapshotContext;
 
 /**
- * A {@link PrepareCommitOperator} to write {@link CdcRecord}. Record schema may change. If current
- * known schema does not fit record schema, this operator will wait for schema changes.
+ * A {@link PrepareCommitOperator} to write {@link CdcRecord} with StoreSinkWriteState. Record
+ * schema may change. If current known schema does not fit record schema, this operator will wait
+ * for schema changes.
  */
-public class CdcRecordStoreWriteOperator extends TableWriteOperator<CdcRecord> {
+public class CdcRecordStoreWriteOperator extends AbstractCdcRecordStoreWriteOperator {
 
     private static final long serialVersionUID = 1L;
-
-    public static final ConfigOption<Duration> RETRY_SLEEP_TIME =
-            ConfigOptions.key("cdc.retry-sleep-time")
-                    .durationType()
-                    .defaultValue(Duration.ofMillis(500));
-
-    private final long retrySleepMillis;
+    private transient StoreSinkWriteWithUnionListState state;
 
     public CdcRecordStoreWriteOperator(
             FileStoreTable table,
             StoreSinkWrite.Provider storeSinkWriteProvider,
             String initialCommitUser) {
         super(table, storeSinkWriteProvider, initialCommitUser);
-        this.retrySleepMillis =
-                table.coreOptions().toConfiguration().get(RETRY_SLEEP_TIME).toMillis();
     }
 
     @Override
-    public void initializeState(StateInitializationContext context) throws Exception {
-        table = table.copyWithLatestSchema();
-        super.initializeState(context);
+    protected void initStateAndWriter(
+            StateInitializationContext context,
+            StateValueFilter stateFilter,
+            IOManager ioManager,
+            String commitUser)
+            throws Exception {
+        state = new StoreSinkWriteWithUnionListState(context, stateFilter);
+        write =
+                storeSinkWriteProvider.provide(
+                        table, commitUser, state, ioManager, memoryPool, getMetricGroup());
     }
 
     @Override
-    protected boolean containLogSystem() {
-        return false;
-    }
-
-    @Override
-    public void processElement(StreamRecord<CdcRecord> element) throws Exception {
-        CdcRecord record = element.getValue();
-        Optional<GenericRow> optionalConverted = toGenericRow(record, table.schema().fields());
-        if (!optionalConverted.isPresent()) {
-            while (true) {
-                table = table.copyWithLatestSchema();
-                optionalConverted = toGenericRow(record, table.schema().fields());
-                if (optionalConverted.isPresent()) {
-                    break;
-                }
-                Thread.sleep(retrySleepMillis);
-            }
-            write.replace(table);
-        }
-
-        try {
-            write.write(optionalConverted.get());
-        } catch (Exception e) {
-            throw new IOException(e);
-        }
+    public void snapshotState(StateSnapshotContext context) throws Exception {
+        super.snapshotState(context);
+        state.snapshotState();
     }
 }

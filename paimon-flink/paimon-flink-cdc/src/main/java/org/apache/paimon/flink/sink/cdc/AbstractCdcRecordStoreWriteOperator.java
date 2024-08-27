@@ -20,34 +20,37 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.sink.PrepareCommitOperator;
-import org.apache.paimon.flink.sink.StateValueFilter;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
-import org.apache.paimon.flink.sink.StoreSinkWriteWithUnionListState;
 import org.apache.paimon.flink.sink.TableWriteOperator;
+import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.table.FileStoreTable;
 
-import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.runtime.state.StateInitializationContext;
-import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.Optional;
 
-import static org.apache.paimon.flink.sink.cdc.CdcRecordStoreWriteOperator.RETRY_SLEEP_TIME;
 import static org.apache.paimon.flink.sink.cdc.CdcRecordUtils.toGenericRow;
 
 /**
- * A {@link PrepareCommitOperator} to write {@link CdcRecord} with bucket. Record schema is fixed.
+ * A abstract {@link PrepareCommitOperator} to write {@link CdcRecord}. Record schema may change. If
+ * current known schema does not fit record schema, this operator will wait for schema changes.
  */
-public class CdcDynamicBucketWriteOperator extends TableWriteOperator<Tuple2<CdcRecord, Integer>> {
+public abstract class AbstractCdcRecordStoreWriteOperator extends TableWriteOperator<CdcRecord> {
 
     private static final long serialVersionUID = 1L;
-    private transient StoreSinkWriteWithUnionListState state;
+
+    public static final ConfigOption<Duration> RETRY_SLEEP_TIME =
+            ConfigOptions.key("cdc.retry-sleep-time")
+                    .durationType()
+                    .defaultValue(Duration.ofMillis(500));
+
     private final long retrySleepMillis;
 
-    public CdcDynamicBucketWriteOperator(
+    public AbstractCdcRecordStoreWriteOperator(
             FileStoreTable table,
             StoreSinkWrite.Provider storeSinkWriteProvider,
             String initialCommitUser) {
@@ -68,37 +71,18 @@ public class CdcDynamicBucketWriteOperator extends TableWriteOperator<Tuple2<Cdc
     }
 
     @Override
-    protected void initStateAndWriter(
-            StateInitializationContext context,
-            StateValueFilter stateFilter,
-            IOManager ioManager,
-            String commitUser)
-            throws Exception {
-        state = new StoreSinkWriteWithUnionListState(context, stateFilter);
-        write =
-                storeSinkWriteProvider.provide(
-                        table, commitUser, state, ioManager, memoryPool, getMetricGroup());
-    }
-
-    @Override
-    public void snapshotState(StateSnapshotContext context) throws Exception {
-        super.snapshotState(context);
-        state.snapshotState();
-    }
-
-    @Override
     protected boolean containLogSystem() {
         return false;
     }
 
     @Override
-    public void processElement(StreamRecord<Tuple2<CdcRecord, Integer>> element) throws Exception {
-        Tuple2<CdcRecord, Integer> record = element.getValue();
-        Optional<GenericRow> optionalConverted = toGenericRow(record.f0, table.schema().fields());
+    public void processElement(StreamRecord<CdcRecord> element) throws Exception {
+        CdcRecord record = element.getValue();
+        Optional<GenericRow> optionalConverted = toGenericRow(record, table.schema().fields());
         if (!optionalConverted.isPresent()) {
             while (true) {
                 table = table.copyWithLatestSchema();
-                optionalConverted = toGenericRow(record.f0, table.schema().fields());
+                optionalConverted = toGenericRow(record, table.schema().fields());
                 if (optionalConverted.isPresent()) {
                     break;
                 }
@@ -108,7 +92,7 @@ public class CdcDynamicBucketWriteOperator extends TableWriteOperator<Tuple2<Cdc
         }
 
         try {
-            write.write(optionalConverted.get(), record.f1);
+            write.write(optionalConverted.get());
         } catch (Exception e) {
             throw new IOException(e);
         }

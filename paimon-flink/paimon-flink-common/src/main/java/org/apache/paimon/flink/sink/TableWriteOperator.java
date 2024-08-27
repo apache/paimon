@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.flink.sink.StoreSinkWriteState.StateValueFilter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.ChannelComputer;
@@ -35,12 +34,11 @@ import java.util.List;
 public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, Committable> {
 
     protected FileStoreTable table;
-
-    private final StoreSinkWrite.Provider storeSinkWriteProvider;
-    private final String initialCommitUser;
-
-    private transient StoreSinkWriteState state;
     protected transient StoreSinkWrite write;
+    protected StateValueFilter stateFilter;
+    protected String commitUser;
+    protected final StoreSinkWrite.Provider storeSinkWriteProvider;
+    private final String initialCommitUser;
 
     public TableWriteOperator(
             FileStoreTable table,
@@ -59,13 +57,13 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
         // Each job can only have one user name and this name must be consistent across restarts.
         // We cannot use job id as commit user name here because user may change job id by creating
         // a savepoint, stop the job and then resume from savepoint.
-        String commitUser =
+        commitUser =
                 StateUtils.getSingleValueFromState(
                         context, "commit_user_state", String.class, initialCommitUser);
 
         boolean containLogSystem = containLogSystem();
         int numTasks = getRuntimeContext().getNumberOfParallelSubtasks();
-        StateValueFilter stateFilter =
+        stateFilter =
                 (tableName, partition, bucket) -> {
                     int task =
                             containLogSystem
@@ -73,38 +71,24 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
                                     : ChannelComputer.select(partition, bucket, numTasks);
                     return task == getRuntimeContext().getIndexOfThisSubtask();
                 };
-
-        initStateAndWriter(
-                context,
-                stateFilter,
-                getContainingTask().getEnvironment().getIOManager(),
-                commitUser);
     }
 
+    // We put state and write init in this method for convenient testing. Without construct a
+    // runtime context, we can test to construct a writer here
     @VisibleForTesting
-    void initStateAndWriter(
+    protected abstract void initStateAndWriter(
             StateInitializationContext context,
             StateValueFilter stateFilter,
             IOManager ioManager,
             String commitUser)
-            throws Exception {
-        // We put state and write init in this method for convenient testing. Without construct a
-        // runtime context, we can test to construct a writer here
-        state = new StoreSinkWriteState(context, stateFilter);
-
-        write =
-                storeSinkWriteProvider.provide(
-                        table, commitUser, state, ioManager, memoryPool, getMetricGroup());
-    }
+            throws Exception;
 
     protected abstract boolean containLogSystem();
 
     @Override
     public void snapshotState(StateSnapshotContext context) throws Exception {
         super.snapshotState(context);
-
         write.snapshotState();
-        state.snapshotState();
     }
 
     @Override

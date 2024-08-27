@@ -39,6 +39,7 @@ public class RowUnawareBucketSink extends UnawareBucketSink<InternalRow> {
     @Override
     protected OneInputStreamOperator<InternalRow, Committable> createWriteOperator(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new RowDataStoreWriteOperator(table, logSinkFunction, writeProvider, commitUser);
+        return new RowDataStoreUnawareBucketWriteOperator(
+                table, logSinkFunction, writeProvider, commitUser);
     }
 }

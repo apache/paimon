@@ -103,7 +103,7 @@ public class MultiTablesStoreCompactOperator
                         context, "commit_user_state", String.class, initialCommitUser);
 
         state =
-                new StoreSinkWriteState(
+                new StoreSinkWriteWithUnionListState(
                         context,
                         (tableName, partition, bucket) ->
                                 ChannelComputer.select(

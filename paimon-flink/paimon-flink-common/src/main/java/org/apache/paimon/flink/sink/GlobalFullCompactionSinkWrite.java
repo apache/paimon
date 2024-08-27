@@ -55,7 +55,6 @@ public class GlobalFullCompactionSinkWrite extends StoreSinkWriteImpl {
     private static final Logger LOG = LoggerFactory.getLogger(GlobalFullCompactionSinkWrite.class);
 
     private final int deltaCommits;
-
     private final String tableName;
     private final SnapshotManager snapshotManager;
 
@@ -86,9 +85,7 @@ public class GlobalFullCompactionSinkWrite extends StoreSinkWriteImpl {
                 isStreaming,
                 memoryPool,
                 metricGroup);
-
         this.deltaCommits = deltaCommits;
-
         this.tableName = table.name();
         this.snapshotManager = table.snapshotManager();
 

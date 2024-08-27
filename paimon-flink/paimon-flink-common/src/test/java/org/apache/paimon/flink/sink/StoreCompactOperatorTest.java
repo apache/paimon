@@ -52,7 +52,7 @@ public class StoreCompactOperatorTest extends TableTestBase {
                 new CompactRememberStoreWrite(streamingMode);
         StoreCompactOperator storeCompactOperator =
                 new StoreCompactOperator(
-                        (FileStoreTable) getTableDefault(),
+                        getTableDefault(),
                         (table, commitUser, state, ioManager, memoryPool, metricGroup) ->
                                 compactRememberStoreWrite,
                         "10086");

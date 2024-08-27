@@ -19,24 +19,9 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.utils.SerializationUtils;
 
-import org.apache.flink.api.common.state.ListState;
-import org.apache.flink.api.common.state.ListStateDescriptor;
-import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.api.common.typeutils.base.IntSerializer;
-import org.apache.flink.api.common.typeutils.base.StringSerializer;
-import org.apache.flink.api.common.typeutils.base.array.BytePrimitiveArraySerializer;
-import org.apache.flink.api.java.tuple.Tuple5;
-import org.apache.flink.api.java.typeutils.runtime.TupleSerializer;
-import org.apache.flink.runtime.state.StateInitializationContext;
-
-import javax.annotation.Nullable;
-
-import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 
 /**
  * States for {@link StoreSinkWrite}s.
@@ -46,74 +31,24 @@ import java.util.Map;
  */
 public class StoreSinkWriteState {
 
-    private final StateValueFilter stateValueFilter;
-
-    private final ListState<Tuple5<String, String, byte[], Integer, byte[]>> listState;
-    private final Map<String, Map<String, List<StateValue>>> map;
+    protected final StateValueFilter stateValueFilter;
 
     @SuppressWarnings("unchecked")
-    public StoreSinkWriteState(
-            StateInitializationContext context, StateValueFilter stateValueFilter)
-            throws Exception {
+    public StoreSinkWriteState(StateValueFilter stateValueFilter) throws Exception {
         this.stateValueFilter = stateValueFilter;
-        TupleSerializer<Tuple5<String, String, byte[], Integer, byte[]>> listStateSerializer =
-                new TupleSerializer<>(
-                        (Class<Tuple5<String, String, byte[], Integer, byte[]>>)
-                                (Class<?>) Tuple5.class,
-                        new TypeSerializer[] {
-                            StringSerializer.INSTANCE,
-                            StringSerializer.INSTANCE,
-                            BytePrimitiveArraySerializer.INSTANCE,
-                            IntSerializer.INSTANCE,
-                            BytePrimitiveArraySerializer.INSTANCE
-                        });
-        listState =
-                context.getOperatorStateStore()
-                        .getUnionListState(
-                                new ListStateDescriptor<>(
-                                        "paimon_store_sink_write_state", listStateSerializer));
-
-        map = new HashMap<>();
-        for (Tuple5<String, String, byte[], Integer, byte[]> tuple : listState.get()) {
-            BinaryRow partition = SerializationUtils.deserializeBinaryRow(tuple.f2);
-            if (stateValueFilter.filter(tuple.f0, partition, tuple.f3)) {
-                map.computeIfAbsent(tuple.f0, k -> new HashMap<>())
-                        .computeIfAbsent(tuple.f1, k -> new ArrayList<>())
-                        .add(new StateValue(partition, tuple.f3, tuple.f4));
-            }
-        }
     }
 
     public StateValueFilter stateValueFilter() {
         return stateValueFilter;
     }
 
-    public @Nullable List<StateValue> get(String tableName, String key) {
-        Map<String, List<StateValue>> innerMap = map.get(tableName);
-        return innerMap == null ? null : innerMap.get(key);
+    List<StateValue> get(String tableName, String key) {
+        return Collections.emptyList();
     }
 
-    public void put(String tableName, String key, List<StateValue> stateValues) {
-        map.computeIfAbsent(tableName, k -> new HashMap<>()).put(key, stateValues);
-    }
+    void put(String tableName, String key, List<StoreSinkWriteState.StateValue> stateValues) {}
 
-    public void snapshotState() throws Exception {
-        List<Tuple5<String, String, byte[], Integer, byte[]>> list = new ArrayList<>();
-        for (Map.Entry<String, Map<String, List<StateValue>>> tables : map.entrySet()) {
-            for (Map.Entry<String, List<StateValue>> entry : tables.getValue().entrySet()) {
-                for (StateValue stateValue : entry.getValue()) {
-                    list.add(
-                            Tuple5.of(
-                                    tables.getKey(),
-                                    entry.getKey(),
-                                    SerializationUtils.serializeBinaryRow(stateValue.partition()),
-                                    stateValue.bucket(),
-                                    stateValue.value()));
-                }
-            }
-        }
-        listState.update(list);
-    }
+    void snapshotState() throws Exception {}
 
     /**
      * A state value for {@link StoreSinkWrite}. All state values should be given a partition and a
@@ -142,14 +77,5 @@ public class StoreSinkWriteState {
         public byte[] value() {
             return value;
         }
-    }
-
-    /**
-     * Given the table name, partition and bucket of a {@link StateValue} in a union list state,
-     * decide whether to keep this {@link StateValue} in this subtask.
-     */
-    public interface StateValueFilter {
-
-        boolean filter(String tableName, BinaryRow partition, int bucket);
     }
 }

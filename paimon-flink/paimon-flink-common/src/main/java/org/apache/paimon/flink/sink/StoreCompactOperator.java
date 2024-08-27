@@ -99,13 +99,13 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
     @VisibleForTesting
     void initStateAndWriter(
             StateInitializationContext context,
-            StoreSinkWriteState.StateValueFilter stateFilter,
+            StateValueFilter stateFilter,
             IOManager ioManager,
             String commitUser)
             throws Exception {
         // We put state and write init in this method for convenient testing. Without construct a
         // runtime context, we can test to construct a writer here
-        state = new StoreSinkWriteState(context, stateFilter);
+        state = new StoreSinkWriteWithUnionListState(context, stateFilter);
 
         write =
                 storeSinkWriteProvider.provide(

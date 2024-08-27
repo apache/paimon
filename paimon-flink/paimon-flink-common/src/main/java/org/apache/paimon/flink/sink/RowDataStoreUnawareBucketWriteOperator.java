@@ -16,27 +16,25 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink.cdc;
+package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.flink.sink.PrepareCommitOperator;
-import org.apache.paimon.flink.sink.StateValueFilter;
-import org.apache.paimon.flink.sink.StoreSinkWrite;
-import org.apache.paimon.flink.sink.StoreSinkWriteState;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.types.RowKind;
 
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.runtime.state.StateInitializationContext;
-import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
-/** A {@link PrepareCommitOperator} to write {@link CdcRecord} to unaware-bucket mode table. */
-public class CdcUnawareBucketWriteOperator extends AbstractCdcRecordStoreWriteOperator {
+import javax.annotation.Nullable;
 
-    public CdcUnawareBucketWriteOperator(
+/** A {@link PrepareCommitOperator} to write {@link InternalRow}. Record schema is fixed. */
+public class RowDataStoreUnawareBucketWriteOperator extends AbstractRowDataStoreWriteOperator {
+
+    public RowDataStoreUnawareBucketWriteOperator(
             FileStoreTable table,
+            @Nullable LogSinkFunction logSinkFunction,
             StoreSinkWrite.Provider storeSinkWriteProvider,
             String initialCommitUser) {
-        super(table, storeSinkWriteProvider, initialCommitUser);
+        super(table, logSinkFunction, storeSinkWriteProvider, initialCommitUser);
     }
 
     @Override
@@ -54,13 +52,5 @@ public class CdcUnawareBucketWriteOperator extends AbstractCdcRecordStoreWriteOp
                         ioManager,
                         memoryPool,
                         getMetricGroup());
-    }
-
-    @Override
-    public void processElement(StreamRecord<CdcRecord> element) throws Exception {
-        // only accepts INSERT record
-        if (element.getValue().kind() == RowKind.INSERT) {
-            super.processElement(element);
-        }
     }
 }

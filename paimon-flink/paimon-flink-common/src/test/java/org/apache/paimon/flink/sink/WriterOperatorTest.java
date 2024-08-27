@@ -339,17 +339,17 @@ public class WriterOperatorTest {
                         options);
         TableCommitImpl commit = fileStoreTable.newCommit(commitUser);
 
-        RowDataStoreWriteOperator rowDataStoreWriteOperator =
+        RowDataStoreWriteOperator rowDataStoreWriteOperatorWithState =
                 getStoreSinkWriteOperator(fileStoreTable);
         OneInputStreamOperatorTestHarness<InternalRow, Committable> harness =
-                createHarness(rowDataStoreWriteOperator);
+                createHarness(rowDataStoreWriteOperatorWithState);
 
         TypeSerializer<Committable> serializer =
                 new CommittableTypeInfo().createSerializer(new ExecutionConfig());
         harness.setup(serializer);
         harness.open();
 
-        OperatorMetricGroup metricGroup = rowDataStoreWriteOperator.getMetricGroup();
+        OperatorMetricGroup metricGroup = rowDataStoreWriteOperatorWithState.getMetricGroup();
         MetricGroup writerBufferMetricGroup =
                 metricGroup
                         .addGroup("paimon")

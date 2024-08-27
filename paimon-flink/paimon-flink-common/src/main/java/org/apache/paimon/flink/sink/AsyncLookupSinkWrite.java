@@ -62,9 +62,7 @@ public class AsyncLookupSinkWrite extends StoreSinkWriteImpl {
                 isStreaming,
                 memoryPool,
                 metricGroup);
-
         this.tableName = table.name();
-
         List<StoreSinkWriteState.StateValue> activeBucketsStateValues =
                 state.get(tableName, ACTIVE_BUCKETS_STATE_NAME);
         if (activeBucketsStateValues != null) {
