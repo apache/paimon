@@ -16,20 +16,17 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format;
+package org.apache.paimon.table;
 
-import org.apache.paimon.io.BatchRecords;
+import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.ConfigOptions;
 
-import java.io.IOException;
+/** Options of {@link FormatTable}. */
+public class FormatTableOptions {
 
-/** Format write with batch interface. */
-public interface BatchFormatWriter extends FormatWriter {
-
-    /**
-     * Write a batch of records directly.
-     *
-     * @param batchRecords the records to be written
-     * @throws IOException if exception happens
-     */
-    void writeBatch(BatchRecords batchRecords) throws IOException;
+    public static final ConfigOption<String> FIELD_DELIMITER =
+            ConfigOptions.key("csv.field-delimiter")
+                    .stringType()
+                    .defaultValue(",")
+                    .withDescription("Optional field delimiter character (',' by default)");
 }

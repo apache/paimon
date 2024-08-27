@@ -45,11 +45,12 @@ abstract class InsertOverwriteTableTestBase extends PaimonSparkTestBase {
                            |TBLPROPERTIES ('file.format' = '$fileFormat')
                            |""".stripMargin)
 
-              spark.sql(s"""
-                           |CREATE TABLE t2 (col2 INT, col3 DOUBLE, col1 STRING, col4 STRING)
-                           |$partitionedSQL
-                           |TBLPROPERTIES ('file.format' = '$fileFormat')
-                           |""".stripMargin)
+              spark.sql(
+                s"""
+                   |CREATE TABLE t2 (col2 INT, col3 DOUBLE, col1 STRING NOT NULL, col4 STRING)
+                   |$partitionedSQL
+                   |TBLPROPERTIES ('file.format' = '$fileFormat')
+                   |""".stripMargin)
 
               sql(s"""
                      |INSERT INTO TABLE t1 VALUES
@@ -68,11 +69,55 @@ abstract class InsertOverwriteTableTestBase extends PaimonSparkTestBase {
               sql("INSERT OVERWRITE t2 (col1, col2, col3, col4) SELECT * FROM t1")
               checkAnswer(
                 sql("SELECT * FROM t2 ORDER BY col2"),
-                Row(1, 1.1d, "Hello", "pt1") :: Row(2, 2.2d, "World", "pt1") :: Row(
-                  3,
-                  3.3d,
-                  "Paimon",
-                  "pt2") :: Nil)
+                Row(1, 1.1d, "Hello", "pt1") :: Row(2, 2.2d, "World", "pt1") ::
+                  Row(3, 3.3d, "Paimon", "pt2") :: Nil
+              )
+
+              // BY NAME statementis supported since Spark3.5
+              if (gteqSpark3_5) {
+                sql("INSERT OVERWRITE TABLE t1 BY NAME SELECT col3, col2, col4, col1 FROM t1")
+                // null for non-specified column
+                sql("INSERT OVERWRITE TABLE t2 BY NAME SELECT col1, col2 FROM t2 ")
+                checkAnswer(
+                  sql("SELECT * FROM t2 ORDER BY col2"),
+                  Row(1, null, "Hello", null) :: Row(2, null, "World", null) ::
+                    Row(3, null, "Paimon", null) :: Nil
+                )
+
+                // by name bad case
+                // names conflict
+                val msg1 = intercept[Exception] {
+                  sql("INSERT INTO TABLE t1 BY NAME SELECT col1, col2 as col1 FROM t1")
+                }
+                assert(msg1.getMessage.contains("due to column name conflicts"))
+                // name does not match
+                val msg2 = intercept[Exception] {
+                  sql("INSERT INTO TABLE t1 BY NAME SELECT col1, col2 as colx FROM t1")
+                }
+                assert(msg2.getMessage.contains("due to unknown column names"))
+                // query column size bigger than table's
+                val msg3 = intercept[Exception] {
+                  sql("INSERT INTO TABLE t1 BY NAME SELECT col1, col2, col3, col4, col4 as col5 FROM t1")
+                }
+                assert(
+                  msg3.getMessage.contains(
+                    "the number of data columns don't match with the table schema"))
+                // non-nullable column has no specified value
+                val msg4 = intercept[Exception] {
+                  sql("INSERT INTO TABLE t2 BY NAME SELECT col2 FROM t2")
+                }
+                assert(
+                  msg4.getMessage.contains("non-nullable column `col1` has no specified value"))
+
+                // by position
+                // column size does not match
+                val msg5 = intercept[Exception] {
+                  sql("INSERT INTO TABLE t1 VALUES(1)")
+                }
+                assert(
+                  msg5.getMessage.contains(
+                    "the number of data columns don't match with the table schema"))
+              }
             }
           }
       }

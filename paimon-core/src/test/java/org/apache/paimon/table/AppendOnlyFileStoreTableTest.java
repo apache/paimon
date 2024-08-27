@@ -30,7 +30,7 @@ import org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndexFactory;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.io.BatchRecords;
+import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Equal;
@@ -149,10 +149,10 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
 
         BatchTableWrite write = table.newBatchWriteBuilder().newWrite();
 
-        write.writeBatch(
+        write.writeBundle(
                 binaryRow(1),
                 0,
-                new BatchRecords() {
+                new BundleRecords() {
                     @Override
                     public long rowCount() {
                         return 1000;

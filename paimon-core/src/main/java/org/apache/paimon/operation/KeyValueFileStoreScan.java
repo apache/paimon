@@ -39,7 +39,9 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import static org.apache.paimon.CoreOptions.MergeEngine.AGGREGATE;
 import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
+import static org.apache.paimon.CoreOptions.MergeEngine.PARTIAL_UPDATE;
 
 /** {@link FileStoreScan} for {@link KeyValueFileStore}. */
 public class KeyValueFileStoreScan extends AbstractFileStoreScan {
@@ -173,6 +175,11 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     }
 
     private List<ManifestEntry> filterWholeBucketAllFiles(List<ManifestEntry> entries) {
+        if (!deletionVectorsEnabled
+                && (mergeEngine == PARTIAL_UPDATE || mergeEngine == AGGREGATE)) {
+            return entries;
+        }
+
         // entries come from the same bucket, if any of it doesn't meet the request, we could
         // filter the bucket.
         for (ManifestEntry entry : entries) {

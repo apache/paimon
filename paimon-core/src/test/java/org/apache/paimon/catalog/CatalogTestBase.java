@@ -79,6 +79,13 @@ public abstract class CatalogTestBase {
     @AfterEach
     void tearDown() throws Exception {
         if (catalog != null) {
+            List<String> dbs = catalog.listDatabases();
+            for (String db : dbs) {
+                try {
+                    catalog.dropDatabase(db, true, true);
+                } catch (Exception ignored) {
+                }
+            }
             catalog.close();
         }
     }

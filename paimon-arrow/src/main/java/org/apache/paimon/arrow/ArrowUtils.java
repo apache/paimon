@@ -82,7 +82,7 @@ public class ArrowUtils {
                 .createVector(allocator);
     }
 
-    private static Field toArrowField(String fieldName, DataType dataType) {
+    public static Field toArrowField(String fieldName, DataType dataType) {
         FieldType fieldType = dataType.accept(ArrowFieldTypeConversion.ARROW_FIELD_TYPE_VISITOR);
         List<Field> children = null;
         if (dataType instanceof ArrayType) {

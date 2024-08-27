@@ -122,6 +122,26 @@ All available procedures are listed below.
          CALL sys.create_tag('default.T', 'my_tag', 10, '1 d')
       </td>
    </tr>
+    <tr>
+      <td>create_tag_from_timestamp</td>
+      <td>
+         -- Create a tag from the first snapshot whose commit-time greater than the specified timestamp. <br/>
+         CALL [catalog.]sys.create_tag_from_timestamp('identifier', 'tagName', timestamp, time_retained)
+      </td>
+      <td>
+         To create a tag based on given timestamp. Arguments:
+            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>tag: name of the new tag.</li>
+            <li>timestamp (Long): Find the first snapshot whose commit-time greater than this timestamp.</li>
+            <li>time_retained : The maximum time retained for newly created tags.</li>
+      </td>
+      <td>
+         -- for Flink 1.18<br/>
+         CALL sys.create_tag_from_timestamp('default.T', 'my_tag', 1724404318750, '1 d')
+         -- for Flink 1.19 and later<br/>
+         CALL sys.create_tag_from_timestamp(`table` => 'default.T', `tag` => 'my_tag', `timestamp` => 1724404318750, time_retained => '1 d')
+      </td>
+   </tr>
    <tr>
       <td>delete_tag</td>
       <td>

@@ -67,6 +67,8 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
     @Nullable private Long currentWatermark;
     @Nullable private Long nextSnapshotId;
 
+    @Nullable private Long scanDelayMillis;
+
     public DataTableStreamScan(
             CoreOptions options,
             SnapshotReader snapshotReader,
@@ -118,6 +120,9 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
         }
         if (boundedChecker == null) {
             boundedChecker = createBoundedChecker();
+        }
+        if (scanDelayMillis == null) {
+            scanDelayMillis = getScanDelayMillis();
         }
         initialized = true;
     }
@@ -177,6 +182,10 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
                 throw new EndOfScanException();
             }
 
+            if (shouldDelaySnapshot(nextSnapshotId)) {
+                return SnapshotNotExistPlan.INSTANCE;
+            }
+
             // first check changes of overwrite
             if (snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE
                     && supportStreamingReadOverwrite) {
@@ -196,6 +205,19 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
                 nextSnapshotId++;
             }
         }
+    }
+
+    private boolean shouldDelaySnapshot(long snapshotId) {
+        if (scanDelayMillis == null) {
+            return false;
+        }
+
+        long snapshotMills = System.currentTimeMillis() - scanDelayMillis;
+        if (snapshotManager.snapshotExists(snapshotId)
+                && snapshotManager.snapshot(snapshotId).timeMillis() > snapshotMills) {
+            return true;
+        }
+        return false;
     }
 
     private FollowUpScanner createFollowUpScanner() {
@@ -235,6 +257,12 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
         return boundedWatermark != null
                 ? BoundedChecker.watermark(boundedWatermark)
                 : BoundedChecker.neverEnd();
+    }
+
+    private Long getScanDelayMillis() {
+        return options.streamingReadDelay() == null
+                ? null
+                : options.streamingReadDelay().toMillis();
     }
 
     @Nullable

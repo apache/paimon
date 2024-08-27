@@ -16,17 +16,19 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.io;
+package org.apache.paimon.flink.action.cdc.format.ogg;
 
-import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.flink.action.cdc.format.AbstractJsonDataFormat;
+import org.apache.paimon.flink.action.cdc.format.RecordParserFactory;
 
-/** Interface of Batch records. */
-public interface BatchRecords extends Iterable<InternalRow> {
+/**
+ * Supports the message queue's ogg json data format and provides definitions for the message
+ * queue's record json deserialization class and parsing class {@link OggRecordParser}.
+ */
+public class OggDataFormat extends AbstractJsonDataFormat {
 
-    /**
-     * The total row count of this batch.
-     *
-     * @return the number of row count.
-     */
-    long rowCount();
+    @Override
+    protected RecordParserFactory parser() {
+        return OggRecordParser::new;
+    }
 }

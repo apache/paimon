@@ -16,21 +16,23 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.operation;
+package org.apache.paimon.flink.action.cdc.format.debezium;
 
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.io.BatchRecords;
+import org.apache.paimon.flink.action.cdc.format.DataFormat;
+import org.apache.paimon.flink.action.cdc.format.DataFormatFactory;
 
-/** Whether the writer could write batch. */
-public interface BatchWriter {
+/** Factory to create {@link DebeziumJsonDataFormat}. */
+public class DebeziumJsonDataFormatFactory implements DataFormatFactory {
 
-    /**
-     * Write the batch data to the store according to the partition and bucket.
-     *
-     * @param partition the partition of the data
-     * @param bucket the bucket id of the data
-     * @param data the given data
-     * @throws Exception the thrown exception when writing the record
-     */
-    void writeBatch(BinaryRow partition, int bucket, BatchRecords data) throws Exception;
+    public static final String IDENTIFIER = "debezium-json";
+
+    @Override
+    public String identifier() {
+        return IDENTIFIER;
+    }
+
+    @Override
+    public DataFormat create() {
+        return new DebeziumJsonDataFormat();
+    }
 }

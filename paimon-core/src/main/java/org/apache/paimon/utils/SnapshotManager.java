@@ -292,6 +292,39 @@ public class SnapshotManager implements Serializable {
         return finalSnapshot;
     }
 
+    /**
+     * Returns a {@link Snapshot} whoes commit time is later than or equal to given timestamp mills.
+     * If there is no such a snapshot, returns null.
+     */
+    public @Nullable Snapshot laterOrEqualTimeMills(long timestampMills) {
+        Long earliest = earliestSnapshotId();
+        Long latest = latestSnapshotId();
+        if (earliest == null || latest == null) {
+            return null;
+        }
+
+        Snapshot latestSnapShot = snapshot(latest);
+        if (latestSnapShot.timeMillis() < timestampMills) {
+            return null;
+        }
+        Snapshot finalSnapshot = null;
+        while (earliest <= latest) {
+            long mid = earliest + (latest - earliest) / 2; // Avoid overflow
+            Snapshot snapshot = snapshot(mid);
+            long commitTime = snapshot.timeMillis();
+            if (commitTime > timestampMills) {
+                latest = mid - 1; // Search in the left half
+                finalSnapshot = snapshot;
+            } else if (commitTime < timestampMills) {
+                earliest = mid + 1; // Search in the right half
+            } else {
+                finalSnapshot = snapshot; // Found the exact match
+                break;
+            }
+        }
+        return finalSnapshot;
+    }
+
     public @Nullable Snapshot laterOrEqualWatermark(long watermark) {
         Long earliest = earliestSnapshotId();
         Long latest = latestSnapshotId();

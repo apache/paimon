@@ -21,6 +21,7 @@ package org.apache.paimon.flink.action.cdc.pulsar;
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
+import org.apache.paimon.flink.action.cdc.format.DataFormatFactory;
 
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.configuration.ConfigOption;
@@ -291,7 +292,7 @@ public class PulsarActionUtils {
     }
 
     public static DataFormat getDataFormat(Configuration pulsarConfig) {
-        return DataFormat.fromConfigString(pulsarConfig.get(VALUE_FORMAT));
+        return DataFormatFactory.createDataFormat(pulsarConfig.get(VALUE_FORMAT));
     }
 
     /** Referenced to {@link PulsarPartitionSplitReader#createPulsarConsumer}. */

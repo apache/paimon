@@ -28,7 +28,7 @@ import org.apache.paimon.disk.RowBuffer;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.io.BatchRecords;
+import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
@@ -168,13 +168,13 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     }
 
     @Override
-    public void writeBatch(BatchRecords batchRecords) throws Exception {
+    public void writeBundle(BundleRecords bundle) throws Exception {
         if (sinkWriter instanceof BufferedSinkWriter) {
-            for (InternalRow row : batchRecords) {
+            for (InternalRow row : bundle) {
                 write(row);
             }
         } else {
-            ((DirectSinkWriter) sinkWriter).writeBatch(batchRecords);
+            ((DirectSinkWriter) sinkWriter).writeBundle(bundle);
         }
     }
 
@@ -399,11 +399,11 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             return true;
         }
 
-        public void writeBatch(BatchRecords batch) throws IOException {
+        public void writeBundle(BundleRecords bundle) throws IOException {
             if (writer == null) {
                 writer = createRollingRowWriter();
             }
-            writer.writeBatch(batch);
+            writer.writeBundle(bundle);
         }
 
         @Override

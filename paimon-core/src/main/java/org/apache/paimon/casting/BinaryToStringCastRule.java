@@ -37,6 +37,6 @@ public class BinaryToStringCastRule extends AbstractCastRule<byte[], BinaryStrin
 
     @Override
     public CastExecutor<byte[], BinaryString> create(DataType inputType, DataType targetType) {
-        return value -> BinaryString.fromBytes(value);
+        return BinaryString::fromBytes;
     }
 }
