@@ -34,13 +34,11 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.UUID;
-import java.util.concurrent.ThreadLocalRandom;
 
 /** Benchmark for measure the bloom filter for lookup. */
 public class LookupBloomFilterBenchmark extends AbstractLookupBenchmark {
 
     @TempDir Path tempDir;
-    ThreadLocalRandom rnd = ThreadLocalRandom.current();
 
     @Test
     public void testHighMatch() throws Exception {
@@ -56,15 +54,6 @@ public class LookupBloomFilterBenchmark extends AbstractLookupBenchmark {
     public void testLowMatch() throws Exception {
         innerTest(
                 "lookup", generateSequenceInputs(0, 100000), generateRandomInputs(100000, 200000));
-    }
-
-    private byte[][] generateRandomInputs(int start, int end) {
-        int count = end - start;
-        byte[][] result = new byte[count][4];
-        for (int i = 0; i < count; i++) {
-            result[i] = intToByteArray(rnd.nextInt(start, end));
-        }
-        return result;
     }
 
     public void innerTest(String name, byte[][] inputs, byte[][] probe) throws Exception {
