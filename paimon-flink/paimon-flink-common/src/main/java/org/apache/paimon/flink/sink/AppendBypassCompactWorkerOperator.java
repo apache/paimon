@@ -31,7 +31,7 @@ public class AppendBypassCompactWorkerOperator
 
     public AppendBypassCompactWorkerOperator(FileStoreTable table, String commitUser) {
         super(table, commitUser);
-        this.chainingStrategy = ChainingStrategy.NEVER;
+        this.chainingStrategy = ChainingStrategy.HEAD;
     }
 
     @Override
