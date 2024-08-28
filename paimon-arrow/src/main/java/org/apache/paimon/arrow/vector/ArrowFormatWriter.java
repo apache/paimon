@@ -39,10 +39,10 @@ public class ArrowFormatWriter implements AutoCloseable {
     private final RootAllocator allocator;
     private int rowId;
 
-    public ArrowFormatWriter(RowType rowType, int writeBatchSize) {
+    public ArrowFormatWriter(RowType rowType, int writeBatchSize, boolean allowUpperCase) {
         allocator = new RootAllocator();
 
-        vectorSchemaRoot = ArrowUtils.createVectorSchemaRoot(rowType, allocator, false);
+        vectorSchemaRoot = ArrowUtils.createVectorSchemaRoot(rowType, allocator, allowUpperCase);
 
         fieldWriters = new ArrowFieldWriter[rowType.getFieldCount()];
 
