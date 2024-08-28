@@ -96,6 +96,56 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testPartitionFilter() throws Exception {
+        sql(
+                "CREATE TABLE T ("
+                        + " k INT,"
+                        + " v STRING,"
+                        + " hh INT,"
+                        + " dt STRING"
+                        + ") PARTITIONED BY (dt, hh) WITH ("
+                        + " 'write-only' = 'true',"
+                        + " 'file.format' = 'avro',"
+                        + " 'bucket' = '-1'"
+                        + ")");
+
+        sql(
+                "INSERT INTO T VALUES (1, '10', 15, '20221208'), (4, '100', 16, '20221208'), (5, '1000', 15, '20221209')");
+
+        sql(
+                "INSERT INTO T VALUES (1, '10', 15, '20221208'), (4, '100', 16, '20221208'), (5, '1000', 15, '20221209')");
+
+        FileStoreTable table = paimonTable("T");
+
+        Predicate predicateK = new PredicateBuilder(table.rowType()).equal(0, 2);
+        Predicate predicateV =
+                new PredicateBuilder(table.rowType()).equal(1, BinaryString.fromString("101"));
+        RecordReader<InternalRow> reader =
+                table.newRead()
+                        .withFilter(PredicateBuilder.and(predicateK, predicateV))
+                        .createReader(table.newScan().plan());
+        AtomicInteger count = new AtomicInteger(0);
+        reader.forEachRemaining(r -> count.incrementAndGet());
+
+        // parquet format predicate would not reduce record read from file
+        Assertions.assertThat(count.get()).isEqualTo(6);
+
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql("ALTER TABLE T SET ('file-index.bloom-filter.columns'='order_id,v')");
+        sql("CALL sys.rewrite_file_index('default.T', 'dt=20221208')");
+
+        reader =
+                table.newRead()
+                        .withFilter(PredicateBuilder.and(predicateK, predicateV))
+                        .createReader(table.newScan().plan());
+        count.set(0);
+        reader.forEachRemaining(r -> count.incrementAndGet());
+
+        // only partition 20221208 is filtered.
+        Assertions.assertThat(count.get()).isEqualTo(2);
+    }
+
+    @Test
     public void testFileIndexProcedureDropIndex() throws Exception {
         sql(
                 "CREATE TABLE T ("
