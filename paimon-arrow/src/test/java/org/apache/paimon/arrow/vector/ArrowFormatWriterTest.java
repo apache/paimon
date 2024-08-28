@@ -84,7 +84,7 @@ public class ArrowFormatWriterTest {
 
     @Test
     public void testWrite() {
-        try (ArrowFormatWriter writer = new ArrowFormatWriter(PRIMITIVE_TYPE, 4096)) {
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(PRIMITIVE_TYPE, 4096, true)) {
             List<InternalRow> list = new ArrayList<>();
             List<InternalRow.FieldGetter> fieldGetters = new ArrayList<>();
 
@@ -118,7 +118,7 @@ public class ArrowFormatWriterTest {
 
     @Test
     public void testReadWithSchemaMessUp() {
-        try (ArrowFormatWriter writer = new ArrowFormatWriter(PRIMITIVE_TYPE, 4096)) {
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(PRIMITIVE_TYPE, 4096, true)) {
             List<InternalRow> list = new ArrayList<>();
             List<InternalRow.FieldGetter> fieldGetters = new ArrayList<>();
 
@@ -160,7 +160,7 @@ public class ArrowFormatWriterTest {
 
     @Test
     public void testArrowBundleRecords() {
-        try (ArrowFormatWriter writer = new ArrowFormatWriter(PRIMITIVE_TYPE, 4096)) {
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(PRIMITIVE_TYPE, 4096, true)) {
             List<InternalRow> list = new ArrayList<>();
             List<InternalRow.FieldGetter> fieldGetters = new ArrayList<>();
 
@@ -192,7 +192,7 @@ public class ArrowFormatWriterTest {
 
     @Test
     public void testCWriter() {
-        try (ArrowFormatCWriter writer = new ArrowFormatCWriter(PRIMITIVE_TYPE, 4096)) {
+        try (ArrowFormatCWriter writer = new ArrowFormatCWriter(PRIMITIVE_TYPE, 4096, true)) {
             List<InternalRow> list = new ArrayList<>();
             List<InternalRow.FieldGetter> fieldGetters = new ArrayList<>();
 
