@@ -280,6 +280,16 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testEmptyFallbackBranch() throws Exception {
+        sql("CREATE TABLE t (a INT, v STRING)");
+        sql("INSERT INTO t VALUES (1, 'apple'), (2, 'banana')");
+        sql("ALTER TABLE t SET ( 'scan.fallback-branch' = 'empty_branch' )");
+
+        assertThat(collectResult("SELECT * FROM t"))
+                .containsExactlyInAnyOrder("+I[1, apple]", "+I[2, banana]");
+    }
+
+    @Test
     public void testFallbackBranchBatchRead() throws Exception {
         sql(
                 "CREATE TABLE t ( pt INT NOT NULL, k INT NOT NULL, v STRING ) PARTITIONED BY (pt) WITH ( 'bucket' = '-1' )");

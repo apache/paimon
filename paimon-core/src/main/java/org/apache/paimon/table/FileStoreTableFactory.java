@@ -29,6 +29,7 @@ import org.apache.paimon.utils.StringUtils;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.Optional;
 
 import static org.apache.paimon.CoreOptions.PATH;
 
@@ -91,16 +92,21 @@ public class FileStoreTableFactory {
         Options options = new Options(table.options());
         String fallbackBranch = options.get(CoreOptions.SCAN_FALLBACK_BRANCH);
         if (!StringUtils.isNullOrWhitespaceOnly(fallbackBranch)) {
-            Options branchOptions = new Options(dynamicOptions.toMap());
-            branchOptions.set(CoreOptions.BRANCH, fallbackBranch);
-            FileStoreTable fallbackTable =
-                    createWithoutFallbackBranch(
-                            fileIO,
-                            tablePath,
-                            new SchemaManager(fileIO, tablePath, fallbackBranch).latest().get(),
-                            branchOptions,
-                            catalogEnvironment);
-            table = new FallbackReadFileStoreTable(table, fallbackTable);
+            Optional<TableSchema> branchSchema =
+                    new SchemaManager(fileIO, tablePath, fallbackBranch).latest();
+            // only when fallbackBranch's schema is created, return a FallbackReadFileStoreTable
+            if (branchSchema.isPresent()) {
+                Options branchOptions = new Options(dynamicOptions.toMap());
+                branchOptions.set(CoreOptions.BRANCH, fallbackBranch);
+                FileStoreTable fallbackTable =
+                        createWithoutFallbackBranch(
+                                fileIO,
+                                tablePath,
+                                branchSchema.get(),
+                                branchOptions,
+                                catalogEnvironment);
+                table = new FallbackReadFileStoreTable(table, fallbackTable);
+            }
         }
 
         return table;
