@@ -42,10 +42,10 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.api.config.TableConfigOptions.TABLE_DML_SYNC;
-import static org.apache.paimon.flink.FlinkCatalog.FILE_COUNT_KEY;
-import static org.apache.paimon.flink.FlinkCatalog.FILE_SIZE_IN_BYTES_KEY;
 import static org.apache.paimon.flink.FlinkCatalog.LAST_UPDATE_TIME_KEY;
+import static org.apache.paimon.flink.FlinkCatalog.NUM_FILES_KEY;
 import static org.apache.paimon.flink.FlinkCatalog.NUM_ROWS_KEY;
+import static org.apache.paimon.flink.FlinkCatalog.TOTAL_SIZE_KEY;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -504,8 +504,8 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                         (par, properties) -> {
                             assertThat(properties.get(NUM_ROWS_KEY)).isEqualTo("2");
                             assertThat(properties.get(LAST_UPDATE_TIME_KEY)).isNotBlank();
-                            assertThat(properties.get(FILE_COUNT_KEY)).isEqualTo("1");
-                            assertThat(properties.get(FILE_SIZE_IN_BYTES_KEY)).isNotBlank();
+                            assertThat(properties.get(NUM_FILES_KEY)).isEqualTo("1");
+                            assertThat(properties.get(TOTAL_SIZE_KEY)).isNotBlank();
                         });
         // update p1 data
         sql("UPDATE PK_T SET word = 'c' WHERE id = 2");
@@ -1010,9 +1010,9 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                 .isEqualTo(String.valueOf(expectedRecordCount));
         assertThat(Long.valueOf(newPartitionProperties.get(LAST_UPDATE_TIME_KEY)))
                 .isGreaterThan(Long.valueOf(oldPartitionProperties.get(LAST_UPDATE_TIME_KEY)));
-        assertThat(newPartitionProperties.get(FILE_COUNT_KEY))
+        assertThat(newPartitionProperties.get(NUM_FILES_KEY))
                 .isEqualTo(String.valueOf(expectedFileCount));
-        assertThat(Long.valueOf(newPartitionProperties.get(FILE_SIZE_IN_BYTES_KEY)))
-                .isGreaterThan(Long.valueOf(oldPartitionProperties.get(FILE_SIZE_IN_BYTES_KEY)));
+        assertThat(Long.valueOf(newPartitionProperties.get(TOTAL_SIZE_KEY)))
+                .isGreaterThan(Long.valueOf(oldPartitionProperties.get(TOTAL_SIZE_KEY)));
     }
 }

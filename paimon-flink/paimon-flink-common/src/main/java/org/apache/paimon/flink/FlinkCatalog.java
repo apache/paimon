@@ -135,8 +135,8 @@ public class FlinkCatalog extends AbstractCatalog {
     private static final Logger LOG = LoggerFactory.getLogger(FlinkCatalog.class);
     public static final String NUM_ROWS_KEY = "numRows";
     public static final String LAST_UPDATE_TIME_KEY = "lastUpdateTime";
-    public static final String FILE_SIZE_IN_BYTES_KEY = "fileSizeInBytes";
-    public static final String FILE_COUNT_KEY = "fileCount";
+    public static final String TOTAL_SIZE_KEY = "totalSize";
+    public static final String NUM_FILES_KEY = "numFiles";
     private final ClassLoader classLoader;
 
     private final Catalog catalog;
@@ -946,9 +946,8 @@ public class FlinkCatalog extends AbstractCatalog {
             properties.put(NUM_ROWS_KEY, String.valueOf(partitionEntry.recordCount()));
             properties.put(
                     LAST_UPDATE_TIME_KEY, String.valueOf(partitionEntry.lastFileCreationTime()));
-            properties.put(FILE_COUNT_KEY, String.valueOf(partitionEntry.fileCount()));
-            properties.put(
-                    FILE_SIZE_IN_BYTES_KEY, String.valueOf(partitionEntry.fileSizeInBytes()));
+            properties.put(NUM_FILES_KEY, String.valueOf(partitionEntry.fileCount()));
+            properties.put(TOTAL_SIZE_KEY, String.valueOf(partitionEntry.fileSizeInBytes()));
             return new CatalogPartitionImpl(properties, "");
         } catch (TableNotPartitionedException | TableNotExistException e) {
             throw new PartitionNotExistException(getName(), tablePath, partitionSpec);
