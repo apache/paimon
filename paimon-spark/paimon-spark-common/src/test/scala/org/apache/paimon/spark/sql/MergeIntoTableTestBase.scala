@@ -272,6 +272,33 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
     }
   }
 
+  test(s"Paimon MergeInto: source and target have different data type on primary-key columns") {
+    withTable("source", "target") {
+
+      Seq(("1", 100, "c11"), ("3", 300, "c33"))
+        .toDF("a", "b", "c")
+        .createOrReplaceTempView("source")
+
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
+      spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
+
+      spark.sql(s"""
+                   |MERGE INTO target
+                   |USING source
+                   |ON target.a = source.a
+                   |WHEN MATCHED THEN
+                   |UPDATE SET *
+                   |WHEN NOT MATCHED THEN
+                   |INSERT *
+                   |""".stripMargin)
+
+      spark.sql("SELECT * FROM target ORDER BY a, b").schema.printTreeString()
+      checkAnswer(
+        spark.sql("SELECT * FROM target ORDER BY a, b"),
+        Row(1, 100, "c11") :: Row(2, 20, "c2") :: Row(3, 300, "c33") :: Nil)
+    }
+  }
+
   test(s"Paimon MergeInto: source and target are empty") {
     withTable("source", "target") {
 

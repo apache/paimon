@@ -21,7 +21,7 @@ package org.apache.paimon.spark.catalyst.analysis
 import org.apache.paimon.table.Table
 
 import org.apache.spark.sql.catalyst.SQLConfHelper
-import org.apache.spark.sql.catalyst.expressions.{AttributeReference, AttributeSet, BinaryExpression, EqualTo, Expression, SubqueryExpression}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, AttributeSet, BinaryExpression, EqualTo, Expression}
 import org.apache.spark.sql.catalyst.plans.logical.Assignment
 
 trait RowLevelHelper extends SQLConfHelper {
@@ -30,13 +30,6 @@ trait RowLevelHelper extends SQLConfHelper {
 
   protected def checkPaimonTable(table: Table): Unit = {
     operation.checkValidity(table)
-  }
-
-  protected def checkSubquery(condition: Expression): Unit = {
-    if (SubqueryExpression.hasSubquery(condition)) {
-      throw new RuntimeException(
-        s"Subqueries are not supported in $condition operation (condition = $condition).")
-    }
   }
 
   protected def validUpdateAssignment(
@@ -56,7 +49,7 @@ trait RowLevelHelper extends SQLConfHelper {
     val resolver = conf.resolver
 
     // Check whether this attribute is same to primary key and is from target table.
-    def isTargetPrimaryKey(attr: AttributeReference): Boolean = {
+    def isTargetPrimaryKey(attr: Attribute): Boolean = {
       resolver(primaryKey, attr.name) && output.contains(attr)
     }
 
@@ -66,8 +59,8 @@ trait RowLevelHelper extends SQLConfHelper {
         case Assignment(key, value) => key == value
       }
       .exists {
-        case EqualTo(left: AttributeReference, right: AttributeReference) =>
-          isTargetPrimaryKey(left) || isTargetPrimaryKey(right)
+        case EqualTo(left, right) if left.references.size == 1 && right.references.size == 1 =>
+          isTargetPrimaryKey(left.references.head) || isTargetPrimaryKey(right.references.head)
         case Assignment(key: AttributeReference, _) =>
           isTargetPrimaryKey(key)
         case _ => false
