@@ -81,7 +81,9 @@ public class RewriteFileIndexProcedure extends ProcedureBase {
                                             p ->
                                                     PredicateBuilder.partition(
                                                             p,
-                                                            table.rowType(),
+                                                            ((FileStoreTable) table)
+                                                                    .schema()
+                                                                    .logicalPartitionType(),
                                                             CoreOptions.PARTITION_DEFAULT_NAME
                                                                     .defaultValue()))
                                     .toArray(Predicate[]::new));
