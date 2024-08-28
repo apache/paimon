@@ -1002,16 +1002,16 @@ public class CatalogTableITCase extends CatalogITCaseBase {
             String partition,
             Map<String, Map<String, String>> oldProperties,
             Map<String, Map<String, String>> newProperties,
-            Long expectedRecordCount,
-            Long expectedFileCount) {
+            Long expectedNumRows,
+            Long expectedNumFiles) {
         Map<String, String> newPartitionProperties = newProperties.get(partition);
         Map<String, String> oldPartitionProperties = oldProperties.get(partition);
         assertThat(newPartitionProperties.get(NUM_ROWS_KEY))
-                .isEqualTo(String.valueOf(expectedRecordCount));
+                .isEqualTo(String.valueOf(expectedNumRows));
         assertThat(Long.valueOf(newPartitionProperties.get(LAST_UPDATE_TIME_KEY)))
                 .isGreaterThan(Long.valueOf(oldPartitionProperties.get(LAST_UPDATE_TIME_KEY)));
         assertThat(newPartitionProperties.get(NUM_FILES_KEY))
-                .isEqualTo(String.valueOf(expectedFileCount));
+                .isEqualTo(String.valueOf(expectedNumFiles));
         assertThat(Long.valueOf(newPartitionProperties.get(TOTAL_SIZE_KEY)))
                 .isGreaterThan(Long.valueOf(oldPartitionProperties.get(TOTAL_SIZE_KEY)));
     }
