@@ -133,10 +133,10 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 public class FlinkCatalog extends AbstractCatalog {
 
     private static final Logger LOG = LoggerFactory.getLogger(FlinkCatalog.class);
-    public static final String NUM_ROWS_KEY = "partition.numRows";
-    public static final String LAST_UPDATE_TIME_KEY = "partition.lastUpdateTime";
-    public static final String FILE_SIZE_IN_BYTES_KEY = "partition.fileSizeInBytes";
-    public static final String FILE_COUNT_KEY = "partition.fileCount";
+    public static final String NUM_ROWS_KEY = "numRows";
+    public static final String LAST_UPDATE_TIME_KEY = "lastUpdateTime";
+    public static final String FILE_SIZE_IN_BYTES_KEY = "fileSizeInBytes";
+    public static final String FILE_COUNT_KEY = "fileCount";
     private final ClassLoader classLoader;
 
     private final Catalog catalog;
