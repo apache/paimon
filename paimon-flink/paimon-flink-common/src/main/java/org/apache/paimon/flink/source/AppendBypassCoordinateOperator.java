@@ -67,7 +67,7 @@ public class AppendBypassCoordinateOperator<CommitT>
         this.table = table;
         this.processingTimeService = processingTimeService;
         this.mailbox = (MailboxExecutorImpl) mailbox;
-        this.chainingStrategy = ChainingStrategy.NEVER;
+        this.chainingStrategy = ChainingStrategy.HEAD;
     }
 
     @Override
