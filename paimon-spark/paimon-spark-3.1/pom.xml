@@ -232,6 +232,7 @@ under the License.
                             <goal>shade</goal>
                         </goals>
                         <configuration>
+                            <!-- Do no exclude zstd-jni since Spark3.1 depends on 1.4.8 which is not compatible with Paimon's -->
                             <artifactSet>
                                 <includes combine.children="append">
                                     <include>org.apache.paimon:paimon-spark-common</include>
