@@ -22,6 +22,9 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.utils.TableMigrationUtils;
 import org.apache.paimon.migrate.Migrator;
 
+import org.apache.flink.table.annotation.ArgumentHint;
+import org.apache.flink.table.annotation.DataTypeHint;
+import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 import java.util.Collections;
@@ -34,23 +37,26 @@ public class MigrateFileProcedure extends ProcedureBase {
         return "migrate_file";
     }
 
-    public String[] call(
-            ProcedureContext procedureContext,
-            String connector,
-            String sourceTablePath,
-            String targetPaimonTablePath)
-            throws Exception {
-        call(procedureContext, connector, sourceTablePath, targetPaimonTablePath, true);
-        return new String[] {"Success"};
-    }
-
+    @ProcedureHint(
+            argument = {
+                @ArgumentHint(name = "connector", type = @DataTypeHint("STRING")),
+                @ArgumentHint(name = "source_table", type = @DataTypeHint("STRING")),
+                @ArgumentHint(name = "target_table", type = @DataTypeHint("STRING")),
+                @ArgumentHint(
+                        name = "delete_origin",
+                        type = @DataTypeHint("BOOLEAN"),
+                        isOptional = true)
+            })
     public String[] call(
             ProcedureContext procedureContext,
             String connector,
             String sourceTablePath,
             String targetPaimonTablePath,
-            boolean deleteOrigin)
+            Boolean deleteOrigin)
             throws Exception {
+        if (deleteOrigin == null) {
+            deleteOrigin = true;
+        }
         migrateHandle(connector, sourceTablePath, targetPaimonTablePath, deleteOrigin);
         return new String[] {"Success"};
     }

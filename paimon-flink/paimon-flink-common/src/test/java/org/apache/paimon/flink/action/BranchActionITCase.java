@@ -85,8 +85,20 @@ class BranchActionITCase extends ActionITCaseBase {
 
         callProcedure(
                 String.format(
+                        "CALL sys.create_branch(`table` => '%s.%s', branch => 'branch_name_named_argument', tag => 'tag2')",
+                        database, tableName));
+        assertThat(branchManager.branchExists("branch_name_named_argument")).isTrue();
+
+        callProcedure(
+                String.format(
                         "CALL sys.delete_branch('%s.%s', 'branch_name')", database, tableName));
         assertThat(branchManager.branchExists("branch_name")).isFalse();
+
+        callProcedure(
+                String.format(
+                        "CALL sys.delete_branch(`table` => '%s.%s', branch => 'branch_name_named_argument')",
+                        database, tableName));
+        assertThat(branchManager.branchExists("branch_name_named_argument")).isFalse();
 
         createAction(
                         CreateBranchAction.class,
@@ -154,9 +166,21 @@ class BranchActionITCase extends ActionITCaseBase {
 
         callProcedure(
                 String.format(
+                        "CALL sys.create_branch(`table` => '%s.%s', branch => 'empty_branch_named_argument')",
+                        database, tableName));
+        assertThat(branchManager.branchExists("empty_branch_named_argument")).isTrue();
+
+        callProcedure(
+                String.format(
                         "CALL sys.delete_branch('%s.%s', 'empty_branch_name')",
                         database, tableName));
         assertThat(branchManager.branchExists("empty_branch_name")).isFalse();
+
+        callProcedure(
+                String.format(
+                        "CALL sys.delete_branch(`table` => '%s.%s', branch => 'empty_branch_named_argument')",
+                        database, tableName));
+        assertThat(branchManager.branchExists("empty_branch_named_argument")).isFalse();
 
         createAction(
                         CreateBranchAction.class,
@@ -303,7 +327,8 @@ class BranchActionITCase extends ActionITCaseBase {
         // Fast-forward branch branch_name again
         callProcedure(
                 String.format(
-                        "CALL sys.fast_forward('%s.%s', 'branch_name')", database, tableName));
+                        "CALL sys.fast_forward(`table` => '%s.%s', branch => 'branch_name')",
+                        database, tableName));
 
         // Check main branch data
         result = readTableData(table);

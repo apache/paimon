@@ -38,6 +38,9 @@ import org.apache.flink.api.java.typeutils.GenericTypeInfo;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.table.annotation.ArgumentHint;
+import org.apache.flink.table.annotation.DataTypeHint;
+import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 import java.io.IOException;
@@ -54,14 +57,18 @@ public class RewriteFileIndexProcedure extends ProcedureBase {
         return "rewrite_file_index";
     }
 
-    public String[] call(ProcedureContext procedureContext, String sourceTablePath)
-            throws Exception {
-        return call(procedureContext, sourceTablePath, "");
-    }
-
+    @ProcedureHint(
+            argument = {
+                @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
+                @ArgumentHint(
+                        name = "partitions",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true)
+            })
     public String[] call(
             ProcedureContext procedureContext, String sourceTablePath, String partitions)
             throws Exception {
+        partitions = notnull(partitions);
 
         StreamExecutionEnvironment env = procedureContext.getExecutionEnvironment();
         Table table = catalog.getTable(Identifier.fromString(sourceTablePath));

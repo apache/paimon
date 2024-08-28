@@ -23,6 +23,9 @@ import org.apache.paimon.flink.service.QueryService;
 import org.apache.paimon.table.Table;
 
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.table.annotation.ArgumentHint;
+import org.apache.flink.table.annotation.DataTypeHint;
+import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 /**
@@ -41,6 +44,11 @@ public class QueryServiceProcedure extends ProcedureBase {
         return IDENTIFIER;
     }
 
+    @ProcedureHint(
+            argument = {
+                @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
+                @ArgumentHint(name = "parallelism", type = @DataTypeHint("INT"))
+            })
     public String[] call(ProcedureContext procedureContext, String tableId, int parallelism)
             throws Exception {
         Table table = catalog.getTable(Identifier.fromString(tableId));

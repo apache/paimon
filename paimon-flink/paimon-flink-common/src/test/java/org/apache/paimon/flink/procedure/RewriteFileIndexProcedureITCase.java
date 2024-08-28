@@ -33,7 +33,8 @@ import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.table.api.config.TableConfigOptions;
 import org.assertj.core.api.Assertions;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.List;
 import java.util.Set;
@@ -43,8 +44,9 @@ import java.util.stream.Collectors;
 /** IT Case for {@link RewriteFileIndexProcedure}. */
 public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
 
-    @Test
-    public void testFileIndexProcedureSchemaEvolution() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testFileIndexProcedureSchemaEvolution(boolean isNamedArgument) throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " k INT,"
@@ -82,7 +84,11 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
 
         tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
         sql("ALTER TABLE T SET ('file-index.bloom-filter.columns'='order_id,v')");
-        sql("CALL sys.rewrite_file_index('default.T')");
+        if (isNamedArgument) {
+            sql("CALL sys.rewrite_file_index(`table` => 'default.T')");
+        } else {
+            sql("CALL sys.rewrite_file_index('default.T')");
+        }
 
         reader =
                 table.newRead()
@@ -95,8 +101,9 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
         Assertions.assertThat(count.get()).isEqualTo(0);
     }
 
-    @Test
-    public void testPartitionFilter() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testPartitionFilter(boolean isNamedArgument) throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " k INT,"
@@ -132,7 +139,11 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
 
         tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
         sql("ALTER TABLE T SET ('file-index.bloom-filter.columns'='order_id,v')");
-        sql("CALL sys.rewrite_file_index('default.T', 'dt=20221208')");
+        if (isNamedArgument) {
+            sql("CALL sys.rewrite_file_index(`table` => 'default.T', partitions => 'dt=20221208')");
+        } else {
+            sql("CALL sys.rewrite_file_index('default.T', 'dt=20221208')");
+        }
 
         reader =
                 table.newRead()
@@ -145,8 +156,9 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
         Assertions.assertThat(count.get()).isEqualTo(2);
     }
 
-    @Test
-    public void testFileIndexProcedureDropIndex() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testFileIndexProcedureDropIndex(boolean isNamedArgument) throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " k INT,"
@@ -164,7 +176,11 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
 
         tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
         sql("ALTER TABLE T SET ('file-index.bloom-filter.columns'='k')");
-        sql("CALL sys.rewrite_file_index('default.T')");
+        if (isNamedArgument) {
+            sql("CALL sys.rewrite_file_index(`table` => 'default.T')");
+        } else {
+            sql("CALL sys.rewrite_file_index('default.T')");
+        }
 
         FileStoreTable table = paimonTable("T");
         List<ManifestEntry> list = table.store().newScan().plan().files();
@@ -195,7 +211,11 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
 
         sql("ALTER TABLE T RESET ('file-index.bloom-filter.columns')");
 
-        sql("CALL sys.rewrite_file_index('default.T')");
+        if (isNamedArgument) {
+            sql("CALL sys.rewrite_file_index('default.T')");
+        } else {
+            sql("CALL sys.rewrite_file_index(`table` => 'default.T')");
+        }
 
         table = paimonTable("T");
         list = table.store().newScan().plan().files();

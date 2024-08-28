@@ -22,6 +22,9 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.utils.TableMigrationUtils;
 import org.apache.paimon.utils.ParameterUtils;
 
+import org.apache.flink.table.annotation.ArgumentHint;
+import org.apache.flink.table.annotation.DataTypeHint;
+import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,18 +41,20 @@ public class MigrateTableProcedure extends ProcedureBase {
         return "migrate_table";
     }
 
-    public String[] call(
-            ProcedureContext procedureContext, String connector, String sourceTablePath)
-            throws Exception {
-        return call(procedureContext, connector, sourceTablePath, "");
-    }
-
+    @ProcedureHint(
+            argument = {
+                @ArgumentHint(name = "connector", type = @DataTypeHint("STRING")),
+                @ArgumentHint(name = "source_table", type = @DataTypeHint("STRING")),
+                @ArgumentHint(name = "options", type = @DataTypeHint("STRING"), isOptional = true)
+            })
     public String[] call(
             ProcedureContext procedureContext,
             String connector,
             String sourceTablePath,
             String properties)
             throws Exception {
+        properties = notnull(properties);
+
         String targetPaimonTablePath = sourceTablePath + PAIMON_SUFFIX;
 
         Identifier sourceTableId = Identifier.fromString(sourceTablePath);

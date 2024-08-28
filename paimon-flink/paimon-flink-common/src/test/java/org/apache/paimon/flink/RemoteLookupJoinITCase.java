@@ -41,6 +41,8 @@ import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -66,11 +68,16 @@ public class RemoteLookupJoinITCase extends CatalogITCaseBase {
         return 1;
     }
 
-    @Test
-    public void testQueryServiceLookup() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testQueryServiceLookup(boolean isNamedArgument) throws Exception {
         sql(
                 "CREATE TABLE DIM (k INT PRIMARY KEY NOT ENFORCED, v INT) WITH ('bucket' = '2', 'continuous.discovery-interval' = '1ms')");
-        CloseableIterator<Row> service = streamSqlIter("CALL sys.query_service('default.DIM', 2)");
+        CloseableIterator<Row> service =
+                isNamedArgument
+                        ? streamSqlIter(
+                                "CALL sys.query_service(`table` => 'default.DIM', parallelism => 2)")
+                        : streamSqlIter("CALL sys.query_service('default.DIM', 2)");
         RemoteTableQuery query = new RemoteTableQuery(paimonTable("DIM"));
 
         sql("INSERT INTO DIM VALUES (1, 11), (2, 22), (3, 33), (4, 44)");

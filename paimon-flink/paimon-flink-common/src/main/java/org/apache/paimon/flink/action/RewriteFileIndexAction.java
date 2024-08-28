@@ -38,6 +38,6 @@ public class RewriteFileIndexAction extends ActionBase {
     public void run() throws Exception {
         RewriteFileIndexProcedure rewriteFileIndexProcedure = new RewriteFileIndexProcedure();
         rewriteFileIndexProcedure.withCatalog(catalog);
-        rewriteFileIndexProcedure.call(new DefaultProcedureContext(env), identifier);
+        rewriteFileIndexProcedure.call(new DefaultProcedureContext(env), identifier, "");
     }
 }

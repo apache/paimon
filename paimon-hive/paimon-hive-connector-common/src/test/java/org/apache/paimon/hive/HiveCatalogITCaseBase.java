@@ -1624,13 +1624,74 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
+    public void testRepairDatabasesOrTablesWithNamedArgument() throws Exception {
+        TableEnvironment fileCatalog = useFileCatalog("test_db");
+        TableEnvironment fileCatalog01 = useFileCatalog("test_db_02");
+        // Database test_db exists in hive metastore
+        hiveShell.execute("use test_db");
+        tEnv.executeSql("USE test_db").await();
+        // When the Hive table does not exist, specify the paimon table to create hive table in hive
+        // metastore.
+        tEnv.executeSql("CALL sys.repair(`table` => 'test_db.t_repair_hive,test_db_02')");
+
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS test_db.t_repair_hive"))
+                .containsExactlyInAnyOrder("dt=2020-01-02/hh=09");
+
+        alterTableInFileSystem(fileCatalog);
+        // When the Hive table exists, specify the paimon table to update hive table in hive
+        // metastore.
+        tEnv.executeSql("CALL sys.repair(`table` => 'test_db.t_repair_hive')");
+
+        assertThat(
+                        hiveShell
+                                .executeQuery("DESC FORMATTED test_db.t_repair_hive")
+                                .contains("item_id\tbigint\titem id"))
+                .isTrue();
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS test_db.t_repair_hive"))
+                .containsExactlyInAnyOrder("dt=2020-01-02/hh=09", "dt=2020-01-03/hh=10");
+
+        // Database test_db_02 exists in hive metastore
+        hiveShell.execute("use test_db_02");
+        tEnv.executeSql("USE test_db_02").await();
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS test_db_02.t_repair_hive"))
+                .containsExactlyInAnyOrder("dt=2020-01-02/hh=09");
+
+        alterTableInFileSystem(fileCatalog01);
+
+        // When the Hive table exists, specify the paimon table to update hive table in hive
+        // metastore.
+        tEnv.executeSql("CALL sys.repair(`table` => 'test_db_02.t_repair_hive')");
+        assertThat(
+                        hiveShell
+                                .executeQuery("DESC FORMATTED test_db_02.t_repair_hive")
+                                .contains("item_id\tbigint\titem id"))
+                .isTrue();
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS test_db_02.t_repair_hive"))
+                .containsExactlyInAnyOrder("dt=2020-01-02/hh=09", "dt=2020-01-03/hh=10");
+        hiveShell.execute("DROP TABLE test_db.t_repair_hive");
+        hiveShell.execute("DROP TABLE test_db_02.t_repair_hive");
+    }
+
+    @Test
     public void testRepairTable() throws Exception {
+        testRepairTable(false);
+    }
+
+    @Test
+    public void testRepairTableWithNamedArgument() throws Exception {
+        testRepairTable(true);
+    }
+
+    private void testRepairTable(boolean isNamedArgument) throws Exception {
         TableEnvironment fileCatalog = useFileCatalog("test_db");
         // Database test_db exists in hive metastore
         hiveShell.execute("use test_db");
         // When the Hive table does not exist, specify the paimon table to create hive table in hive
         // metastore.
-        tEnv.executeSql("CALL sys.repair('test_db.t_repair_hive')");
+        tEnv.executeSql(
+                isNamedArgument
+                        ? "CALL sys.repair(`table` => 'test_db.t_repair_hive')"
+                        : "CALL sys.repair('test_db.t_repair_hive')");
 
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t_repair_hive"))
                 .containsExactlyInAnyOrder("dt=2020-01-02/hh=09");
@@ -1639,7 +1700,10 @@ public abstract class HiveCatalogITCaseBase {
 
         // When the Hive table exists, specify the paimon table to update hive table in hive
         // metastore.
-        tEnv.executeSql("CALL sys.repair('test_db.t_repair_hive')");
+        tEnv.executeSql(
+                isNamedArgument
+                        ? "CALL sys.repair(`table` => 'test_db.t_repair_hive')"
+                        : "CALL sys.repair('test_db.t_repair_hive')");
         assertThat(
                         hiveShell
                                 .executeQuery("DESC FORMATTED t_repair_hive")
@@ -1651,6 +1715,15 @@ public abstract class HiveCatalogITCaseBase {
 
     @Test
     public void testRepairTableWithCustomLocation() throws Exception {
+        testRepairTableWithCustomLocation(false);
+    }
+
+    @Test
+    public void testRepairTableWithCustomLocationAndNamedArgument() throws Exception {
+        testRepairTableWithCustomLocation(true);
+    }
+
+    private void testRepairTableWithCustomLocation(boolean isNamedArgument) throws Exception {
         TableEnvironment fileCatalog = useFileCatalog("test_db");
         // Database exists in hive metastore and uses custom location.
         String databaseLocation = path + "test_db.db";
@@ -1659,7 +1732,11 @@ public abstract class HiveCatalogITCaseBase {
 
         // When the Hive table does not exist, specify the paimon table to create hive table in hive
         // metastore.
-        tEnv.executeSql("CALL sys.repair('my_database.t_repair_hive')").await();
+        tEnv.executeSql(
+                        isNamedArgument
+                                ? "CALL sys.repair(`table` => 'my_database.t_repair_hive')"
+                                : "CALL sys.repair('my_database.t_repair_hive')")
+                .await();
 
         String tableLocation = databaseLocation + "/t_repair_hive";
         assertThat(
@@ -1674,7 +1751,10 @@ public abstract class HiveCatalogITCaseBase {
 
         // When the Hive table exists, specify the paimon table to update hive table in hive
         // metastore.
-        tEnv.executeSql("CALL sys.repair('my_database.t_repair_hive')");
+        tEnv.executeSql(
+                isNamedArgument
+                        ? "CALL sys.repair(`table` => 'my_database.t_repair_hive')"
+                        : "CALL sys.repair('my_database.t_repair_hive')");
         assertThat(
                         hiveShell
                                 .executeQuery("DESC FORMATTED t_repair_hive")
@@ -1687,6 +1767,8 @@ public abstract class HiveCatalogITCaseBase {
                 .isTrue();
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t_repair_hive"))
                 .containsExactlyInAnyOrder("dt=2020-01-02/hh=09", "dt=2020-01-03/hh=10");
+        hiveShell.execute("DROP TABLE my_database.t_repair_hive");
+        hiveShell.execute("DROP DATABASE my_database");
     }
 
     @Test
