@@ -21,7 +21,6 @@ package org.apache.paimon.flink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.procedure.ProcedureUtil;
 import org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil;
 import org.apache.paimon.fs.Path;
@@ -870,46 +869,52 @@ public class FlinkCatalog extends AbstractCatalog {
         return getPartitionSpecs(tablePath, null);
     }
 
-    private List<CatalogPartitionSpec> getPartitionSpecs(
-            ObjectPath tablePath, @Nullable CatalogPartitionSpec partitionSpec)
-            throws CatalogException, TableNotPartitionedException, TableNotExistException {
-        Identifier identifier = toIdentifier(tablePath);
+    private Table getPaimonTable(ObjectPath tablePath) throws TableNotExistException {
         try {
-            Table table = catalog.getTable(identifier);
-            FileStoreTable fileStoreTable = (FileStoreTable) table;
-
-            if (fileStoreTable.partitionKeys() == null
-                    || fileStoreTable.partitionKeys().size() == 0) {
-                throw new TableNotPartitionedException(getName(), tablePath);
-            }
-
-            ReadBuilder readBuilder = table.newReadBuilder();
-            if (partitionSpec != null && partitionSpec.getPartitionSpec() != null) {
-                readBuilder.withPartitionFilter(partitionSpec.getPartitionSpec());
-            }
-            List<BinaryRow> partitions = readBuilder.newScan().listPartitions();
-            org.apache.paimon.types.RowType partitionRowType =
-                    fileStoreTable.schema().logicalPartitionType();
-
-            InternalRowPartitionComputer partitionComputer =
-                    FileStorePathFactory.getPartitionComputer(
-                            partitionRowType,
-                            new CoreOptions(table.options()).partitionDefaultName());
-
-            return partitions.stream()
-                    .map(
-                            m -> {
-                                LinkedHashMap<String, String> partValues =
-                                        partitionComputer.generatePartValues(
-                                                Preconditions.checkNotNull(
-                                                        m,
-                                                        "Partition row data is null. This is unexpected."));
-                                return new CatalogPartitionSpec(partValues);
-                            })
-                    .collect(Collectors.toList());
+            Identifier identifier = toIdentifier(tablePath);
+            return catalog.getTable(identifier);
         } catch (Catalog.TableNotExistException e) {
             throw new TableNotExistException(getName(), tablePath);
         }
+    }
+
+    private List<PartitionEntry> getPartitionEntries(
+            Table table, ObjectPath tablePath, @Nullable CatalogPartitionSpec partitionSpec)
+            throws TableNotPartitionedException {
+        if (table.partitionKeys() == null || table.partitionKeys().size() == 0) {
+            throw new TableNotPartitionedException(getName(), tablePath);
+        }
+
+        ReadBuilder readBuilder = table.newReadBuilder();
+        if (partitionSpec != null && partitionSpec.getPartitionSpec() != null) {
+            readBuilder.withPartitionFilter(partitionSpec.getPartitionSpec());
+        }
+        return readBuilder.newScan().listPartitionEntries();
+    }
+
+    private List<CatalogPartitionSpec> getPartitionSpecs(
+            ObjectPath tablePath, @Nullable CatalogPartitionSpec partitionSpec)
+            throws CatalogException, TableNotPartitionedException, TableNotExistException {
+        FileStoreTable table = (FileStoreTable) getPaimonTable(tablePath);
+        List<PartitionEntry> partitionEntries =
+                getPartitionEntries(table, tablePath, partitionSpec);
+        org.apache.paimon.types.RowType partitionRowType = table.schema().logicalPartitionType();
+
+        InternalRowPartitionComputer partitionComputer =
+                FileStorePathFactory.getPartitionComputer(
+                        partitionRowType, new CoreOptions(table.options()).partitionDefaultName());
+
+        return partitionEntries.stream()
+                .map(
+                        e -> {
+                            LinkedHashMap<String, String> partValues =
+                                    partitionComputer.generatePartValues(
+                                            Preconditions.checkNotNull(
+                                                    e.partition(),
+                                                    "Partition row data is null. This is unexpected."));
+                            return new CatalogPartitionSpec(partValues);
+                        })
+                .collect(Collectors.toList());
     }
 
     @Override
@@ -929,17 +934,9 @@ public class FlinkCatalog extends AbstractCatalog {
     public CatalogPartition getPartition(ObjectPath tablePath, CatalogPartitionSpec partitionSpec)
             throws PartitionNotExistException, CatalogException {
         checkNotNull(partitionSpec, "partition spec shouldn't be null");
-        Identifier identifier = toIdentifier(tablePath);
         try {
-            Table table = catalog.getTable(identifier);
-            if (table.partitionKeys() == null || table.partitionKeys().size() == 0) {
-                throw new PartitionNotExistException(getName(), tablePath, partitionSpec);
-            }
-
-            ReadBuilder readBuilder =
-                    table.newReadBuilder()
-                            .withPartitionFilter(checkNotNull(partitionSpec.getPartitionSpec()));
-            List<PartitionEntry> partitionEntries = readBuilder.newScan().listPartitionEntries();
+            List<PartitionEntry> partitionEntries =
+                    getPartitionEntries(getPaimonTable(tablePath), tablePath, partitionSpec);
             if (partitionEntries.isEmpty()) {
                 throw new PartitionNotExistException(getName(), tablePath, partitionSpec);
             }
@@ -953,8 +950,8 @@ public class FlinkCatalog extends AbstractCatalog {
             properties.put(
                     FILE_SIZE_IN_BYTES_KEY, String.valueOf(partitionEntry.fileSizeInBytes()));
             return new CatalogPartitionImpl(properties, "");
-        } catch (Catalog.TableNotExistException e) {
-            throw new CatalogException("table not exist", e);
+        } catch (TableNotPartitionedException | TableNotExistException e) {
+            throw new PartitionNotExistException(getName(), tablePath, partitionSpec);
         }
     }
 
