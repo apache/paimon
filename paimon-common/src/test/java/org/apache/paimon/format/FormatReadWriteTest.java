@@ -256,7 +256,16 @@ public abstract class FormatReadWriteTest {
                 Object expectedField = fieldGetters[i].getFieldOrNull(expected);
                 switch (name) {
                     case "locations":
-                        validateInternalMap((InternalMap) actualField, (InternalMap) expectedField);
+                        validateInternalMap(
+                                (InternalMap) actualField,
+                                (InternalMap) expectedField,
+                                DataTypes.STRING());
+                        break;
+                    case "nonStrKeyMap":
+                        validateInternalMap(
+                                (InternalMap) actualField,
+                                (InternalMap) expectedField,
+                                DataTypes.INT());
                         break;
                     case "strArray":
                         validateInternalArray(
@@ -290,8 +299,9 @@ public abstract class FormatReadWriteTest {
         }
     }
 
-    private void validateInternalMap(InternalMap actualMap, InternalMap expectedMap) {
-        validateInternalArray(actualMap.keyArray(), expectedMap.keyArray(), DataTypes.STRING());
+    private void validateInternalMap(
+            InternalMap actualMap, InternalMap expectedMap, DataType keyType) {
+        validateInternalArray(actualMap.keyArray(), expectedMap.keyArray(), keyType);
         validateInternalArray(actualMap.valueArray(), expectedMap.valueArray(), getMapValueType());
     }
 
