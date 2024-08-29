@@ -50,12 +50,9 @@ public interface AvroSchemaVisitor<T> {
                 return visitUnion(schema, type);
 
             case ARRAY:
-                if (schema.getLogicalType() instanceof LogicalMap) {
+                if (type instanceof MapType) {
                     MapType mapType = (MapType) type;
-                    return visitArrayMap(
-                            schema,
-                            mapType == null ? null : mapType.getKeyType(),
-                            mapType == null ? null : mapType.getValueType());
+                    return visitArrayMap(schema, mapType.getKeyType(), mapType.getValueType());
                 } else {
                     return visitArray(
                             schema, type == null ? null : ((ArrayType) type).getElementType());
