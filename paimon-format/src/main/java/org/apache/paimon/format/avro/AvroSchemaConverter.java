@@ -192,33 +192,33 @@ public class AvroSchemaConverter {
                 DataType valueType = extractValueTypeToAvroMap(dataType);
                 Schema map;
                 if (isArrayMap(dataType)) {
+                    // Avro only natively support map with string key.
+                    // To represent a map with non-string key, we use an array containing several
+                    // rows. The first field of a row is the key, and the second field is the value.
+                    SchemaBuilder.GenericDefault<Schema> kvBuilder =
+                            SchemaBuilder.builder()
+                                    .record(rowName)
+                                    .fields()
+                                    .name("key")
+                                    .type(
+                                            convertToSchema(
+                                                    keyType, rowName + "_key", rowNameMapping))
+                                    .noDefault()
+                                    .name("value")
+                                    .type(
+                                            convertToSchema(
+                                                    valueType, rowName + "_value", rowNameMapping));
+                    SchemaBuilder.FieldAssembler<Schema> assembler =
+                            valueType.isNullable()
+                                    ? kvBuilder.withDefault(null)
+                                    : kvBuilder.noDefault();
+                    map = SchemaBuilder.builder().array().items(assembler.endRecord());
+                    map = LogicalMap.get().addToSchema(map);
+                } else {
                     map =
                             SchemaBuilder.builder()
                                     .map()
                                     .values(convertToSchema(valueType, rowName, rowNameMapping));
-                } else {
-                    String mapRowName = rowName + "_kv";
-                    SchemaBuilder.GenericDefault<Schema> kvBuilder =
-                            SchemaBuilder.builder()
-                                    .record(mapRowName)
-                                    .fields()
-                                    .name("key")
-                                    .type(convertToSchema(keyType, mapRowName, rowNameMapping))
-                                    .noDefault()
-                                    .name("value")
-                                    .type(convertToSchema(valueType, mapRowName, rowNameMapping));
-                    if (valueType.isNullable()) {
-                        map =
-                                SchemaBuilder.builder()
-                                        .array()
-                                        .items(kvBuilder.withDefault(null).endRecord());
-                    } else {
-                        map =
-                                SchemaBuilder.builder()
-                                        .array()
-                                        .items(kvBuilder.noDefault().endRecord());
-                    }
-                    map = LogicalMap.get().addToSchema(map);
                 }
                 return nullable ? nullableSchema(map) : map;
             case ARRAY:
@@ -240,8 +240,8 @@ public class AvroSchemaConverter {
 
     public static boolean isArrayMap(DataType type) {
         DataType keyType = extractKeyTypeToAvroMap(type);
-        return keyType.getTypeRoot() == DataTypeRoot.VARCHAR
-                || keyType.getTypeRoot() == DataTypeRoot.CHAR;
+        return keyType.getTypeRoot() != DataTypeRoot.VARCHAR
+                && keyType.getTypeRoot() != DataTypeRoot.CHAR;
     }
 
     public static DataType extractKeyTypeToAvroMap(DataType type) {

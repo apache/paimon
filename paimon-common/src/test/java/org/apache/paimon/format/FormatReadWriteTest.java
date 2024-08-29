@@ -142,6 +142,9 @@ public abstract class FormatReadWriteTest {
                         .field(
                                 "locations",
                                 DataTypes.MAP(DataTypes.STRING().notNull(), getMapValueType()))
+                        .field(
+                                "nonStrKeyMap",
+                                DataTypes.MAP(DataTypes.INT().notNull(), getMapValueType()))
                         .field("strArray", DataTypes.ARRAY(DataTypes.STRING()).nullable())
                         .field("intArray", DataTypes.ARRAY(DataTypes.INT()).nullable())
                         .field("boolean", DataTypes.BOOLEAN().nullable())
@@ -193,6 +196,13 @@ public abstract class FormatReadWriteTest {
                                     {
                                         this.put(fromString("key1"), mapValueData[0]);
                                         this.put(fromString("key2"), mapValueData[1]);
+                                    }
+                                }),
+                        new GenericMap(
+                                new HashMap<Object, Object>() {
+                                    {
+                                        this.put(1, mapValueData[0]);
+                                        this.put(2, mapValueData[1]);
                                     }
                                 }),
                         new GenericArray(new Object[] {fromString("123"), fromString("456")}),
