@@ -188,14 +188,38 @@ public class AvroSchemaConverter {
                 return nullable ? nullableSchema(record) : record;
             case MULTISET:
             case MAP:
-                Schema map =
-                        SchemaBuilder.builder()
-                                .map()
-                                .values(
-                                        convertToSchema(
-                                                extractValueTypeToAvroMap(dataType),
-                                                rowName,
-                                                rowNameMapping));
+                DataType keyType = extractKeyTypeToAvroMap(dataType);
+                DataType valueType = extractValueTypeToAvroMap(dataType);
+                Schema map;
+                if (isArrayMap(dataType)) {
+                    // Avro only natively support map with string key.
+                    // To represent a map with non-string key, we use an array containing several
+                    // rows. The first field of a row is the key, and the second field is the value.
+                    SchemaBuilder.GenericDefault<Schema> kvBuilder =
+                            SchemaBuilder.builder()
+                                    .record(rowName)
+                                    .fields()
+                                    .name("key")
+                                    .type(
+                                            convertToSchema(
+                                                    keyType, rowName + "_key", rowNameMapping))
+                                    .noDefault()
+                                    .name("value")
+                                    .type(
+                                            convertToSchema(
+                                                    valueType, rowName + "_value", rowNameMapping));
+                    SchemaBuilder.FieldAssembler<Schema> assembler =
+                            valueType.isNullable()
+                                    ? kvBuilder.withDefault(null)
+                                    : kvBuilder.noDefault();
+                    map = SchemaBuilder.builder().array().items(assembler.endRecord());
+                    map = LogicalMap.get().addToSchema(map);
+                } else {
+                    map =
+                            SchemaBuilder.builder()
+                                    .map()
+                                    .values(convertToSchema(valueType, rowName, rowNameMapping));
+                }
                 return nullable ? nullableSchema(map) : map;
             case ARRAY:
                 ArrayType arrayType = (ArrayType) dataType;
@@ -214,26 +238,29 @@ public class AvroSchemaConverter {
         }
     }
 
-    public static DataType extractValueTypeToAvroMap(DataType type) {
-        DataType keyType;
-        DataType valueType;
+    public static boolean isArrayMap(DataType type) {
+        DataType keyType = extractKeyTypeToAvroMap(type);
+        return keyType.getTypeRoot() != DataTypeRoot.VARCHAR
+                && keyType.getTypeRoot() != DataTypeRoot.CHAR;
+    }
+
+    public static DataType extractKeyTypeToAvroMap(DataType type) {
         if (type instanceof MapType) {
             MapType mapType = (MapType) type;
-            keyType = mapType.getKeyType();
-            valueType = mapType.getValueType();
+            return mapType.getKeyType();
         } else {
             MultisetType multisetType = (MultisetType) type;
-            keyType = multisetType.getElementType();
-            valueType = new IntType();
+            return multisetType.getElementType();
         }
-        if (keyType.getTypeRoot() != DataTypeRoot.VARCHAR
-                && keyType.getTypeRoot() != DataTypeRoot.CHAR) {
-            throw new UnsupportedOperationException(
-                    "Avro format doesn't support non-string as key type of map. "
-                            + "The key type is: "
-                            + keyType.asSQLString());
+    }
+
+    public static DataType extractValueTypeToAvroMap(DataType type) {
+        if (type instanceof MapType) {
+            MapType mapType = (MapType) type;
+            return mapType.getValueType();
+        } else {
+            return new IntType();
         }
-        return valueType;
     }
 
     /** Returns schema with nullable true. */

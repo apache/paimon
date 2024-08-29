@@ -27,6 +27,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.RowType;
 
 import org.apache.avro.AvroRuntimeException;
 import org.apache.avro.Schema;
@@ -139,6 +140,18 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
     public FieldReader visitArray(Schema schema, @Nullable DataType elementType) {
         FieldReader elementReader = visit(schema.getElementType(), elementType);
         return new ArrayReader(elementReader);
+    }
+
+    @Override
+    public FieldReader visitArrayMap(Schema schema, DataType keyType, DataType valueType) {
+        RowReader entryReader =
+                new RowReader(
+                        schema.getElementType(),
+                        RowType.of(
+                                        new DataType[] {keyType, valueType},
+                                        new String[] {"key", "value"})
+                                .getFields());
+        return new ArrayMapReader(entryReader, keyType, valueType);
     }
 
     @Override
@@ -388,6 +401,49 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
                 chunkLength = decoder.arrayNext();
             }
         }
+    }
+
+    private static class ArrayMapReader implements FieldReader {
+
+        private final RowReader entryReader;
+        private final InternalRow.FieldGetter keyGetter;
+        private final InternalRow.FieldGetter valueGetter;
+
+        private final List<Object> reusedKeyList = new ArrayList<>();
+        private final List<Object> reusedValueList = new ArrayList<>();
+
+        private ArrayMapReader(RowReader entryReader, DataType keyType, DataType valueType) {
+            this.entryReader = entryReader;
+            this.keyGetter = InternalRow.createFieldGetter(keyType, 0);
+            this.valueGetter = InternalRow.createFieldGetter(valueType, 1);
+        }
+
+        @Override
+        public Object read(Decoder decoder, Object reuse) throws IOException {
+            reusedKeyList.clear();
+            reusedValueList.clear();
+            long chunkLength = decoder.readArrayStart();
+
+            while (chunkLength > 0) {
+                for (int i = 0; i < chunkLength; i += 1) {
+                    InternalRow entry = entryReader.read(decoder, null);
+                    reusedKeyList.add(keyGetter.getFieldOrNull(entry));
+                    reusedValueList.add(valueGetter.getFieldOrNull(entry));
+                }
+                chunkLength = decoder.arrayNext();
+            }
+
+            Map<Object, Object> map = new HashMap<>();
+            Object[] keys = reusedKeyList.toArray();
+            Object[] values = reusedValueList.toArray();
+            for (int i = 0; i < keys.length; i++) {
+                map.put(keys[i], values[i]);
+            }
+            return new GenericMap(map);
+        }
+
+        @Override
+        public void skip(Decoder decoder) throws IOException {}
     }
 
     private static class MapReader implements FieldReader {

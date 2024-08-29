@@ -50,8 +50,16 @@ public interface AvroSchemaVisitor<T> {
                 return visitUnion(schema, type);
 
             case ARRAY:
-                return visitArray(
-                        schema, type == null ? null : ((ArrayType) type).getElementType());
+                if (schema.getLogicalType() instanceof LogicalMap) {
+                    MapType mapType = (MapType) type;
+                    return visitArrayMap(
+                            schema,
+                            mapType == null ? null : mapType.getKeyType(),
+                            mapType == null ? null : mapType.getValueType());
+                } else {
+                    return visitArray(
+                            schema, type == null ? null : ((ArrayType) type).getElementType());
+                }
 
             case MAP:
                 DataType valueType =
@@ -149,6 +157,8 @@ public interface AvroSchemaVisitor<T> {
     T visitDecimal(Integer precision, Integer scale);
 
     T visitArray(Schema schema, DataType elementType);
+
+    T visitArrayMap(Schema schema, DataType keyType, DataType valueType);
 
     T visitMap(Schema schema, DataType valueType);
 
