@@ -213,6 +213,9 @@ public class AvroSchemaConverter {
                                     ? kvBuilder.withDefault(null)
                                     : kvBuilder.noDefault();
                     map = SchemaBuilder.builder().array().items(assembler.endRecord());
+                    // Compatible with Iceberg's avro format.
+                    // We don't use avro's logical type to check if an array field is actually a
+                    // map. We use Paimon's DataType to check this.
                     map = LogicalMap.get().addToSchema(map);
                 } else {
                     map =

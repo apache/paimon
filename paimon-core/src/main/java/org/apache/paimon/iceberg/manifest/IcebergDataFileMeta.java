@@ -19,12 +19,20 @@
 package org.apache.paimon.iceberg.manifest;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.GenericMap;
+import org.apache.paimon.data.InternalMap;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -69,20 +77,72 @@ public class IcebergDataFileMeta {
     private final BinaryRow partition;
     private final long recordCount;
     private final long fileSizeInBytes;
+    private final InternalMap nullValueCounts;
+    private final InternalMap lowerBounds;
+    private final InternalMap upperBounds;
 
-    public IcebergDataFileMeta(
+    IcebergDataFileMeta(
             Content content,
             String filePath,
             String fileFormat,
             BinaryRow partition,
             long recordCount,
-            long fileSizeInBytes) {
+            long fileSizeInBytes,
+            InternalMap nullValueCounts,
+            InternalMap lowerBounds,
+            InternalMap upperBounds) {
         this.content = content;
         this.filePath = filePath;
         this.fileFormat = fileFormat;
         this.partition = partition;
         this.recordCount = recordCount;
         this.fileSizeInBytes = fileSizeInBytes;
+        this.nullValueCounts = nullValueCounts;
+        this.lowerBounds = lowerBounds;
+        this.upperBounds = upperBounds;
+    }
+
+    public static IcebergDataFileMeta create(
+            Content content,
+            String filePath,
+            String fileFormat,
+            BinaryRow partition,
+            long recordCount,
+            long fileSizeInBytes,
+            TableSchema tableSchema,
+            SimpleStats stats) {
+        Map<Integer, Long> nullValueCounts = new HashMap<>();
+        Map<Integer, byte[]> lowerBounds = new HashMap<>();
+        Map<Integer, byte[]> upperBounds = new HashMap<>();
+
+        List<InternalRow.FieldGetter> fieldGetters = new ArrayList<>();
+        int numFields = tableSchema.fields().size();
+        for (int i = 0; i < numFields; i++) {
+            fieldGetters.add(InternalRow.createFieldGetter(tableSchema.fields().get(i).type(), i));
+        }
+
+        for (int i = 0; i < numFields; i++) {
+            int fieldId = tableSchema.fields().get(i).id();
+            DataType type = tableSchema.fields().get(i).type();
+            nullValueCounts.put(fieldId, stats.nullCounts().getLong(i));
+            Object minValue = fieldGetters.get(i).getFieldOrNull(stats.minValues());
+            Object maxValue = fieldGetters.get(i).getFieldOrNull(stats.maxValues());
+            if (minValue != null && maxValue != null) {
+                lowerBounds.put(fieldId, IcebergConversions.toByteBuffer(type, minValue).array());
+                upperBounds.put(fieldId, IcebergConversions.toByteBuffer(type, maxValue).array());
+            }
+        }
+
+        return new IcebergDataFileMeta(
+                content,
+                filePath,
+                fileFormat,
+                partition,
+                recordCount,
+                fileSizeInBytes,
+                new GenericMap(nullValueCounts),
+                new GenericMap(lowerBounds),
+                new GenericMap(upperBounds));
     }
 
     public Content content() {
@@ -109,6 +169,18 @@ public class IcebergDataFileMeta {
         return fileSizeInBytes;
     }
 
+    public InternalMap nullValueCounts() {
+        return nullValueCounts;
+    }
+
+    public InternalMap lowerBounds() {
+        return lowerBounds;
+    }
+
+    public InternalMap upperBounds() {
+        return upperBounds;
+    }
+
     public static RowType schema(RowType partitionType) {
         List<DataField> fields = new ArrayList<>();
         fields.add(new DataField(134, "content", DataTypes.INT().notNull()));
@@ -117,6 +189,21 @@ public class IcebergDataFileMeta {
         fields.add(new DataField(102, "partition", partitionType));
         fields.add(new DataField(103, "record_count", DataTypes.BIGINT().notNull()));
         fields.add(new DataField(104, "file_size_in_bytes", DataTypes.BIGINT().notNull()));
+        fields.add(
+                new DataField(
+                        110,
+                        "null_value_counts",
+                        DataTypes.MAP(DataTypes.INT().notNull(), DataTypes.BIGINT().notNull())));
+        fields.add(
+                new DataField(
+                        125,
+                        "lower_bounds",
+                        DataTypes.MAP(DataTypes.INT().notNull(), DataTypes.BYTES().notNull())));
+        fields.add(
+                new DataField(
+                        128,
+                        "upper_bounds",
+                        DataTypes.MAP(DataTypes.INT().notNull(), DataTypes.BYTES().notNull())));
         return new RowType(fields);
     }
 
@@ -134,11 +221,23 @@ public class IcebergDataFileMeta {
                 && fileSizeInBytes == that.fileSizeInBytes
                 && Objects.equals(filePath, that.filePath)
                 && Objects.equals(fileFormat, that.fileFormat)
-                && Objects.equals(partition, that.partition);
+                && Objects.equals(partition, that.partition)
+                && Objects.equals(nullValueCounts, that.nullValueCounts)
+                && Objects.equals(lowerBounds, that.lowerBounds)
+                && Objects.equals(upperBounds, that.upperBounds);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(content, filePath, fileFormat, partition, recordCount, fileSizeInBytes);
+        return Objects.hash(
+                content,
+                filePath,
+                fileFormat,
+                partition,
+                recordCount,
+                fileSizeInBytes,
+                nullValueCounts,
+                lowerBounds,
+                upperBounds);
     }
 }

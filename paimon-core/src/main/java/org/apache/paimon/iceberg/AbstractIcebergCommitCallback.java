@@ -44,6 +44,8 @@ import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.source.DataSplit;
@@ -62,6 +64,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -170,10 +173,11 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
 
     private void createMetadataWithoutBase(long snapshotId) throws IOException {
         SnapshotReader snapshotReader = table.newSnapshotReader().withSnapshot(snapshotId);
+        SchemaCache schemas = new SchemaCache();
         Iterator<IcebergManifestEntry> entryIterator =
                 snapshotReader.read().dataSplits().stream()
                         .filter(DataSplit::rawConvertible)
-                        .flatMap(s -> dataSplitToManifestEntries(s, snapshotId).stream())
+                        .flatMap(s -> dataSplitToManifestEntries(s, snapshotId, schemas).stream())
                         .iterator();
         List<IcebergManifestFileMeta> manifestFileMetas =
                 manifestFile.rollingWrite(entryIterator, snapshotId);
@@ -219,17 +223,22 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
     }
 
     private List<IcebergManifestEntry> dataSplitToManifestEntries(
-            DataSplit dataSplit, long snapshotId) {
+            DataSplit dataSplit, long snapshotId, SchemaCache schemas) {
         List<IcebergManifestEntry> result = new ArrayList<>();
-        for (RawFile rawFile : dataSplit.convertToRawFiles().get()) {
+        List<RawFile> rawFiles = dataSplit.convertToRawFiles().get();
+        for (int i = 0; i < dataSplit.dataFiles().size(); i++) {
+            DataFileMeta paimonFileMeta = dataSplit.dataFiles().get(i);
+            RawFile rawFile = rawFiles.get(i);
             IcebergDataFileMeta fileMeta =
-                    new IcebergDataFileMeta(
+                    IcebergDataFileMeta.create(
                             IcebergDataFileMeta.Content.DATA,
                             rawFile.path(),
                             rawFile.format(),
                             dataSplit.partition(),
                             rawFile.rowCount(),
-                            rawFile.fileSize());
+                            rawFile.fileSize(),
+                            schemas.get(paimonFileMeta.schemaId()),
+                            paimonFileMeta.valueStats());
             result.add(
                     new IcebergManifestEntry(
                             IcebergManifestEntry.Status.ADDED,
@@ -414,24 +423,28 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
             return Collections.emptyList();
         }
 
+        SchemaCache schemas = new SchemaCache();
         return manifestFile.rollingWrite(
                 addedFiles.entrySet().stream()
                         .map(
                                 e -> {
-                                    IcebergDataFileMeta fileMeta =
-                                            new IcebergDataFileMeta(
+                                    DataFileMeta paimonFileMeta = e.getValue().getRight();
+                                    IcebergDataFileMeta icebergFileMeta =
+                                            IcebergDataFileMeta.create(
                                                     IcebergDataFileMeta.Content.DATA,
                                                     e.getKey(),
-                                                    e.getValue().getRight().fileFormat(),
+                                                    paimonFileMeta.fileFormat(),
                                                     e.getValue().getLeft(),
-                                                    e.getValue().getRight().rowCount(),
-                                                    e.getValue().getRight().fileSize());
+                                                    paimonFileMeta.rowCount(),
+                                                    paimonFileMeta.fileSize(),
+                                                    schemas.get(paimonFileMeta.schemaId()),
+                                                    paimonFileMeta.valueStats());
                                     return new IcebergManifestEntry(
                                             IcebergManifestEntry.Status.ADDED,
                                             currentSnapshotId,
                                             currentSnapshotId,
                                             currentSnapshotId,
-                                            fileMeta);
+                                            icebergFileMeta);
                                 })
                         .iterator(),
                 currentSnapshotId);
@@ -658,6 +671,20 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                 table.fileIO().deleteQuietly(listPath);
             }
             table.fileIO().deleteQuietly(path);
+        }
+    }
+
+    // -------------------------------------------------------------------------------------
+    // Utils
+    // -------------------------------------------------------------------------------------
+
+    private class SchemaCache {
+
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        Map<Long, TableSchema> tableSchemas = new HashMap<>();
+
+        private TableSchema get(long schemaId) {
+            return tableSchemas.computeIfAbsent(schemaId, id -> schemaManager.schema(id));
         }
     }
 }

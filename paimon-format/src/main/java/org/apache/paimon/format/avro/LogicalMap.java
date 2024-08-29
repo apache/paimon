@@ -28,15 +28,17 @@ import org.apache.avro.Schema;
  *
  * <p>Modified from <a
  * href="https://github.com/apache/iceberg/blob/main/core/src/main/java/org/apache/iceberg/avro/LogicalMap.java">Iceberg</a>.
+ *
+ * <p>NOTE: We don't register this type into Avro's {@link org.apache.avro.LogicalTypes}, because
+ * Iceberg will register a logical type with the same name, and we don't want to conflict with
+ * Iceberg. This class is only for our avro's format to be compatible with Iceberg's avro format. We
+ * use Paimon's {@link org.apache.paimon.types.DataType} to check if an array field is actually a
+ * map.
  */
 public class LogicalMap extends LogicalType {
 
     private static final String NAME = "map";
     private static final LogicalMap INSTANCE = new LogicalMap();
-
-    static String name() {
-        return NAME;
-    }
 
     static LogicalMap get() {
         return INSTANCE;
