@@ -31,6 +31,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.utils.Filter;
@@ -149,6 +150,9 @@ public class UnawareAppendTableCompactionCoordinator {
             }
             snapshotReader.withMode(ScanMode.ALL);
         } else {
+            if (!streamingMode) {
+                throw new EndOfScanException();
+            }
             snapshotReader.withMode(ScanMode.DELTA);
         }
 
