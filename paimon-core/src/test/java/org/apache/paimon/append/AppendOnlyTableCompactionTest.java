@@ -47,17 +47,42 @@ import java.util.List;
 import java.util.Random;
 import java.util.UUID;
 
+import static java.util.Collections.singletonMap;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for append table compaction. */
 public class AppendOnlyTableCompactionTest {
+
+    private static final Random random = new Random();
 
     @TempDir private Path tempDir;
     private FileStoreTable appendOnlyFileStoreTable;
     private SnapshotManager snapshotManager;
     private UnawareAppendTableCompactionCoordinator compactionCoordinator;
     private AppendOnlyFileStoreWrite write;
+    private org.apache.paimon.fs.Path path;
+    private TableSchema tableSchema;
     private final String commitUser = UUID.randomUUID().toString();
+
+    @BeforeEach
+    public void createNegativeAppendOnlyTable() throws Exception {
+        FileIO fileIO = new LocalFileIO();
+        path = new org.apache.paimon.fs.Path(tempDir.toString());
+        tableSchema = new SchemaManager(fileIO, path).createTable(schema());
+        snapshotManager = new SnapshotManager(fileIO, path);
+        recreate();
+    }
+
+    private void recreate() {
+        appendOnlyFileStoreTable =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(),
+                        new org.apache.paimon.fs.Path(tempDir.toString()),
+                        tableSchema);
+        compactionCoordinator =
+                new UnawareAppendTableCompactionCoordinator(appendOnlyFileStoreTable);
+        write = (AppendOnlyFileStoreWrite) appendOnlyFileStoreTable.store().newWrite(commitUser);
+    }
 
     @Test
     public void noCompaction() throws Exception {
@@ -98,6 +123,15 @@ public class AppendOnlyTableCompactionTest {
         List<DataFileMeta> last = new ArrayList<>(compactionCoordinator.listRestoredFiles());
         assertThat(last.size()).isEqualTo(1);
         assertThat(last.get(0).rowCount()).isEqualTo(11);
+    }
+
+    @Test
+    public void testScanSkipBigFiles() throws Exception {
+        List<CommitMessage> messages = writeCommit(11);
+        commit(messages);
+        tableSchema = tableSchema.copy(singletonMap("target-file-size", "1 b"));
+        recreate();
+        assertThat(compactionCoordinator.plan()).isEmpty();
     }
 
     @Test
@@ -177,22 +211,5 @@ public class AppendOnlyTableCompactionTest {
                 BinaryString.fromString("A" + random.nextInt(100)),
                 BinaryString.fromString("B" + random.nextInt(100)),
                 BinaryString.fromString("C" + random.nextInt(100)));
-    }
-
-    private static final Random random = new Random();
-
-    @BeforeEach
-    public void createNegativeAppendOnlyTable() throws Exception {
-        FileIO fileIO = new LocalFileIO();
-        org.apache.paimon.fs.Path path = new org.apache.paimon.fs.Path(tempDir.toString());
-        SchemaManager schemaManager = new SchemaManager(fileIO, path);
-        TableSchema tableSchema = schemaManager.createTable(schema());
-        snapshotManager = new SnapshotManager(fileIO, path);
-        appendOnlyFileStoreTable =
-                FileStoreTableFactory.create(
-                        fileIO, new org.apache.paimon.fs.Path(tempDir.toString()), tableSchema);
-        compactionCoordinator =
-                new UnawareAppendTableCompactionCoordinator(appendOnlyFileStoreTable);
-        write = (AppendOnlyFileStoreWrite) appendOnlyFileStoreTable.store().newWrite(commitUser);
     }
 }

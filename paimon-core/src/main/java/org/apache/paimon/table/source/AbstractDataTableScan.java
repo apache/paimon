@@ -116,7 +116,6 @@ public abstract class AbstractDataTableScan implements DataTableScan {
                 checkArgument(
                         isStreaming, "Set 'streaming-compact' in batch mode. This is unexpected.");
                 return new ContinuousCompactorStartingScanner(snapshotManager);
-            case COMPACT_APPEND_NO_BUCKET:
             case FILE_MONITOR:
                 return new FullStartingScanner(snapshotManager);
         }

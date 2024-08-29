@@ -100,6 +100,10 @@ public class UnawareAppendDeletionFileMaintainer implements AppendDeletionFileMa
         return UNAWARE_BUCKET;
     }
 
+    public boolean hasDeletionFile(String dataFile) {
+        return this.dataFileToDeletionFile.containsKey(dataFile);
+    }
+
     public DeletionFile getDeletionFile(String dataFile) {
         return this.dataFileToDeletionFile.get(dataFile);
     }

@@ -88,7 +88,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private List<ManifestFileMeta> specifiedManifests = null;
     protected ScanMode scanMode = ScanMode.ALL;
     private Filter<Integer> levelFilter = null;
-    private Long dataFileTimeMills = null;
+    private Filter<ManifestEntry> manifestEntryFilter = null;
     private Filter<String> fileNameFilter = null;
 
     private ManifestCacheFilter manifestCacheFilter = null;
@@ -196,8 +196,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     @Override
-    public FileStoreScan withDataFileTimeMills(long dataFileTimeMills) {
-        this.dataFileTimeMills = dataFileTimeMills;
+    public FileStoreScan withManifestEntryFilter(Filter<ManifestEntry> filter) {
+        this.manifestEntryFilter = filter;
         return this;
     }
 
@@ -455,8 +455,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     /** Note: Keep this thread-safe. */
     private boolean filterUnmergedManifestEntry(ManifestEntry entry) {
-        if (dataFileTimeMills != null
-                && entry.file().creationTimeEpochMillis() < dataFileTimeMills) {
+        if (manifestEntryFilter != null && !manifestEntryFilter.test(entry)) {
             return false;
         }
 
