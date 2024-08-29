@@ -160,7 +160,7 @@ public class ExpireSnapshotsProcedureITCase extends CatalogITCaseBase {
         assertThat(sm.latestSnapshotId()).isEqualTo(latest);
     }
 
-    protected <T extends ActionBase> T createAction(Class<T> clazz, String... args) {
+    private <T extends ActionBase> T createAction(Class<T> clazz, String... args) {
         return ActionFactory.createAction(args)
                 .filter(clazz::isInstance)
                 .map(clazz::cast)
