@@ -26,6 +26,9 @@ import org.apache.paimon.table.system.SourceTableLineageTable;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.flink.table.catalog.CatalogPartition;
+import org.apache.flink.table.catalog.CatalogPartitionSpec;
+import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.exceptions.PartitionNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotPartitionedException;
 import org.apache.flink.types.Row;
@@ -33,10 +36,16 @@ import org.junit.jupiter.api.Test;
 
 import javax.annotation.Nonnull;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.api.config.TableConfigOptions.TABLE_DML_SYNC;
+import static org.apache.paimon.flink.FlinkCatalog.LAST_UPDATE_TIME_KEY;
+import static org.apache.paimon.flink.FlinkCatalog.NUM_FILES_KEY;
+import static org.apache.paimon.flink.FlinkCatalog.NUM_ROWS_KEY;
+import static org.apache.paimon.flink.FlinkCatalog.TOTAL_SIZE_KEY;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -481,6 +490,67 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    void testPKTableGetPartition() throws Exception {
+        sql(
+                "CREATE TABLE IF NOT EXISTS PK_T (id INT PRIMARY KEY NOT ENFORCED, par STRING, word STRING) PARTITIONED BY(par)");
+        FlinkCatalog flinkCatalog = flinkCatalog();
+        ObjectPath tablePath = new ObjectPath(flinkCatalog.getDefaultDatabase(), "PK_T");
+        sql("INSERT INTO PK_T VALUES (1, 'p1', 'a'),(2, 'p1', 'b'),(3, 'p2', 'a'),(4, 'p2', 'b')");
+        List<CatalogPartitionSpec> partitions = flinkCatalog.listPartitions(tablePath);
+        Map<String, Map<String, String>> partitionPropertiesMap1 =
+                getPartitionProperties(flinkCatalog, tablePath, partitions);
+        assertThat(partitionPropertiesMap1)
+                .allSatisfy(
+                        (par, properties) -> {
+                            assertThat(properties.get(NUM_ROWS_KEY)).isEqualTo("2");
+                            assertThat(properties.get(LAST_UPDATE_TIME_KEY)).isNotBlank();
+                            assertThat(properties.get(NUM_FILES_KEY)).isEqualTo("1");
+                            assertThat(properties.get(TOTAL_SIZE_KEY)).isNotBlank();
+                        });
+        // update p1 data
+        sql("UPDATE PK_T SET word = 'c' WHERE id = 2");
+        Map<String, Map<String, String>> partitionPropertiesMap2 =
+                getPartitionProperties(flinkCatalog, tablePath, partitions);
+        assertPartitionNotUpdate("p2", partitionPropertiesMap1, partitionPropertiesMap2);
+        // we compute the count of changelog data, not distinct count(*).
+        assertPartitionUpdateTo("p1", partitionPropertiesMap1, partitionPropertiesMap2, 3L, 2L);
+
+        // delete data from p2
+        sql("DELETE FROM PK_T WHERE id = 3");
+        Map<String, Map<String, String>> partitionPropertiesMap3 =
+                getPartitionProperties(flinkCatalog, tablePath, partitions);
+        assertPartitionNotUpdate("p1", partitionPropertiesMap2, partitionPropertiesMap3);
+        // we compute the count of changelog data, not distinct count(*).
+        assertPartitionUpdateTo("p2", partitionPropertiesMap2, partitionPropertiesMap3, 3L, 2L);
+    }
+
+    @Test
+    void testNonPKTableGetPartition() throws Exception {
+        FlinkCatalog flinkCatalog = flinkCatalog();
+        ObjectPath tablePath = new ObjectPath(flinkCatalog.getDefaultDatabase(), "NON_PK_T");
+        sql("CREATE TABLE IF NOT EXISTS NON_PK_T (par STRING, a INT, b INT) PARTITIONED BY(par)");
+        sql("INSERT INTO NON_PK_T VALUES ('p1', 2, 3),('p2', 4, 5)");
+        List<CatalogPartitionSpec> partitions = flinkCatalog.listPartitions(tablePath);
+        Map<String, Map<String, String>> partitionPropertiesMap1 =
+                getPartitionProperties(flinkCatalog, tablePath, partitions);
+
+        assertThat(partitionPropertiesMap1)
+                .allSatisfy(
+                        (par, properties) -> {
+                            assertThat(properties.get(NUM_ROWS_KEY)).isEqualTo("1");
+                            assertThat(properties.get(LAST_UPDATE_TIME_KEY)).isNotBlank();
+                        });
+
+        // append data to p1
+        sql("INSERT INTO NON_PK_T VALUES ('p1', 6, 7), ('p1', 8, 9)");
+        Map<String, Map<String, String>> partitionPropertiesMap2 =
+                getPartitionProperties(flinkCatalog, tablePath, partitions);
+
+        assertPartitionNotUpdate("p2", partitionPropertiesMap1, partitionPropertiesMap2);
+        assertPartitionUpdateTo("p1", partitionPropertiesMap1, partitionPropertiesMap2, 3L, 2L);
+    }
+
+    @Test
     public void testDropPartition() {
         sql(
                 "CREATE TABLE PartitionTable (\n"
@@ -900,5 +970,49 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                 "INSERT INTO T /*+ OPTIONS('full-compaction.delta-commits' = '100') */ VALUES (2, 21), (3, 31)");
         result = sql("SELECT k, v FROM T$ro ORDER BY k");
         assertThat(result).containsExactly(Row.of(1, 11), Row.of(2, 21), Row.of(3, 31));
+    }
+
+    private static Map<String, Map<String, String>> getPartitionProperties(
+            FlinkCatalog flinkCatalog,
+            ObjectPath tablePath,
+            List<CatalogPartitionSpec> partitions) {
+        Map<String, Map<String, String>> partitionPropertiesMap = new HashMap<>();
+        partitions.forEach(
+                p -> {
+                    try {
+                        String partition = p.getPartitionSpec().get("par");
+                        CatalogPartition catalogPartition = flinkCatalog.getPartition(tablePath, p);
+                        Map<String, String> properties = catalogPartition.getProperties();
+                        partitionPropertiesMap.put(partition, properties);
+                    } catch (PartitionNotExistException e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+        return partitionPropertiesMap;
+    }
+
+    private static void assertPartitionNotUpdate(
+            String partition,
+            Map<String, Map<String, String>> oldProperties,
+            Map<String, Map<String, String>> newProperties) {
+        assertThat(oldProperties.get(partition)).isEqualTo(newProperties.get(partition));
+    }
+
+    private static void assertPartitionUpdateTo(
+            String partition,
+            Map<String, Map<String, String>> oldProperties,
+            Map<String, Map<String, String>> newProperties,
+            Long expectedNumRows,
+            Long expectedNumFiles) {
+        Map<String, String> newPartitionProperties = newProperties.get(partition);
+        Map<String, String> oldPartitionProperties = oldProperties.get(partition);
+        assertThat(newPartitionProperties.get(NUM_ROWS_KEY))
+                .isEqualTo(String.valueOf(expectedNumRows));
+        assertThat(Long.valueOf(newPartitionProperties.get(LAST_UPDATE_TIME_KEY)))
+                .isGreaterThan(Long.valueOf(oldPartitionProperties.get(LAST_UPDATE_TIME_KEY)));
+        assertThat(newPartitionProperties.get(NUM_FILES_KEY))
+                .isEqualTo(String.valueOf(expectedNumFiles));
+        assertThat(Long.valueOf(newPartitionProperties.get(TOTAL_SIZE_KEY)))
+                .isGreaterThan(Long.valueOf(oldPartitionProperties.get(TOTAL_SIZE_KEY)));
     }
 }

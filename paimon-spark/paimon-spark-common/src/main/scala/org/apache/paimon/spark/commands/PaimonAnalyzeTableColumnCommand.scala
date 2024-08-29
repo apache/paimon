@@ -63,7 +63,8 @@ case class PaimonAnalyzeTableColumnCommand(
     // compute stats
     val totalSize = PaimonStatsUtils.calculateTotalSize(
       sparkSession.sessionState,
-      table.name(),
+      catalog.name(),
+      identifier,
       Some(table.location().toUri))
     val (mergedRecordCount, colStats) =
       PaimonStatsUtils.computeColumnStats(sparkSession, relation, attributes)

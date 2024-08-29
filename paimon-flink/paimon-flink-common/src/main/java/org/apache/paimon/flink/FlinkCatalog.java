@@ -21,10 +21,10 @@ package org.apache.paimon.flink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.procedure.ProcedureUtil;
 import org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -45,6 +45,7 @@ import org.apache.flink.table.catalog.CatalogDatabase;
 import org.apache.flink.table.catalog.CatalogDatabaseImpl;
 import org.apache.flink.table.catalog.CatalogFunction;
 import org.apache.flink.table.catalog.CatalogPartition;
+import org.apache.flink.table.catalog.CatalogPartitionImpl;
 import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.CatalogTableImpl;
@@ -126,12 +127,16 @@ import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.deseriali
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.nonPhysicalColumnsCount;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.serializeNewWatermarkSpec;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Catalog for paimon. */
 public class FlinkCatalog extends AbstractCatalog {
 
     private static final Logger LOG = LoggerFactory.getLogger(FlinkCatalog.class);
-
+    public static final String NUM_ROWS_KEY = "numRows";
+    public static final String LAST_UPDATE_TIME_KEY = "lastUpdateTime";
+    public static final String TOTAL_SIZE_KEY = "totalSize";
+    public static final String NUM_FILES_KEY = "numFiles";
     private final ClassLoader classLoader;
 
     private final Catalog catalog;
@@ -864,46 +869,52 @@ public class FlinkCatalog extends AbstractCatalog {
         return getPartitionSpecs(tablePath, null);
     }
 
-    private List<CatalogPartitionSpec> getPartitionSpecs(
-            ObjectPath tablePath, @Nullable CatalogPartitionSpec partitionSpec)
-            throws CatalogException, TableNotPartitionedException, TableNotExistException {
-        Identifier identifier = toIdentifier(tablePath);
+    private Table getPaimonTable(ObjectPath tablePath) throws TableNotExistException {
         try {
-            Table table = catalog.getTable(identifier);
-            FileStoreTable fileStoreTable = (FileStoreTable) table;
-
-            if (fileStoreTable.partitionKeys() == null
-                    || fileStoreTable.partitionKeys().size() == 0) {
-                throw new TableNotPartitionedException(getName(), tablePath);
-            }
-
-            ReadBuilder readBuilder = table.newReadBuilder();
-            if (partitionSpec != null && partitionSpec.getPartitionSpec() != null) {
-                readBuilder.withPartitionFilter(partitionSpec.getPartitionSpec());
-            }
-            List<BinaryRow> partitions = readBuilder.newScan().listPartitions();
-            org.apache.paimon.types.RowType partitionRowType =
-                    fileStoreTable.schema().logicalPartitionType();
-
-            InternalRowPartitionComputer partitionComputer =
-                    FileStorePathFactory.getPartitionComputer(
-                            partitionRowType,
-                            new CoreOptions(table.options()).partitionDefaultName());
-
-            return partitions.stream()
-                    .map(
-                            m -> {
-                                LinkedHashMap<String, String> partValues =
-                                        partitionComputer.generatePartValues(
-                                                Preconditions.checkNotNull(
-                                                        m,
-                                                        "Partition row data is null. This is unexpected."));
-                                return new CatalogPartitionSpec(partValues);
-                            })
-                    .collect(Collectors.toList());
+            Identifier identifier = toIdentifier(tablePath);
+            return catalog.getTable(identifier);
         } catch (Catalog.TableNotExistException e) {
             throw new TableNotExistException(getName(), tablePath);
         }
+    }
+
+    private List<PartitionEntry> getPartitionEntries(
+            Table table, ObjectPath tablePath, @Nullable CatalogPartitionSpec partitionSpec)
+            throws TableNotPartitionedException {
+        if (table.partitionKeys() == null || table.partitionKeys().size() == 0) {
+            throw new TableNotPartitionedException(getName(), tablePath);
+        }
+
+        ReadBuilder readBuilder = table.newReadBuilder();
+        if (partitionSpec != null && partitionSpec.getPartitionSpec() != null) {
+            readBuilder.withPartitionFilter(partitionSpec.getPartitionSpec());
+        }
+        return readBuilder.newScan().listPartitionEntries();
+    }
+
+    private List<CatalogPartitionSpec> getPartitionSpecs(
+            ObjectPath tablePath, @Nullable CatalogPartitionSpec partitionSpec)
+            throws CatalogException, TableNotPartitionedException, TableNotExistException {
+        FileStoreTable table = (FileStoreTable) getPaimonTable(tablePath);
+        List<PartitionEntry> partitionEntries =
+                getPartitionEntries(table, tablePath, partitionSpec);
+        org.apache.paimon.types.RowType partitionRowType = table.schema().logicalPartitionType();
+
+        InternalRowPartitionComputer partitionComputer =
+                FileStorePathFactory.getPartitionComputer(
+                        partitionRowType, new CoreOptions(table.options()).partitionDefaultName());
+
+        return partitionEntries.stream()
+                .map(
+                        e -> {
+                            LinkedHashMap<String, String> partValues =
+                                    partitionComputer.generatePartValues(
+                                            Preconditions.checkNotNull(
+                                                    e.partition(),
+                                                    "Partition row data is null. This is unexpected."));
+                            return new CatalogPartitionSpec(partValues);
+                        })
+                .collect(Collectors.toList());
     }
 
     @Override
@@ -922,7 +933,25 @@ public class FlinkCatalog extends AbstractCatalog {
     @Override
     public CatalogPartition getPartition(ObjectPath tablePath, CatalogPartitionSpec partitionSpec)
             throws PartitionNotExistException, CatalogException {
-        throw new PartitionNotExistException(getName(), tablePath, partitionSpec);
+        checkNotNull(partitionSpec, "partition spec shouldn't be null");
+        try {
+            List<PartitionEntry> partitionEntries =
+                    getPartitionEntries(getPaimonTable(tablePath), tablePath, partitionSpec);
+            if (partitionEntries.isEmpty()) {
+                throw new PartitionNotExistException(getName(), tablePath, partitionSpec);
+            }
+            // This was already filtered by the expected partition.
+            PartitionEntry partitionEntry = partitionEntries.get(0);
+            Map<String, String> properties = new HashMap<>();
+            properties.put(NUM_ROWS_KEY, String.valueOf(partitionEntry.recordCount()));
+            properties.put(
+                    LAST_UPDATE_TIME_KEY, String.valueOf(partitionEntry.lastFileCreationTime()));
+            properties.put(NUM_FILES_KEY, String.valueOf(partitionEntry.fileCount()));
+            properties.put(TOTAL_SIZE_KEY, String.valueOf(partitionEntry.fileSizeInBytes()));
+            return new CatalogPartitionImpl(properties, "");
+        } catch (TableNotPartitionedException | TableNotExistException e) {
+            throw new PartitionNotExistException(getName(), tablePath, partitionSpec);
+        }
     }
 
     @Override

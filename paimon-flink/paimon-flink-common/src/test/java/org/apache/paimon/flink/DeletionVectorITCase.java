@@ -245,4 +245,21 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
             }
         }
     }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"none", "lookup"})
+    public void testBatchReadDVTableWithSequenceField(String changelogProducer) {
+        sql(
+                String.format(
+                        "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, sequence INT, name STRING) "
+                                + "WITH ('deletion-vectors.enabled' = 'true', 'sequence.field' = 'sequence', 'changelog-producer' = '%s')",
+                        changelogProducer));
+
+        sql("INSERT INTO T VALUES (1, 1, '1'), (2, 1, '2')");
+        sql("INSERT INTO T VALUES (1, 2, '1_1'), (2, 2, '2_1')");
+        sql("INSERT INTO T VALUES (1, 3, '1_2'), (2, 1, '2_2')");
+
+        assertThat(batchSql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(Row.of(1, 3, "1_2"), Row.of(2, 2, "2_1"));
+    }
 }

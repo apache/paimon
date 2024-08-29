@@ -26,7 +26,6 @@ import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -43,6 +42,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -51,14 +51,14 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.data.IcebergGenerics;
 import org.apache.iceberg.data.Record;
+import org.apache.iceberg.expressions.Expressions;
 import org.apache.iceberg.hadoop.HadoopCatalog;
 import org.apache.iceberg.io.CloseableIterable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.nio.ByteBuffer;
+import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -73,7 +73,6 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -358,6 +357,148 @@ public class IcebergCompatibilityTest {
                 .containsExactlyInAnyOrder("Record(1, 11)", "Record(2, 20)", "Record(3, 30)");
     }
 
+    @Test
+    public void testAllTypeStatistics() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(),
+                            DataTypes.BOOLEAN(),
+                            DataTypes.BIGINT(),
+                            DataTypes.FLOAT(),
+                            DataTypes.DOUBLE(),
+                            DataTypes.DECIMAL(8, 3),
+                            DataTypes.CHAR(20),
+                            DataTypes.STRING(),
+                            DataTypes.BINARY(20),
+                            DataTypes.VARBINARY(20),
+                            DataTypes.DATE()
+                        },
+                        new String[] {
+                            "v_int",
+                            "v_boolean",
+                            "v_bigint",
+                            "v_float",
+                            "v_double",
+                            "v_decimal",
+                            "v_char",
+                            "v_varchar",
+                            "v_binary",
+                            "v_varbinary",
+                            "v_date"
+                        });
+        FileStoreTable table =
+                createPaimonTable(rowType, Collections.emptyList(), Collections.emptyList(), -1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        GenericRow lowerBounds =
+                GenericRow.of(
+                        1,
+                        true,
+                        10L,
+                        100.0f,
+                        1000.0,
+                        Decimal.fromUnscaledLong(123456, 8, 3),
+                        BinaryString.fromString("apple"),
+                        BinaryString.fromString("cat"),
+                        "B_apple".getBytes(),
+                        "B_cat".getBytes(),
+                        100);
+        write.write(lowerBounds);
+        GenericRow upperBounds =
+                GenericRow.of(
+                        2,
+                        true,
+                        20L,
+                        200.0f,
+                        2000.0,
+                        Decimal.fromUnscaledLong(234567, 8, 3),
+                        BinaryString.fromString("banana"),
+                        BinaryString.fromString("dog"),
+                        "B_banana".getBytes(),
+                        "B_dog".getBytes(),
+                        200);
+        write.write(upperBounds);
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        write.close();
+        commit.close();
+
+        int numFields = rowType.getFieldCount();
+        for (int i = 0; i < numFields; i++) {
+            DataType type = rowType.getTypeAt(i);
+            String name = rowType.getFieldNames().get(i);
+            if (type.getTypeRoot() == DataTypeRoot.BOOLEAN
+                    || type.getTypeRoot() == DataTypeRoot.BINARY
+                    || type.getTypeRoot() == DataTypeRoot.VARBINARY) {
+                // lower bounds and upper bounds of these types have no actual use case
+                continue;
+            }
+
+            final Object lower;
+            final Object upper;
+            // change Paimon objects to Iceberg Java API objects
+            if (type.getTypeRoot() == DataTypeRoot.CHAR
+                    || type.getTypeRoot() == DataTypeRoot.VARCHAR) {
+                lower = lowerBounds.getField(i).toString();
+                upper = upperBounds.getField(i).toString();
+            } else if (type.getTypeRoot() == DataTypeRoot.DECIMAL) {
+                lower = new BigDecimal(lowerBounds.getField(i).toString());
+                upper = new BigDecimal(upperBounds.getField(i).toString());
+            } else {
+                lower = lowerBounds.getField(i);
+                upper = upperBounds.getField(i);
+            }
+
+            String expectedLower = lower.toString();
+            String expectedUpper = upper.toString();
+            if (type.getTypeRoot() == DataTypeRoot.DATE) {
+                expectedLower = LocalDate.ofEpochDay((int) lower).toString();
+                expectedUpper = LocalDate.ofEpochDay((int) upper).toString();
+            }
+
+            assertThat(
+                            getIcebergResult(
+                                    icebergTable ->
+                                            IcebergGenerics.read(icebergTable)
+                                                    .select(name)
+                                                    .where(Expressions.lessThan(name, upper))
+                                                    .build(),
+                                    Record::toString))
+                    .containsExactly("Record(" + expectedLower + ")");
+            assertThat(
+                            getIcebergResult(
+                                    icebergTable ->
+                                            IcebergGenerics.read(icebergTable)
+                                                    .select(name)
+                                                    .where(Expressions.greaterThan(name, lower))
+                                                    .build(),
+                                    Record::toString))
+                    .containsExactly("Record(" + expectedUpper + ")");
+            assertThat(
+                            getIcebergResult(
+                                    icebergTable ->
+                                            IcebergGenerics.read(icebergTable)
+                                                    .select(name)
+                                                    .where(Expressions.lessThan(name, lower))
+                                                    .build(),
+                                    Record::toString))
+                    .isEmpty();
+            assertThat(
+                            getIcebergResult(
+                                    icebergTable ->
+                                            IcebergGenerics.read(icebergTable)
+                                                    .select(name)
+                                                    .where(Expressions.greaterThan(name, upper))
+                                                    .build(),
+                                    Record::toString))
+                    .isEmpty();
+        }
+    }
+
     // ------------------------------------------------------------------------
     //  Random Tests
     // ------------------------------------------------------------------------
@@ -471,215 +612,6 @@ public class IcebergCompatibilityTest {
                 testRecords,
                 expected,
                 Record::toString);
-    }
-
-    @Test
-    public void testPartitionedPrimaryKeyTableTimestamp() throws Exception {
-        RowType rowType =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.TIMESTAMP(6),
-                            DataTypes.STRING(),
-                            DataTypes.STRING(),
-                            DataTypes.INT(),
-                            DataTypes.BIGINT()
-                        },
-                        new String[] {"pt1", "pt2", "k", "v1", "v2"});
-
-        BiFunction<Timestamp, String, BinaryRow> binaryRow =
-                (pt1, pt2) -> {
-                    BinaryRow b = new BinaryRow(2);
-                    BinaryRowWriter writer = new BinaryRowWriter(b);
-                    writer.writeTimestamp(0, pt1, 6);
-                    writer.writeString(1, BinaryString.fromString(pt2));
-                    writer.complete();
-                    return b;
-                };
-
-        int numRounds = 20;
-        int numRecords = 100;
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-
-        List<List<TestRecord>> testRecords = new ArrayList<>();
-        List<List<String>> expected = new ArrayList<>();
-        Map<String, String> expectedMap = new LinkedHashMap<>();
-
-        for (int r = 0; r < numRounds; r++) {
-            List<TestRecord> round = new ArrayList<>();
-            for (int i = 0; i < numRecords; i++) {
-                Timestamp pt1 = generateRandomTimestamp(random, random.nextBoolean() ? 3 : 6);
-                String pt2 = String.valueOf(random.nextInt(10, 12));
-                String k = String.valueOf(random.nextInt(0, 100));
-                int v1 = random.nextInt();
-                long v2 = random.nextLong();
-
-                round.add(
-                        new TestRecord(
-                                binaryRow.apply(pt1, pt2),
-                                GenericRow.of(
-                                        pt1,
-                                        BinaryString.fromString(pt2),
-                                        BinaryString.fromString(k),
-                                        v1,
-                                        v2)));
-
-                expectedMap.put(
-                        String.format(
-                                "%s, %s, %s", pt1.toInstant().atOffset(ZoneOffset.UTC), pt2, k),
-                        String.format("%d, %d", v1, v2));
-            }
-
-            testRecords.add(round);
-            expected.add(
-                    expectedMap.entrySet().stream()
-                            .map(e -> String.format("Record(%s, %s)", e.getKey(), e.getValue()))
-                            .collect(Collectors.toList()));
-        }
-
-        runCompatibilityTest(
-                rowType,
-                Arrays.asList("pt1", "pt2"),
-                Arrays.asList("pt1", "pt2", "k"),
-                testRecords,
-                expected,
-                Record::toString);
-    }
-
-    private Timestamp generateRandomTimestamp(ThreadLocalRandom random, int precision) {
-        long milliseconds = random.nextLong(0, Long.MAX_VALUE / 1000_000 - 1_000 * 1000);
-        int nanoAdjustment;
-        switch (precision) {
-            case 3:
-                nanoAdjustment = 0;
-                break;
-            case 6:
-                nanoAdjustment = random.nextInt(0, 1_000) * 1000;
-                break;
-            default:
-                throw new IllegalArgumentException("Unsupported precision: " + precision);
-        }
-
-        return Timestamp.fromEpochMillis(milliseconds, nanoAdjustment);
-    }
-
-    @Test
-    public void testAppendOnlyTableWithAllTypes() throws Exception {
-        RowType rowType =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.INT(),
-                            DataTypes.BOOLEAN(),
-                            DataTypes.BIGINT(),
-                            DataTypes.FLOAT(),
-                            DataTypes.DOUBLE(),
-                            DataTypes.DECIMAL(8, 3),
-                            DataTypes.CHAR(20),
-                            DataTypes.STRING(),
-                            DataTypes.BINARY(20),
-                            DataTypes.VARBINARY(20),
-                            DataTypes.DATE()
-                        },
-                        new String[] {
-                            "pt",
-                            "v_boolean",
-                            "v_bigint",
-                            "v_float",
-                            "v_double",
-                            "v_decimal",
-                            "v_char",
-                            "v_varchar",
-                            "v_binary",
-                            "v_varbinary",
-                            "v_date"
-                        });
-
-        Function<Integer, BinaryRow> binaryRow =
-                (pt) -> {
-                    BinaryRow b = new BinaryRow(1);
-                    BinaryRowWriter writer = new BinaryRowWriter(b);
-                    writer.writeInt(0, pt);
-                    writer.complete();
-                    return b;
-                };
-
-        int numRounds = 5;
-        int numRecords = 500;
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        List<List<TestRecord>> testRecords = new ArrayList<>();
-        List<List<String>> expected = new ArrayList<>();
-        List<String> currentExpected = new ArrayList<>();
-        for (int r = 0; r < numRounds; r++) {
-            List<TestRecord> round = new ArrayList<>();
-            for (int i = 0; i < numRecords; i++) {
-                int pt = random.nextInt(0, 2);
-                Boolean vBoolean = random.nextBoolean() ? random.nextBoolean() : null;
-                Long vBigInt = random.nextBoolean() ? random.nextLong() : null;
-                Float vFloat = random.nextBoolean() ? random.nextFloat() : null;
-                Double vDouble = random.nextBoolean() ? random.nextDouble() : null;
-                Decimal vDecimal =
-                        random.nextBoolean()
-                                ? Decimal.fromUnscaledLong(random.nextLong(0, 100000000), 8, 3)
-                                : null;
-                String vChar = random.nextBoolean() ? String.valueOf(random.nextInt()) : null;
-                String vVarChar = random.nextBoolean() ? String.valueOf(random.nextInt()) : null;
-                byte[] vBinary =
-                        random.nextBoolean() ? String.valueOf(random.nextInt()).getBytes() : null;
-                byte[] vVarBinary =
-                        random.nextBoolean() ? String.valueOf(random.nextInt()).getBytes() : null;
-                Integer vDate = random.nextBoolean() ? random.nextInt(0, 30000) : null;
-
-                round.add(
-                        new TestRecord(
-                                binaryRow.apply(pt),
-                                GenericRow.of(
-                                        pt,
-                                        vBoolean,
-                                        vBigInt,
-                                        vFloat,
-                                        vDouble,
-                                        vDecimal,
-                                        BinaryString.fromString(vChar),
-                                        BinaryString.fromString(vVarChar),
-                                        vBinary,
-                                        vVarBinary,
-                                        vDate)));
-                currentExpected.add(
-                        String.format(
-                                "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s",
-                                pt,
-                                vBoolean,
-                                vBigInt,
-                                vFloat,
-                                vDouble,
-                                vDecimal,
-                                vChar,
-                                vVarChar,
-                                vBinary == null ? null : new String(vBinary),
-                                vVarBinary == null ? null : new String(vVarBinary),
-                                vDate == null ? null : LocalDate.ofEpochDay(vDate)));
-            }
-            testRecords.add(round);
-            expected.add(new ArrayList<>(currentExpected));
-        }
-
-        runCompatibilityTest(
-                rowType,
-                Collections.emptyList(),
-                Collections.emptyList(),
-                testRecords,
-                expected,
-                r ->
-                        IntStream.range(0, rowType.getFieldCount())
-                                .mapToObj(
-                                        i -> {
-                                            Object field = r.get(i);
-                                            if (field instanceof ByteBuffer) {
-                                                return new String(((ByteBuffer) field).array());
-                                            } else {
-                                                return String.valueOf(field);
-                                            }
-                                        })
-                                .collect(Collectors.joining(", ")));
     }
 
     private void runCompatibilityTest(

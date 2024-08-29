@@ -40,13 +40,13 @@ import org.apache.spark.sql.execution.exchange.{Exchange, ShuffleExchangeLike}
  * scan if:
  *
  * 1. The sub-plan from root to bucketed table scan, does not contain
- *    [[hasInterestingPartition]] operator.
+ *    [[hasInterestingPartitionOrOrder]] operator.
  *
- * 2. The sub-plan from the nearest downstream [[hasInterestingPartition]] operator
+ * 2. The sub-plan from the nearest downstream [[hasInterestingPartitionOrOrder]] operator
  *    to the bucketed table scan and at least one [[ShuffleExchangeLike]].
  *
  * Examples:
- * 1. no [[hasInterestingPartition]] operator:
+ * 1. no [[hasInterestingPartitionOrOrder]] operator:
  *                Project
  *                   |
  *                 Filter
@@ -76,7 +76,7 @@ import org.apache.spark.sql.execution.exchange.{Exchange, ShuffleExchangeLike}
  *                  Scan(t1: i, j)
  *  (bucketed on column j, DISABLE bucketed scan)
  *
- * The idea of [[hasInterestingPartition]] is inspired from "interesting order" in
+ * The idea of [[hasInterestingPartitionOrOrder]] is inspired from "interesting order" in
  * the paper "Access Path Selection in a Relational Database Management System"
  * (https://dl.acm.org/doi/10.1145/582095.582099).
  */
@@ -86,26 +86,28 @@ object DisableUnnecessaryPaimonBucketedScan extends Rule[SparkPlan] {
   /**
    * Disable bucketed table scan with pre-order traversal of plan.
    *
-   * @param hashInterestingPartition
-   *   The traversed plan has operator with interesting partition.
+   * @param hashInterestingPartitionOrOrder
+   *   The traversed plan has operator with interesting partition and order.
    * @param hasExchange
    *   The traversed plan has [[Exchange]] operator.
    */
   private def disableBucketScan(
       plan: SparkPlan,
-      hashInterestingPartition: Boolean,
+      hashInterestingPartitionOrOrder: Boolean,
       hasExchange: Boolean): SparkPlan = {
     plan match {
-      case p if hasInterestingPartition(p) =>
-        // Operator with interesting partition, propagates `hashInterestingPartition` as true
+      case p if hasInterestingPartitionOrOrder(p) =>
+        // Operator with interesting partition, propagates `hashInterestingPartitionOrOrder` as true
         // to its children, and resets `hasExchange`.
-        p.mapChildren(disableBucketScan(_, hashInterestingPartition = true, hasExchange = false))
+        p.mapChildren(
+          disableBucketScan(_, hashInterestingPartitionOrOrder = true, hasExchange = false))
       case exchange: ShuffleExchangeLike =>
         // Exchange operator propagates `hasExchange` as true to its child.
-        exchange.mapChildren(disableBucketScan(_, hashInterestingPartition, hasExchange = true))
+        exchange.mapChildren(
+          disableBucketScan(_, hashInterestingPartitionOrOrder, hasExchange = true))
       case batch: BatchScanExec =>
         val paimonBucketedScan = extractPaimonBucketedScan(batch)
-        if (paimonBucketedScan.isDefined && (!hashInterestingPartition || hasExchange)) {
+        if (paimonBucketedScan.isDefined && (!hashInterestingPartitionOrOrder || hasExchange)) {
           val (batch, paimonScan) = paimonBucketedScan.get
           val newBatch = batch.copy(scan = paimonScan.disableBucketedScan())
           newBatch.copyTagsFrom(batch)
@@ -114,18 +116,22 @@ object DisableUnnecessaryPaimonBucketedScan extends Rule[SparkPlan] {
           batch
         }
       case p if canPassThrough(p) =>
-        p.mapChildren(disableBucketScan(_, hashInterestingPartition, hasExchange))
+        p.mapChildren(disableBucketScan(_, hashInterestingPartitionOrOrder, hasExchange))
       case other =>
         other.mapChildren(
-          disableBucketScan(_, hashInterestingPartition = false, hasExchange = false))
+          disableBucketScan(_, hashInterestingPartitionOrOrder = false, hasExchange = false))
     }
   }
 
-  private def hasInterestingPartition(plan: SparkPlan): Boolean = {
-    plan.requiredChildDistribution.exists {
+  private def hasInterestingPartitionOrOrder(plan: SparkPlan): Boolean = {
+    val hashPartition = plan.requiredChildDistribution.exists {
       case _: ClusteredDistribution | AllTuples => true
       case _ => false
     }
+    // Some operators may only require local sort without distribution,
+    // so we do not disable bucketed scan for these queries.
+    val hashOrder = plan.requiredChildOrdering.exists(_.nonEmpty)
+    hashPartition || hashOrder
   }
 
   /**
@@ -166,7 +172,7 @@ object DisableUnnecessaryPaimonBucketedScan extends Rule[SparkPlan] {
     if (!v2BucketingEnabled || !conf.autoBucketedScanEnabled || !hasBucketedScan) {
       plan
     } else {
-      disableBucketScan(plan, hashInterestingPartition = false, hasExchange = false)
+      disableBucketScan(plan, hashInterestingPartitionOrOrder = false, hasExchange = false)
     }
   }
 }

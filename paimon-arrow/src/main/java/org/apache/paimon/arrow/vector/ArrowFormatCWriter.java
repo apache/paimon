@@ -37,8 +37,8 @@ public class ArrowFormatCWriter implements AutoCloseable {
     private final ArrowSchema schema;
     private final ArrowFormatWriter realWriter;
 
-    public ArrowFormatCWriter(RowType rowType, int writeBatchSize) {
-        this.realWriter = new ArrowFormatWriter(rowType, writeBatchSize);
+    public ArrowFormatCWriter(RowType rowType, int writeBatchSize, boolean allowUpperCase) {
+        this.realWriter = new ArrowFormatWriter(rowType, writeBatchSize, allowUpperCase);
         RootAllocator allocator = realWriter.getAllocator();
         array = ArrowArray.allocateNew(allocator);
         schema = ArrowSchema.allocateNew(allocator);
