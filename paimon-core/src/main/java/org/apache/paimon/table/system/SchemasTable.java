@@ -26,6 +26,9 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.predicate.Equal;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.LeafPredicateExtractor;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
@@ -50,10 +53,13 @@ import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
+import javax.annotation.Nullable;
+
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
@@ -130,15 +136,23 @@ public class SchemasTable implements ReadonlyTable {
     }
 
     private class SchemasScan extends ReadOnceTableScan {
+        private @Nullable LeafPredicate schemaId;
 
         @Override
         public InnerTableScan withFilter(Predicate predicate) {
+            if (predicate == null) {
+                return this;
+            }
+
+            Map<String, LeafPredicate> leafPredicates =
+                    predicate.visit(LeafPredicateExtractor.INSTANCE);
+            schemaId = leafPredicates.get("schema_id");
             return this;
         }
 
         @Override
         public Plan innerPlan() {
-            return () -> Collections.singletonList(new SchemasSplit(location));
+            return () -> Collections.singletonList(new SchemasSplit(location, schemaId));
         }
     }
 
@@ -149,8 +163,11 @@ public class SchemasTable implements ReadonlyTable {
 
         private final Path location;
 
-        private SchemasSplit(Path location) {
+        private final @Nullable LeafPredicate schemaId;
+
+        private SchemasSplit(Path location, @Nullable LeafPredicate schemaId) {
             this.location = location;
+            this.schemaId = schemaId;
         }
 
         public boolean equals(Object o) {
@@ -161,12 +178,13 @@ public class SchemasTable implements ReadonlyTable {
                 return false;
             }
             SchemasSplit that = (SchemasSplit) o;
-            return Objects.equals(location, that.location);
+            return Objects.equals(location, that.location)
+                    && Objects.equals(schemaId, that.schemaId);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(location);
+            return Objects.hash(location, schemaId);
         }
     }
 
@@ -201,10 +219,21 @@ public class SchemasTable implements ReadonlyTable {
             if (!(split instanceof SchemasSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
-            Path location = ((SchemasSplit) split).location;
-            Iterator<TableSchema> schemas =
-                    new SchemaManager(fileIO, location, branch).listAll().iterator();
-            Iterator<InternalRow> rows = Iterators.transform(schemas, this::toRow);
+            SchemasSplit schemasSplit = (SchemasSplit) split;
+            LeafPredicate predicate = schemasSplit.schemaId;
+            Path location = schemasSplit.location;
+            SchemaManager manager = new SchemaManager(fileIO, location, branch);
+
+            Collection<TableSchema> tableSchemas = Collections.emptyList();
+            if (predicate != null && predicate.function() instanceof Equal) {
+                Object equalValue = predicate.literals().get(0);
+                if (equalValue instanceof Long) {
+                    tableSchemas = Collections.singletonList(manager.schema((Long) equalValue));
+                }
+            } else {
+                tableSchemas = manager.listAll();
+            }
+            Iterator<InternalRow> rows = Iterators.transform(tableSchemas.iterator(), this::toRow);
             if (projection != null) {
                 rows =
                         Iterators.transform(
