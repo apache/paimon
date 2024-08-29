@@ -21,6 +21,7 @@ package org.apache.spark.sql
 import org.apache.spark.sql.catalyst.TableIdentifier
 import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.plans.logical.{ColumnStat, LogicalPlan}
+import org.apache.spark.sql.connector.catalog.Identifier
 import org.apache.spark.sql.execution.command.CommandUtils
 import org.apache.spark.sql.internal.SessionState
 import org.apache.spark.sql.types.{BinaryType, BooleanType, DataType, DateType, DecimalType, DoubleType, FloatType, IntegralType, StringType, TimestampNTZType, TimestampType}
@@ -30,11 +31,12 @@ import java.net.URI
 object PaimonStatsUtils {
   def calculateTotalSize(
       sessionState: SessionState,
-      tableName: String,
+      catalogName: String,
+      identifier: Identifier,
       locationUri: Option[URI]): Long = {
     CommandUtils.calculateSingleLocationSize(
       sessionState,
-      new TableIdentifier(tableName),
+      new TableIdentifier(identifier.name(), Some(identifier.namespace().head)),
       locationUri)
   }
 
