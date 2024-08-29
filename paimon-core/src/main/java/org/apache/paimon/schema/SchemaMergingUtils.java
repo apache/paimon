@@ -39,18 +39,21 @@ import java.util.stream.Collectors;
 public class SchemaMergingUtils {
 
     public static TableSchema mergeSchemas(
-            TableSchema currentTableSchema, RowType dataFields, boolean allowExplicitCast) {
-        if (currentTableSchema.logicalRowType().equals(dataFields)) {
+            TableSchema currentTableSchema, RowType targetType, boolean allowExplicitCast) {
+        RowType currentType = currentTableSchema.logicalRowType();
+        if (currentType.equals(targetType)) {
             return currentTableSchema;
         }
 
         AtomicInteger highestFieldId = new AtomicInteger(currentTableSchema.highestFieldId());
         RowType newRowType =
-                mergeSchemas(
-                        currentTableSchema.logicalRowType(),
-                        dataFields,
-                        highestFieldId,
-                        allowExplicitCast);
+                mergeSchemas(currentType, targetType, highestFieldId, allowExplicitCast);
+        if (newRowType == currentType) {
+            // It happens if the `targetType` only changes `nullability` but we always respect the
+            // current's.
+            return currentTableSchema;
+        }
+
         return new TableSchema(
                 currentTableSchema.id() + 1,
                 newRowType.getFields(),
@@ -86,7 +89,7 @@ public class SchemaMergingUtils {
             DataType update0,
             AtomicInteger highestFieldId,
             boolean allowExplicitCast) {
-        // Here we try t0 merge the base0 and update0 without regard to the nullability,
+        // Here we try to merge the base0 and update0 without regard to the nullability,
         // and set the base0's nullability to the return's.
         DataType base = base0.copy(true);
         DataType update = update0.copy(true);
@@ -134,10 +137,10 @@ public class SchemaMergingUtils {
                             .collect(Collectors.toList());
 
             updatedFields.addAll(newFields);
-            return new RowType(base.isNullable(), updatedFields);
+            return new RowType(base0.isNullable(), updatedFields);
         } else if (base instanceof MapType && update instanceof MapType) {
             return new MapType(
-                    base.isNullable(),
+                    base0.isNullable(),
                     merge(
                             ((MapType) base).getKeyType(),
                             ((MapType) update).getKeyType(),
@@ -150,7 +153,7 @@ public class SchemaMergingUtils {
                             allowExplicitCast));
         } else if (base instanceof ArrayType && update instanceof ArrayType) {
             return new ArrayType(
-                    base.isNullable(),
+                    base0.isNullable(),
                     merge(
                             ((ArrayType) base).getElementType(),
                             ((ArrayType) update).getElementType(),
@@ -158,19 +161,24 @@ public class SchemaMergingUtils {
                             allowExplicitCast));
         } else if (base instanceof MultisetType && update instanceof MultisetType) {
             return new MultisetType(
-                    base.isNullable(),
+                    base0.isNullable(),
                     merge(
                             ((MultisetType) base).getElementType(),
                             ((MultisetType) update).getElementType(),
                             highestFieldId,
                             allowExplicitCast));
         } else if (base instanceof DecimalType && update instanceof DecimalType) {
-            if (base.equals(update)) {
-                return base0;
+            if (((DecimalType) base).getScale() == ((DecimalType) update).getScale()) {
+                return new DecimalType(
+                        base0.isNullable(),
+                        Math.max(
+                                ((DecimalType) base).getPrecision(),
+                                ((DecimalType) update).getPrecision()),
+                        ((DecimalType) base).getScale());
             } else {
                 throw new UnsupportedOperationException(
                         String.format(
-                                "Failed to merge decimal types with different precision or scale: %s and %s",
+                                "Failed to merge decimal types with different scale: %s and %s",
                                 base, update));
             }
         } else if (supportsDataTypesCast(base, update, allowExplicitCast)) {
@@ -212,10 +220,11 @@ public class SchemaMergingUtils {
 
     private static boolean supportsDataTypesCast(
             DataType sourceType, DataType targetType, boolean allowExplicitCast) {
-        boolean canImplicitCast = DataTypeCasts.supportsImplicitCast(sourceType, targetType);
-        boolean canExplicitCast =
-                allowExplicitCast && DataTypeCasts.supportsExplicitCast(sourceType, targetType);
-        return canImplicitCast || canExplicitCast;
+        if (allowExplicitCast) {
+            return DataTypeCasts.supportsExplicitCast(sourceType, targetType);
+        } else {
+            return DataTypeCasts.supportsImplicitCast(sourceType, targetType);
+        }
     }
 
     private static DataField assignIdForNewField(DataField field, AtomicInteger highestFieldId) {
