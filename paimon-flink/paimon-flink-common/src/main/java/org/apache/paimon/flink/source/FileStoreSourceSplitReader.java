@@ -49,6 +49,7 @@ import java.util.LinkedList;
 import java.util.Objects;
 import java.util.Queue;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** The {@link SplitReader} implementation for the file store source. */
 public class FileStoreSourceSplitReader
@@ -70,7 +71,7 @@ public class FileStoreSourceSplitReader
     private RecordIterator<InternalRow> currentFirstBatch;
 
     private boolean paused;
-    private volatile boolean wakeup;
+    private final AtomicBoolean wakeup;
     private final FileStoreSourceReaderMetrics metrics;
 
     public FileStoreSourceSplitReader(
@@ -84,17 +85,17 @@ public class FileStoreSourceSplitReader
         this.pool.add(new FileStoreRecordIterator());
         this.paused = false;
         this.metrics = metrics;
+        this.wakeup = new AtomicBoolean(false);
     }
 
     @Override
     public RecordsWithSplitIds<BulkFormat.RecordIterator<RowData>> fetch() throws IOException {
         if (paused) {
-            return new RecordsWithPausedSplit<>();
+            return new EmptyRecordsWithSplitIds<>();
         }
 
-        if (wakeup) {
-            wakeup = false;
-            return new RecordsWithPausedSplit<>();
+        if (wakeup.get() && wakeup.compareAndSet(true,false)) {
+            return new EmptyRecordsWithSplitIds<>();
         }
 
         checkSplitOrStartNext();
@@ -103,9 +104,8 @@ public class FileStoreSourceSplitReader
         // to be read at the same time
         FileStoreRecordIterator iterator = pool();
         if (iterator == null) {
-            LOG.info("Skip waiting for object pool due to wakeup: {}", wakeup);
-            wakeup = false;
-            return new RecordsWithPausedSplit<>();
+            LOG.info("Skip waiting for object pool due to wakeup");
+            return new EmptyRecordsWithSplitIds<>();
         }
 
         RecordIterator<InternalRow> nextBatch;
@@ -131,13 +131,16 @@ public class FileStoreSourceSplitReader
 
     private FileStoreRecordIterator pool() throws IOException {
         FileStoreRecordIterator iterator = null;
-        while (iterator == null && !wakeup) {
+        while (iterator == null && !wakeup.get()) {
             try {
                 iterator = this.pool.pollEntry(Duration.ofSeconds(10));
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new IOException("Interrupted");
             }
+        }
+        if (iterator == null) {
+            wakeup.compareAndSet(true,false);
         }
         return iterator;
     }
@@ -177,7 +180,7 @@ public class FileStoreSourceSplitReader
 
     @Override
     public void wakeUp() {
-        this.wakeup = true;
+        wakeup.compareAndSet(false,true);
         LOG.info("Wake up the split reader.");
     }
 
@@ -317,8 +320,11 @@ public class FileStoreSourceSplitReader
         }
     }
 
-    /** Indicates that the {@link FileStoreSourceSplitReader} is paused. */
-    private static class RecordsWithPausedSplit<T> implements RecordsWithSplitIds<T> {
+    /**
+     * An empty implementation of {@link RecordsWithSplitIds}. It is used to indicate that the
+     * {@link FileStoreSourceSplitReader} is paused or wakeup.
+     */
+    private static class EmptyRecordsWithSplitIds<T> implements RecordsWithSplitIds<T> {
 
         @Nullable
         @Override

@@ -98,7 +98,7 @@ public class FileStoreSourceSplitReaderTest {
     }
 
     @Test
-    public void testWakeup() throws Exception {
+    public void testSplitReaderWakeupAble() throws Exception {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString());
         FileStoreSourceSplitReader reader = createReader(rw.createReadWithKey(), null);
 
