@@ -18,6 +18,7 @@
 
 package org.apache.paimon.lookup.sort;
 
+import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.RowCompactedSerializer;
 import org.apache.paimon.io.cache.CacheManager;
@@ -66,7 +67,7 @@ public class SortLookupStoreFactoryTest {
                         Comparator.naturalOrder(),
                         new CacheManager(MemorySize.ofMebiBytes(1)),
                         1024,
-                        "zstd");
+                        CompressOptions.defaultOptions());
 
         SortLookupStoreWriter writer = factory.createWriter(file, null);
         for (int i = 0; i < VALUE_COUNT; i++) {
@@ -94,7 +95,7 @@ public class SortLookupStoreFactoryTest {
                         keySerializer.createSliceComparator(),
                         new CacheManager(MemorySize.ofMebiBytes(1)),
                         64 * 1024,
-                        "zstd");
+                        CompressOptions.defaultOptions());
         SortLookupStoreWriter writer = factory.createWriter(file, null);
         for (int i = 0; i < VALUE_COUNT; i++) {
             byte[] bytes = toBytes(keySerializer, row, i);

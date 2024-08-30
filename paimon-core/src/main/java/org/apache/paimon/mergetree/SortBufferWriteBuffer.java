@@ -24,6 +24,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.NormalizedKeyComputer;
 import org.apache.paimon.codegen.RecordComparator;
+import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.BinaryRowSerializer;
@@ -69,7 +70,7 @@ public class SortBufferWriteBuffer implements WriteBuffer {
             boolean spillable,
             MemorySize maxDiskSize,
             int sortMaxFan,
-            String compression,
+            CompressOptions compression,
             IOManager ioManager) {
         this.keyType = keyType;
         this.valueType = valueType;

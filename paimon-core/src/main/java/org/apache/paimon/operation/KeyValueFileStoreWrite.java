@@ -210,7 +210,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 bufferSpillable(),
                 options.writeBufferSpillDiskSize(),
                 options.localSortMaxNumFileHandles(),
-                options.spillCompression(),
+                options.spillCompressOptions(),
                 ioManager,
                 compactManager,
                 restoredMaxSeqNumber,

@@ -24,6 +24,7 @@ import org.apache.paimon.append.AppendOnlyWriter;
 import org.apache.paimon.append.BucketedAppendCompactManager;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compact.NoopCompactManager;
+import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionVector;
@@ -79,7 +80,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow>
     private final int compactionMaxFileNum;
     private final boolean commitForceCompact;
     private final String fileCompression;
-    private final String spillCompression;
+    private final CompressOptions spillCompression;
     private final boolean useWriteBuffer;
     private final boolean spillable;
     private final MemorySize maxDiskSize;
@@ -123,7 +124,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow>
             this.skipCompaction = options.writeOnly();
         }
         this.fileCompression = options.fileCompression();
-        this.spillCompression = options.spillCompression();
+        this.spillCompression = options.spillCompressOptions();
         this.useWriteBuffer = options.useWriteBufferForAppend();
         this.spillable = options.writeBufferSpillable(fileIO.isObjectStore(), isStreamingMode);
         this.maxDiskSize = options.writeBufferSpillDiskSize();

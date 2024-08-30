@@ -19,6 +19,7 @@
 package org.apache.paimon.lookup.sort;
 
 import org.apache.paimon.compression.BlockCompressionFactory;
+import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.LookupStoreFactory;
 import org.apache.paimon.memory.MemorySlice;
@@ -42,7 +43,7 @@ public class SortLookupStoreFactory implements LookupStoreFactory {
             Comparator<MemorySlice> comparator,
             CacheManager cacheManager,
             int blockSize,
-            String compression) {
+            CompressOptions compression) {
         this.comparator = comparator;
         this.cacheManager = cacheManager;
         this.blockSize = blockSize;

@@ -125,7 +125,7 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
                         false,
                         MemorySize.MAX_VALUE,
                         options.localSortMaxNumFileHandles(),
-                        options.spillCompression(),
+                        options.spillCompressOptions(),
                         null);
         currentWatermark = Long.MIN_VALUE;
 

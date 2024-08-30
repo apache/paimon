@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sorter;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
@@ -44,7 +45,7 @@ public class SortOperator extends TableStreamOperator<InternalRow>
     private final int pageSize;
     private final int arity;
     private final int spillSortMaxNumFiles;
-    private final String spillCompression;
+    private final CompressOptions spillCompression;
     private final int sinkParallelism;
     private final MemorySize maxDiskSize;
 
@@ -57,7 +58,7 @@ public class SortOperator extends TableStreamOperator<InternalRow>
             long maxMemory,
             int pageSize,
             int spillSortMaxNumFiles,
-            String spillCompression,
+            CompressOptions spillCompression,
             int sinkParallelism,
             MemorySize maxDiskSize) {
         this.keyType = keyType;

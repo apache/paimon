@@ -21,6 +21,7 @@ package org.apache.paimon.sort;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.compression.BlockCompressionFactory;
+import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.BinaryRowSerializer;
@@ -68,7 +69,7 @@ public class BinaryExternalSortBuffer implements SortBuffer {
             BinaryInMemorySortBuffer inMemorySortBuffer,
             IOManager ioManager,
             int maxNumFileHandles,
-            String compression,
+            CompressOptions compression,
             MemorySize maxDiskSize) {
         this.serializer = serializer;
         this.inMemorySortBuffer = inMemorySortBuffer;
@@ -99,7 +100,7 @@ public class BinaryExternalSortBuffer implements SortBuffer {
             long bufferSize,
             int pageSize,
             int maxNumFileHandles,
-            String compression,
+            CompressOptions compression,
             MemorySize maxDiskSize) {
         return create(
                 ioManager,
@@ -117,7 +118,7 @@ public class BinaryExternalSortBuffer implements SortBuffer {
             int[] keyFields,
             MemorySegmentPool pool,
             int maxNumFileHandles,
-            String compression,
+            CompressOptions compression,
             MemorySize maxDiskSize) {
         RecordComparator comparator = newRecordComparator(rowType.getFieldTypes(), keyFields);
         BinaryInMemorySortBuffer sortBuffer =

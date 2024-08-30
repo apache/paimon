@@ -19,6 +19,7 @@
 package org.apache.paimon.lookup.hash;
 
 import org.apache.paimon.compression.BlockCompressionFactory;
+import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.LookupStoreFactory;
 import org.apache.paimon.utils.BloomFilter;
@@ -37,7 +38,10 @@ public class HashLookupStoreFactory implements LookupStoreFactory {
     @Nullable private final BlockCompressionFactory compressionFactory;
 
     public HashLookupStoreFactory(
-            CacheManager cacheManager, int cachePageSize, double loadFactor, String compression) {
+            CacheManager cacheManager,
+            int cachePageSize,
+            double loadFactor,
+            CompressOptions compression) {
         this.cacheManager = cacheManager;
         this.cachePageSize = cachePageSize;
         this.loadFactor = loadFactor;

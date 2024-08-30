@@ -23,6 +23,7 @@ import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.SortEngine;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.compact.CompactResult;
+import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -514,7 +515,7 @@ public abstract class MergeTreeTestBase {
                         false,
                         MemorySize.ofKibiBytes(10),
                         128,
-                        "lz4",
+                        CompressOptions.defaultOptions(),
                         null,
                         compactManager,
                         maxSequenceNumber,
