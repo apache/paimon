@@ -301,8 +301,8 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public SnapshotReader withDataFileTimeMills(long dataFileTimeMills) {
-            snapshotReader.withDataFileTimeMills(dataFileTimeMills);
+        public SnapshotReader withManifestEntryFilter(Filter<ManifestEntry> filter) {
+            snapshotReader.withManifestEntryFilter(filter);
             return this;
         }
 

@@ -19,6 +19,7 @@
 package org.apache.paimon.append;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.append.AppendDeletionFileMaintainer;
@@ -26,12 +27,16 @@ import org.apache.paimon.deletionvectors.append.UnawareAppendDeletionFileMaintai
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.InnerTableScan;
-import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.EndOfScanException;
+import org.apache.paimon.table.source.ScanMode;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
 
@@ -43,7 +48,10 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
+
+import static java.util.Collections.emptyList;
 
 /**
  * Compact coordinator for append only tables.
@@ -65,15 +73,16 @@ public class UnawareAppendTableCompactionCoordinator {
     protected static final int REMOVE_AGE = 10;
     protected static final int COMPACT_AGE = 5;
 
-    @Nullable private final Long snapshotId;
-    private final InnerTableScan scan;
+    private final SnapshotManager snapshotManager;
+    private final SnapshotReader snapshotReader;
     private final long targetFileSize;
     private final long compactionFileSize;
     private final int minFileNum;
     private final int maxFileNum;
     private final boolean streamingMode;
-    private final IndexFileHandler indexFileHandler;
-    private final boolean deletionVectorEnabled;
+    private final DvMaintainerCache dvMaintainerCache;
+
+    @Nullable private Long nextSnapshot = null;
 
     final Map<BinaryRow, PartitionCompactCoordinator> partitionCompactCoordinators =
             new HashMap<>();
@@ -89,25 +98,22 @@ public class UnawareAppendTableCompactionCoordinator {
     public UnawareAppendTableCompactionCoordinator(
             FileStoreTable table, boolean isStreaming, @Nullable Predicate filter) {
         Preconditions.checkArgument(table.primaryKeys().isEmpty());
-        FileStoreTable tableCopy = table.copy(compactScanType());
-        if (isStreaming) {
-            scan = tableCopy.newStreamScan();
-        } else {
-            scan = tableCopy.newScan();
-        }
+        this.snapshotManager = table.snapshotManager();
+        this.snapshotReader = table.newSnapshotReader();
         if (filter != null) {
-            scan.withFilter(filter);
+            snapshotReader.withFilter(filter);
         }
-        this.snapshotId = table.snapshotManager().latestSnapshotId();
         this.streamingMode = isStreaming;
-        CoreOptions coreOptions = table.coreOptions();
-        this.targetFileSize = coreOptions.targetFileSize(false);
-        this.compactionFileSize = coreOptions.compactionFileSize(false);
-        this.minFileNum = coreOptions.compactionMinFileNum();
+        CoreOptions options = table.coreOptions();
+        this.targetFileSize = options.targetFileSize(false);
+        this.compactionFileSize = options.compactionFileSize(false);
+        this.minFileNum = options.compactionMinFileNum();
         // this is global compaction, avoid too many compaction tasks
-        this.maxFileNum = coreOptions.compactionMaxFileNum().orElse(50);
-        this.indexFileHandler = table.store().newIndexFileHandler();
-        this.deletionVectorEnabled = coreOptions.deletionVectorsEnabled();
+        this.maxFileNum = options.compactionMaxFileNum().orElse(50);
+        this.dvMaintainerCache =
+                options.deletionVectorsEnabled()
+                        ? new DvMaintainerCache(table.store().newIndexFileHandler())
+                        : null;
     }
 
     public List<UnawareAppendCompactionTask> run() {
@@ -122,15 +128,11 @@ public class UnawareAppendTableCompactionCoordinator {
 
     @VisibleForTesting
     boolean scan() {
-        List<Split> splits;
+        List<DataSplit> splits;
         boolean hasResult = false;
-        while (!(splits = scan.plan().splits()).isEmpty()) {
+        while (!(splits = plan()).isEmpty()) {
             hasResult = true;
-            splits.forEach(
-                    split -> {
-                        DataSplit dataSplit = (DataSplit) split;
-                        notifyNewFiles(dataSplit.partition(), dataSplit.dataFiles());
-                    });
+            splits.forEach(split -> notifyNewFiles(split.partition(), split.dataFiles()));
             // batch mode, we don't do continuous scanning
             if (!streamingMode) {
                 break;
@@ -140,19 +142,59 @@ public class UnawareAppendTableCompactionCoordinator {
     }
 
     @VisibleForTesting
-    void notifyNewFiles(BinaryRow partition, List<DataFileMeta> files) {
-        UnawareAppendDeletionFileMaintainer dvIndexFileMaintainer;
-        if (deletionVectorEnabled) {
-            dvIndexFileMaintainer =
-                    AppendDeletionFileMaintainer.forUnawareAppend(
-                            indexFileHandler, snapshotId, partition);
+    List<DataSplit> plan() {
+        if (nextSnapshot == null) {
+            nextSnapshot = snapshotManager.latestSnapshotId();
+            if (nextSnapshot == null) {
+                return emptyList();
+            }
+            snapshotReader.withMode(ScanMode.ALL);
         } else {
-            dvIndexFileMaintainer = null;
+            if (!streamingMode) {
+                throw new EndOfScanException();
+            }
+            snapshotReader.withMode(ScanMode.DELTA);
         }
+
+        if (!snapshotManager.snapshotExists(nextSnapshot)) {
+            return emptyList();
+        }
+
+        Snapshot snapshot = snapshotManager.snapshot(nextSnapshot);
+        nextSnapshot++;
+
+        if (dvMaintainerCache != null) {
+            dvMaintainerCache.refresh();
+        }
+        Filter<ManifestEntry> entryFilter =
+                entry -> {
+                    if (entry.file().fileSize() < compactionFileSize) {
+                        return true;
+                    }
+
+                    if (dvMaintainerCache != null) {
+                        return dvMaintainerCache
+                                .dvMaintainer(entry.partition())
+                                .hasDeletionFile(entry.fileName());
+                    }
+                    return false;
+                };
+        return snapshotReader
+                .withManifestEntryFilter(entryFilter)
+                .withSnapshot(snapshot)
+                .read()
+                .dataSplits();
+    }
+
+    @VisibleForTesting
+    void notifyNewFiles(BinaryRow partition, List<DataFileMeta> files) {
         java.util.function.Predicate<DataFileMeta> filter =
                 file -> {
-                    if (dvIndexFileMaintainer == null
-                            || dvIndexFileMaintainer.getDeletionFile(file.fileName()) == null) {
+                    if (dvMaintainerCache == null
+                            || dvMaintainerCache
+                                            .dvMaintainer(partition)
+                                            .getDeletionFile(file.fileName())
+                                    == null) {
                         return file.fileSize() < compactionFileSize;
                     }
                     // if a data file has a deletion file, always be to compact.
@@ -160,9 +202,7 @@ public class UnawareAppendTableCompactionCoordinator {
                 };
         List<DataFileMeta> toCompact = files.stream().filter(filter).collect(Collectors.toList());
         partitionCompactCoordinators
-                .computeIfAbsent(
-                        partition,
-                        pp -> new PartitionCompactCoordinator(dvIndexFileMaintainer, partition))
+                .computeIfAbsent(partition, pp -> new PartitionCompactCoordinator(partition))
                 .addFiles(toCompact);
     }
 
@@ -196,27 +236,14 @@ public class UnawareAppendTableCompactionCoordinator {
         return sets;
     }
 
-    private Map<String, String> compactScanType() {
-        return new HashMap<String, String>() {
-            {
-                put(
-                        CoreOptions.STREAM_SCAN_MODE.key(),
-                        CoreOptions.StreamScanMode.COMPACT_APPEND_NO_BUCKET.getValue());
-            }
-        };
-    }
-
     /** Coordinator for a single partition. */
     class PartitionCompactCoordinator {
 
-        private final UnawareAppendDeletionFileMaintainer dvIndexFileMaintainer;
         private final BinaryRow partition;
         private final HashSet<DataFileMeta> toCompact = new HashSet<>();
         int age = 0;
 
-        public PartitionCompactCoordinator(
-                UnawareAppendDeletionFileMaintainer dvIndexFileMaintainer, BinaryRow partition) {
-            this.dvIndexFileMaintainer = dvIndexFileMaintainer;
+        public PartitionCompactCoordinator(BinaryRow partition) {
             this.partition = partition;
         }
 
@@ -248,7 +275,7 @@ public class UnawareAppendTableCompactionCoordinator {
 
         private List<List<DataFileMeta>> agePack() {
             List<List<DataFileMeta>> packed;
-            if (dvIndexFileMaintainer == null) {
+            if (dvMaintainerCache == null) {
                 packed = pack(toCompact);
             } else {
                 packed = packInDeletionVectorVMode(toCompact);
@@ -293,7 +320,8 @@ public class UnawareAppendTableCompactionCoordinator {
             Map<IndexFileMeta, List<DataFileMeta>> filesWithDV = new HashMap<>();
             Set<DataFileMeta> rest = new HashSet<>();
             for (DataFileMeta dataFile : toCompact) {
-                IndexFileMeta indexFile = dvIndexFileMaintainer.getIndexFile(dataFile.fileName());
+                IndexFileMeta indexFile =
+                        dvMaintainerCache.dvMaintainer(partition).getIndexFile(dataFile.fileName());
                 if (indexFile == null) {
                     rest.add(dataFile);
                 } else {
@@ -333,6 +361,38 @@ public class UnawareAppendTableCompactionCoordinator {
                 return (totalFileSize >= targetFileSize && fileNum >= minFileNum)
                         || fileNum >= maxFileNum;
             }
+        }
+    }
+
+    private class DvMaintainerCache {
+
+        private final IndexFileHandler indexFileHandler;
+
+        /** Should be thread safe, ManifestEntryFilter will be invoked in many threads. */
+        private final Map<BinaryRow, UnawareAppendDeletionFileMaintainer> cache =
+                new ConcurrentHashMap<>();
+
+        private DvMaintainerCache(IndexFileHandler indexFileHandler) {
+            this.indexFileHandler = indexFileHandler;
+        }
+
+        private void refresh() {
+            this.cache.clear();
+        }
+
+        private UnawareAppendDeletionFileMaintainer dvMaintainer(BinaryRow partition) {
+            UnawareAppendDeletionFileMaintainer maintainer = cache.get(partition);
+            if (maintainer == null) {
+                synchronized (this) {
+                    maintainer =
+                            AppendDeletionFileMaintainer.forUnawareAppend(
+                                    indexFileHandler,
+                                    snapshotManager.latestSnapshotId(),
+                                    partition);
+                }
+                cache.put(partition, maintainer);
+            }
+            return maintainer;
         }
     }
 }

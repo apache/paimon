@@ -2347,8 +2347,6 @@ public class CoreOptions implements Serializable {
     public enum StreamScanMode implements DescribedEnum {
         NONE("none", "No requirement."),
         COMPACT_BUCKET_TABLE("compact-bucket-table", "Compaction for traditional bucket table."),
-        COMPACT_APPEND_NO_BUCKET(
-                "compact-append-no-bucket", "Compaction for append table with bucket unaware."),
         FILE_MONITOR("file-monitor", "Monitor data file changes.");
 
         private final String value;

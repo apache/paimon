@@ -21,6 +21,7 @@ package org.apache.paimon.table.source.snapshot;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.predicate.Predicate;
@@ -62,7 +63,7 @@ public interface SnapshotReader {
 
     SnapshotReader withLevelFilter(Filter<Integer> levelFilter);
 
-    SnapshotReader withDataFileTimeMills(long dataFileTimeMills);
+    SnapshotReader withManifestEntryFilter(Filter<ManifestEntry> filter);
 
     SnapshotReader withBucket(int bucket);
 
