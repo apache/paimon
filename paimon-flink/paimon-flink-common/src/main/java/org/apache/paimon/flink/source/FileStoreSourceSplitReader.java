@@ -94,15 +94,11 @@ public class FileStoreSourceSplitReader
             return new EmptyRecordsWithSplitIds<>();
         }
 
-        if (wakeup.get() && wakeup.compareAndSet(true, false)) {
-            return new EmptyRecordsWithSplitIds<>();
-        }
-
         checkSplitOrStartNext();
 
-        // pool first, pool size is 1, the underlying implementation does not allow multiple batches
-        // to be read at the same time
-        FileStoreRecordIterator iterator = pool();
+        // poll from the pool first, pool size is 1, the underlying implementation does not allow
+        // multiple batches to be read at the same time
+        FileStoreRecordIterator iterator = poll();
         if (iterator == null) {
             LOG.info("Skip waiting for object pool due to wakeup");
             return new EmptyRecordsWithSplitIds<>();
@@ -129,7 +125,8 @@ public class FileStoreSourceSplitReader
         return limiter != null && limiter.reachLimit();
     }
 
-    private FileStoreRecordIterator pool() throws IOException {
+    @Nullable
+    private FileStoreRecordIterator poll() throws IOException {
         FileStoreRecordIterator iterator = null;
         while (iterator == null && !wakeup.get()) {
             try {
@@ -139,7 +136,7 @@ public class FileStoreSourceSplitReader
                 throw new IOException("Interrupted");
             }
         }
-        if (iterator == null) {
+        if (wakeup.get()) {
             wakeup.compareAndSet(true, false);
         }
         return iterator;
