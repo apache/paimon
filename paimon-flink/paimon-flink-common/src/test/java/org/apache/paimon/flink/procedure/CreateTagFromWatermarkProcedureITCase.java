@@ -20,16 +20,11 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.flink.CatalogITCaseBase;
-import org.apache.paimon.flink.action.ActionBase;
-import org.apache.paimon.flink.action.ActionFactory;
-import org.apache.paimon.flink.action.CreateTagFromWatermarkAction;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.SnapshotNotExistException;
 
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
-
-import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatException;
@@ -38,7 +33,7 @@ import static org.assertj.core.api.Assertions.assertThatException;
 public class CreateTagFromWatermarkProcedureITCase extends CatalogITCaseBase {
 
     @Test
-    public void testCreatTagsFromSnapshotsWatermark() throws Exception {
+    public void testCreateTagsFromSnapshotsWatermark() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " k STRING,"
@@ -85,67 +80,30 @@ public class CreateTagFromWatermarkProcedureITCase extends CatalogITCaseBase {
         assertThat(watermark1 == Long.MIN_VALUE).isTrue();
         assertThat(watermark2 == 1000).isTrue();
         assertThat(watermark3 == 2000).isTrue();
-        if (ThreadLocalRandom.current().nextBoolean()) {
-            assertThat(
-                            sql(
-                                            "CALL sys.create_tag_from_watermark("
-                                                    + "`table` => 'default.T',"
-                                                    + "`tag` => 'tag2',"
-                                                    + "`watermark` => %s)",
-                                            watermark2 - 1)
-                                    .stream()
-                                    .map(Row::toString))
-                    .containsExactlyInAnyOrder(
-                            String.format("+I[tag2, 2, %s, %s]", commitTime2, watermark2));
-        } else {
-            createAction(
-                            CreateTagFromWatermarkAction.class,
-                            "create_tag_from_watermark",
-                            "--warehouse",
-                            path,
-                            "--table",
-                            "default.T",
-                            "--tag",
-                            "tag2",
-                            "--watermark",
-                            Long.toString(watermark2 - 1))
-                    .run();
-        }
-        Snapshot snapshot = table.tagManager().taggedSnapshot("tag2");
-        assertThat(table.tagManager().tagExists("tag2")).isTrue();
-        assertThat(snapshot.watermark()).isEqualTo(watermark2);
-        assertThat(snapshot.timeMillis()).isEqualTo(commitTime2);
 
-        if (ThreadLocalRandom.current().nextBoolean()) {
-            assertThat(
-                            sql(
-                                            "CALL sys.create_tag_from_watermark("
-                                                    + "`table` => 'default.T',"
-                                                    + "`tag` => 'tag3',"
-                                                    + "`watermark` => %s)",
-                                            watermark2 + 1)
-                                    .stream()
-                                    .map(Row::toString))
-                    .containsExactlyInAnyOrder(
-                            String.format("+I[tag3, 3, %s, %s]", commitTime3, watermark3));
-        } else {
-            createAction(
-                            CreateTagFromWatermarkAction.class,
-                            "create_tag_from_watermark",
-                            "--warehouse",
-                            path,
-                            "--table",
-                            "default.T",
-                            "--tag",
-                            "tag3",
-                            "--watermark",
-                            Long.toString(watermark2 + 1))
-                    .run();
-        }
+        assertThat(
+                        sql(
+                                        "CALL sys.create_tag_from_watermark("
+                                                + "`table` => 'default.T',"
+                                                + "`tag` => 'tag2',"
+                                                + "`watermark` => %s)",
+                                        watermark2 - 1)
+                                .stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder(
+                        String.format("+I[tag2, 2, %s, %s]", commitTime2, watermark2));
 
-        assertThat(table.tagManager().tagExists("tag3")).isTrue();
-        assertThat(table.tagManager().taggedSnapshot("tag3").watermark()).isEqualTo(watermark3);
-        assertThat(table.tagManager().taggedSnapshot("tag3").timeMillis()).isEqualTo(commitTime3);
+        assertThat(
+                        sql(
+                                        "CALL sys.create_tag_from_watermark("
+                                                + "`table` => 'default.T',"
+                                                + "`tag` => 'tag3',"
+                                                + "`watermark` => %s)",
+                                        watermark2 + 1)
+                                .stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder(
+                        String.format("+I[tag3, 3, %s, %s]", commitTime3, watermark3));
 
         assertThatException()
                 .isThrownBy(
@@ -202,72 +160,28 @@ public class CreateTagFromWatermarkProcedureITCase extends CatalogITCaseBase {
         assertThat(watermark2 == 2000).isTrue();
 
         // create tag from tag1 that snapshot is 1.
-        if (ThreadLocalRandom.current().nextBoolean()) {
-            assertThat(
-                            sql(
-                                            "CALL sys.create_tag_from_watermark("
-                                                    + "`table` => 'default.T',"
-                                                    + "`tag` => 'tag2',"
-                                                    + "`watermark` => %s)",
-                                            tagsWatermark - 1)
-                                    .stream()
-                                    .map(Row::toString))
-                    .containsExactlyInAnyOrder(
-                            String.format("+I[tag2, 1, %s, %s]", tagsCommitTime, tagsWatermark));
-        } else {
-            createAction(
-                            CreateTagFromWatermarkAction.class,
-                            "create_tag_from_watermark",
-                            "--warehouse",
-                            path,
-                            "--table",
-                            "default.T",
-                            "--tag",
-                            "tag2",
-                            "--watermark",
-                            Long.toString(tagsWatermark - 1))
-                    .run();
-        }
-        assertThat(table.tagManager().tagExists("tag2")).isTrue();
-        assertThat(table.tagManager().taggedSnapshot("tag2").watermark()).isEqualTo(tagsWatermark);
-        assertThat(table.tagManager().taggedSnapshot("tag2").timeMillis())
-                .isEqualTo(tagsCommitTime);
+        assertThat(
+                        sql(
+                                        "CALL sys.create_tag_from_watermark("
+                                                + "`table` => 'default.T',"
+                                                + "`tag` => 'tag2',"
+                                                + "`watermark` => %s)",
+                                        tagsWatermark - 1)
+                                .stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder(
+                        String.format("+I[tag2, 1, %s, %s]", tagsCommitTime, tagsWatermark));
 
-        if (ThreadLocalRandom.current().nextBoolean()) {
-            assertThat(
-                            sql(
-                                            "CALL sys.create_tag_from_watermark("
-                                                    + "`table` => 'default.T',"
-                                                    + "`tag` => 'tag3',"
-                                                    + "`watermark` => %s)",
-                                            watermark2 - 1)
-                                    .stream()
-                                    .map(Row::toString))
-                    .containsExactlyInAnyOrder(
-                            String.format("+I[tag3, 2, %s, %s]", commitTime2, watermark2));
-        } else {
-            createAction(
-                            CreateTagFromWatermarkAction.class,
-                            "create_tag_from_watermark",
-                            "--warehouse",
-                            path,
-                            "--table",
-                            "default.T",
-                            "--tag",
-                            "tag3",
-                            "--watermark",
-                            Long.toString(watermark2 - 1))
-                    .run();
-        }
-        assertThat(table.tagManager().tagExists("tag3")).isTrue();
-        assertThat(table.tagManager().taggedSnapshot("tag3").watermark()).isEqualTo(watermark2);
-        assertThat(table.tagManager().taggedSnapshot("tag3").timeMillis()).isEqualTo(commitTime2);
-    }
-
-    private <T extends ActionBase> T createAction(Class<T> clazz, String... args) {
-        return ActionFactory.createAction(args)
-                .filter(clazz::isInstance)
-                .map(clazz::cast)
-                .orElseThrow(() -> new RuntimeException("Failed to create action"));
+        assertThat(
+                        sql(
+                                        "CALL sys.create_tag_from_watermark("
+                                                + "`table` => 'default.T',"
+                                                + "`tag` => 'tag3',"
+                                                + "`watermark` => %s)",
+                                        watermark2 - 1)
+                                .stream()
+                                .map(Row::toString))
+                .containsExactlyInAnyOrder(
+                        String.format("+I[tag3, 2, %s, %s]", commitTime2, watermark2));
     }
 }
