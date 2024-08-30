@@ -31,6 +31,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -508,6 +509,24 @@ public class BranchSqlITCase extends CatalogITCaseBase {
                         collectResult(
                                 "SELECT `partition`, record_count, file_count FROM t$branch_b1$partitions"))
                 .containsExactlyInAnyOrder("+I[[1], 2, 2]", "+I[[2], 3, 2]");
+    }
+
+    @Test
+    public void testCannotSetEmptyFallbackBranch() {
+        String errMsg =
+                "Cannot set 'scan.fallback-branch' = 'test' because the branch 'test' isn't existed.";
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "CREATE TABLE t1 (a INT, b INT) WITH ('scan.fallback-branch' = 'test')"))
+                .satisfies(anyCauseMatches(IllegalArgumentException.class, errMsg));
+
+        assertThatThrownBy(
+                        () -> {
+                            sql("CREATE TABLE t2 (a INT, b INT)");
+                            sql("ALTER TABLE t2 SET ('scan.fallback-branch' = 'test')");
+                        })
+                .satisfies(anyCauseMatches(IllegalArgumentException.class, errMsg));
     }
 
     private List<String> collectResult(String sql) throws Exception {
