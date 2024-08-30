@@ -34,6 +34,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.StringUtils;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -193,6 +194,18 @@ public class SchemaValidation {
 
         if (options.deletionVectorsEnabled()) {
             validateForDeletionVectors(options);
+        }
+    }
+
+    public static void validateFallbackBranch(SchemaManager schemaManager, TableSchema schema) {
+        String fallbackBranch = schema.options().get(CoreOptions.SCAN_FALLBACK_BRANCH.key());
+        if (!StringUtils.isNullOrWhitespaceOnly(fallbackBranch)) {
+            checkArgument(
+                    schemaManager.copyWithBranch(fallbackBranch).latest().isPresent(),
+                    "Cannot set '%s' = '%s' because the branch '%s' isn't existed.",
+                    CoreOptions.SCAN_FALLBACK_BRANCH.key(),
+                    fallbackBranch,
+                    fallbackBranch);
         }
     }
 
