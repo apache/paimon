@@ -111,7 +111,7 @@ public class CdcSinkBuilder<T> {
                                         identifier,
                                         catalogLoader))
                         .name("Schema Evolution");
-        schemaChangeProcessFunction.getTransformation().setParallelism(1);
+        schemaChangeProcessFunction.getTransformation().setParallelism(1, true);
         schemaChangeProcessFunction.getTransformation().setMaxParallelism(1);
 
         DataStream<CdcRecord> converted =

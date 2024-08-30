@@ -144,11 +144,11 @@ public class UnawareBucketCompactionTopoBuilder {
                 new PartitionTransformation<>(
                         input.getTransformation(), new RebalancePartitioner<>());
         if (compactionWorkerParallelism != null) {
-            transformation.setParallelism(compactionWorkerParallelism);
+            transformation.setParallelism(compactionWorkerParallelism, true);
         } else {
             // cause source function for unaware-bucket table compaction has only one parallelism,
             // we need to set to default parallelism by hand.
-            transformation.setParallelism(env.getParallelism());
+            transformation.setParallelism(env.getParallelism(), false);
         }
         return new DataStream<>(env, transformation);
     }

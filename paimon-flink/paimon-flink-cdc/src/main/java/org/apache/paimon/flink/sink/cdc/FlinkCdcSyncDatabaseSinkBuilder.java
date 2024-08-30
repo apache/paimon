@@ -204,7 +204,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                                             Identifier.create(database, table.name()),
                                             catalogLoader))
                             .name("Schema Evolution");
-            schemaChangeProcessFunction.getTransformation().setParallelism(1);
+            schemaChangeProcessFunction.getTransformation().setParallelism(1, true);
             schemaChangeProcessFunction.getTransformation().setMaxParallelism(1);
 
             DataStream<CdcRecord> parsedForTable =

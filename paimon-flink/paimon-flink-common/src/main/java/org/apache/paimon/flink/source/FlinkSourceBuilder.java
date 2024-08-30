@@ -304,7 +304,7 @@ public class FlinkSourceBuilder {
                                 FlinkConnectorOptions.STREAMING_READ_SHUFFLE_BUCKET_WITH_PARTITION),
                         bucketMode);
         if (parallelism != null) {
-            dataStream.getTransformation().setParallelism(parallelism);
+            dataStream.getTransformation().setParallelism(parallelism, true);
         }
         if (watermarkStrategy != null) {
             dataStream = dataStream.assignTimestampsAndWatermarks(watermarkStrategy);

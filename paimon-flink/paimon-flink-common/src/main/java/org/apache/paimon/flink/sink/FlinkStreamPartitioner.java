@@ -73,7 +73,7 @@ public class FlinkStreamPartitioner<T> extends StreamPartitioner<T> {
         PartitionTransformation<T> partitioned =
                 new PartitionTransformation<>(input.getTransformation(), partitioner);
         if (parallelism != null) {
-            partitioned.setParallelism(parallelism);
+            partitioned.setParallelism(parallelism, true);
         }
         return new DataStream<>(input.getExecutionEnvironment(), partitioned);
     }
