@@ -27,6 +27,9 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.PartitionPathUtils;
 
+import org.apache.flink.table.annotation.ArgumentHint;
+import org.apache.flink.table.annotation.DataTypeHint;
+import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 import java.io.IOException;
@@ -40,16 +43,21 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * Partition mark done procedure. Usage:
  *
  * <pre><code>
- *  CALL sys.mark_partition_done('tableId', 'partition1', 'partition2', ...)
+ *  CALL sys.mark_partition_done('tableId', 'partition1;partition2')
  * </code></pre>
  */
 public class MarkPartitionDoneProcedure extends ProcedureBase {
 
     public static final String IDENTIFIER = "mark_partition_done";
 
-    public String[] call(
-            ProcedureContext procedureContext, String tableId, String... partitionStrings)
+    @ProcedureHint(
+            argument = {
+                @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
+                @ArgumentHint(name = "partitions", type = @DataTypeHint("STRING"))
+            })
+    public String[] call(ProcedureContext procedureContext, String tableId, String partitions)
             throws Catalog.TableNotExistException, IOException {
+        String[] partitionStrings = partitions.split(";");
         checkArgument(
                 partitionStrings.length > 0,
                 "mark_partition_done procedure must specify partitions.");

@@ -29,7 +29,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.annotation.Nullable;
 
@@ -38,7 +37,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
-import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Stream;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
@@ -132,9 +131,19 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 12, "v_12", "insert", "02-29")));
     }
 
-    @ParameterizedTest(name = "in-default = {0}")
-    @ValueSource(booleans = {true, false})
-    public void testTargetAlias(boolean inDefault) throws Exception {
+    private static Stream<Arguments> testArguments() {
+        return Stream.of(
+                Arguments.of(true, "action"),
+                Arguments.of(false, "action"),
+                Arguments.of(true, "procedure_indexed"),
+                Arguments.of(false, "procedure_indexed"),
+                Arguments.of(true, "procedure_named"),
+                Arguments.of(false, "procedure_named"));
+    }
+
+    @ParameterizedTest
+    @MethodSource("testArguments")
+    public void testTargetAlias(boolean inDefault, String invoker) throws Exception {
         MergeIntoActionBuilder action;
 
         if (!inDefault) {
@@ -155,10 +164,23 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                 .withMergeCondition("TT.k = S.k AND TT.dt = S.dt")
                 .withMatchedDelete("S.v IS NULL");
 
-        String procedureStatement =
-                String.format(
-                        "CALL sys.merge_into('%s.T', 'TT', '', 'S', 'TT.k = S.k AND TT.dt = S.dt', 'S.v IS NULL')",
-                        inDefault ? database : "test_db");
+        String procedureStatement = "";
+        if ("procedure_indexed".equals(invoker)) {
+            procedureStatement =
+                    String.format(
+                            "CALL sys.merge_into('%s.T', 'TT', '', 'S', 'TT.k = S.k AND TT.dt = S.dt', '', '', '', '', 'S.v IS NULL')",
+                            inDefault ? database : "test_db");
+        } else if ("procedure_named".equals(invoker)) {
+            procedureStatement =
+                    String.format(
+                            "CALL sys.merge_into("
+                                    + "target_table => '%s.T', "
+                                    + "target_alias => 'TT', "
+                                    + "source_table => 'S', "
+                                    + "merge_condition => 'TT.k = S.k AND TT.dt = S.dt', "
+                                    + "matched_delete_condition => 'S.v IS NULL')",
+                            inDefault ? database : "test_db");
+        }
 
         List<Row> streamingExpected =
                 Arrays.asList(
@@ -176,16 +198,16 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 9, "v_9", "creation", "02-28"),
                         changelogRow("+I", 10, "v_10", "creation", "02-28"));
 
-        if (ThreadLocalRandom.current().nextBoolean()) {
+        if ("action".equals(invoker)) {
             validateActionRunResult(action.build(), streamingExpected, batchExpected);
         } else {
             validateProcedureResult(procedureStatement, streamingExpected, batchExpected);
         }
     }
 
-    @ParameterizedTest(name = "in-default = {0}")
-    @ValueSource(booleans = {true, false})
-    public void testSourceName(boolean inDefault) throws Exception {
+    @ParameterizedTest
+    @MethodSource("testArguments")
+    public void testSourceName(boolean inDefault, String invoker) throws Exception {
         MergeIntoActionBuilder action = new MergeIntoActionBuilder(warehouse, "default", "T");
         String sourceTableName = "S";
 
@@ -203,10 +225,22 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                 .withMergeCondition("T.k = S.k AND T.dt = S.dt")
                 .withMatchedDelete("S.v IS NULL");
 
-        String procedureStatement =
-                String.format(
-                        "CALL sys.merge_into('default.T', '', '', '%s', 'T.k = S.k AND T.dt = S.dt', 'S.v IS NULL')",
-                        sourceTableName);
+        String procedureStatement = "";
+        if ("procedure_indexed".equals(invoker)) {
+            procedureStatement =
+                    String.format(
+                            "CALL sys.merge_into('default.T', '', '', '%s', 'T.k = S.k AND T.dt = S.dt', '', '', '', '', 'S.v IS NULL')",
+                            sourceTableName);
+        } else if ("procedure_named".equals(invoker)) {
+            procedureStatement =
+                    String.format(
+                            "CALL sys.merge_into("
+                                    + "target_table => 'default.T', "
+                                    + "source_table => '%s', "
+                                    + "merge_condition => 'T.k = S.k AND T.dt = S.dt', "
+                                    + "matched_delete_condition => 'S.v IS NULL')",
+                            sourceTableName);
+        }
 
         if (!inDefault) {
             sEnv.executeSql("USE `default`");
@@ -229,16 +263,16 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 9, "v_9", "creation", "02-28"),
                         changelogRow("+I", 10, "v_10", "creation", "02-28"));
 
-        if (ThreadLocalRandom.current().nextBoolean()) {
+        if ("action".equals(invoker)) {
             validateActionRunResult(action.build(), streamingExpected, batchExpected);
         } else {
             validateProcedureResult(procedureStatement, streamingExpected, batchExpected);
         }
     }
 
-    @ParameterizedTest(name = "useCatalog = {0}")
-    @ValueSource(booleans = {true, false})
-    public void testSqls(boolean useCatalog) throws Exception {
+    @ParameterizedTest
+    @MethodSource("testArguments")
+    public void testSqls(boolean useCatalog, String invoker) throws Exception {
         // drop table S
         sEnv.executeSql("DROP TABLE S");
 
@@ -273,16 +307,28 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
 
         action.withMergeCondition("T.k = S.k AND T.dt = S.dt").withMatchedDelete("S.v IS NULL");
 
-        String procedureStatement =
-                String.format(
-                        "CALL sys.merge_into('%s.T', '', '%s', '%s', 'T.k = S.k AND T.dt = S.dt', 'S.v IS NULL')",
-                        database,
-                        useCatalog
-                                ? String.format(
-                                        "%s;%s;%s",
-                                        escapeCatalog, "USE CATALOG test_cat", escapeDdl)
-                                : String.format("%s;%s", escapeCatalog, escapeDdl),
-                        useCatalog ? "S" : "test_cat.default.S");
+        String procedureStatement = "";
+        String sourceSqls =
+                useCatalog
+                        ? String.format(
+                                "%s;%s;%s", escapeCatalog, "USE CATALOG test_cat", escapeDdl)
+                        : String.format("%s;%s", escapeCatalog, escapeDdl);
+        if ("procedure_indexed".equals(invoker)) {
+            procedureStatement =
+                    String.format(
+                            "CALL sys.merge_into('%s.T', '', '%s', '%s', 'T.k = S.k AND T.dt = S.dt', '', '', '', '', 'S.v IS NULL')",
+                            database, sourceSqls, useCatalog ? "S" : "test_cat.default.S");
+        } else if ("procedure_named".equals(invoker)) {
+            procedureStatement =
+                    String.format(
+                            "CALL sys.merge_into("
+                                    + "target_table => '%s.T', "
+                                    + "source_sqls => '%s', "
+                                    + "source_table => '%s', "
+                                    + "merge_condition => 'T.k = S.k AND T.dt = S.dt', "
+                                    + "matched_delete_condition => 'S.v IS NULL')",
+                            database, sourceSqls, useCatalog ? "S" : "test_cat.default.S");
+        }
 
         List<Row> streamingExpected =
                 Arrays.asList(
@@ -300,16 +346,16 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 9, "v_9", "creation", "02-28"),
                         changelogRow("+I", 10, "v_10", "creation", "02-28"));
 
-        if (ThreadLocalRandom.current().nextBoolean()) {
+        if ("action".equals(invoker)) {
             validateActionRunResult(action.build(), streamingExpected, batchExpected);
         } else {
             validateProcedureResult(procedureStatement, streamingExpected, batchExpected);
         }
     }
 
-    @ParameterizedTest(name = "source-qualified = {0}")
-    @ValueSource(booleans = {true, false})
-    public void testMatchedUpsertSetAll(boolean qualified) throws Exception {
+    @ParameterizedTest
+    @MethodSource("testArguments")
+    public void testMatchedUpsertSetAll(boolean qualified, String invoker) throws Exception {
         // build MergeIntoAction
         MergeIntoActionBuilder action = new MergeIntoActionBuilder(warehouse, database, "T");
         action.withSourceSqls("CREATE TEMPORARY VIEW SS AS SELECT k, v, 'unknown', dt FROM S")
@@ -317,12 +363,27 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                 .withMergeCondition("T.k = SS.k AND T.dt = SS.dt")
                 .withMatchedUpsert(null, "*");
 
-        String procedureStatement =
-                String.format(
-                        "CALL sys.merge_into('%s.T', '', '%s', '%s', 'T.k = SS.k AND T.dt = SS.dt', '', '*')",
-                        database,
-                        "CREATE TEMPORARY VIEW SS AS SELECT k, v, ''unknown'', dt FROM S",
-                        qualified ? "default.SS" : "SS");
+        String procedureStatement = "";
+        if ("procedure_indexed".equals(invoker)) {
+            procedureStatement =
+                    String.format(
+                            "CALL sys.merge_into('%s.T', '', '%s', '%s', 'T.k = SS.k AND T.dt = SS.dt', '', '*')",
+                            database,
+                            "CREATE TEMPORARY VIEW SS AS SELECT k, v, ''unknown'', dt FROM S",
+                            qualified ? "default.SS" : "SS");
+        } else if ("procedure_named".equals(invoker)) {
+            procedureStatement =
+                    String.format(
+                            "CALL sys.merge_into("
+                                    + "target_table => '%s.T', "
+                                    + "source_sqls => '%s', "
+                                    + "source_table => '%s', "
+                                    + "merge_condition => 'T.k = SS.k AND T.dt = SS.dt', "
+                                    + "matched_upsert_setting => '*')",
+                            database,
+                            "CREATE TEMPORARY VIEW SS AS SELECT k, v, ''unknown'', dt FROM S",
+                            qualified ? "default.SS" : "SS");
+        }
 
         List<Row> streamingExpected =
                 Arrays.asList(
@@ -348,16 +409,16 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 9, "v_9", "creation", "02-28"),
                         changelogRow("+I", 10, "v_10", "creation", "02-28"));
 
-        if (ThreadLocalRandom.current().nextBoolean()) {
+        if ("action".equals(invoker)) {
             validateActionRunResult(action.build(), streamingExpected, batchExpected);
         } else {
             validateProcedureResult(procedureStatement, streamingExpected, batchExpected);
         }
     }
 
-    @ParameterizedTest(name = "source-qualified = {0}")
-    @ValueSource(booleans = {true, false})
-    public void testNotMatchedInsertAll(boolean qualified) throws Exception {
+    @ParameterizedTest
+    @MethodSource("testArguments")
+    public void testNotMatchedInsertAll(boolean qualified, String invoker) throws Exception {
         // build MergeIntoAction
         MergeIntoActionBuilder action = new MergeIntoActionBuilder(warehouse, database, "T");
         action.withSourceSqls("CREATE TEMPORARY VIEW SS AS SELECT k, v, 'unknown', dt FROM S")
@@ -365,12 +426,28 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                 .withMergeCondition("T.k = SS.k AND T.dt = SS.dt")
                 .withNotMatchedInsert("SS.k < 12", "*");
 
-        String procedureStatement =
-                String.format(
-                        "CALL sys.merge_into('%s.T', '', '%s', '%s', 'T.k = SS.k AND T.dt = SS.dt', '', '', 'SS.k < 12', '*', '')",
-                        database,
-                        "CREATE TEMPORARY VIEW SS AS SELECT k, v, ''unknown'', dt FROM S",
-                        qualified ? "default.SS" : "SS");
+        String procedureStatement = "";
+        if ("procedure_indexed".equals(invoker)) {
+            procedureStatement =
+                    String.format(
+                            "CALL sys.merge_into('%s.T', '', '%s', '%s', 'T.k = SS.k AND T.dt = SS.dt', '', '', 'SS.k < 12', '*', '')",
+                            database,
+                            "CREATE TEMPORARY VIEW SS AS SELECT k, v, ''unknown'', dt FROM S",
+                            qualified ? "default.SS" : "SS");
+        } else if ("procedure_named".equals(invoker)) {
+            procedureStatement =
+                    String.format(
+                            "CALL sys.merge_into("
+                                    + "target_table => '%s.T', "
+                                    + "source_sqls => '%s', "
+                                    + "source_table => '%s', "
+                                    + "merge_condition => 'T.k = SS.k AND T.dt = SS.dt', "
+                                    + "not_matched_insert_condition => 'SS.k < 12',"
+                                    + "not_matched_insert_values => '*')",
+                            database,
+                            "CREATE TEMPORARY VIEW SS AS SELECT k, v, ''unknown'', dt FROM S",
+                            qualified ? "default.SS" : "SS");
+        }
 
         List<Row> streamingExpected =
                 Arrays.asList(
@@ -392,7 +469,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 8, "v_8", "unknown", "02-29"),
                         changelogRow("+I", 11, "v_11", "unknown", "02-29"));
 
-        if (ThreadLocalRandom.current().nextBoolean()) {
+        if ("action".equals(invoker)) {
             validateActionRunResult(action.build(), streamingExpected, batchExpected);
         } else {
             validateProcedureResult(procedureStatement, streamingExpected, batchExpected);
@@ -403,7 +480,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
     public void testProcedureWithDeleteConditionTrue() throws Exception {
         String procedureStatement =
                 String.format(
-                        "CALL sys.merge_into('%s.T', '', '', 'S', 'T.k = S.k AND T.dt = S.dt', 'TRUE')",
+                        "CALL sys.merge_into('%s.T', '', '', 'S', 'T.k = S.k AND T.dt = S.dt', '', '', '', '', 'TRUE')",
                         database);
 
         validateProcedureResult(

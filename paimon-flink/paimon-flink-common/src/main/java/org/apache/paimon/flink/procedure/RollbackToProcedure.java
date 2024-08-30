@@ -21,7 +21,11 @@ package org.apache.paimon.flink.procedure;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.StringUtils;
 
+import org.apache.flink.table.annotation.ArgumentHint;
+import org.apache.flink.table.annotation.DataTypeHint;
+import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 /**
@@ -29,29 +33,34 @@ import org.apache.flink.table.procedure.ProcedureContext;
  *
  * <pre><code>
  *  -- rollback to a snapshot
- *  CALL sys.rollback_to('tableId', snapshotId)
+ *  CALL sys.rollback_to(`table` => 'tableId', snapshot_id => snapshotId)
  *
  *  -- rollback to a tag
- *  CALL sys.rollback_to('tableId', 'tagName')
+ *  CALL sys.rollback_to(`table` => 'tableId', tag => 'tagName')
  * </code></pre>
  */
 public class RollbackToProcedure extends ProcedureBase {
 
     public static final String IDENTIFIER = "rollback_to";
 
-    public String[] call(ProcedureContext procedureContext, String tableId, long snapshotId)
+    @ProcedureHint(
+            argument = {
+                @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
+                @ArgumentHint(name = "tag", type = @DataTypeHint("STRING"), isOptional = true),
+                @ArgumentHint(
+                        name = "snapshot_id",
+                        type = @DataTypeHint("BIGINT"),
+                        isOptional = true)
+            })
+    public String[] call(
+            ProcedureContext procedureContext, String tableId, String tagName, Long snapshotId)
             throws Catalog.TableNotExistException {
         Table table = catalog.getTable(Identifier.fromString(tableId));
-        table.rollbackTo(snapshotId);
-
-        return new String[] {"Success"};
-    }
-
-    public String[] call(ProcedureContext procedureContext, String tableId, String tagName)
-            throws Catalog.TableNotExistException {
-        Table table = catalog.getTable(Identifier.fromString(tableId));
-        table.rollbackTo(tagName);
-
+        if (!StringUtils.isBlank(tagName)) {
+            table.rollbackTo(tagName);
+        } else {
+            table.rollbackTo(snapshotId);
+        }
         return new String[] {"Success"};
     }
 

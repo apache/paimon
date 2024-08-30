@@ -30,12 +30,13 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -48,28 +49,51 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
     private static final RowType ROW_TYPE =
             RowType.of(FIELD_TYPES, new String[] {"partKey0", "partKey1", "dt", "value"});
 
+    private static Stream<Arguments> testArguments() {
+        return Stream.of(
+                Arguments.of(true, "action"),
+                Arguments.of(false, "action"),
+                Arguments.of(true, "procedure_indexed"),
+                Arguments.of(false, "procedure_indexed"),
+                Arguments.of(true, "procedure_named"),
+                Arguments.of(false, "procedure_named"));
+    }
+
     @ParameterizedTest
-    @ValueSource(booleans = {true, false})
-    public void testPartitionMarkDoneWithSinglePartitionKey(boolean hasPk) throws Exception {
+    @MethodSource("testArguments")
+    public void testPartitionMarkDoneWithSinglePartitionKey(boolean hasPk, String invoker)
+            throws Exception {
         FileStoreTable table = prepareTable(hasPk);
-        if (ThreadLocalRandom.current().nextBoolean()) {
-            createAction(
-                            MarkPartitionDoneAction.class,
-                            "mark_partition_done",
-                            "--warehouse",
-                            warehouse,
-                            "--database",
-                            database,
-                            "--table",
-                            tableName,
-                            "--partition",
-                            "partKey0=0")
-                    .run();
-        } else {
-            callProcedure(
-                    String.format(
-                            "CALL sys.mark_partition_done('%s.%s', 'partKey0 = 0')",
-                            database, tableName));
+
+        switch (invoker) {
+            case "action":
+                createAction(
+                                MarkPartitionDoneAction.class,
+                                "mark_partition_done",
+                                "--warehouse",
+                                warehouse,
+                                "--database",
+                                database,
+                                "--table",
+                                tableName,
+                                "--partition",
+                                "partKey0=0")
+                        .run();
+                break;
+            case "procedure_indexed":
+                callProcedure(
+                        String.format(
+                                "CALL sys.mark_partition_done('%s.%s', 'partKey0 = 0')",
+                                database, tableName));
+                break;
+            case "procedure_named":
+                callProcedure(
+                        String.format(
+                                "CALL sys.mark_partition_done(`table` => '%s.%s', partitions => 'partKey0 = 0')",
+                                database, tableName));
+                break;
+            default:
+                throw new UnsupportedOperationException(invoker);
         }
 
         Path successPath = new Path(table.location(), "partKey0=0/_SUCCESS");
@@ -78,30 +102,42 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
     }
 
     @ParameterizedTest
-    @ValueSource(booleans = {true, false})
-    public void testDropPartitionWithMultiplePartitionKey(boolean hasPk) throws Exception {
+    @MethodSource("testArguments")
+    public void testDropPartitionWithMultiplePartitionKey(boolean hasPk, String invoker)
+            throws Exception {
         FileStoreTable table = prepareTable(hasPk);
 
-        if (ThreadLocalRandom.current().nextBoolean()) {
-            createAction(
-                            MarkPartitionDoneAction.class,
-                            "mark_partition_done",
-                            "--warehouse",
-                            warehouse,
-                            "--database",
-                            database,
-                            "--table",
-                            tableName,
-                            "--partition",
-                            "partKey0=0,partKey1=1",
-                            "--partition",
-                            "partKey0=1,partKey1=0")
-                    .run();
-        } else {
-            callProcedure(
-                    String.format(
-                            "CALL sys.mark_partition_done('%s.%s', 'partKey0=0,partKey1=1', 'partKey0=1,partKey1=0')",
-                            database, tableName));
+        switch (invoker) {
+            case "action":
+                createAction(
+                                MarkPartitionDoneAction.class,
+                                "mark_partition_done",
+                                "--warehouse",
+                                warehouse,
+                                "--database",
+                                database,
+                                "--table",
+                                tableName,
+                                "--partition",
+                                "partKey0=0,partKey1=1",
+                                "--partition",
+                                "partKey0=1,partKey1=0")
+                        .run();
+                break;
+            case "procedure_indexed":
+                callProcedure(
+                        String.format(
+                                "CALL sys.mark_partition_done('%s.%s', 'partKey0=0,partKey1=1;partKey0=1,partKey1=0')",
+                                database, tableName));
+                break;
+            case "procedure_named":
+                callProcedure(
+                        String.format(
+                                "CALL sys.mark_partition_done(`table` => '%s.%s', partitions => 'partKey0=0,partKey1=1;partKey0=1,partKey1=0')",
+                                database, tableName));
+                break;
+            default:
+                throw new UnsupportedOperationException(invoker);
         }
 
         Path successPath1 = new Path(table.location(), "partKey0=0/partKey1=1/_SUCCESS");

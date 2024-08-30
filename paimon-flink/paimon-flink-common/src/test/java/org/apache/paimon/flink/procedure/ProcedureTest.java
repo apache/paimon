@@ -69,11 +69,6 @@ public class ProcedureTest {
     public void testProcedureHasNamedArgument() {
         Set<String> expectedExclusions = new HashSet<>();
         expectedExclusions.add("drop_partition"); // Has been deprecated.
-        // The followings involve compatibility issue to be resolved in followup PR
-        expectedExclusions.add("merge_into");
-        expectedExclusions.add("rollback_to");
-        expectedExclusions.add("mark_partition_done");
-
         List<String> identifiers =
                 FactoryUtil.discoverIdentifiers(
                         ProcedureBase.class.getClassLoader(), ProcedureBase.class);
