@@ -32,7 +32,7 @@ import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.CharVarcharUtils
 import org.apache.spark.sql.catalyst.util.TypeUtils.toSQLId
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
-import org.apache.spark.sql.types.{ArrayType, DataType, IntegerType, MapType, StructField, StructType}
+import org.apache.spark.sql.types.{ArrayType, DataType, IntegerType, MapType, Metadata, StructField, StructType}
 
 import scala.collection.mutable
 
@@ -107,10 +107,7 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
         } else {
           matchedCols += matched.head.name
           val matchedCol = matched.head
-          val actualExpectedCol = expectedCol.withDataType {
-            CharVarcharUtils.getRawType(expectedCol.metadata).getOrElse(expectedCol.dataType)
-          }
-          addCastToColumn(matchedCol, actualExpectedCol, isByName = true)
+          addCastToColumn(matchedCol, expectedCol, isByName = true)
         }
     }
 
@@ -185,7 +182,8 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
       case _ =>
         cast(attr, targetAttr.dataType)
     }
-    Alias(expr, targetAttr.name)(explicitMetadata = Option(targetAttr.metadata))
+    Alias(withStrLenCheck(expr, targetAttr.metadata), targetAttr.name)(explicitMetadata =
+      Option(targetAttr.metadata))
   }
 
   private def addCastToStructByName(
@@ -248,9 +246,10 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
       sourceFieldName: String,
       targetField: StructField): NamedExpression = {
     Alias(
-      cast(GetStructField(parent, i, Option(sourceFieldName)), targetField.dataType),
-      targetField.name
-    )(explicitMetadata = Option(targetField.metadata))
+      withStrLenCheck(
+        cast(GetStructField(parent, i, Option(sourceFieldName)), targetField.dataType),
+        targetField.metadata),
+      targetField.name)(explicitMetadata = Option(targetField.metadata))
   }
 
   private def castToArrayStruct(
@@ -274,6 +273,17 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
     val cast = Compatibility.cast(expr, dataType, Option(conf.sessionLocalTimeZone))
     cast.setTagValue(Compatibility.castByTableInsertionTag, ())
     cast
+  }
+
+  private def withStrLenCheck(expr: Expression, metadata: Metadata): Expression = {
+    if (!conf.charVarcharAsString) {
+      CharVarcharUtils
+        .getRawType(metadata)
+        .map(rawType => CharVarcharUtils.stringLengthCheck(expr, rawType))
+        .getOrElse(expr)
+    } else {
+      expr
+    }
   }
 }
 

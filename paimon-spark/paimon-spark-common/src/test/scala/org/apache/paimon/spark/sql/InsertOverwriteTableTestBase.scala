@@ -73,7 +73,7 @@ abstract class InsertOverwriteTableTestBase extends PaimonSparkTestBase {
                   Row(3, 3.3d, "Paimon", "pt2") :: Nil
               )
 
-              // BY NAME statementis supported since Spark3.5
+              // BY NAME statements supported since Spark3.5
               if (gteqSpark3_5) {
                 sql("INSERT OVERWRITE TABLE t1 BY NAME SELECT col3, col2, col4, col1 FROM t1")
                 // null for non-specified column
