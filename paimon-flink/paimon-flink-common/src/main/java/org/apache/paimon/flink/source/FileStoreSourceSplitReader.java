@@ -94,7 +94,7 @@ public class FileStoreSourceSplitReader
             return new EmptyRecordsWithSplitIds<>();
         }
 
-        if (wakeup.get() && wakeup.compareAndSet(true,false)) {
+        if (wakeup.get() && wakeup.compareAndSet(true, false)) {
             return new EmptyRecordsWithSplitIds<>();
         }
 
@@ -140,7 +140,7 @@ public class FileStoreSourceSplitReader
             }
         }
         if (iterator == null) {
-            wakeup.compareAndSet(true,false);
+            wakeup.compareAndSet(true, false);
         }
         return iterator;
     }
@@ -180,7 +180,7 @@ public class FileStoreSourceSplitReader
 
     @Override
     public void wakeUp() {
-        wakeup.compareAndSet(false,true);
+        wakeup.compareAndSet(false, true);
         LOG.info("Wake up the split reader.");
     }
 
