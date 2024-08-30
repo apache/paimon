@@ -19,6 +19,7 @@
 package org.apache.paimon.benchmark.lookup;
 
 import org.apache.paimon.benchmark.Benchmark;
+import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.hash.HashLookupStoreFactory;
 import org.apache.paimon.lookup.hash.HashLookupStoreReader;
@@ -102,7 +103,10 @@ public class LookupBloomFilterBenchmark extends AbstractLookupBenchmark {
         Arrays.fill(value, (byte) 1);
         HashLookupStoreFactory factory =
                 new HashLookupStoreFactory(
-                        new CacheManager(MemorySize.ofMebiBytes(10)), 16 * 1024, 0.75, "none");
+                        new CacheManager(MemorySize.ofMebiBytes(10)),
+                        16 * 1024,
+                        0.75,
+                        new CompressOptions("none", 1));
 
         File file = new File(tempDir.toFile(), UUID.randomUUID().toString());
         HashLookupStoreWriter writer = factory.createWriter(file, filter);

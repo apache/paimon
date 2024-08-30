@@ -36,7 +36,8 @@ class BlockCompressionTest {
     @ParameterizedTest
     @MethodSource("compressCodecGenerator")
     void testBlockCompression(String compress) {
-        BlockCompressionFactory factory = BlockCompressionFactory.create(compress);
+        BlockCompressionFactory factory =
+                BlockCompressionFactory.create(new CompressOptions(compress, 1));
         runTest(factory, 32768);
         runTest(factory, 16);
     }

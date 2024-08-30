@@ -21,6 +21,7 @@ package org.apache.paimon.format;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.append.AppendOnlyWriter;
 import org.apache.paimon.append.BucketedAppendCompactManager;
+import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.disk.IOManager;
@@ -87,7 +88,7 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
                         false,
                         false,
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
-                        CoreOptions.SPILL_COMPRESSION.defaultValue(),
+                        CompressOptions.defaultOptions(),
                         StatsCollectorFactories.createStatsFactories(
                                 options, SCHEMA.getFieldNames()),
                         MemorySize.MAX_VALUE,

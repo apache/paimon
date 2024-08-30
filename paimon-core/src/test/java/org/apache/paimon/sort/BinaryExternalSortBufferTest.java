@@ -18,6 +18,7 @@
 
 package org.apache.paimon.sort;
 
+import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
@@ -309,7 +310,7 @@ public class BinaryExternalSortBufferTest {
                 inMemorySortBuffer,
                 ioManager,
                 maxNumFileHandles,
-                "lz4",
+                CompressOptions.defaultOptions(),
                 diskSize);
     }
 

@@ -20,6 +20,7 @@ package org.apache.paimon.disk;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compression.BlockCompressionFactory;
+import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.AbstractRowDataSerializer;
@@ -64,7 +65,7 @@ public class ExternalBuffer implements RowBuffer {
             MemorySegmentPool pool,
             AbstractRowDataSerializer<?> serializer,
             MemorySize maxDiskSize,
-            String compression) {
+            CompressOptions compression) {
         this.ioManager = ioManager;
         this.pool = pool;
         this.maxDiskSize = maxDiskSize;

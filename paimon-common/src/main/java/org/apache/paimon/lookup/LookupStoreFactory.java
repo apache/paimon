@@ -19,6 +19,7 @@
 package org.apache.paimon.lookup;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.hash.HashLookupStoreFactory;
 import org.apache.paimon.lookup.sort.SortLookupStoreFactory;
@@ -66,8 +67,7 @@ public interface LookupStoreFactory {
 
     static LookupStoreFactory create(
             CoreOptions options, CacheManager cacheManager, Comparator<MemorySlice> keyComparator) {
-        String compression =
-                options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_SPILL_COMPRESSION);
+        CompressOptions compression = options.lookupCompressOptions();
         switch (options.lookupLocalFileType()) {
             case SORT:
                 return new SortLookupStoreFactory(

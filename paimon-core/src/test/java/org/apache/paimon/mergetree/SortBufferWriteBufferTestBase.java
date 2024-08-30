@@ -20,6 +20,7 @@ package org.apache.paimon.mergetree;
 
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordComparator;
+import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.mergetree.compact.FirstRowMergeFunction;
@@ -71,7 +72,7 @@ public abstract class SortBufferWriteBufferTestBase {
                     false,
                     MemorySize.MAX_VALUE,
                     128,
-                    "lz4",
+                    CompressOptions.defaultOptions(),
                     null);
 
     protected abstract boolean addOnly();

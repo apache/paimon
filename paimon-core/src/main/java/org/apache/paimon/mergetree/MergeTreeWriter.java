@@ -24,6 +24,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compact.CompactResult;
+import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.CompactIncrement;
@@ -59,7 +60,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     private final boolean writeBufferSpillable;
     private final MemorySize maxDiskSize;
     private final int sortMaxFan;
-    private final String sortCompression;
+    private final CompressOptions sortCompression;
     private final IOManager ioManager;
 
     private final RowType keyType;
@@ -89,7 +90,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             boolean writeBufferSpillable,
             MemorySize maxDiskSize,
             int sortMaxFan,
-            String sortCompression,
+            CompressOptions sortCompression,
             IOManager ioManager,
             CompactManager compactManager,
             long maxSequenceNumber,

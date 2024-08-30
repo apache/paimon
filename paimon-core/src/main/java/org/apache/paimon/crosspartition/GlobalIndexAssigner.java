@@ -174,7 +174,7 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
                         new InternalRowSerializer(table.rowType()),
                         true,
                         coreOptions.writeBufferSpillDiskSize(),
-                        coreOptions.spillCompression());
+                        coreOptions.spillCompressOptions());
     }
 
     public void bootstrapKey(InternalRow value) throws IOException {
@@ -305,7 +305,7 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
                         coreOptions.writeBufferSize() / 2,
                         coreOptions.pageSize(),
                         coreOptions.localSortMaxNumFileHandles(),
-                        coreOptions.spillCompression(),
+                        coreOptions.spillCompressOptions(),
                         coreOptions.writeBufferSpillDiskSize());
 
         Function<SortOrder, RowIterator> iteratorFunction =

@@ -21,6 +21,7 @@ package org.apache.paimon.append;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.compact.CompactManager;
+import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.IOManager;
@@ -81,7 +82,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     @Nullable private CompactDeletionFile compactDeletionFile;
     private final LongCounter seqNumCounter;
     private final String fileCompression;
-    private final String spillCompression;
+    private final CompressOptions spillCompression;
     private SinkWriter sinkWriter;
     private final SimpleColStatsCollector.Factory[] statsCollectors;
     @Nullable private final IOManager ioManager;
@@ -106,7 +107,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             boolean useWriteBuffer,
             boolean spillable,
             String fileCompression,
-            String spillCompression,
+            CompressOptions spillCompression,
             SimpleColStatsCollector.Factory[] statsCollectors,
             MemorySize maxDiskSize,
             FileIndexOptions fileIndexOptions,
@@ -456,11 +457,12 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
 
         private final MemorySize maxDiskSize;
 
-        private final String compression;
+        private final CompressOptions compression;
 
         private RowBuffer writeBuffer;
 
-        private BufferedSinkWriter(boolean spillable, MemorySize maxDiskSize, String compression) {
+        private BufferedSinkWriter(
+                boolean spillable, MemorySize maxDiskSize, CompressOptions compression) {
             this.spillable = spillable;
             this.maxDiskSize = maxDiskSize;
             this.compression = compression;
