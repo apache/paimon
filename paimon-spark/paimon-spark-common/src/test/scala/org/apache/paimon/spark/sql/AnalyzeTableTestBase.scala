@@ -163,16 +163,9 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     Assertions.assertEquals(
       ColStats.newColStats(12, 2, null, null, 1, 15, 15),
       colStats.get("binary"))
-    // From Spark 3.4, the written char col is padded
-    if (gteqSpark3_4) {
-      Assertions.assertEquals(
-        ColStats.newColStats(13, 4, null, null, 0, 20, 20),
-        colStats.get("char_col"))
-    } else {
-      Assertions.assertEquals(
-        ColStats.newColStats(13, 4, null, null, 0, 4, 8),
-        colStats.get("char_col"))
-    }
+    Assertions.assertEquals(
+      ColStats.newColStats(13, 4, null, null, 0, 20, 20),
+      colStats.get("char_col"))
     Assertions.assertEquals(
       ColStats.newColStats(14, 4, null, null, 0, 4, 8),
       colStats.get("varchar_col"))
@@ -234,15 +227,9 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     Assertions.assertEquals(
       ColStats.newColStats(12, 3, null, null, 1, 13, 15),
       colStats.get("binary"))
-    if (gteqSpark3_4) {
-      Assertions.assertEquals(
-        ColStats.newColStats(13, 5, null, null, 0, 20, 20),
-        colStats.get("char_col"))
-    } else {
-      Assertions.assertEquals(
-        ColStats.newColStats(13, 5, null, null, 0, 7, 16),
-        colStats.get("char_col"))
-    }
+    Assertions.assertEquals(
+      ColStats.newColStats(13, 5, null, null, 0, 20, 20),
+      colStats.get("char_col"))
     Assertions.assertEquals(
       ColStats.newColStats(14, 5, null, null, 0, 7, 16),
       colStats.get("varchar_col"))
