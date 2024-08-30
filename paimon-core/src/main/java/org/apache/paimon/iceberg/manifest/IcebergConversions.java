@@ -91,10 +91,10 @@ public class IcebergConversions {
                 return convertTimestampWithPrecisionToBuffer(
                         (Timestamp) value, localTimestampType.getPrecision());
             case TIME_WITHOUT_TIME_ZONE:
-                long microsecondsFromMidnight = (Long) value / 1_000;
+                long microsecondsFromMillis = (int) value * 1_000;
                 return ByteBuffer.allocate(8)
                         .order(ByteOrder.LITTLE_ENDIAN)
-                        .putLong(0, microsecondsFromMidnight);
+                        .putLong(0, microsecondsFromMillis);
             default:
                 throw new UnsupportedOperationException("Cannot serialize type: " + type);
         }
@@ -135,7 +135,7 @@ public class IcebergConversions {
                 LocalZonedTimestampType localTimestampType = (LocalZonedTimestampType) type;
                 return convertBytesToTimestamp(bytes, localTimestampType.getPrecision());
             case TIME_WITHOUT_TIME_ZONE:
-                return ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getLong() * 1000;
+                return ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getLong() / 1000;
             default:
                 throw new UnsupportedOperationException("Cannot deserialize type: " + type);
         }
