@@ -1922,14 +1922,10 @@ public class CoreOptions implements Serializable {
         return options.get(PARTITION_TIMESTAMP_PATTERN);
     }
 
-    public int readBatchSize() {
-        return options.get(READ_BATCH_SIZE);
-    }
-
     public String consumerId() {
         String consumerId = options.get(CONSUMER_ID);
-        if (StringUtils.isBlankString(consumerId)) {
-            throw new RuntimeException("consumer id cannot be blank string");
+        if (consumerId != null && consumerId.isEmpty()) {
+            throw new RuntimeException("consumer id cannot be empty string.");
         }
         return consumerId;
     }
