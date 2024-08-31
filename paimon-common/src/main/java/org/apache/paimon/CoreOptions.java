@@ -1927,7 +1927,11 @@ public class CoreOptions implements Serializable {
     }
 
     public String consumerId() {
-        return options.get(CONSUMER_ID);
+        String consumerId = options.get(CONSUMER_ID);
+        if (StringUtils.isBlankString(consumerId)) {
+            throw new RuntimeException("consumer id cannot be blank string");
+        }
+        return consumerId;
     }
 
     public static StreamingReadMode streamReadType(Options options) {
