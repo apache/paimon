@@ -1913,7 +1913,7 @@ public class CoreOptions implements Serializable {
 
     public String consumerId() {
         String consumerId = options.get(CONSUMER_ID);
-        if (consumerId != null && consumerId.length() == 0) {
+        if (StringUtils.isBlankString(consumerId)) {
             throw new RuntimeException("consumer id cannot be blank string");
         }
         return consumerId;

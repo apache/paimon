@@ -551,6 +551,13 @@ public class StringUtils {
         return true;
     }
 
+    public static boolean isBlankString(String str) {
+        if (str != null && str.length() == 0) {
+            return true;
+        }
+        return false;
+    }
+
     public static String quote(String str) {
         return "`" + str + "`";
     }
