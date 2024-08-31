@@ -41,6 +41,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.function.Predicate;
@@ -235,8 +236,21 @@ public class TagManager {
         }
 
         // delete manifests
-        tagDeletion.cleanUnusedManifests(
-                taggedSnapshot, tagDeletion.manifestSkippingSet(skippedSnapshots));
+        success = true;
+        Set<String> manifestSkippingSet = null;
+        try {
+            manifestSkippingSet = tagDeletion.manifestSkippingSet(skippedSnapshots);
+        } catch (Exception e) {
+            LOG.info(
+                    String.format(
+                            "Skip cleaning manifest files for tag of snapshot %s due to failed to build skipping set.",
+                            taggedSnapshot.id()),
+                    e);
+            success = false;
+        }
+        if (success) {
+            tagDeletion.cleanUnusedManifests(taggedSnapshot, manifestSkippingSet);
+        }
     }
 
     /** Check if a tag exists. */
