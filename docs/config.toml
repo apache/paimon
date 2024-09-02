@@ -43,6 +43,9 @@ pygmentsUseClasses = true
   # The branch for this version of Apache Paimon
   Branch = "master"
 
+  # The most recent supported Apache Flink version
+  FlinkVersion = "1.20"
+
   # The github repository for Apache Paimon
   Repo = "//github.com/apache/paimon"
 
