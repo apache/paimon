@@ -56,6 +56,8 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -157,16 +159,23 @@ public class SnapshotsTable implements ReadonlyTable {
     }
 
     private class SnapshotsScan extends ReadOnceTableScan {
+        private @Nullable LeafPredicate snapshotIdPredicate;
 
         @Override
         public InnerTableScan withFilter(Predicate predicate) {
+            if (predicate != null) {
+                Map<String, LeafPredicate> leafPredicates =
+                        predicate.visit(LeafPredicateExtractor.INSTANCE);
+                snapshotIdPredicate = leafPredicates.get("snapshot_id");
+            }
             // do filter in read
             return this;
         }
 
         @Override
         public Plan innerPlan() {
-            return () -> Collections.singletonList(new SnapshotsSplit(location));
+            return () ->
+                    Collections.singletonList(new SnapshotsSplit(location, snapshotIdPredicate));
         }
     }
 
@@ -175,9 +184,11 @@ public class SnapshotsTable implements ReadonlyTable {
         private static final long serialVersionUID = 1L;
 
         private final Path location;
+        private final @Nullable LeafPredicate snapshotPredicate;
 
-        private SnapshotsSplit(Path location) {
+        private SnapshotsSplit(Path location, @Nullable LeafPredicate snapshotPredicate) {
             this.location = location;
+            this.snapshotPredicate = snapshotPredicate;
         }
 
         @Override
@@ -189,7 +200,8 @@ public class SnapshotsTable implements ReadonlyTable {
                 return false;
             }
             SnapshotsSplit that = (SnapshotsSplit) o;
-            return Objects.equals(location, that.location);
+            return Objects.equals(location, that.location)
+                    && Objects.equals(snapshotPredicate, that.snapshotPredicate);
         }
 
         @Override
@@ -267,9 +279,26 @@ public class SnapshotsTable implements ReadonlyTable {
             }
             SnapshotManager snapshotManager =
                     new SnapshotManager(fileIO, ((SnapshotsSplit) split).location, branch);
-            Iterator<Snapshot> snapshots =
-                    snapshotManager.snapshotsWithinRange(
-                            optionalFilterSnapshotIdMax, optionalFilterSnapshotIdMin);
+            Iterator<Snapshot> snapshots;
+
+            LeafPredicate snapshotPredicate = ((SnapshotsSplit) split).snapshotPredicate;
+            if (snapshotPredicate != null
+                    && snapshotPredicate.function() instanceof Equal
+                    && snapshotPredicate.literals().get(0) instanceof Long) {
+                snapshots =
+                        Collections.singletonList(
+                                        snapshotManager.snapshot(
+                                                Long.parseLong(
+                                                        snapshotPredicate
+                                                                .literals()
+                                                                .get(0)
+                                                                .toString())))
+                                .iterator();
+            } else {
+                snapshots =
+                        snapshotManager.snapshotsWithinRange(
+                                optionalFilterSnapshotIdMax, optionalFilterSnapshotIdMin);
+            }
 
             Iterator<InternalRow> rows = Iterators.transform(snapshots, this::toRow);
             if (projection != null) {

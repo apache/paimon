@@ -136,6 +136,13 @@ public class FlinkGenericCatalogITCase extends AbstractTestBaseJUnit4 {
                 sql("SELECT snapshot_id, schema_id, commit_kind FROM paimon_t$snapshots");
 
         assertThat(result).containsExactly(Row.of(1L, 0L, "APPEND"), Row.of(2L, 0L, "APPEND"));
+
+        // check filter with snapshot_id
+        List<Row> result1 =
+                sql(
+                        "SELECT snapshot_id, schema_id, commit_kind FROM paimon_t$snapshots where snapshot_id=2");
+
+        assertThat(result1).containsExactly(Row.of(2L, 0L, "APPEND"));
     }
 
     @Test
