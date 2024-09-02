@@ -26,6 +26,9 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.predicate.Equal;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.LeafPredicateExtractor;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
@@ -50,6 +53,8 @@ import org.apache.paimon.utils.SerializationUtils;
 import org.apache.paimon.utils.TagManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
+
+import javax.annotation.Nullable;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -129,16 +134,23 @@ public class TagsTable implements ReadonlyTable {
     }
 
     private class TagsScan extends ReadOnceTableScan {
+        private @Nullable LeafPredicate tagName;
 
         @Override
         public InnerTableScan withFilter(Predicate predicate) {
+            if (predicate == null) {
+                return this;
+            }
             // TODO
+            Map<String, LeafPredicate> leafPredicates =
+                    predicate.visit(LeafPredicateExtractor.INSTANCE);
+            tagName = leafPredicates.get("tag_name");
             return this;
         }
 
         @Override
         public Plan innerPlan() {
-            return () -> Collections.singletonList(new TagsSplit(location));
+            return () -> Collections.singletonList(new TagsSplit(location, tagName));
         }
     }
 
@@ -148,8 +160,11 @@ public class TagsTable implements ReadonlyTable {
 
         private final Path location;
 
-        private TagsSplit(Path location) {
+        private final @Nullable LeafPredicate tagName;
+
+        private TagsSplit(Path location, @Nullable LeafPredicate tagName) {
             this.location = location;
+            this.tagName = tagName;
         }
 
         @Override
@@ -161,7 +176,7 @@ public class TagsTable implements ReadonlyTable {
                 return false;
             }
             TagsSplit that = (TagsSplit) o;
-            return Objects.equals(location, that.location);
+            return Objects.equals(location, that.location) && Objects.equals(tagName, that.tagName);
         }
 
         @Override
@@ -202,10 +217,23 @@ public class TagsTable implements ReadonlyTable {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
             Path location = ((TagsSplit) split).location;
-            List<Pair<Tag, String>> tags = new TagManager(fileIO, location, branch).tagObjects();
+            LeafPredicate predicate = ((TagsSplit) split).tagName;
+            TagManager tagManager = new TagManager(fileIO, location, branch);
+
             Map<String, Tag> nameToSnapshot = new LinkedHashMap<>();
-            for (Pair<Tag, String> tag : tags) {
-                nameToSnapshot.put(tag.getValue(), tag.getKey());
+
+            if (predicate != null
+                    && predicate.function() instanceof Equal
+                    && predicate.literals().get(0) instanceof BinaryString) {
+                String equalValue = predicate.literals().get(0).toString();
+                Tag tag = tagManager.tag(equalValue);
+                if (tag != null) {
+                    nameToSnapshot.put(equalValue, tag);
+                }
+            } else {
+                for (Pair<Tag, String> tag : tagManager.tagObjects()) {
+                    nameToSnapshot.put(tag.getValue(), tag.getKey());
+                }
             }
 
             Iterator<InternalRow> rows =

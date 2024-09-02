@@ -35,6 +35,7 @@ import javax.annotation.Nullable;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -381,5 +382,14 @@ public class TagManager {
                 String.format(
                         "Didn't find tag with snapshot id '%s'.This is unexpected.",
                         taggedSnapshot.id()));
+    }
+
+    /** Read tag for tagName. */
+    public Tag tag(String tagName) {
+        try {
+            return Tag.safelyFromPath(fileIO, tagPath(tagName));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 }
