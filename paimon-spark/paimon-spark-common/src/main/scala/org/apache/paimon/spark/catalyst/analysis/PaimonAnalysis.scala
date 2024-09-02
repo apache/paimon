@@ -182,7 +182,7 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
       case _ =>
         cast(attr, targetAttr.dataType)
     }
-    Alias(withStrLenCheck(expr, targetAttr.metadata), targetAttr.name)(explicitMetadata =
+    Alias(stringLengthCheck(expr, targetAttr.metadata), targetAttr.name)(explicitMetadata =
       Option(targetAttr.metadata))
   }
 
@@ -246,7 +246,7 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
       sourceFieldName: String,
       targetField: StructField): NamedExpression = {
     Alias(
-      withStrLenCheck(
+      stringLengthCheck(
         cast(GetStructField(parent, i, Option(sourceFieldName)), targetField.dataType),
         targetField.metadata),
       targetField.name)(explicitMetadata = Option(targetField.metadata))
@@ -275,7 +275,7 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
     cast
   }
 
-  private def withStrLenCheck(expr: Expression, metadata: Metadata): Expression = {
+  private def stringLengthCheck(expr: Expression, metadata: Metadata): Expression = {
     if (!conf.charVarcharAsString) {
       CharVarcharUtils
         .getRawType(metadata)
