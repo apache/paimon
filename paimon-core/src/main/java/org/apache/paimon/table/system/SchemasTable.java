@@ -225,10 +225,12 @@ public class SchemasTable implements ReadonlyTable {
             SchemaManager manager = new SchemaManager(fileIO, location, branch);
 
             Collection<TableSchema> tableSchemas = Collections.emptyList();
-            if (predicate != null && predicate.function() instanceof Equal) {
-                Object equalValue = predicate.literals().get(0);
-                if (equalValue instanceof Long) {
-                    tableSchemas = Collections.singletonList(manager.schema((Long) equalValue));
+            if (predicate != null
+                    && predicate.function() instanceof Equal
+                    && predicate.literals().get(0) instanceof Long) {
+                Long equalValue = (Long) predicate.literals().get(0);
+                if (manager.schemaExists(equalValue)) {
+                    tableSchemas = Collections.singletonList(manager.schema(equalValue));
                 }
             } else {
                 tableSchemas = manager.listAll();
