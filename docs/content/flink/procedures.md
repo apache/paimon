@@ -71,6 +71,7 @@ All available procedures are listed below.
          -- Use indexed argument<br/>
          CALL [catalog.]sys.compact('table') <br/><br/>
          CALL [catalog.]sys.compact('table', 'partitions') <br/><br/> 
+         CALL [catalog.]sys.compact('table', 'order_strategy', 'order_by') <br/><br/>
          CALL [catalog.]sys.compact('table', 'partitions', 'order_strategy', 'order_by') <br/><br/>
          CALL [catalog.]sys.compact('table', 'partitions', 'order_strategy', 'order_by', 'options') <br/><br/>
          CALL [catalog.]sys.compact('table', 'partitions', 'order_strategy', 'order_by', 'options', 'where') <br/><br/>
