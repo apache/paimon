@@ -812,6 +812,11 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                         "SELECT tag_name, snapshot_id, schema_id, record_count FROM T$tags ORDER BY tag_name");
 
         assertThat(result).containsExactly(Row.of("tag1", 1L, 0L, 1L), Row.of("tag2", 2L, 0L, 2L));
+
+        result =
+                sql(
+                        "SELECT tag_name, snapshot_id, schema_id, record_count FROM T$tags where tag_name = 'tag1' ");
+        assertThat(result).containsExactly(Row.of("tag1", 1L, 0L, 1L));
     }
 
     @Test

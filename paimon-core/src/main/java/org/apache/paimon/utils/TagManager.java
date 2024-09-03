@@ -382,4 +382,9 @@ public class TagManager {
                         "Didn't find tag with snapshot id '%s'.This is unexpected.",
                         taggedSnapshot.id()));
     }
+
+    /** Read tag for tagName. */
+    public Tag tag(String tagName) {
+        return Tag.fromPath(fileIO, tagPath(tagName));
+    }
 }
