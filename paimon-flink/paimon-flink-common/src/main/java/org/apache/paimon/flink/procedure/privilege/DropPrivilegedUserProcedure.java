@@ -18,6 +18,9 @@
 
 package org.apache.paimon.flink.procedure.privilege;
 
+import org.apache.flink.table.annotation.ArgumentHint;
+import org.apache.flink.table.annotation.DataTypeHint;
+import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 /**
@@ -32,6 +35,7 @@ public class DropPrivilegedUserProcedure extends PrivilegeProcedureBase {
 
     public static final String IDENTIFIER = "drop_privileged_user";
 
+    @ProcedureHint(argument = {@ArgumentHint(name = "username", type = @DataTypeHint("STRING"))})
     public String[] call(ProcedureContext procedureContext, String name) {
         getPrivilegedCatalog().dropPrivilegedUser(name);
         return new String[] {String.format("User %s is dropped.", name)};

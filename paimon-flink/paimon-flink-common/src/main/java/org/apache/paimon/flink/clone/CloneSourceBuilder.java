@@ -76,7 +76,7 @@ public class CloneSourceBuilder {
     private DataStream<Tuple2<String, String>> build(Catalog sourceCatalog) throws Exception {
         List<Tuple2<String, String>> result = new ArrayList<>();
 
-        if (database == null) {
+        if (StringUtils.isBlank(database)) {
             checkArgument(
                     StringUtils.isBlank(tableName),
                     "tableName must be blank when database is null.");
@@ -92,7 +92,7 @@ public class CloneSourceBuilder {
                     result.add(new Tuple2<>(s, s));
                 }
             }
-        } else if (tableName == null) {
+        } else if (StringUtils.isBlank(tableName)) {
             checkArgument(
                     !StringUtils.isBlank(targetDatabase),
                     "targetDatabase must not be blank when clone all tables in a database.");

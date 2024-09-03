@@ -24,6 +24,9 @@ import org.apache.paimon.privilege.FileBasedPrivilegeManager;
 import org.apache.paimon.privilege.PrivilegeManager;
 import org.apache.paimon.privilege.PrivilegedCatalog;
 
+import org.apache.flink.table.annotation.ArgumentHint;
+import org.apache.flink.table.annotation.DataTypeHint;
+import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 /**
@@ -38,6 +41,8 @@ public class InitFileBasedPrivilegeProcedure extends ProcedureBase {
 
     public static final String IDENTIFIER = "init_file_based_privilege";
 
+    @ProcedureHint(
+            argument = {@ArgumentHint(name = "root_password", type = @DataTypeHint("STRING"))})
     public String[] call(ProcedureContext procedureContext, String rootPassword) {
         if (catalog instanceof PrivilegedCatalog) {
             throw new IllegalArgumentException("Catalog is already a PrivilegedCatalog");

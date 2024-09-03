@@ -22,9 +22,6 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.operation.OrphanFilesClean;
 import org.apache.paimon.utils.StringUtils;
 
-import org.apache.flink.table.annotation.ArgumentHint;
-import org.apache.flink.table.annotation.DataTypeHint;
-import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 import java.util.List;
@@ -49,26 +46,18 @@ public class RemoveOrphanFilesProcedure extends ProcedureBase {
 
     public static final String IDENTIFIER = "remove_orphan_files";
 
-    @ProcedureHint(
-            argument = {
-                @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
-                @ArgumentHint(
-                        name = "older_than",
-                        type = @DataTypeHint("STRING"),
-                        isOptional = true),
-                @ArgumentHint(name = "dry_run", type = @DataTypeHint("BOOLEAN"), isOptional = true)
-            })
-    public String[] call(
-            ProcedureContext procedureContext,
-            String tableId,
-            String nullableOlderThan,
-            Boolean dryRun)
-            throws Exception {
-        final String olderThan = notnull(nullableOlderThan);
-        if (dryRun == null) {
-            dryRun = false;
-        }
+    public String[] call(ProcedureContext procedureContext, String tableId) throws Exception {
+        return call(procedureContext, tableId, "");
+    }
 
+    public String[] call(ProcedureContext procedureContext, String tableId, String olderThan)
+            throws Exception {
+        return call(procedureContext, tableId, olderThan, false);
+    }
+
+    public String[] call(
+            ProcedureContext procedureContext, String tableId, String olderThan, boolean dryRun)
+            throws Exception {
         Identifier identifier = Identifier.fromString(tableId);
         String databaseName = identifier.getDatabaseName();
         String tableName = identifier.getObjectName();

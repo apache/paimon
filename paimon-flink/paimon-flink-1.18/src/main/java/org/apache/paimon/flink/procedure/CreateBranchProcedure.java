@@ -18,42 +18,48 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.service.QueryService;
 import org.apache.paimon.table.Table;
 
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.table.annotation.ArgumentHint;
-import org.apache.flink.table.annotation.DataTypeHint;
-import org.apache.flink.table.annotation.ProcedureHint;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 /**
- * Query Service procedure. Usage:
+ * Create branch procedure for given tag. Usage:
  *
  * <pre><code>
- *  CALL sys.query_service('tableId', 'parallelism')
+ *  CALL sys.create_branch('tableId', 'branchName', 'tagName')
  * </code></pre>
  */
-public class QueryServiceProcedure extends ProcedureBase {
+public class CreateBranchProcedure extends ProcedureBase {
 
-    public static final String IDENTIFIER = "query_service";
+    public static final String IDENTIFIER = "create_branch";
 
     @Override
     public String identifier() {
         return IDENTIFIER;
     }
 
-    @ProcedureHint(
-            argument = {
-                @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
-                @ArgumentHint(name = "parallelism", type = @DataTypeHint("INT"))
-            })
-    public String[] call(ProcedureContext procedureContext, String tableId, int parallelism)
-            throws Exception {
+    public String[] call(
+            ProcedureContext procedureContext, String tableId, String branchName, String tagName)
+            throws Catalog.TableNotExistException {
+        return innerCall(tableId, branchName, tagName);
+    }
+
+    public String[] call(ProcedureContext procedureContext, String tableId, String branchName)
+            throws Catalog.TableNotExistException {
+        return innerCall(tableId, branchName, null);
+    }
+
+    private String[] innerCall(String tableId, String branchName, String tagName)
+            throws Catalog.TableNotExistException {
         Table table = catalog.getTable(Identifier.fromString(tableId));
-        StreamExecutionEnvironment env = procedureContext.getExecutionEnvironment();
-        QueryService.build(env, table, parallelism);
-        return execute(env, IDENTIFIER);
+        if (!StringUtils.isBlank(tagName)) {
+            table.createBranch(branchName, tagName);
+        } else {
+            table.createBranch(branchName);
+        }
+        return new String[] {"Success"};
     }
 }

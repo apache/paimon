@@ -20,7 +20,11 @@ package org.apache.paimon.flink.procedure.privilege;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.privilege.PrivilegeType;
+import org.apache.paimon.utils.Preconditions;
 
+import org.apache.flink.table.annotation.ArgumentHint;
+import org.apache.flink.table.annotation.DataTypeHint;
+import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 /**
@@ -38,46 +42,55 @@ public class RevokePrivilegeFromUserProcedure extends PrivilegeProcedureBase {
 
     public static final String IDENTIFIER = "revoke_privilege_from_user";
 
-    public String[] call(ProcedureContext procedureContext, String user, String privilege) {
-        int count =
-                getPrivilegedCatalog()
-                        .revokePrivilegeOnCatalog(user, PrivilegeType.valueOf(privilege));
-        return new String[] {
-            String.format("User %s is revoked with privilege %s on the catalog.", user, privilege),
-            "Number of privileges revoked: " + count
-        };
-    }
-
-    public String[] call(
-            ProcedureContext procedureContext, String user, String privilege, String database) {
-        int count =
-                getPrivilegedCatalog()
-                        .revokePrivilegeOnDatabase(
-                                user, database, PrivilegeType.valueOf(privilege));
-        return new String[] {
-            String.format(
-                    "User %s is revoked with privilege %s on database %s.",
-                    user, privilege, database),
-            "Number of privileges revoked: " + count
-        };
-    }
-
+    @ProcedureHint(
+            argument = {
+                @ArgumentHint(name = "username", type = @DataTypeHint("STRING")),
+                @ArgumentHint(name = "privilege", type = @DataTypeHint("STRING")),
+                @ArgumentHint(name = "database", type = @DataTypeHint("STRING"), isOptional = true),
+                @ArgumentHint(name = "table", type = @DataTypeHint("STRING"), isOptional = true)
+            })
     public String[] call(
             ProcedureContext procedureContext,
             String user,
             String privilege,
             String database,
             String table) {
-        Identifier identifier = Identifier.create(database, table);
-        int count =
-                getPrivilegedCatalog()
-                        .revokePrivilegeOnTable(user, identifier, PrivilegeType.valueOf(privilege));
-        return new String[] {
-            String.format(
-                    "User %s is revoked with privilege %s on table %s.",
-                    user, privilege, identifier),
-            "Number of privileges revoked: " + count
-        };
+        if (database == null) {
+            Preconditions.checkState(
+                    table == null,
+                    "database must be set if privilege is granted at table's granularity.");
+            int count =
+                    getPrivilegedCatalog()
+                            .revokePrivilegeOnCatalog(user, PrivilegeType.valueOf(privilege));
+            return new String[] {
+                String.format(
+                        "User %s is revoked with privilege %s on the catalog.", user, privilege),
+                "Number of privileges revoked: " + count
+            };
+        } else if (table == null) {
+            int count =
+                    getPrivilegedCatalog()
+                            .revokePrivilegeOnDatabase(
+                                    user, database, PrivilegeType.valueOf(privilege));
+            return new String[] {
+                String.format(
+                        "User %s is revoked with privilege %s on database %s.",
+                        user, privilege, database),
+                "Number of privileges revoked: " + count
+            };
+        } else {
+            Identifier identifier = Identifier.create(database, table);
+            int count =
+                    getPrivilegedCatalog()
+                            .revokePrivilegeOnTable(
+                                    user, identifier, PrivilegeType.valueOf(privilege));
+            return new String[] {
+                String.format(
+                        "User %s is revoked with privilege %s on table %s.",
+                        user, privilege, identifier),
+                "Number of privileges revoked: " + count
+            };
+        }
     }
 
     @Override

@@ -20,7 +20,11 @@ package org.apache.paimon.flink.procedure.privilege;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.privilege.PrivilegeType;
+import org.apache.paimon.utils.Preconditions;
 
+import org.apache.flink.table.annotation.ArgumentHint;
+import org.apache.flink.table.annotation.DataTypeHint;
+import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 /**
@@ -38,38 +42,46 @@ public class GrantPrivilegeToUserProcedure extends PrivilegeProcedureBase {
 
     public static final String IDENTIFIER = "grant_privilege_to_user";
 
-    public String[] call(ProcedureContext procedureContext, String user, String privilege) {
-        getPrivilegedCatalog().grantPrivilegeOnCatalog(user, PrivilegeType.valueOf(privilege));
-        return new String[] {
-            String.format("User %s is granted with privilege %s on the catalog.", user, privilege)
-        };
-    }
-
-    public String[] call(
-            ProcedureContext procedureContext, String user, String privilege, String database) {
-        getPrivilegedCatalog()
-                .grantPrivilegeOnDatabase(user, database, PrivilegeType.valueOf(privilege));
-        return new String[] {
-            String.format(
-                    "User %s is granted with privilege %s on database %s.",
-                    user, privilege, database)
-        };
-    }
-
+    @ProcedureHint(
+            argument = {
+                @ArgumentHint(name = "username", type = @DataTypeHint("STRING")),
+                @ArgumentHint(name = "privilege", type = @DataTypeHint("STRING")),
+                @ArgumentHint(name = "database", type = @DataTypeHint("STRING"), isOptional = true),
+                @ArgumentHint(name = "table", type = @DataTypeHint("STRING"), isOptional = true)
+            })
     public String[] call(
             ProcedureContext procedureContext,
             String user,
             String privilege,
             String database,
             String table) {
-        Identifier identifier = Identifier.create(database, table);
-        getPrivilegedCatalog()
-                .grantPrivilegeOnTable(user, identifier, PrivilegeType.valueOf(privilege));
-        return new String[] {
-            String.format(
-                    "User %s is granted with privilege %s on table %s.",
-                    user, privilege, identifier)
-        };
+        if (database == null) {
+            Preconditions.checkState(
+                    table == null,
+                    "database must be set if privilege is granted at table's granularity.");
+            getPrivilegedCatalog().grantPrivilegeOnCatalog(user, PrivilegeType.valueOf(privilege));
+            return new String[] {
+                String.format(
+                        "User %s is granted with privilege %s on the catalog.", user, privilege)
+            };
+        } else if (table == null) {
+            getPrivilegedCatalog()
+                    .grantPrivilegeOnDatabase(user, database, PrivilegeType.valueOf(privilege));
+            return new String[] {
+                String.format(
+                        "User %s is granted with privilege %s on database %s.",
+                        user, privilege, database)
+            };
+        } else {
+            Identifier identifier = Identifier.create(database, table);
+            getPrivilegedCatalog()
+                    .grantPrivilegeOnTable(user, identifier, PrivilegeType.valueOf(privilege));
+            return new String[] {
+                String.format(
+                        "User %s is granted with privilege %s on table %s.",
+                        user, privilege, identifier)
+            };
+        }
     }
 
     @Override

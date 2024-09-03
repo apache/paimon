@@ -18,42 +18,45 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.service.QueryService;
 import org.apache.paimon.table.Table;
 
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.table.annotation.ArgumentHint;
-import org.apache.flink.table.annotation.DataTypeHint;
-import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 /**
- * Query Service procedure. Usage:
+ * Rollback procedure. Usage:
  *
  * <pre><code>
- *  CALL sys.query_service('tableId', 'parallelism')
+ *  -- rollback to a snapshot
+ *  CALL sys.rollback_to('tableId', snapshotId)
+ *
+ *  -- rollback to a tag
+ *  CALL sys.rollback_to('tableId', 'tagName')
  * </code></pre>
  */
-public class QueryServiceProcedure extends ProcedureBase {
+public class RollbackToProcedure extends ProcedureBase {
 
-    public static final String IDENTIFIER = "query_service";
+    public static final String IDENTIFIER = "rollback_to";
+
+    public String[] call(ProcedureContext procedureContext, String tableId, long snapshotId)
+            throws Catalog.TableNotExistException {
+        Table table = catalog.getTable(Identifier.fromString(tableId));
+        table.rollbackTo(snapshotId);
+
+        return new String[] {"Success"};
+    }
+
+    public String[] call(ProcedureContext procedureContext, String tableId, String tagName)
+            throws Catalog.TableNotExistException {
+        Table table = catalog.getTable(Identifier.fromString(tableId));
+        table.rollbackTo(tagName);
+
+        return new String[] {"Success"};
+    }
 
     @Override
     public String identifier() {
         return IDENTIFIER;
-    }
-
-    @ProcedureHint(
-            argument = {
-                @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
-                @ArgumentHint(name = "parallelism", type = @DataTypeHint("INT"))
-            })
-    public String[] call(ProcedureContext procedureContext, String tableId, int parallelism)
-            throws Exception {
-        Table table = catalog.getTable(Identifier.fromString(tableId));
-        StreamExecutionEnvironment env = procedureContext.getExecutionEnvironment();
-        QueryService.build(env, table, parallelism);
-        return execute(env, IDENTIFIER);
     }
 }

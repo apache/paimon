@@ -22,6 +22,9 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.utils.StringUtils;
 
+import org.apache.flink.table.annotation.ArgumentHint;
+import org.apache.flink.table.annotation.DataTypeHint;
+import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 /**
@@ -47,11 +50,10 @@ public class RepairProcedure extends ProcedureBase {
         return IDENTIFIER;
     }
 
-    public String[] call(ProcedureContext procedureContext)
-            throws Catalog.TableNotExistException, Catalog.DatabaseNotExistException {
-        return call(procedureContext, null);
-    }
-
+    @ProcedureHint(
+            argument = {
+                @ArgumentHint(name = "table", type = @DataTypeHint("STRING"), isOptional = true)
+            })
     public String[] call(ProcedureContext procedureContext, String identifier)
             throws Catalog.DatabaseNotExistException, Catalog.TableNotExistException {
         if (StringUtils.isBlank(identifier)) {

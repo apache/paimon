@@ -23,9 +23,6 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.TimeUtils;
 
-import org.apache.flink.table.annotation.ArgumentHint;
-import org.apache.flink.table.annotation.DataTypeHint;
-import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 import javax.annotation.Nullable;
@@ -43,21 +40,34 @@ public class CreateTagProcedure extends ProcedureBase {
 
     public static final String IDENTIFIER = "create_tag";
 
-    @ProcedureHint(
-            argument = {
-                @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
-                @ArgumentHint(name = "tag", type = @DataTypeHint("STRING")),
-                @ArgumentHint(
-                        name = "snapshot_id",
-                        type = @DataTypeHint("BIGINT"),
-                        isOptional = true),
-                @ArgumentHint(
-                        name = "time_retained",
-                        type = @DataTypeHint("STRING"),
-                        isOptional = true)
-            })
+    public String[] call(
+            ProcedureContext procedureContext, String tableId, String tagName, long snapshotId)
+            throws Catalog.TableNotExistException {
+        return innerCall(tableId, tagName, snapshotId, null);
+    }
+
+    public String[] call(ProcedureContext procedureContext, String tableId, String tagName)
+            throws Catalog.TableNotExistException {
+        return innerCall(tableId, tagName, null, null);
+    }
+
     public String[] call(
             ProcedureContext procedureContext,
+            String tableId,
+            String tagName,
+            long snapshotId,
+            String timeRetained)
+            throws Catalog.TableNotExistException {
+        return innerCall(tableId, tagName, snapshotId, timeRetained);
+    }
+
+    public String[] call(
+            ProcedureContext procedureContext, String tableId, String tagName, String timeRetained)
+            throws Catalog.TableNotExistException {
+        return innerCall(tableId, tagName, null, timeRetained);
+    }
+
+    private String[] innerCall(
             String tableId,
             String tagName,
             @Nullable Long snapshotId,

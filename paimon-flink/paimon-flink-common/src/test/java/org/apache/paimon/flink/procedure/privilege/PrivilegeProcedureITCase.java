@@ -29,8 +29,9 @@ import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -49,8 +50,9 @@ public class PrivilegeProcedureITCase extends AbstractTestBase {
         path = getTempDirPath();
     }
 
-    @Test
-    public void testUserPrivileges() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testUserPrivileges(boolean isNamedArgument) throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql(
                 String.format(
@@ -69,7 +71,11 @@ public class PrivilegeProcedureITCase extends AbstractTestBase {
                         + "  PRIMARY KEY (k) NOT ENFORCED\n"
                         + ")");
         tEnv.executeSql("INSERT INTO mydb.T1 VALUES (1, 10), (2, 20), (3, 30)").await();
-        tEnv.executeSql("CALL sys.init_file_based_privilege('root-passwd')");
+        if (isNamedArgument) {
+            tEnv.executeSql("CALL sys.init_file_based_privilege(root_password => 'root-passwd')");
+        } else {
+            tEnv.executeSql("CALL sys.init_file_based_privilege('root-passwd')");
+        }
 
         tEnv.executeSql(
                 String.format(
@@ -97,8 +103,17 @@ public class PrivilegeProcedureITCase extends AbstractTestBase {
         assertNoPrivilege(() -> tEnv.executeSql("ALTER TABLE mydb.T1 RENAME TO mydb.T2"));
         assertNoPrivilege(() -> tEnv.executeSql("CREATE DATABASE anotherdb"));
         assertNoPrivilege(() -> tEnv.executeSql("DROP DATABASE mydb CASCADE"));
-        assertNoPrivilege(
-                () -> tEnv.executeSql("CALL sys.create_privileged_user('test2', 'test2-passwd')"));
+        if (isNamedArgument) {
+            assertNoPrivilege(
+                    () ->
+                            tEnv.executeSql(
+                                    "CALL sys.create_privileged_user(username => 'test2', password => 'test2-passwd')"));
+        } else {
+            assertNoPrivilege(
+                    () ->
+                            tEnv.executeSql(
+                                    "CALL sys.create_privileged_user('test2', 'test2-passwd')"));
+        }
 
         tEnv.executeSql(
                 String.format(
@@ -118,10 +133,21 @@ public class PrivilegeProcedureITCase extends AbstractTestBase {
                         + ")");
         tEnv.executeSql("INSERT INTO mydb2.T2 VALUES (100, 1000), (200, 2000), (300, 3000)")
                 .await();
-        tEnv.executeSql("CALL sys.create_privileged_user('test', 'test-passwd')");
-        tEnv.executeSql("CALL sys.grant_privilege_to_user('test', 'CREATE_TABLE', 'mydb')");
-        tEnv.executeSql("CALL sys.grant_privilege_to_user('test', 'SELECT', 'mydb')");
-        tEnv.executeSql("CALL sys.grant_privilege_to_user('test', 'INSERT', 'mydb')");
+        if (isNamedArgument) {
+            tEnv.executeSql(
+                    "CALL sys.create_privileged_user(username => 'test', password => 'test-passwd')");
+            tEnv.executeSql(
+                    "CALL sys.grant_privilege_to_user(username => 'test', privilege => 'CREATE_TABLE', database => 'mydb')");
+            tEnv.executeSql(
+                    "CALL sys.grant_privilege_to_user(username => 'test', privilege => 'SELECT', database => 'mydb')");
+            tEnv.executeSql(
+                    "CALL sys.grant_privilege_to_user(username => 'test', privilege => 'INSERT', database => 'mydb')");
+        } else {
+            tEnv.executeSql("CALL sys.create_privileged_user('test', 'test-passwd')");
+            tEnv.executeSql("CALL sys.grant_privilege_to_user('test', 'CREATE_TABLE', 'mydb')");
+            tEnv.executeSql("CALL sys.grant_privilege_to_user('test', 'SELECT', 'mydb')");
+            tEnv.executeSql("CALL sys.grant_privilege_to_user('test', 'INSERT', 'mydb')");
+        }
 
         tEnv.executeSql(
                 String.format(
@@ -146,15 +172,36 @@ public class PrivilegeProcedureITCase extends AbstractTestBase {
         assertNoPrivilege(() -> tEnv.executeSql("ALTER TABLE mydb.S1 RENAME TO mydb.S2"));
         assertNoPrivilege(() -> tEnv.executeSql("CREATE DATABASE anotherdb"));
         assertNoPrivilege(() -> tEnv.executeSql("DROP DATABASE mydb CASCADE"));
-        assertNoPrivilege(
-                () -> tEnv.executeSql("CALL sys.create_privileged_user('test2', 'test2-passwd')"));
+        if (isNamedArgument) {
+            assertNoPrivilege(
+                    () ->
+                            tEnv.executeSql(
+                                    "CALL sys.create_privileged_user(username => 'test2', password => 'test2-passwd')"));
 
-        tEnv.executeSql("USE CATALOG rootcat");
-        tEnv.executeSql("CALL sys.create_privileged_user('test2', 'test2-passwd')");
-        tEnv.executeSql("CALL sys.grant_privilege_to_user('test2', 'SELECT', 'mydb2')");
-        tEnv.executeSql("CALL sys.grant_privilege_to_user('test2', 'INSERT', 'mydb', 'T1')");
-        tEnv.executeSql("CALL sys.grant_privilege_to_user('test2', 'SELECT', 'mydb', 'S1')");
-        tEnv.executeSql("CALL sys.grant_privilege_to_user('test2', 'CREATE_DATABASE')");
+            tEnv.executeSql("USE CATALOG rootcat");
+            tEnv.executeSql(
+                    "CALL sys.create_privileged_user(username => 'test2', password => 'test2-passwd')");
+            tEnv.executeSql(
+                    "CALL sys.grant_privilege_to_user(username => 'test2', privilege => 'SELECT', database => 'mydb2')");
+            tEnv.executeSql(
+                    "CALL sys.grant_privilege_to_user(username => 'test2', privilege => 'INSERT', database => 'mydb', `table` => 'T1')");
+            tEnv.executeSql(
+                    "CALL sys.grant_privilege_to_user(username => 'test2', privilege => 'SELECT', database => 'mydb', `table` => 'S1')");
+            tEnv.executeSql(
+                    "CALL sys.grant_privilege_to_user(username => 'test2', privilege => 'CREATE_DATABASE')");
+        } else {
+            assertNoPrivilege(
+                    () ->
+                            tEnv.executeSql(
+                                    "CALL sys.create_privileged_user('test2', 'test2-passwd')"));
+
+            tEnv.executeSql("USE CATALOG rootcat");
+            tEnv.executeSql("CALL sys.create_privileged_user('test2', 'test2-passwd')");
+            tEnv.executeSql("CALL sys.grant_privilege_to_user('test2', 'SELECT', 'mydb2')");
+            tEnv.executeSql("CALL sys.grant_privilege_to_user('test2', 'INSERT', 'mydb', 'T1')");
+            tEnv.executeSql("CALL sys.grant_privilege_to_user('test2', 'SELECT', 'mydb', 'S1')");
+            tEnv.executeSql("CALL sys.grant_privilege_to_user('test2', 'CREATE_DATABASE')");
+        }
 
         tEnv.executeSql(
                 String.format(
@@ -188,14 +235,30 @@ public class PrivilegeProcedureITCase extends AbstractTestBase {
         assertNoPrivilege(() -> tEnv.executeSql("DROP TABLE mydb.S1"));
         assertNoPrivilege(() -> tEnv.executeSql("ALTER TABLE mydb.S1 RENAME TO mydb.S2"));
         assertNoPrivilege(() -> tEnv.executeSql("DROP DATABASE mydb CASCADE"));
-        assertNoPrivilege(
-                () -> tEnv.executeSql("CALL sys.create_privileged_user('test3', 'test3-passwd')"));
+        if (isNamedArgument) {
+            assertNoPrivilege(
+                    () ->
+                            tEnv.executeSql(
+                                    "CALL sys.create_privileged_user(username => 'test3', password => 'test3-passwd')"));
 
-        tEnv.executeSql("USE CATALOG rootcat");
-        assertThat(collect(tEnv, "SELECT * FROM mydb.T1 ORDER BY k"))
-                .isEqualTo(Arrays.asList(Row.of(1, 13), Row.of(2, 23), Row.of(3, 30)));
-        tEnv.executeSql("CALL sys.revoke_privilege_from_user('test2', 'SELECT')");
-        tEnv.executeSql("CALL sys.drop_privileged_user('test')");
+            tEnv.executeSql("USE CATALOG rootcat");
+            assertThat(collect(tEnv, "SELECT * FROM mydb.T1 ORDER BY k"))
+                    .isEqualTo(Arrays.asList(Row.of(1, 13), Row.of(2, 23), Row.of(3, 30)));
+            tEnv.executeSql(
+                    "CALL sys.revoke_privilege_from_user(username => 'test2', privilege => 'SELECT')");
+            tEnv.executeSql("CALL sys.drop_privileged_user(username => 'test')");
+        } else {
+            assertNoPrivilege(
+                    () ->
+                            tEnv.executeSql(
+                                    "CALL sys.create_privileged_user('test3', 'test3-passwd')"));
+
+            tEnv.executeSql("USE CATALOG rootcat");
+            assertThat(collect(tEnv, "SELECT * FROM mydb.T1 ORDER BY k"))
+                    .isEqualTo(Arrays.asList(Row.of(1, 13), Row.of(2, 23), Row.of(3, 30)));
+            tEnv.executeSql("CALL sys.revoke_privilege_from_user('test2', 'SELECT')");
+            tEnv.executeSql("CALL sys.drop_privileged_user('test')");
+        }
 
         tEnv.executeSql("USE CATALOG testcat");
         Exception e =
@@ -215,14 +278,21 @@ public class PrivilegeProcedureITCase extends AbstractTestBase {
         tEnv.executeSql("DROP DATABASE mydb2 CASCADE");
     }
 
-    @Test
-    public void testDropUser() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testDropUser(boolean isNamedArgument) throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
-        initializeSingleUserTest(tEnv);
+        initializeSingleUserTest(tEnv, isNamedArgument);
 
         tEnv.executeSql("USE CATALOG rootcat");
-        tEnv.executeSql("CALL sys.drop_privileged_user('test')");
-        tEnv.executeSql("CALL sys.create_privileged_user('test', 'test-passwd')");
+        if (isNamedArgument) {
+            tEnv.executeSql("CALL sys.drop_privileged_user(username => 'test')");
+            tEnv.executeSql(
+                    "CALL sys.create_privileged_user(username => 'test', password => 'test-passwd')");
+        } else {
+            tEnv.executeSql("CALL sys.drop_privileged_user('test')");
+            tEnv.executeSql("CALL sys.create_privileged_user('test', 'test-passwd')");
+        }
 
         tEnv.executeSql("USE CATALOG testcat");
         assertNoPrivilege(() -> collect(tEnv, "SELECT * FROM mydb.T1 ORDER BY k"));
@@ -230,10 +300,11 @@ public class PrivilegeProcedureITCase extends AbstractTestBase {
                 () -> tEnv.executeSql("INSERT INTO mydb.T1 VALUES (1, 12), (2, 22)").await());
     }
 
-    @Test
-    public void testDropObject() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testDropObject(boolean isNamedArgument) throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
-        initializeSingleUserTest(tEnv);
+        initializeSingleUserTest(tEnv, isNamedArgument);
 
         tEnv.executeSql("USE CATALOG rootcat");
         tEnv.executeSql("DROP TABLE mydb.T1");
@@ -250,10 +321,11 @@ public class PrivilegeProcedureITCase extends AbstractTestBase {
                 () -> tEnv.executeSql("INSERT INTO mydb.T1 VALUES (1, 12), (2, 22)").await());
     }
 
-    @Test
-    public void testRenameObject() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testRenameObject(boolean isNamedArgument) throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
-        initializeSingleUserTest(tEnv);
+        initializeSingleUserTest(tEnv, isNamedArgument);
 
         tEnv.executeSql("USE CATALOG rootcat");
         tEnv.executeSql("ALTER TABLE mydb.T1 RENAME TO mydb.T2");
@@ -266,7 +338,8 @@ public class PrivilegeProcedureITCase extends AbstractTestBase {
                 .isEqualTo(Arrays.asList(Row.of(1, 12), Row.of(2, 22), Row.of(3, 30)));
     }
 
-    private void initializeSingleUserTest(TableEnvironment tEnv) throws Exception {
+    private void initializeSingleUserTest(TableEnvironment tEnv, boolean isNamedArgument)
+            throws Exception {
         tEnv.executeSql(
                 String.format(
                         "CREATE CATALOG mycat WITH (\n"
@@ -283,7 +356,11 @@ public class PrivilegeProcedureITCase extends AbstractTestBase {
                         + "  PRIMARY KEY (k) NOT ENFORCED\n"
                         + ")");
         tEnv.executeSql("INSERT INTO mydb.T1 VALUES (1, 10), (2, 20), (3, 30)").await();
-        tEnv.executeSql("CALL sys.init_file_based_privilege('root-passwd')");
+        if (isNamedArgument) {
+            tEnv.executeSql("CALL sys.init_file_based_privilege(root_password => 'root-passwd')");
+        } else {
+            tEnv.executeSql("CALL sys.init_file_based_privilege('root-passwd')");
+        }
 
         tEnv.executeSql(
                 String.format(
@@ -295,9 +372,18 @@ public class PrivilegeProcedureITCase extends AbstractTestBase {
                                 + ")",
                         path));
         tEnv.executeSql("USE CATALOG rootcat");
-        tEnv.executeSql("CALL sys.create_privileged_user('test', 'test-passwd')");
-        tEnv.executeSql("CALL sys.grant_privilege_to_user('test', 'SELECT', 'mydb', 'T1')");
-        tEnv.executeSql("CALL sys.grant_privilege_to_user('test', 'INSERT', 'mydb', 'T1')");
+        if (isNamedArgument) {
+            tEnv.executeSql(
+                    "CALL sys.create_privileged_user(username => 'test', password => 'test-passwd')");
+            tEnv.executeSql(
+                    "CALL sys.grant_privilege_to_user(username => 'test', privilege => 'SELECT', database => 'mydb', `table` => 'T1')");
+            tEnv.executeSql(
+                    "CALL sys.grant_privilege_to_user(username => 'test', privilege => 'INSERT', database => 'mydb', `table` => 'T1')");
+        } else {
+            tEnv.executeSql("CALL sys.create_privileged_user('test', 'test-passwd')");
+            tEnv.executeSql("CALL sys.grant_privilege_to_user('test', 'SELECT', 'mydb', 'T1')");
+            tEnv.executeSql("CALL sys.grant_privilege_to_user('test', 'INSERT', 'mydb', 'T1')");
+        }
 
         tEnv.executeSql(
                 String.format(
