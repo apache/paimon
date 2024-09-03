@@ -18,8 +18,13 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
 
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
@@ -31,6 +36,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -43,9 +49,11 @@ public class SparkWriteITCase {
 
     protected SparkSession spark = null;
 
+    protected static Path warehousePath = null;
+
     @BeforeAll
     public void startMetastoreAndSpark(@TempDir java.nio.file.Path tempDir) {
-        Path warehousePath = new Path("file:///" + tempDir.toString());
+        warehousePath = new Path("file:///" + tempDir.toString());
         spark =
                 SparkSession.builder()
                         .master("local[2]")
@@ -251,7 +259,7 @@ public class SparkWriteITCase {
     public void testDataFilePrefixForAppendOnlyTable() {
         spark.sql("CREATE TABLE T (a INT, b INT, c STRING)");
 
-        spark.conf().set("spark.paimon.file.prefix", "test-");
+        spark.conf().set("spark.paimon.data-file.prefix", "test-");
         spark.sql("INSERT INTO T VALUES (1, 1, 'aa')");
         spark.sql("INSERT INTO T VALUES (2, 2, 'bb')");
         spark.sql("INSERT INTO T VALUES (3, 3, 'cc')");
@@ -272,7 +280,7 @@ public class SparkWriteITCase {
     public void testDataFilePrefixForPKTable() {
         spark.sql("CREATE TABLE T (a INT, b INT, c STRING)" + " TBLPROPERTIES ('primary-key'='a')");
 
-        spark.conf().set("spark.paimon.file.prefix", "test-");
+        spark.conf().set("spark.paimon.data-file.prefix", "test-");
         spark.sql("INSERT INTO T VALUES (1, 1, 'aa')");
         spark.sql("INSERT INTO T VALUES (2, 2, 'bb')");
         spark.sql("INSERT INTO T VALUES (1, 3, 'cc')");
@@ -287,5 +295,38 @@ public class SparkWriteITCase {
         for (String fileName : fileNames) {
             Assertions.assertTrue(fileName.startsWith("test-"));
         }
+    }
+
+    @Test
+    public void testChangelogFilePrefixForPkTable() throws Exception {
+        spark.sql(
+                "CREATE TABLE T (a INT, b INT, c STRING) TBLPROPERTIES ('primary-key'='a', 'bucket' = '1', 'changelog-producer' = 'lookup')");
+
+        FileStoreTable table = getTable("T");
+        Path tabLocation = table.location();
+        FileIO fileIO = table.fileIO();
+
+        // default prefix "changelog-"
+        spark.sql("INSERT INTO T VALUES (1, 1, 'aa')");
+        FileStatus[] files1 = fileIO.listStatus(new Path(tabLocation, "bucket-0"));
+        Assertions.assertEquals(1, dataFileCount(files1, "changelog-"));
+
+        // custom prefix "test-changelog"
+        spark.conf().set("spark.paimon.changelog-file.prefix", "test-changelog-");
+        spark.sql("INSERT INTO T VALUES (2, 2, 'bb')");
+        FileStatus[] files2 = fileIO.listStatus(new Path(tabLocation, "bucket-0"));
+        Assertions.assertEquals(1, dataFileCount(files2, "test-changelog-"));
+    }
+
+    protected static FileStoreTable getTable(String tableName) {
+        return FileStoreTableFactory.create(
+                LocalFileIO.create(),
+                new Path(warehousePath, String.format("db.db/%s", tableName)));
+    }
+
+    private long dataFileCount(FileStatus[] files, String filePrefix) {
+        return Arrays.stream(files)
+                .filter(f -> f.getPath().getName().startsWith(filePrefix))
+                .count();
     }
 }

@@ -137,12 +137,12 @@ public class ChangelogMergeTreeRewriterTest {
                                                             .toString()
                                                             .startsWith(
                                                                     DataFilePathFactory
-                                                                            .DATA_FILE_PREFIX)
+                                                                            .DEFAULT_DATA_FILE_PREFIX)
                                                     || p.getFileName()
                                                             .toString()
                                                             .startsWith(
                                                                     DataFilePathFactory
-                                                                            .CHANGELOG_FILE_PREFIX))
+                                                                            .DEFAULT_CHANGELOG_FILE_PREFIX))
                             .collect(Collectors.toList());
             Assertions.assertEquals(0, files.size());
         }
@@ -176,12 +176,12 @@ public class ChangelogMergeTreeRewriterTest {
                                                             .toString()
                                                             .startsWith(
                                                                     DataFilePathFactory
-                                                                            .DATA_FILE_PREFIX)
+                                                                            .DEFAULT_DATA_FILE_PREFIX)
                                                     || p.getFileName()
                                                             .toString()
                                                             .startsWith(
                                                                     DataFilePathFactory
-                                                                            .CHANGELOG_FILE_PREFIX))
+                                                                            .DEFAULT_CHANGELOG_FILE_PREFIX))
                             .collect(Collectors.toList());
             if (rewriteChangelog) {
                 Assertions.assertEquals(2, files.size()); // changelog + data file

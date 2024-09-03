@@ -129,7 +129,8 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
                         RowType.of(),
                         new CoreOptions(new Options()).partitionDefaultName(),
                         CoreOptions.FILE_FORMAT.defaultValue().toString(),
-                        CoreOptions.FILE_PREFIX.defaultValue());
+                        CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue());
 
         Table table = fileSystemCatalog.getTable(Identifier.create("db", "T"));
         ReadBuilder readBuilder = table.newReadBuilder();

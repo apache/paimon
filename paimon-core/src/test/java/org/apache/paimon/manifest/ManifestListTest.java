@@ -105,7 +105,8 @@ public class ManifestListTest {
                         TestKeyValueGenerator.DEFAULT_PART_TYPE,
                         "default",
                         CoreOptions.FILE_FORMAT.defaultValue().toString(),
-                        CoreOptions.FILE_PREFIX.defaultValue());
+                        CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue());
         return new ManifestList.Factory(FileIOFinder.find(path), avro, "zstd", pathFactory, null)
                 .create();
     }
