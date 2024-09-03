@@ -59,6 +59,12 @@ All available procedures are listed below.
    <tr>
       <td>compact</td>
       <td>
+         CALL [catalog.]sys.compact('table') <br/><br/>
+         CALL [catalog.]sys.compact('table', 'partitions') <br/><br/> 
+         CALL [catalog.]sys.compact('table', 'partitions', 'order_strategy', 'order_by') <br/><br/>
+         CALL [catalog.]sys.compact('table', 'partitions', 'order_strategy', 'order_by', 'options') <br/><br/>
+         CALL [catalog.]sys.compact('table', 'partitions', 'order_strategy', 'order_by', 'options', 'where') <br/><br/>
+         CALL [catalog.]sys.compact('table', 'partitions', 'order_strategy', 'order_by', 'options', 'where', 'partition_idle_time') <br/><br/>
       </td>
       <td>
          To compact a table. Arguments:
