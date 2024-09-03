@@ -120,8 +120,14 @@ public class ThreadPoolUtils {
     public static <U> void randomlyOnlyExecute(
             ExecutorService executor, Consumer<U> processor, Collection<U> input) {
         List<Future<?>> futures = new ArrayList<>(input.size());
+        ClassLoader cl = Thread.currentThread().getContextClassLoader();
         for (U u : input) {
-            futures.add(executor.submit(() -> processor.accept(u)));
+            futures.add(
+                    executor.submit(
+                            () -> {
+                                Thread.currentThread().setContextClassLoader(cl);
+                                processor.accept(u);
+                            }));
         }
         awaitAllFutures(futures);
     }
@@ -129,8 +135,14 @@ public class ThreadPoolUtils {
     public static <U, T> Iterator<T> randomlyExecute(
             ExecutorService executor, Function<U, List<T>> processor, Collection<U> input) {
         List<Future<List<T>>> futures = new ArrayList<>(input.size());
+        ClassLoader cl = Thread.currentThread().getContextClassLoader();
         for (U u : input) {
-            futures.add(executor.submit(() -> processor.apply(u)));
+            futures.add(
+                    executor.submit(
+                            () -> {
+                                Thread.currentThread().setContextClassLoader(cl);
+                                return processor.apply(u);
+                            }));
         }
         return futuresToIterIter(futures);
     }
