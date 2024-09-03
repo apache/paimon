@@ -226,9 +226,8 @@ public class TagsTable implements ReadonlyTable {
                     && predicate.function() instanceof Equal
                     && predicate.literals().get(0) instanceof BinaryString) {
                 String equalValue = predicate.literals().get(0).toString();
-                Tag tag = tagManager.tag(equalValue);
-                if (tag != null) {
-                    nameToSnapshot.put(equalValue, tag);
+                if (tagManager.tagExists(equalValue)) {
+                    nameToSnapshot.put(equalValue, tagManager.tag(equalValue));
                 }
             } else {
                 for (Pair<Tag, String> tag : tagManager.tagObjects()) {

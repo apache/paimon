@@ -35,7 +35,6 @@ import javax.annotation.Nullable;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -386,10 +385,6 @@ public class TagManager {
 
     /** Read tag for tagName. */
     public Tag tag(String tagName) {
-        try {
-            return Tag.safelyFromPath(fileIO, tagPath(tagName));
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+        return Tag.fromPath(fileIO, tagPath(tagName));
     }
 }
