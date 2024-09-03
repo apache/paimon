@@ -554,6 +554,19 @@ public class SchemaManager implements Serializable {
         }
     }
 
+    /** Check if a schema exists. */
+    public boolean schemaExists(long id) {
+        Path path = toSchemaPath(id);
+        try {
+            return fileIO.exists(path);
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Failed to determine if schema '%s' exists in path %s.", id, path),
+                    e);
+        }
+    }
+
     public static TableSchema fromPath(FileIO fileIO, Path path) {
         try {
             return JsonSerdeUtil.fromJson(fileIO.readFileUtf8(path), TableSchema.class);
