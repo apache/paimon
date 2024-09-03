@@ -58,12 +58,13 @@ public class FileBasedBloomFilter {
         // we should refresh cache in LRU, but we cannot refresh everytime, it is costly.
         // so we introduce a refresh count to reduce refresh
         if (accessCount == REFRESH_COUNT || filter.getMemorySegment() == null) {
+            final BloomFilter bloomFilter = filter;
             MemorySegment segment =
                     cacheManager.getPage(
                             CacheKey.forPosition(input.file(), readOffset, readLength),
                             key -> input.readPosition(readOffset, readLength),
-                            key -> filter.unsetMemorySegment());
-            filter.setMemorySegment(segment, 0);
+                            key -> bloomFilter.unsetMemorySegment());
+            bloomFilter.setMemorySegment(segment, 0);
             accessCount = 0;
         }
         return filter.testHash(hash);
