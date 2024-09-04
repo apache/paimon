@@ -72,7 +72,7 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
 
     @BeforeAll
     public void startMetastoreAndSpark(@TempDir java.nio.file.Path tempDir) {
-        Path warehousePath = new Path("file:///" + tempDir.toString());
+        warehousePath = new Path("file:///" + tempDir.toString());
         spark =
                 SparkSession.builder()
                         .master("local[1]")
