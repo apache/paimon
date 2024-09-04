@@ -21,15 +21,16 @@ package org.apache.paimon.flink.action;
 import java.util.Map;
 import java.util.Optional;
 
-/** Factory to create {@link CreateTagFromTimestampAction}. */
-public class CreateTagFromTimestampActionFactory implements ActionFactory {
-    public static final String IDENTIFIER = "create_tag_from_timestamp";
+/** Factory to create {@link CreateTagFromWatermarkAction}. */
+public class CreateTagFromWatermarkActionFactory implements ActionFactory {
+
+    public static final String IDENTIFIER = "create_tag_from_watermark";
 
     private static final String TABLE = "table";
 
     private static final String TAG = "tag";
 
-    private static final String TIMESTAMP = "timestamp";
+    private static final String WATERMARK = "watermark";
 
     private static final String TIME_RETAINED = "time_retained";
 
@@ -43,27 +44,27 @@ public class CreateTagFromTimestampActionFactory implements ActionFactory {
         String warehouse = params.get(WAREHOUSE);
         String table = params.get(TABLE);
         String tag = params.get(TAG);
-        Long timestamp = Long.parseLong(params.get(TIMESTAMP));
+        Long watermark = Long.parseLong(params.get(WATERMARK));
         String timeRetained = params.get(TIME_RETAINED);
         Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
 
-        CreateTagFromTimestampAction createTagFromTimestampAction =
-                new CreateTagFromTimestampAction(
-                        warehouse, table, tag, timestamp, timeRetained, catalogConfig);
-        return Optional.of(createTagFromTimestampAction);
+        CreateTagFromWatermarkAction createTagFromWatermarkAction =
+                new CreateTagFromWatermarkAction(
+                        warehouse, table, tag, watermark, timeRetained, catalogConfig);
+        return Optional.of(createTagFromWatermarkAction);
     }
 
     @Override
     public void printHelp() {
-        System.out.println("Action \"create_tag_from_timestamp\" create tag from timestamp.");
+        System.out.println("Action \"create_tag_from_watermark\" create tag from watermark.");
         System.out.println();
 
         System.out.println("Syntax:");
         System.out.println(
-                "  create_tag_from_timestamp --warehouse <warehouse_path> "
+                "  create_tag_from_watermark --warehouse <warehouse_path> "
                         + "--table <database.table_name> "
                         + "--tag <tag> "
-                        + "--timestamp <timestamp> "
+                        + "--watermark <watermark> "
                         + "[--timeRetained <duration>] "
                         + "[--options <key>=<value>,<key>=<value>,...]");
     }
