@@ -79,7 +79,8 @@ public class SnapshotManager implements Serializable {
     public SnapshotManager(FileIO fileIO, Path tablePath, String branchName) {
         this.fileIO = fileIO;
         this.tablePath = tablePath;
-        this.branch = StringUtils.isBlank(branchName) ? DEFAULT_MAIN_BRANCH : branchName;
+        this.branch =
+                StringUtils.isNullOrWhitespaceOnly(branchName) ? DEFAULT_MAIN_BRANCH : branchName;
     }
 
     public SnapshotManager copyWithBranch(String branchName) {

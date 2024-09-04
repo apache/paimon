@@ -62,7 +62,7 @@ public abstract class ProcedureBase implements Procedure, Factory {
 
     @Nullable
     protected String nullable(String arg) {
-        return StringUtils.isBlank(arg) ? null : arg;
+        return StringUtils.isNullOrWhitespaceOnly(arg) ? null : arg;
     }
 
     protected String[] execute(
@@ -103,7 +103,7 @@ public abstract class ProcedureBase implements Procedure, Factory {
     }
 
     protected Map<String, String> optionalConfigMap(String configStr) {
-        if (StringUtils.isBlank(configStr)) {
+        if (StringUtils.isNullOrWhitespaceOnly(configStr)) {
             return Collections.emptyMap();
         }
 

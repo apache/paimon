@@ -188,7 +188,7 @@ public class PostgresRecordParser
                     return DataTypes.DECIMAL(precision, scale);
                 } else if (Bits.LOGICAL_NAME.equals(field.name())) {
                     String stringifyLength = field.parameters().get("length").asText();
-                    if (StringUtils.isBlank(stringifyLength)) {
+                    if (StringUtils.isNullOrWhitespaceOnly(stringifyLength)) {
                         return DataTypes.BOOLEAN();
                     }
                     Integer length = Integer.valueOf(stringifyLength);

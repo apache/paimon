@@ -126,10 +126,10 @@ public class CompactDatabaseProcedure extends ProcedureBase {
                         .includingTables(nullable(includingTables))
                         .excludingTables(nullable(excludingTables))
                         .withDatabaseCompactMode(nullable(mode));
-        if (!StringUtils.isBlank(tableOptions)) {
+        if (!StringUtils.isNullOrWhitespaceOnly(tableOptions)) {
             action.withTableOptions(parseCommaSeparatedKeyValues(tableOptions));
         }
-        if (!StringUtils.isBlank(partitionIdleTime)) {
+        if (!StringUtils.isNullOrWhitespaceOnly(partitionIdleTime)) {
             action.withPartitionIdleTime(TimeUtils.parseDuration(partitionIdleTime));
         }
 
