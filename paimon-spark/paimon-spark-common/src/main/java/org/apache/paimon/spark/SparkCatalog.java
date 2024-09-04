@@ -390,7 +390,7 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
 
     private Schema toInitialSchema(
             StructType schema, Transform[] partitions, Map<String, String> properties) {
-        Map<String, String> normalizedProperties = mergeSQLConf(properties);
+        Map<String, String> normalizedProperties = mergeSQLConf(properties, false);
         if (!normalizedProperties.containsKey(TableCatalog.PROP_PROVIDER)) {
             normalizedProperties.put(TableCatalog.PROP_PROVIDER, SparkSource.NAME());
         }
