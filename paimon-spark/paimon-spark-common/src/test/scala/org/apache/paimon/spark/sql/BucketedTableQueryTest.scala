@@ -25,7 +25,7 @@ import org.apache.spark.sql.execution.SortExec
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
 import org.apache.spark.sql.execution.exchange.ShuffleExchangeLike
 
-class c extends PaimonSparkTestBase with AdaptiveSparkPlanHelper {
+class BucketedTableQueryTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelper {
   private def checkAnswerAndShuffleSorts(query: String, numShuffles: Int, numSorts: Int): Unit = {
     var expectedResult: Array[Row] = null
     // avoid config default value change in future, so specify it manually
