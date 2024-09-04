@@ -111,13 +111,11 @@ public interface FileStoreScan {
         Long watermark();
 
         /**
-         * Snapshot id of this plan, return null if the table is empty or the manifest list is
+         * Snapshot of this plan, return null if the table is empty or the manifest list is
          * specified.
          */
         @Nullable
-        Long snapshotId();
-
-        ScanMode scanMode();
+        Snapshot snapshot();
 
         /** Result {@link ManifestEntry} files. */
         List<ManifestEntry> files();
