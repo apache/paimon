@@ -76,7 +76,7 @@ case class WriteIntoPaimonTable(
         } else if (isTruncate(filter.get)) {
           Map.empty[String, String]
         } else {
-          convertFilterToMap(filter.get, table.schema.logicalPartitionType())
+          convertPartitionFilterToMap(filter.get, table.schema.logicalPartitionType())
         }
       case DynamicOverWrite =>
         dynamicPartitionOverwriteMode = true
