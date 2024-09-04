@@ -236,13 +236,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
             @Nullable
             @Override
-            public Long snapshotId() {
-                return readSnapshot == null ? null : readSnapshot.id();
-            }
-
-            @Override
-            public ScanMode scanMode() {
-                return scanMode;
+            public Snapshot snapshot() {
+                return readSnapshot;
             }
 
             @Override

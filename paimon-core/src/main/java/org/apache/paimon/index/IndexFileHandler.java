@@ -146,9 +146,14 @@ public class IndexFileHandler {
     }
 
     public Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> scan(
-            long snapshotId, String indexType, Set<BinaryRow> partitions) {
+            long snapshot, String indexType, Set<BinaryRow> partitions) {
+        return scan(snapshotManager.snapshot(snapshot), indexType, partitions);
+    }
+
+    public Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> scan(
+            Snapshot snapshot, String indexType, Set<BinaryRow> partitions) {
         Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> result = new HashMap<>();
-        for (IndexManifestEntry file : scanEntries(snapshotId, indexType, partitions)) {
+        for (IndexManifestEntry file : scanEntries(snapshot, indexType, partitions)) {
             result.computeIfAbsent(Pair.of(file.partition(), file.bucket()), k -> new ArrayList<>())
                     .add(file.indexFile());
         }
@@ -179,8 +184,12 @@ public class IndexFileHandler {
     }
 
     public List<IndexManifestEntry> scanEntries(
-            long snapshotId, String indexType, Set<BinaryRow> partitions) {
-        Snapshot snapshot = snapshotManager.snapshot(snapshotId);
+            long snapshot, String indexType, Set<BinaryRow> partitions) {
+        return scanEntries(snapshotManager.snapshot(snapshot), indexType, partitions);
+    }
+
+    public List<IndexManifestEntry> scanEntries(
+            Snapshot snapshot, String indexType, Set<BinaryRow> partitions) {
         String indexManifest = snapshot.indexManifest();
         if (indexManifest == null) {
             return Collections.emptyList();
