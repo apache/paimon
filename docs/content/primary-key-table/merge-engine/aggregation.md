@@ -230,7 +230,7 @@ It supports VARBINARY data type.
 
 An example:
 
-{{< tabs "nested_update-example" >}}
+{{< tabs "hll_sketch-example" >}}
 
 {{< tab "Flink" >}}
 
@@ -290,7 +290,7 @@ An example:
 
   An example:
 
-  {{< tabs "nested_update-example" >}}
+  {{< tabs "theta_sketch-example" >}}
 
   {{< tab "Flink" >}}
 
