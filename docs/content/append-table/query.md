@@ -49,14 +49,10 @@ CREATE TABLE <PAIMON_TABLE> (<COLUMN> <COLUMN_TYPE> , ...) WITH (
 );
 ```
 
-Define `file-index.bloom-filter.columns`, Paimon will create its corresponding index file for each file. If the index
-file is too small, it will be stored directly in the manifest, or in the directory of the data file. Each data file
+Define `file-index.bloom-filter.columns`, Data file index is an external index file and Paimon will create its corresponding index file for each file. If the index
+file is too small, it will be stored directly in the manifest, otherwise in the directory of the data file. Each data file
 corresponds to an index file, which has a separate file definition and can contain different types of indexes with
 multiple columns.
-
-Data file index is an external index file corresponding to a certain data file. If the index file is too small, it will
-be stored directly in the manifest, otherwise in the directory of the data file. Each data file corresponds to an index file,
-which has a separate file definition and can contain different types of indexes with multiple columns.
 
 Different file index may be efficient in different scenario. For example bloom filter may speed up query in point lookup
 scenario. Using a bitmap may consume more space but can result in greater accuracy.
