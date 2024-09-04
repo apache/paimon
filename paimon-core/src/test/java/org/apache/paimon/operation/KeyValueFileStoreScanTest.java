@@ -294,7 +294,8 @@ public class KeyValueFileStoreScanTest {
     private Map<BinaryRow, BinaryRow> getActualKvMap(FileStoreScan scan, Long expectedSnapshotId)
             throws Exception {
         FileStoreScan.Plan plan = scan.plan();
-        assertThat(plan.snapshot().id()).isEqualTo(expectedSnapshotId);
+        Snapshot snapshot = plan.snapshot();
+        assertThat(snapshot == null ? null : snapshot.id()).isEqualTo(expectedSnapshotId);
 
         List<KeyValue> actualKvs = store.readKvsFromManifestEntries(plan.files(), false);
         gen.sort(actualKvs);
