@@ -81,7 +81,7 @@ class SparkSource
 
   private def loadTable(options: JMap[String, String]): DataTable = {
     val catalogContext = CatalogContext.create(
-      Options.fromMap(mergeSQLConf(options, true)),
+      Options.fromMap(mergeSQLConf(options)),
       SparkSession.active.sessionState.newHadoopConf())
     val table = FileStoreTableFactory.create(catalogContext)
     if (Options.fromMap(options).get(SparkConnectorOptions.READ_CHANGELOG)) {
