@@ -38,9 +38,9 @@ import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.util.zip.CRC32;
 
 import static org.apache.paimon.lookup.sort.BlockHandle.writeBlockHandle;
+import static org.apache.paimon.lookup.sort.SortLookupStoreUtils.crc32c;
 import static org.apache.paimon.memory.MemorySegmentUtils.allocateReuseBytes;
 import static org.apache.paimon.utils.VarLengthIntUtils.encodeInt;
 
@@ -163,13 +163,6 @@ public class SortLookupStoreWriter implements LookupStoreWriter {
         blockWriter.reset();
 
         return blockHandle;
-    }
-
-    private static int crc32c(MemorySlice data, BlockCompressionType type) {
-        CRC32 crc = new CRC32();
-        crc.update(data.getHeapMemory(), data.offset(), data.length());
-        crc.update(type.persistentId() & 0xFF);
-        return (int) crc.getValue();
     }
 
     @Override

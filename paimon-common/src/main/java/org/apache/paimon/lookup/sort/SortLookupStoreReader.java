@@ -35,6 +35,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.util.Comparator;
 
+import static org.apache.paimon.lookup.sort.SortLookupStoreUtils.crc32c;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -48,6 +49,7 @@ public class SortLookupStoreReader implements LookupStoreReader {
 
     private final Comparator<MemorySlice> comparator;
     private final FileChannel fileChannel;
+    private final String filePath;
     private final long fileSize;
 
     private final BlockIterator indexBlockIterator;
@@ -61,6 +63,7 @@ public class SortLookupStoreReader implements LookupStoreReader {
         this.comparator = comparator;
         //noinspection resource
         this.fileChannel = new FileInputStream(file).getChannel();
+        this.filePath = file.getAbsolutePath();
         this.fileSize = context.fileSize();
 
         Footer footer = readFooter();
@@ -121,11 +124,15 @@ public class SortLookupStoreReader implements LookupStoreReader {
         BlockTrailer blockTrailer =
                 BlockTrailer.readBlockTrailer(MemorySlice.wrap(trailerData).toInput());
 
-        // TODO validate checksum
+        MemorySegment block = read(blockHandle.offset(), blockHandle.size());
+        int crc32cCode = crc32c(block, blockTrailer.getCompressionType());
+        checkArgument(
+                blockTrailer.getCrc32c() == crc32cCode,
+                String.format(
+                        "Expected CRC32C(%d) but found CRC32C(%d) for file(%s)",
+                        blockTrailer.getCrc32c(), crc32cCode, filePath));
 
         // decompress data
-
-        MemorySegment block = read(blockHandle.offset(), blockHandle.size());
         MemorySlice uncompressedData;
         BlockCompressionFactory compressionFactory =
                 BlockCompressionFactory.create(blockTrailer.getCompressionType());
