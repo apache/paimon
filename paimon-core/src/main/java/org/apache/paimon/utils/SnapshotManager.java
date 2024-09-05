@@ -425,7 +425,7 @@ public class SnapshotManager implements Serializable {
             if (lowerId > upperBoundSnapshotId) {
                 throw new RuntimeException(
                         String.format(
-                                "snapshot upper id:%s should not greater than earliestSnapshotId:%s",
+                                "snapshot upper id:%s should not greater than latestSnapshotId:%s",
                                 lowerId, upperBoundSnapshotId));
             }
             lowerBoundSnapshotId = lowerId > lowerBoundSnapshotId ? lowerId : lowerBoundSnapshotId;

@@ -157,12 +157,28 @@ public class FlinkGenericCatalogITCase extends AbstractTestBaseJUnit4 {
                         Row.of(3L, 0L, "APPEND"),
                         Row.of(4L, 0L, "APPEND"));
 
-        // check compound predicate query with right range
+        // check leaf predicate query with exist snapshot_id
         List<Row> result2 =
+                sql(
+                        "SELECT snapshot_id, schema_id, commit_kind FROM paimon_t$snapshots where snapshot_id=2");
+
+        assertThat(result2).containsExactly(Row.of(2L, 0L, "APPEND"));
+
+        // check leaf predicate query with exist snapshot_id
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "SELECT snapshot_id, schema_id, commit_kind FROM paimon_t$snapshots where snapshot_id=6"))
+                .hasCauseInstanceOf(RuntimeException.class)
+                .hasRootCauseMessage(
+                        "snapshot upper id:6 should not greater than latestSnapshotId:4");
+
+        // check compound predicate query with right range
+        List<Row> result3 =
                 sql(
                         "SELECT snapshot_id, schema_id, commit_kind FROM paimon_t$snapshots where snapshot_id>1 and snapshot_id<5");
 
-        assertThat(result2)
+        assertThat(result3)
                 .containsExactly(
                         Row.of(2L, 0L, "APPEND"),
                         Row.of(3L, 0L, "APPEND"),
@@ -175,7 +191,7 @@ public class FlinkGenericCatalogITCase extends AbstractTestBaseJUnit4 {
                                         "SELECT snapshot_id, schema_id, commit_kind FROM paimon_t$snapshots where snapshot_id>9"))
                 .hasCauseInstanceOf(RuntimeException.class)
                 .hasRootCauseMessage(
-                        "snapshot upper id:10 should not greater than earliestSnapshotId:4");
+                        "snapshot upper id:10 should not greater than latestSnapshotId:4");
     }
 
     @Test
