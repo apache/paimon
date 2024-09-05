@@ -884,6 +884,7 @@ public class CoreOptions implements Serializable {
             key("write.batch-size")
                     .intType()
                     .defaultValue(1024)
+                    .withFallbackKeys("orc.write.batch-size")
                     .withDescription("Write batch size for any file format if it supports.");
 
     public static final ConfigOption<String> CONSUMER_ID =
