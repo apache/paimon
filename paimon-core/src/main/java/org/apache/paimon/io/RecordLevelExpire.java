@@ -64,12 +64,15 @@ public class RecordLevelExpire {
         DataField field = rowType.getField(timeField);
         if (!((timeFieldType == CoreOptions.TimeFieldType.SECONDS_INT
                         && field.type() instanceof IntType)
+                || (timeFieldType == CoreOptions.TimeFieldType.SECONDS_LONG
+                        && field.type() instanceof BigIntType)
                 || (timeFieldType == CoreOptions.TimeFieldType.MILLIS_LONG
                         && field.type() instanceof BigIntType))) {
             throw new IllegalArgumentException(
                     String.format(
-                            "Record level time field should be INT type, but is %s.",
-                            field.type()));
+                            "The record level time field type should be one of SECONDS_INT,SECONDS_LONG or MILLIS_LONG, "
+                                    + "but time field type is %s, field type is %s.",
+                            timeFieldType, field.type()));
         }
 
         return new RecordLevelExpire(fieldIndex, (int) expireTime.getSeconds(), timeFieldType);
@@ -97,6 +100,9 @@ public class RecordLevelExpire {
                     switch (timeFieldType) {
                         case SECONDS_INT:
                             recordTime = kv.value().getInt(timeField);
+                            break;
+                        case SECONDS_LONG:
+                            recordTime = (int) kv.value().getLong(timeField);
                             break;
                         case MILLIS_LONG:
                             recordTime = (int) (kv.value().getLong(timeField) / 1000);
