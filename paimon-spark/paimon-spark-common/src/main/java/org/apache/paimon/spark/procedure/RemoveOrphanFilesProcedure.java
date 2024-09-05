@@ -111,7 +111,7 @@ public class RemoveOrphanFilesProcedure extends BaseProcedure {
         }
 
         String olderThan = args.isNullAt(1) ? null : args.getString(1);
-        if (!StringUtils.isBlank(olderThan)) {
+        if (!StringUtils.isNullOrWhitespaceOnly(olderThan)) {
             tableCleans.forEach(clean -> clean.olderThan(olderThan));
         }
 

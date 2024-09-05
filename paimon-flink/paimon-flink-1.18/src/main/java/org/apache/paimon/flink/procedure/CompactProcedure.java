@@ -123,7 +123,7 @@ public class CompactProcedure extends ProcedureBase {
         String warehouse = catalog.warehouse();
         Map<String, String> catalogOptions = catalog.options();
         Map<String, String> tableConf =
-                StringUtils.isBlank(tableOptions)
+                StringUtils.isNullOrWhitespaceOnly(tableOptions)
                         ? Collections.emptyMap()
                         : ParameterUtils.parseCommaSeparatedKeyValues(tableOptions);
         Identifier identifier = Identifier.fromString(tableId);
@@ -137,13 +137,13 @@ public class CompactProcedure extends ProcedureBase {
                             identifier.getObjectName(),
                             catalogOptions,
                             tableConf);
-            if (!(StringUtils.isBlank(partitionIdleTime))) {
+            if (!(StringUtils.isNullOrWhitespaceOnly(partitionIdleTime))) {
                 action.withPartitionIdleTime(TimeUtils.parseDuration(partitionIdleTime));
             }
             jobName = "Compact Job";
         } else if (!orderStrategy.isEmpty() && !orderByColumns.isEmpty()) {
             Preconditions.checkArgument(
-                    StringUtils.isBlank(partitionIdleTime),
+                    StringUtils.isNullOrWhitespaceOnly(partitionIdleTime),
                     "sort compact do not support 'partition_idle_time'.");
             action =
                     new SortCompactAction(
@@ -160,11 +160,11 @@ public class CompactProcedure extends ProcedureBase {
                     "You must specify 'order strategy' and 'order by columns' both.");
         }
 
-        if (!(StringUtils.isBlank(partitions))) {
+        if (!(StringUtils.isNullOrWhitespaceOnly(partitions))) {
             action.withPartitions(ParameterUtils.getPartitions(partitions.split(";")));
         }
 
-        if (!StringUtils.isBlank(whereSql)) {
+        if (!StringUtils.isNullOrWhitespaceOnly(whereSql)) {
             action.withWhereSql(whereSql);
         }
 

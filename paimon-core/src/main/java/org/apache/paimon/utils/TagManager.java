@@ -71,7 +71,7 @@ public class TagManager {
     public TagManager(FileIO fileIO, Path tablePath, String branch) {
         this.fileIO = fileIO;
         this.tablePath = tablePath;
-        this.branch = StringUtils.isBlank(branch) ? DEFAULT_MAIN_BRANCH : branch;
+        this.branch = StringUtils.isNullOrWhitespaceOnly(branch) ? DEFAULT_MAIN_BRANCH : branch;
     }
 
     public TagManager copyWithBranch(String branchName) {
@@ -94,7 +94,8 @@ public class TagManager {
             String tagName,
             @Nullable Duration timeRetained,
             List<TagCallback> callbacks) {
-        checkArgument(!StringUtils.isBlank(tagName), "Tag name '%s' is blank.", tagName);
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name '%s' is blank.", tagName);
 
         // When timeRetained is not defined, please do not write the tagCreatorTime field,
         // as this will cause older versions (<= 0.7) of readers to be unable to read this
@@ -160,7 +161,8 @@ public class TagManager {
             TagDeletion tagDeletion,
             SnapshotManager snapshotManager,
             List<TagCallback> callbacks) {
-        checkArgument(!StringUtils.isBlank(tagName), "Tag name '%s' is blank.", tagName);
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name '%s' is blank.", tagName);
         checkArgument(tagExists(tagName), "Tag '%s' doesn't exist.", tagName);
 
         Snapshot taggedSnapshot = taggedSnapshot(tagName);

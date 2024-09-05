@@ -56,7 +56,7 @@ public class RepairProcedure extends ProcedureBase {
             })
     public String[] call(ProcedureContext procedureContext, String identifier)
             throws Catalog.DatabaseNotExistException, Catalog.TableNotExistException {
-        if (StringUtils.isBlank(identifier)) {
+        if (StringUtils.isNullOrWhitespaceOnly(identifier)) {
             catalog.repairCatalog();
             return new String[] {"Success"};
         }

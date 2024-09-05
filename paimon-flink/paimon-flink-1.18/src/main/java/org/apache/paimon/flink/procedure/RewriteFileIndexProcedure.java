@@ -67,7 +67,9 @@ public class RewriteFileIndexProcedure extends ProcedureBase {
         Table table = catalog.getTable(Identifier.fromString(sourceTablePath));
 
         List<Map<String, String>> partitionList =
-                StringUtils.isBlank(partitions) ? null : getPartitions(partitions.split(";"));
+                StringUtils.isNullOrWhitespaceOnly(partitions)
+                        ? null
+                        : getPartitions(partitions.split(";"));
 
         Predicate partitionPredicate;
         if (partitionList != null) {

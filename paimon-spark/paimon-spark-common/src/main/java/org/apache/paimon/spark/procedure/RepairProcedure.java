@@ -69,7 +69,7 @@ public class RepairProcedure extends BaseProcedure {
         Catalog paimonCatalog = ((WithPaimonCatalog) tableCatalog()).paimonCatalog();
         String identifier = args.getString(0);
         try {
-            if (StringUtils.isBlank(identifier)) {
+            if (StringUtils.isNullOrWhitespaceOnly(identifier)) {
                 paimonCatalog.repairCatalog();
                 return new InternalRow[] {newInternalRow(true)};
             }

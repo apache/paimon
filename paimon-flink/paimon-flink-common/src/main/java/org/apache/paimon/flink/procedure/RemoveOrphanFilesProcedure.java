@@ -76,7 +76,7 @@ public class RemoveOrphanFilesProcedure extends ProcedureBase {
         List<OrphanFilesClean> tableCleans =
                 OrphanFilesClean.createOrphanFilesCleans(catalog, databaseName, tableName);
 
-        if (!StringUtils.isBlank(olderThan)) {
+        if (!StringUtils.isNullOrWhitespaceOnly(olderThan)) {
             tableCleans.forEach(clean -> clean.olderThan(olderThan));
         }
 

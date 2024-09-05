@@ -56,7 +56,7 @@ public class RollbackToProcedure extends ProcedureBase {
             ProcedureContext procedureContext, String tableId, String tagName, Long snapshotId)
             throws Catalog.TableNotExistException {
         Table table = catalog.getTable(Identifier.fromString(tableId));
-        if (!StringUtils.isBlank(tagName)) {
+        if (!StringUtils.isNullOrWhitespaceOnly(tagName)) {
             table.rollbackTo(tagName);
         } else {
             table.rollbackTo(snapshotId);

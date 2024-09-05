@@ -93,7 +93,7 @@ public class SchemaManager implements Serializable {
     public SchemaManager(FileIO fileIO, Path tableRoot, String branch) {
         this.fileIO = fileIO;
         this.tableRoot = tableRoot;
-        this.branch = StringUtils.isBlank(branch) ? DEFAULT_MAIN_BRANCH : branch;
+        this.branch = StringUtils.isNullOrWhitespaceOnly(branch) ? DEFAULT_MAIN_BRANCH : branch;
     }
 
     public SchemaManager copyWithBranch(String branchName) {
