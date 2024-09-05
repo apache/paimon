@@ -47,7 +47,7 @@ public class ParquetFileFormatTest {
     public void testAbsent() {
         Options options = new Options();
         ParquetFileFormat parquet =
-                new ParquetFileFormatFactory().create(new FormatContext(options, 1024));
+                new ParquetFileFormatFactory().create(new FormatContext(options, 1024, 1024));
         assertThat(parquet.formatOptions().getString(KEY1)).isEqualTo("absent");
     }
 
@@ -56,7 +56,7 @@ public class ParquetFileFormatTest {
         Options options = new Options();
         options.setString(KEY1.key(), "v1");
         ParquetFileFormat parquet =
-                new ParquetFileFormatFactory().create(new FormatContext(options, 1024));
+                new ParquetFileFormatFactory().create(new FormatContext(options, 1024, 1024));
         assertThat(parquet.formatOptions().getString(KEY1)).isEqualTo("v1");
     }
 
@@ -69,7 +69,8 @@ public class ParquetFileFormatTest {
                 new RowDataParquetBuilder(
                         new RowType(new ArrayList<>()),
                         getParquetConfiguration(
-                                new FormatContext(conf.removePrefix(IDENTIFIER + "."), 1024)));
+                                new FormatContext(
+                                        conf.removePrefix(IDENTIFIER + "."), 1024, 1024)));
         assertThat(builder.getCompression(null)).isEqualTo(lz4);
         assertThat(builder.getCompression("SNAPPY")).isEqualTo(lz4);
     }
@@ -77,7 +78,7 @@ public class ParquetFileFormatTest {
     @Test
     public void testSupportedDataFields() {
         ParquetFileFormat parquet =
-                new ParquetFileFormatFactory().create(new FormatContext(new Options(), 1024));
+                new ParquetFileFormatFactory().create(new FormatContext(new Options(), 1024, 1024));
 
         int index = 0;
         List<DataField> dataFields = new ArrayList<DataField>();

@@ -68,6 +68,7 @@ public class OrcFileFormat extends FileFormat {
     private final org.apache.hadoop.conf.Configuration readerConf;
     private final org.apache.hadoop.conf.Configuration writerConf;
     private final int readBatchSize;
+    private final int writeBatchSize;
 
     public OrcFileFormat(FormatContext formatContext) {
         super(IDENTIFIER);
@@ -77,6 +78,7 @@ public class OrcFileFormat extends FileFormat {
         this.writerConf = new org.apache.hadoop.conf.Configuration();
         this.orcProperties.forEach((k, v) -> writerConf.set(k.toString(), v.toString()));
         this.readBatchSize = formatContext.readBatchSize();
+        this.writeBatchSize = formatContext.writeaBatchSize();
     }
 
     @VisibleForTesting
@@ -140,7 +142,7 @@ public class OrcFileFormat extends FileFormat {
         Vectorizer<InternalRow> vectorizer =
                 new RowDataVectorizer(typeDescription.toString(), orcTypes);
 
-        return new OrcWriterFactory(vectorizer, orcProperties, writerConf);
+        return new OrcWriterFactory(vectorizer, orcProperties, writerConf, writeBatchSize);
     }
 
     private static Properties getOrcProperties(Options options, FormatContext formatContext) {

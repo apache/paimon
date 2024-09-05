@@ -878,7 +878,13 @@ public class CoreOptions implements Serializable {
             key("read.batch-size")
                     .intType()
                     .defaultValue(1024)
-                    .withDescription("Read batch size for orc and parquet.");
+                    .withDescription("Read batch size for any file format if it supports.");
+
+    public static final ConfigOption<Integer> WRITE_BATCH_SIZE =
+            key("write.batch-size")
+                    .intType()
+                    .defaultValue(1024)
+                    .withDescription("Write batch size for any file format if it supports.");
 
     public static final ConfigOption<String> CONSUMER_ID =
             key("consumer-id")

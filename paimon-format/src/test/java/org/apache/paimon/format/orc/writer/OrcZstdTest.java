@@ -64,7 +64,7 @@ class OrcZstdTest {
         options.set("compression.zstd.level", "1");
         OrcFileFormat orc =
                 new OrcFileFormatFactory()
-                        .create(new FileFormatFactory.FormatContext(options, 1024));
+                        .create(new FileFormatFactory.FormatContext(options, 1024, 1024));
         Assertions.assertThat(orc).isInstanceOf(OrcFileFormat.class);
 
         Assertions.assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".compress", ""))

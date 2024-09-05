@@ -25,12 +25,6 @@ import static org.apache.paimon.options.ConfigOptions.key;
 /** Options for orc format. */
 public class OrcOptions {
 
-    public static final ConfigOption<Integer> ORC_WRITE_BATCH_SIZE =
-            key("orc.write.batch-size")
-                    .intType()
-                    .defaultValue(1024)
-                    .withDescription("write batch size for orc.");
-
     public static final ConfigOption<Integer> ORC_COLUMN_ENCODING_DIRECT =
             key("orc.column.encoding.direct")
                     .intType()
