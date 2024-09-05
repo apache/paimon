@@ -64,6 +64,7 @@ import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.catalog.Catalog.DB_SUFFIX;
@@ -586,6 +587,13 @@ public class SchemaManager implements Serializable {
     @VisibleForTesting
     public Path toSchemaPath(long schemaId) {
         return new Path(branchPath() + "/schema/" + SCHEMA_PREFIX + schemaId);
+    }
+
+    public List<Path> schemaPaths(Predicate<Long> predicate) throws IOException {
+        return listVersionedFiles(fileIO, schemaDirectory(), SCHEMA_PREFIX)
+                .filter(predicate)
+                .map(this::toSchemaPath)
+                .collect(Collectors.toList());
     }
 
     /**
