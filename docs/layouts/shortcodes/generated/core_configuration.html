@@ -573,7 +573,7 @@ This config option does not affect the default filesystem metastore.</td>
             <td><h5>read.batch-size</h5></td>
             <td style="word-wrap: break-word;">1024</td>
             <td>Integer</td>
-            <td>Read batch size for orc and parquet.</td>
+            <td>Read batch size for any file format if it supports.</td>
         </tr>
         <tr>
             <td><h5>record-level.expire-time</h5></td>
@@ -899,6 +899,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>If set to true, compactions and snapshot expiration will be skipped. This option is used along with dedicated compact jobs.</td>
+        </tr>
+        <tr>
+            <td><h5>write.batch-size</h5></td>
+            <td style="word-wrap: break-word;">1024</td>
+            <td>Integer</td>
+            <td>Write batch size for any file format if it supports.</td>
         </tr>
         <tr>
             <td><h5>zorder.var-length-contribution</h5></td>
