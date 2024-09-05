@@ -27,6 +27,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.predicate.And;
 import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.GreaterOrEqual;
@@ -219,9 +220,11 @@ public class SnapshotsTable implements ReadonlyTable {
             String leafName = "snapshot_id";
             if (predicate instanceof CompoundPredicate) {
                 CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
-                List<Predicate> children = compoundPredicate.children();
-                for (Predicate leaf : children) {
-                    handleLeafPredicate(leaf, leafName);
+                if ((compoundPredicate.function()) instanceof And) {
+                    List<Predicate> children = compoundPredicate.children();
+                    for (Predicate leaf : children) {
+                        handleLeafPredicate(leaf, leafName);
+                    }
                 }
             } else {
                 handleLeafPredicate(predicate, leafName);
