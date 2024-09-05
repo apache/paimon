@@ -78,7 +78,7 @@ public class OrcFileFormat extends FileFormat {
         this.writerConf = new org.apache.hadoop.conf.Configuration();
         this.orcProperties.forEach((k, v) -> writerConf.set(k.toString(), v.toString()));
         this.readBatchSize = formatContext.readBatchSize();
-        this.writeBatchSize = formatContext.writeaBatchSize();
+        this.writeBatchSize = formatContext.writeBatchSize();
     }
 
     @VisibleForTesting

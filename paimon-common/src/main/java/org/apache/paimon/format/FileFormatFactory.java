@@ -66,7 +66,7 @@ public interface FileFormatFactory {
             return readBatchSize;
         }
 
-        public int writeaBatchSize() {
+        public int writeBatchSize() {
             return writeBatchSize;
         }
 
