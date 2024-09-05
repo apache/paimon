@@ -25,6 +25,8 @@ import org.apache.paimon.lookup.LookupStoreReader;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceInput;
+import org.apache.paimon.utils.BloomFilter;
+import org.apache.paimon.utils.MurmurHashUtils;
 
 import javax.annotation.Nullable;
 
@@ -53,6 +55,7 @@ public class SortLookupStoreReader implements LookupStoreReader {
     private final long fileSize;
 
     private final BlockIterator indexBlockIterator;
+    @Nullable private final BloomFilter bloomFilter;
 
     public SortLookupStoreReader(
             Comparator<MemorySlice> comparator,
@@ -68,7 +71,18 @@ public class SortLookupStoreReader implements LookupStoreReader {
 
         Footer footer = readFooter();
         this.indexBlockIterator = readBlock(footer.getIndexBlockHandle()).iterator();
-        // TODO read bloom filter block
+        this.bloomFilter = readBloomFilter(footer.getBloomFilterHandle());
+    }
+
+    private BloomFilter readBloomFilter(@Nullable BloomFilterHandle bloomFilterHandle)
+            throws IOException {
+        BloomFilter bloomFilter = null;
+        if (bloomFilterHandle != null) {
+            MemorySegment segment = read(bloomFilterHandle.offset(), bloomFilterHandle.size());
+            bloomFilter = new BloomFilter(bloomFilterHandle.expectedEntries(), segment.size());
+            bloomFilter.setMemorySegment(segment, 0);
+        }
+        return bloomFilter;
     }
 
     private Footer readFooter() throws IOException {
@@ -79,6 +93,10 @@ public class SortLookupStoreReader implements LookupStoreReader {
     @Nullable
     @Override
     public byte[] lookup(byte[] key) throws IOException {
+        if (bloomFilter != null && !bloomFilter.testHash(MurmurHashUtils.hashBytes(key))) {
+            return null;
+        }
+
         MemorySlice keySlice = MemorySlice.wrap(key);
         // seek the index to the block containing the key
         indexBlockIterator.seekTo(keySlice);
