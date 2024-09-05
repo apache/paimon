@@ -38,7 +38,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
-import static org.apache.paimon.utils.StringUtils.isBlank;
+import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
 
 /** The Latest Snapshot clone action for Flink. */
 public class CloneAction extends ActionBase {
@@ -69,7 +69,9 @@ public class CloneAction extends ActionBase {
         checkNotNull(targetWarehouse, "targetWarehouse must not be null.");
 
         this.parallelism =
-                isBlank(parallelismStr) ? env.getParallelism() : Integer.parseInt(parallelismStr);
+                isNullOrWhitespaceOnly(parallelismStr)
+                        ? env.getParallelism()
+                        : Integer.parseInt(parallelismStr);
 
         this.sourceCatalogConfig = new HashMap<>();
         if (!sourceCatalogConfig.isEmpty()) {

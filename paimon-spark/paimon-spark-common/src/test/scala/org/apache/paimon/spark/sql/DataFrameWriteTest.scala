@@ -26,11 +26,9 @@ import org.junit.jupiter.api.Assertions
 import java.sql.{Date, Timestamp}
 
 class DataFrameWriteTest extends PaimonSparkTestBase {
+  import testImplicits._
 
   test("Paimon: DataFrameWrite.saveAsTable") {
-
-    import testImplicits._
-
     Seq((1L, "x1"), (2L, "x2"))
       .toDF("a", "b")
       .write
@@ -138,9 +136,6 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
       bucketModes.foreach {
         bucket =>
           test(s"Write data into Paimon directly: has-pk: $hasPk, bucket: $bucket") {
-
-            val _spark = spark
-            import _spark.implicits._
 
             val prop = if (hasPk) {
               s"'primary-key'='a', 'bucket' = '$bucket' "
@@ -278,8 +273,6 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
         bucket =>
           test(
             s"Schema evolution: write data into Paimon with allowExplicitCast = true: $hasPk, bucket: $bucket") {
-            val _spark = spark
-            import _spark.implicits._
 
             val prop = if (hasPk) {
               s"'primary-key'='a', 'bucket' = '$bucket' "
@@ -380,4 +373,98 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
       }
   }
 
+  withPk.foreach {
+    hasPk =>
+      test(s"Support v2 write with overwrite, hasPk: $hasPk") {
+        withTable("t") {
+          val prop = if (hasPk) {
+            "'primary-key'='c1'"
+          } else {
+            "'write-only'='true'"
+          }
+          spark.sql(s"""
+                       |CREATE TABLE t (c1 INT, c2 STRING) PARTITIONED BY(p1 String, p2 string)
+                       |TBLPROPERTIES ($prop)
+                       |""".stripMargin)
+
+          spark
+            .range(3)
+            .selectExpr("id as c1", "id as c2", "'a' as p1", "id as p2")
+            .writeTo("t")
+            .overwrite($"p1" === "a")
+          checkAnswer(
+            spark.sql("SELECT * FROM t ORDER BY c1"),
+            Row(0, "0", "a", "0") :: Row(1, "1", "a", "1") :: Row(2, "2", "a", "2") :: Nil
+          )
+
+          spark
+            .range(7, 10)
+            .selectExpr("id as c1", "id as c2", "'a' as p1", "id as p2")
+            .writeTo("t")
+            .overwrite($"p1" === "a")
+          checkAnswer(
+            spark.sql("SELECT * FROM t ORDER BY c1"),
+            Row(7, "7", "a", "7") :: Row(8, "8", "a", "8") :: Row(9, "9", "a", "9") :: Nil
+          )
+
+          spark
+            .range(2)
+            .selectExpr("id as c1", "id as c2", "'a' as p1", "9 as p2")
+            .writeTo("t")
+            .overwrite(($"p1" <=> "a").and($"p2" === "9"))
+          checkAnswer(
+            spark.sql("SELECT * FROM t ORDER BY c1"),
+            Row(0, "0", "a", "9") :: Row(1, "1", "a", "9") :: Row(7, "7", "a", "7") ::
+              Row(8, "8", "a", "8") :: Nil
+          )
+
+          // bad case
+          val msg1 = intercept[Exception] {
+            spark
+              .range(2)
+              .selectExpr("id as c1", "id as c2", "'a' as p1", "id as p2")
+              .writeTo("t")
+              .overwrite($"p1" =!= "a")
+          }.getMessage
+          assert(msg1.contains("Only support Overwrite filters with Equal and EqualNullSafe"))
+
+          val msg2 = intercept[Exception] {
+            spark
+              .range(2)
+              .selectExpr("id as c1", "id as c2", "'a' as p1", "id as p2")
+              .writeTo("t")
+              .overwrite($"p1" === $"c2")
+          }.getMessage
+          assert(msg2.contains("Table does not support overwrite by expression"))
+
+          val msg3 = intercept[Exception] {
+            spark
+              .range(2)
+              .selectExpr("id as c1", "id as c2", "'a' as p1", "id as p2")
+              .writeTo("t")
+              .overwrite($"c1" === ($"c2" + 1))
+          }.getMessage
+          assert(msg3.contains("cannot translate expression to source filter"))
+
+          val msg4 = intercept[Exception] {
+            spark
+              .range(2)
+              .selectExpr("id as c1", "id as c2", "'a' as p1", "id as p2")
+              .writeTo("t")
+              .overwrite(($"p1" === "a").and($"p1" === "b"))
+          }.getMessage
+          assert(msg4.contains("Only support Overwrite with one filter for each partition column"))
+
+          // Overwrite a partition which is not the specified
+          val msg5 = intercept[Exception] {
+            spark
+              .range(2)
+              .selectExpr("id as c1", "id as c2", "'a' as p1", "id as p2")
+              .writeTo("t")
+              .overwrite($"p1" === "b")
+          }.getMessage
+          assert(msg5.contains("does not belong to this partition"))
+        }
+      }
+  }
 }

@@ -161,7 +161,10 @@ public class BranchManager {
                 !branchName.equals(DEFAULT_MAIN_BRANCH),
                 "Branch name '%s' do not use in fast-forward.",
                 branchName);
-        checkArgument(!StringUtils.isBlank(branchName), "Branch name '%s' is blank.", branchName);
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(branchName),
+                "Branch name '%s' is blank.",
+                branchName);
         checkArgument(branchExists(branchName), "Branch name '%s' doesn't exist.", branchName);
 
         Long earliestSnapshotId = snapshotManager.copyWithBranch(branchName).earliestSnapshotId();
@@ -232,11 +235,14 @@ public class BranchManager {
                 String.format(
                         "Branch name '%s' is the default branch and cannot be used.",
                         DEFAULT_MAIN_BRANCH));
-        checkArgument(!StringUtils.isBlank(branchName), "Branch name '%s' is blank.", branchName);
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(branchName),
+                "Branch name '%s' is blank.",
+                branchName);
+        checkArgument(!branchExists(branchName), "Branch name '%s' already exists.", branchName);
         checkArgument(
                 !branchName.chars().allMatch(Character::isDigit),
                 "Branch name cannot be pure numeric string but is '%s'.",
                 branchName);
-        checkArgument(!branchExists(branchName), "Branch name '%s' already exists.", branchName);
     }
 }

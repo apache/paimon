@@ -18,7 +18,6 @@
 
 package org.apache.paimon.spark.commands
 
-import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.deletionvectors.BitmapDeletionVector
 import org.apache.paimon.fs.Path
 import org.apache.paimon.index.IndexFileMeta
@@ -38,9 +37,9 @@ import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
-import org.apache.spark.sql.catalyst.plans.logical.{Filter => FilterLogicalNode, LogicalPlan, Project}
+import org.apache.spark.sql.catalyst.plans.logical.{Filter => FilterLogicalNode, LogicalPlan}
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2ScanRelation}
-import org.apache.spark.sql.sources.{AlwaysTrue, And, EqualNullSafe, Filter}
+import org.apache.spark.sql.sources.{AlwaysTrue, And, EqualNullSafe, EqualTo, Filter}
 
 import java.net.URI
 import java.util.Collections
@@ -59,23 +58,20 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
     filters.length == 1 && filters.head.isInstanceOf[AlwaysTrue]
   }
 
-  /**
-   * For the 'INSERT OVERWRITE T PARTITION (partitionVal, ...)' semantics of SQL, Spark will
-   * transform `partitionVal`s to EqualNullSafe Filters.
-   */
-  def convertFilterToMap(filter: Filter, partitionRowType: RowType): Map[String, String] = {
+  /** See [[ org.apache.paimon.spark.SparkWriteBuilder#failIfCanNotOverwrite]] */
+  def convertPartitionFilterToMap(
+      filter: Filter,
+      partitionRowType: RowType): Map[String, String] = {
     val converter = new SparkFilterConverter(partitionRowType)
     splitConjunctiveFilters(filter).map {
       case EqualNullSafe(attribute, value) =>
-        if (isNestedFilterInValue(value)) {
-          throw new RuntimeException(
-            s"Not support the complex partition value in EqualNullSafe when run `INSERT OVERWRITE`.")
-        } else {
-          (attribute, converter.convertLiteral(attribute, value).toString)
-        }
+        (attribute, converter.convertString(attribute, value))
+      case EqualTo(attribute, value) =>
+        (attribute, converter.convertString(attribute, value))
       case _ =>
+        // Should not happen
         throw new RuntimeException(
-          s"Only EqualNullSafe should be used when run `INSERT OVERWRITE`.")
+          s"Only support Overwrite filters with Equal and EqualNullSafe, but got: $filter")
     }.toMap
   }
 
@@ -85,10 +81,6 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
         splitConjunctiveFilters(filter1) ++ splitConjunctiveFilters(filter2)
       case other => other :: Nil
     }
-  }
-
-  private def isNestedFilterInValue(value: Any): Boolean = {
-    value.isInstanceOf[Filter]
   }
 
   /** Gets a relative path against the table path. */

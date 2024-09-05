@@ -53,7 +53,7 @@ class BucketedTableQueryTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
   test("Query on a bucketed table - join - positive case") {
     assume(gteqSpark3_3)
 
-    withTable("t1", "t2", "t3", "t4", "t5") {
+    withTable("t1", "t2", "t3", "t4", "t5", "t6") {
       spark.sql(
         "CREATE TABLE t1 (id INT, c STRING) TBLPROPERTIES ('primary-key' = 'id', 'bucket'='10')")
       spark.sql("INSERT INTO t1 VALUES (1, 'x1'), (2, 'x3'), (3, 'x3'), (4, 'x4'), (5, 'x5')")
@@ -82,13 +82,21 @@ class BucketedTableQueryTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
         "CREATE TABLE t5 (id INT, c STRING) TBLPROPERTIES ('primary-key' = 'id,c', 'bucket-key' = 'id', 'bucket'='10')")
       spark.sql("INSERT INTO t5 VALUES (1, 'x1'), (2, 'x3'), (3, 'x3'), (4, 'x4'), (5, 'x5')")
       checkAnswerAndShuffleSorts("SELECT * FROM t1 JOIN t5 on t1.id = t5.id", 0, 0)
+
+      // one primary-key table and
+      // one primary-key table with two primary keys and one primary key is the partition column
+      spark.sql(
+        "CREATE TABLE t6 (id INT, data STRING, year STRING) PARTITIONED BY (year) TBLPROPERTIES ('primary-key' = 'id,year', 'bucket'='10')")
+      spark.sql(
+        "INSERT INTO t6 VALUES (1, 'x1', '2020'), (2, 'x3', '2020'), (3, 'x3', '2021'), (4, 'x4', '2021'), (5, 'x5', '2021')")
+      checkAnswerAndShuffleSorts("SELECT * FROM t1 JOIN t6 on t1.id = t6.id", 0, 0)
     }
   }
 
   test("Query on a bucketed table - join - negative case") {
     assume(gteqSpark3_3)
 
-    withTable("t1", "t2", "t3", "t4", "t5", "t6") {
+    withTable("t1", "t2", "t3", "t4", "t5", "t6", "t7") {
       spark.sql(
         "CREATE TABLE t1 (id INT, c STRING) TBLPROPERTIES ('primary-key' = 'id', 'bucket'='10')")
       spark.sql("INSERT INTO t1 VALUES (1, 'x1'), (2, 'x3'), (3, 'x3'), (4, 'x4'), (5, 'x5')")
@@ -122,6 +130,13 @@ class BucketedTableQueryTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
       spark.sql(
         "INSERT INTO t6 VALUES (1, 1, 'x1'), (2, 2, 'x3'), (3, 3, 'x3'), (4, 4, 'x4'), (5, 5, 'x5')")
       checkAnswerAndShuffleSorts("SELECT * FROM t1 JOIN t6 on t1.id = t6.id1", 2, 2)
+
+      // primary-key table with three primary keys and one primary key is the partition column
+      spark.sql(
+        "CREATE TABLE t7 (id1 INT, id2 STRING, year STRING) PARTITIONED BY (year) TBLPROPERTIES ('primary-key' = 'id1,id2,year', 'bucket'='10')")
+      spark.sql(
+        "INSERT INTO t7 VALUES (1, 'x1', '2020'), (2, 'x3', '2020'), (3, 'x3', '2021'), (4, 'x4', '2021'), (5, 'x5', '2021')")
+      checkAnswerAndShuffleSorts("SELECT * FROM t1 JOIN t7 on t1.id = t7.id1", 2, 2)
     }
   }
 

@@ -29,17 +29,17 @@ class PaimonOptionTest extends PaimonSparkTestBase {
   import testImplicits._
 
   test("Paimon Option: create table with sql conf") {
-    withSQLConf("spark.paimon.file.block-size" -> "512M") {
+    withSQLConf("spark.paimon.scan.snapshot-id" -> "2") {
       sql("CREATE TABLE T (id INT)")
       val table = loadTable("T")
       // check options in schema file directly
       val fileStoreTable = FileStoreTableFactory.create(table.fileIO(), table.location())
-      Assertions.assertEquals("512M", fileStoreTable.options().get("file.block-size"))
+      Assertions.assertNull(fileStoreTable.options().get("scan.snapshot-id"))
     }
   }
 
   test("Paimon Option: create table by dataframe with sql conf") {
-    withSQLConf("spark.paimon.file.block-size" -> "512M") {
+    withSQLConf("spark.paimon.scan.snapshot-id" -> "2") {
       Seq((1L, "x1"), (2L, "x2"))
         .toDF("a", "b")
         .write
@@ -49,7 +49,7 @@ class PaimonOptionTest extends PaimonSparkTestBase {
       val table = loadTable("T")
       // check options in schema file directly
       val fileStoreTable = FileStoreTableFactory.create(table.fileIO(), table.location())
-      Assertions.assertEquals("512M", fileStoreTable.options().get("file.block-size"))
+      Assertions.assertNull(fileStoreTable.options().get("scan.snapshot-id"))
     }
   }
 

@@ -878,7 +878,14 @@ public class CoreOptions implements Serializable {
             key("read.batch-size")
                     .intType()
                     .defaultValue(1024)
-                    .withDescription("Read batch size for orc and parquet.");
+                    .withDescription("Read batch size for any file format if it supports.");
+
+    public static final ConfigOption<Integer> WRITE_BATCH_SIZE =
+            key("write.batch-size")
+                    .intType()
+                    .defaultValue(1024)
+                    .withFallbackKeys("orc.write.batch-size")
+                    .withDescription("Write batch size for any file format if it supports.");
 
     public static final ConfigOption<String> CONSUMER_ID =
             key("consumer-id")
@@ -1274,7 +1281,7 @@ public class CoreOptions implements Serializable {
                     .enumType(TimeFieldType.class)
                     .defaultValue(TimeFieldType.SECONDS_INT)
                     .withDescription(
-                            "Time field type for record level expire, it can be seconds-int or millis-long.");
+                            "Time field type for record level expire, it can be seconds-int,seconds-long or millis-long.");
 
     public static final ConfigOption<String> FIELDS_DEFAULT_AGG_FUNC =
             key(FIELDS_PREFIX + "." + DEFAULT_AGG_FUNCTION)
@@ -2721,9 +2728,11 @@ public class CoreOptions implements Serializable {
 
     /** Time field type for record level expire. */
     public enum TimeFieldType implements DescribedEnum {
-        SECONDS_INT("seconds-int", "Timestamps in seconds should be INT type."),
+        SECONDS_INT("seconds-int", "Timestamps in seconds with INT field type."),
 
-        MILLIS_LONG("millis-long", "Timestamps in milliseconds should be BIGINT type.");
+        SECONDS_LONG("seconds-long", "Timestamps in seconds with BIGINT field type."),
+
+        MILLIS_LONG("millis-long", "Timestamps in milliseconds with BIGINT field type.");
 
         private final String value;
         private final String description;

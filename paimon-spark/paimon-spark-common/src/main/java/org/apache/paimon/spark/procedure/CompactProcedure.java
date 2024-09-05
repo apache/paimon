@@ -164,7 +164,7 @@ public class CompactProcedure extends BaseProcedure {
                             table.partitionKeys());
                     DataSourceV2Relation relation = createRelation(tableIdent);
                     Expression condition = null;
-                    if (!StringUtils.isBlank(finalWhere)) {
+                    if (!StringUtils.isNullOrWhitespaceOnly(finalWhere)) {
                         condition = ExpressionUtils.resolveFilter(spark(), relation, finalWhere);
                         checkArgument(
                                 ExpressionUtils.isValidPredicate(
@@ -178,7 +178,7 @@ public class CompactProcedure extends BaseProcedure {
 
                     Map<String, String> dynamicOptions = new HashMap<>();
                     dynamicOptions.put(CoreOptions.WRITE_ONLY.key(), "false");
-                    if (!StringUtils.isBlank(options)) {
+                    if (!StringUtils.isNullOrWhitespaceOnly(options)) {
                         dynamicOptions.putAll(ParameterUtils.parseCommaSeparatedKeyValues(options));
                     }
                     table = table.copy(dynamicOptions);
@@ -202,7 +202,7 @@ public class CompactProcedure extends BaseProcedure {
     }
 
     private boolean blank(InternalRow args, int index) {
-        return args.isNullAt(index) || StringUtils.isBlank(args.getString(index));
+        return args.isNullAt(index) || StringUtils.isNullOrWhitespaceOnly(args.getString(index));
     }
 
     private boolean execute(

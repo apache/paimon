@@ -573,7 +573,7 @@ This config option does not affect the default filesystem metastore.</td>
             <td><h5>read.batch-size</h5></td>
             <td style="word-wrap: break-word;">1024</td>
             <td>Integer</td>
-            <td>Read batch size for orc and parquet.</td>
+            <td>Read batch size for any file format if it supports.</td>
         </tr>
         <tr>
             <td><h5>record-level.expire-time</h5></td>
@@ -591,7 +591,7 @@ This config option does not affect the default filesystem metastore.</td>
             <td><h5>record-level.time-field-type</h5></td>
             <td style="word-wrap: break-word;">seconds-int</td>
             <td><p>Enum</p></td>
-            <td>Time field type for record level expire, it can be seconds-int or millis-long.<br /><br />Possible values:<ul><li>"seconds-int": Timestamps in seconds should be INT type.</li><li>"millis-long": Timestamps in milliseconds should be BIGINT type.</li></ul></td>
+            <td>Time field type for record level expire, it can be seconds-int,seconds-long or millis-long.<br /><br />Possible values:<ul><li>"seconds-int": Timestamps in seconds with INT field type.</li><li>"seconds-long": Timestamps in seconds with BIGINT field type.</li><li>"millis-long": Timestamps in milliseconds with BIGINT field type.</li></ul></td>
         </tr>
         <tr>
             <td><h5>rowkind.field</h5></td>
@@ -899,6 +899,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>If set to true, compactions and snapshot expiration will be skipped. This option is used along with dedicated compact jobs.</td>
+        </tr>
+        <tr>
+            <td><h5>write.batch-size</h5></td>
+            <td style="word-wrap: break-word;">1024</td>
+            <td>Integer</td>
+            <td>Write batch size for any file format if it supports.</td>
         </tr>
         <tr>
             <td><h5>zorder.var-length-contribution</h5></td>

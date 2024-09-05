@@ -119,8 +119,7 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
         .mkString(", ")
       // There are seme unknown column names
       throw new RuntimeException(
-        s"Cannot write incompatible data for the table `${table.name}`, due to unknown column names: ${extraCols
-            .mkString(", ")}.")
+        s"Cannot write incompatible data for the table `${table.name}`, due to unknown column names: $extraCols.")
     }
     Project(reorderedCols, query)
   }

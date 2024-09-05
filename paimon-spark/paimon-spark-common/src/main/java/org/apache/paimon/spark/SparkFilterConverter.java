@@ -166,6 +166,11 @@ public class SparkFilterConverter {
         return convertLiteral(fieldIndex(field), value);
     }
 
+    public String convertString(String field, Object value) {
+        Object literal = convertLiteral(field, value);
+        return literal == null ? null : literal.toString();
+    }
+
     private int fieldIndex(String field) {
         int index = rowType.getFieldIndex(field);
         // TODO: support nested field

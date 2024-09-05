@@ -16,22 +16,27 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.avro;
+package org.apache.paimon.lookup.sort;
 
-import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.format.FileFormatFactory;
-import org.apache.paimon.format.FormatReadWriteTest;
-import org.apache.paimon.options.Options;
+import org.apache.paimon.compression.BlockCompressionType;
+import org.apache.paimon.memory.MemorySegment;
+import org.apache.paimon.memory.MemorySlice;
 
-/** An avro {@link FormatReadWriteTest}. */
-public class AvroFormatReadWriteTest extends FormatReadWriteTest {
+import java.util.zip.CRC32;
 
-    protected AvroFormatReadWriteTest() {
-        super("avro");
+/** Utils for sort lookup store. */
+public class SortLookupStoreUtils {
+    public static int crc32c(MemorySlice data, BlockCompressionType type) {
+        CRC32 crc = new CRC32();
+        crc.update(data.getHeapMemory(), data.offset(), data.length());
+        crc.update(type.persistentId() & 0xFF);
+        return (int) crc.getValue();
     }
 
-    @Override
-    protected FileFormat fileFormat() {
-        return new AvroFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
+    public static int crc32c(MemorySegment data, BlockCompressionType type) {
+        CRC32 crc = new CRC32();
+        crc.update(data.getHeapMemory(), 0, data.size());
+        crc.update(type.persistentId() & 0xFF);
+        return (int) crc.getValue();
     }
 }

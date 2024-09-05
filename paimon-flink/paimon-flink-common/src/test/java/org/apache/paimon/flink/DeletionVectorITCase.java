@@ -22,6 +22,7 @@ import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -261,5 +262,21 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
 
         assertThat(batchSql("SELECT * FROM T"))
                 .containsExactlyInAnyOrder(Row.of(1, 3, "1_2"), Row.of(2, 2, "2_1"));
+    }
+
+    @Test
+    public void testReadTagWithDv() {
+        sql(
+                "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, name STRING) WITH ("
+                        + "'deletion-vectors.enabled' = 'true', "
+                        + "'snapshot.num-retained.min' = '1', "
+                        + "'snapshot.num-retained.max' = '1')");
+
+        sql("INSERT INTO T VALUES (1, '1'), (2, '2')");
+        sql("CALL sys.create_tag('default.T', 'my_tag')");
+        sql("INSERT INTO T VALUES (3, '3'), (4, '4')");
+
+        assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('scan.tag-name'='my_tag') */"))
+                .containsExactlyInAnyOrder(Row.of(1, "1"), Row.of(2, "2"));
     }
 }
