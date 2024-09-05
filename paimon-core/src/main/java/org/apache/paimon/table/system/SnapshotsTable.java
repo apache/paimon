@@ -27,14 +27,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.predicate.Equal;
-import org.apache.paimon.predicate.GreaterOrEqual;
-import org.apache.paimon.predicate.GreaterThan;
-import org.apache.paimon.predicate.LeafPredicate;
-import org.apache.paimon.predicate.LeafPredicateExtractor;
-import org.apache.paimon.predicate.LessOrEqual;
-import org.apache.paimon.predicate.LessThan;
-import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.*;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
@@ -215,8 +208,23 @@ public class SnapshotsTable implements ReadonlyTable {
                 return this;
             }
 
+            String leafName = "snapshot_id";
+            if (predicate instanceof CompoundPredicate) {
+                CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
+                List<Predicate> children = compoundPredicate.children();
+                for (Predicate leaf : children) {
+                    handleLeafPredicate(leaf, leafName);
+                }
+            } else {
+                handleLeafPredicate(predicate, leafName);
+            }
+
+            return this;
+        }
+
+        public void handleLeafPredicate(Predicate predicate, String leafName) {
             LeafPredicate snapshotPred =
-                    predicate.visit(LeafPredicateExtractor.INSTANCE).get("snapshot_id");
+                    predicate.visit(LeafPredicateExtractor.INSTANCE).get(leafName);
             if (snapshotPred != null) {
                 if (snapshotPred.function() instanceof Equal) {
                     optionalFilterSnapshotIdMin =
@@ -245,8 +253,6 @@ public class SnapshotsTable implements ReadonlyTable {
                             Optional.of((Long) snapshotPred.literals().get(0));
                 }
             }
-
-            return this;
         }
 
         @Override
