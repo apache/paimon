@@ -60,7 +60,6 @@ import static org.apache.paimon.options.CatalogOptions.ALLOW_UPPER_CASE;
 import static org.apache.paimon.spark.SparkCatalogOptions.DEFAULT_DATABASE;
 import static org.apache.paimon.spark.SparkTypeUtils.toPaimonType;
 import static org.apache.paimon.spark.util.OptionUtils.copyWithSQLConf;
-import static org.apache.paimon.spark.util.OptionUtils.mergeSQLConf;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Spark {@link TableCatalog} for paimon. */
@@ -390,7 +389,7 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction {
 
     private Schema toInitialSchema(
             StructType schema, Transform[] partitions, Map<String, String> properties) {
-        Map<String, String> normalizedProperties = mergeSQLConf(properties);
+        Map<String, String> normalizedProperties = new HashMap<>(properties);
         if (!normalizedProperties.containsKey(TableCatalog.PROP_PROVIDER)) {
             normalizedProperties.put(TableCatalog.PROP_PROVIDER, SparkSource.NAME());
         }
