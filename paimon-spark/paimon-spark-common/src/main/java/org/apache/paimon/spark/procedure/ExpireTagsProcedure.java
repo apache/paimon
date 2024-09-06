@@ -35,7 +35,7 @@ import java.util.TimeZone;
 
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
-/** A procedure to expire tags. */
+/** A procedure to expire tags by time. */
 public class ExpireTagsProcedure extends BaseProcedure {
 
     private static final ProcedureParameter[] PARAMETERS =

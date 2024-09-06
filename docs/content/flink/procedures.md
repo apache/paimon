@@ -183,6 +183,20 @@ All available procedures are listed below.
       </td>
    </tr>
    <tr>
+      <td>expire_tags</td>
+      <td>
+         CALL [catalog.]sys.expire_tags('identifier', 'expiration_time')
+      </td>
+      <td>
+         To expire tags by time. Arguments:
+            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>expiration_time: tagCreateTime before which tags will be removed.</li>
+      </td>
+      <td>
+         CALL sys.expire_tags(table => 'default.T', expiration_time => '2024-09-06 11:00:00')
+      </td>
+   </tr>
+   <tr>
       <td>merge_into</td>
       <td>
          CALL [catalog].sys.merge_into('identifier','targetAlias',<br/>
