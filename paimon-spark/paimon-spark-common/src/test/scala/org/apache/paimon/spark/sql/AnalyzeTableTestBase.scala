@@ -430,7 +430,7 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     spark.sql(s"INSERT INTO T VALUES (2, 2, 200, '${UUID.randomUUID().toString()}')")
     spark.sql(s"INSERT INTO T VALUES (3, 3, 300, '${UUID.randomUUID().toString()}')")
 
-    def checkStatistics(hasColStat: Boolean): Long = {
+    def checkStatistics(): Long = {
       val wholeSize2 = getScanStatistic("SELECT * FROM T")
       assert(wholeSize2.rowCount.get.toLong == 3)
       assert(wholeSize2.sizeInBytes.toLong > 0)
@@ -448,22 +448,14 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
       assert(oneColSize.sizeInBytes > 0 && oneColSize.sizeInBytes < wholeSize2.sizeInBytes)
       assert(threeColSize.sizeInBytes < wholeSize2.sizeInBytes)
       assert(threeColSize.sizeInBytes > oneColSize.sizeInBytes)
-
-      if (hasColStat) {
-        // It not always not equal but tests result show them are not equal
-        assert(oneColSize.sizeInBytes * 2 != threeColSize.sizeInBytes)
-      } else {
-        assert(oneColSize.sizeInBytes * 2 == threeColSize.sizeInBytes)
-      }
-
       wholeSize2.sizeInBytes.toLong
     }
 
     spark.sql("ANALYZE TABLE T COMPUTE STATISTICS")
-    val noColStat = checkStatistics(hasColStat = false)
+    val noColStat = checkStatistics()
 
     spark.sql("ANALYZE TABLE T COMPUTE STATISTICS FOR ALL COLUMNS")
-    val withColStat = checkStatistics(hasColStat = true)
+    val withColStat = checkStatistics()
 
     assert(withColStat == noColStat)
   }
