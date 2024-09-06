@@ -29,6 +29,7 @@ import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 /** A manager to expire tags by time. */
@@ -41,6 +42,8 @@ public class TagTimeExpire {
     private final TagDeletion tagDeletion;
     private final List<TagCallback> callbacks;
 
+    private LocalDateTime expirationTime;
+
     private TagTimeExpire(
             SnapshotManager snapshotManager,
             TagManager tagManager,
@@ -52,8 +55,9 @@ public class TagTimeExpire {
         this.callbacks = callbacks;
     }
 
-    public void run() {
+    public List<String> expire() {
         List<Pair<Tag, String>> tags = tagManager.tagObjects();
+        List<String> expired = new ArrayList<>();
         for (Pair<Tag, String> pair : tags) {
             Tag tag = pair.getLeft();
             String tagName = pair.getRight();
@@ -62,14 +66,23 @@ public class TagTimeExpire {
             if (createTime == null || timeRetained == null) {
                 continue;
             }
-            if (LocalDateTime.now().isAfter(createTime.plus(timeRetained))) {
+            if ((expirationTime == null
+                            && LocalDateTime.now().isAfter(createTime.plus(timeRetained)))
+                    || (expirationTime != null && expirationTime.isAfter(createTime))) {
                 LOG.info(
                         "Delete tag {}, because its existence time has reached its timeRetained of {}.",
                         tagName,
                         timeRetained);
                 tagManager.deleteTag(tagName, tagDeletion, snapshotManager, callbacks);
+                expired.add(tagName);
             }
         }
+        return expired;
+    }
+
+    public TagTimeExpire withExpirationTime(LocalDateTime expirationTime) {
+        this.expirationTime = expirationTime;
+        return this;
     }
 
     public static TagTimeExpire create(

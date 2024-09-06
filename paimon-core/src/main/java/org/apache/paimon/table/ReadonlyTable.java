@@ -29,6 +29,7 @@ import org.apache.paimon.table.sink.InnerTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.sink.WriteSelector;
 import org.apache.paimon.table.source.StreamDataTableScan;
+import org.apache.paimon.tag.TagTimeExpire;
 import org.apache.paimon.utils.SimpleFileReader;
 
 import java.time.Duration;
@@ -250,6 +251,14 @@ public interface ReadonlyTable extends InnerTable {
         throw new UnsupportedOperationException(
                 String.format(
                         "Readonly Table %s does not support expireChangelog.",
+                        this.getClass().getSimpleName()));
+    }
+
+    @Override
+    default TagTimeExpire newExpireTags() {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support expireTags.",
                         this.getClass().getSimpleName()));
     }
 }

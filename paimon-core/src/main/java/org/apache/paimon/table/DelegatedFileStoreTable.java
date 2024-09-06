@@ -35,6 +35,7 @@ import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.tag.TagTimeExpire;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
@@ -197,6 +198,11 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     @Override
     public ExpireSnapshots newExpireChangelog() {
         return wrapped.newExpireChangelog();
+    }
+
+    @Override
+    public TagTimeExpire newExpireTags() {
+        return wrapped.newExpireTags();
     }
 
     @Override

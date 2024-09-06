@@ -28,6 +28,7 @@ import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.tag.TagTimeExpire;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SimpleFileReader;
 
@@ -163,6 +164,9 @@ public interface Table extends Serializable {
 
     @Experimental
     ExpireSnapshots newExpireChangelog();
+
+    /** Expire tags. */
+    TagTimeExpire newExpireTags();
 
     // =============== Read & Write Operations ==================
 

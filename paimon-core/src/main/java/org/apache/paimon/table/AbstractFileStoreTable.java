@@ -59,6 +59,7 @@ import org.apache.paimon.table.source.snapshot.SnapshotReaderImpl;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromWatermarkStartingScanner;
 import org.apache.paimon.tag.TagPreview;
+import org.apache.paimon.tag.TagTimeExpire;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SegmentsCache;
@@ -370,6 +371,15 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     public ExpireSnapshots newExpireChangelog() {
         return new ExpireChangelogImpl(
                 snapshotManager(), tagManager(), store().newChangelogDeletion());
+    }
+
+    @Override
+    public TagTimeExpire newExpireTags() {
+        return TagTimeExpire.create(
+                snapshotManager(),
+                tagManager(),
+                store().newTagDeletion(),
+                store().createTagCallbacks());
     }
 
     @Override
