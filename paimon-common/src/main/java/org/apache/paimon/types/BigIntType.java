@@ -42,6 +42,11 @@ public final class BigIntType extends DataType {
     }
 
     @Override
+    public int defaultSize() {
+        return 8;
+    }
+
+    @Override
     public DataType copy(boolean isNullable) {
         return new BigIntType(isNullable);
     }

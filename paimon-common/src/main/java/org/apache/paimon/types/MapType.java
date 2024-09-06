@@ -65,6 +65,11 @@ public class MapType extends DataType {
     }
 
     @Override
+    public int defaultSize() {
+        return keyType.defaultSize() + valueType.defaultSize();
+    }
+
+    @Override
     public DataType copy(boolean isNullable) {
         return new MapType(isNullable, keyType.copy(), valueType.copy());
     }
