@@ -20,6 +20,8 @@ package org.apache.paimon.flink.action.cdc.kafka;
 
 import org.apache.paimon.flink.action.cdc.SyncDatabaseActionBase;
 import org.apache.paimon.flink.action.cdc.SyncJobHandler;
+import org.apache.paimon.flink.action.cdc.watermark.CdcTimestampExtractor;
+import org.apache.paimon.flink.action.cdc.watermark.MessageQueueCdcTimestampExtractor;
 
 import java.util.Map;
 
@@ -32,5 +34,10 @@ public class KafkaSyncDatabaseAction extends SyncDatabaseActionBase {
             Map<String, String> catalogConfig,
             Map<String, String> kafkaConfig) {
         super(warehouse, database, catalogConfig, kafkaConfig, SyncJobHandler.SourceType.KAFKA);
+    }
+
+    @Override
+    protected CdcTimestampExtractor createCdcTimestampExtractor() {
+        return new MessageQueueCdcTimestampExtractor();
     }
 }

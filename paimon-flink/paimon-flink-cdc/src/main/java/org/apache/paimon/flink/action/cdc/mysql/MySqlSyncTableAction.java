@@ -25,6 +25,7 @@ import org.apache.paimon.flink.action.cdc.SyncJobHandler;
 import org.apache.paimon.flink.action.cdc.SyncTableActionBase;
 import org.apache.paimon.flink.action.cdc.schema.JdbcSchemasInfo;
 import org.apache.paimon.flink.action.cdc.schema.JdbcTableInfo;
+import org.apache.paimon.flink.action.cdc.watermark.CdcTimestampExtractor;
 import org.apache.paimon.schema.Schema;
 
 import org.apache.flink.cdc.connectors.mysql.source.MySqlSource;
@@ -107,6 +108,11 @@ public class MySqlSyncTableAction extends SyncTableActionBase {
                         cdcSourceConfig.get(MySqlSourceOptions.DATABASE_NAME),
                         cdcSourceConfig.get(MySqlSourceOptions.TABLE_NAME));
         return MySqlActionUtils.buildMySqlSource(cdcSourceConfig, tableList, typeMapping);
+    }
+
+    @Override
+    protected CdcTimestampExtractor createCdcTimestampExtractor() {
+        return MySqlActionUtils.createCdcTimestampExtractor();
     }
 
     private void validateMySqlTableInfos(JdbcSchemasInfo mySqlSchemasInfo) {

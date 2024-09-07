@@ -19,6 +19,8 @@
 package org.apache.paimon.flink.action.cdc;
 
 import org.apache.paimon.flink.action.Action;
+import org.apache.paimon.flink.action.cdc.watermark.CdcTimestampExtractor;
+import org.apache.paimon.flink.action.cdc.watermark.MessageQueueCdcTimestampExtractor;
 import org.apache.paimon.schema.Schema;
 
 import java.util.Map;
@@ -67,6 +69,11 @@ public abstract class MessageQueueSyncTableActionBase extends SyncTableActionBas
             return MessageQueueSchemaUtils.getSchema(
                     consumer, syncJobHandler.provideDataFormat(), typeMapping);
         }
+    }
+
+    @Override
+    protected CdcTimestampExtractor createCdcTimestampExtractor() {
+        return new MessageQueueCdcTimestampExtractor();
     }
 
     @Override

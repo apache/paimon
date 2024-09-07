@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action.cdc.watermark;
 
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
-import org.apache.paimon.flink.action.cdc.watermark.CdcTimestampExtractorFactory.CdcTimestampExtractor;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 

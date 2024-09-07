@@ -20,6 +20,7 @@ package org.apache.paimon.flink.action.cdc.mongodb;
 
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.serialization.CdcDebeziumDeserializationSchema;
+import org.apache.paimon.flink.action.cdc.watermark.CdcTimestampExtractor;
 
 import org.apache.flink.cdc.connectors.base.options.SourceOptions;
 import org.apache.flink.cdc.connectors.base.options.StartupOptions;
@@ -138,5 +139,9 @@ public class MongoDBActionUtils {
                 new CdcDebeziumDeserializationSchema(false, customConverterConfigs);
 
         return sourceBuilder.deserializer(schema).build();
+    }
+
+    public static CdcTimestampExtractor createCdcTimestampExtractor() {
+        return new MongoDBCdcTimestampExtractor();
     }
 }
