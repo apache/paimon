@@ -45,7 +45,7 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.utils.FileStorePathFactoryTest.createNonPartFactory;
-import static org.assertj.core.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertThrows;
 
 /** Unit tests for {@link ManifestsTable}. */
