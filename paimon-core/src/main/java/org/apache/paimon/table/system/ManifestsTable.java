@@ -202,8 +202,8 @@ public class ManifestsTable implements ReadonlyTable {
                 Long latestSnapshotId = snapshotManager.latestSnapshotId();
                 throw new RuntimeException(
                         String.format(
-                                "scan.snapshot-id is not exist, you can set it in range from %s to %s",
-                                earliestSnapshotId, latestSnapshotId));
+                                "Specified scan.snapshot-id %s is not exist, you can set it in range from %s to %s",
+                                snapshotId, earliestSnapshotId, latestSnapshotId));
             }
             snapshot = snapshotManager.snapshot(snapshotId);
         } else if (snapshotId == null) {

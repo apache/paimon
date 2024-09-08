@@ -119,7 +119,10 @@ public class ManifestsTableTest extends TableTestBase {
                 (ManifestsTable)
                         manifestsTable.copy(
                                 Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "3"));
-        assertThrows(RuntimeException.class, () -> read(manifestsTable));
+        assertThrows(
+                "Specified scan.snapshot-id 3 is not exist, you can set it in range from 1 to 2",
+                RuntimeException.class,
+                () -> read(manifestsTable));
     }
 
     private List<InternalRow> getExpectedResult(long snapshotId) {
