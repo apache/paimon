@@ -40,11 +40,7 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.IteratorRecordReader;
-import org.apache.paimon.utils.ProjectedRow;
-import org.apache.paimon.utils.SerializationUtils;
-import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.*;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
@@ -195,7 +191,16 @@ public class ManifestsTable implements ReadonlyTable {
         SnapshotManager snapshotManager = dataTable.snapshotManager();
         Long snapshotId = coreOptions.scanSnapshotId();
         Snapshot snapshot = null;
-        if (snapshotId != null && snapshotManager.snapshotExists(snapshotId)) {
+        if (snapshotId != null) {
+            // reminder user with snapshot id range
+            if (!snapshotManager.snapshotExists(snapshotId)) {
+                Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
+                Long latestSnapshotId = snapshotManager.latestSnapshotId();
+                throw new RuntimeException(
+                        String.format(
+                                "scan.snapshot-id is not exist, you can set it in range from %s to %s",
+                                earliestSnapshotId, latestSnapshotId));
+            }
             snapshot = snapshotManager.snapshot(snapshotId);
         } else if (snapshotId == null) {
             snapshot = snapshotManager.latestSnapshot();
