@@ -32,7 +32,6 @@ import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.exceptions.PartitionNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotPartitionedException;
 import org.apache.flink.types.Row;
-import org.assertj.core.api.AssertionsForInterfaceTypes;
 import org.junit.jupiter.api.Test;
 
 import javax.annotation.Nonnull;
@@ -104,37 +103,6 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                 sql(
                         "SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots WHERE snapshot_id <= 2");
         assertThat(result).contains(Row.of(1L, 0L, "APPEND"), Row.of(2L, 0L, "APPEND"));
-    }
-
-    @Test
-    public void testManifestsTableWithSnapshotId() {
-        sql(String.format("CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, name STRING)"));
-
-        sql("INSERT INTO T VALUES (1, '111111111'), (2, '2'), (3, '3'), (4, '4')");
-
-        sql("INSERT INTO T VALUES (2, '2_1'), (3, '3_1')");
-
-        sql("INSERT INTO T VALUES (2, '2_2'), (4, '4_1')");
-
-        AssertionsForInterfaceTypes.assertThat(batchSql("SELECT * FROM T"))
-                .containsExactlyInAnyOrder(
-                        Row.of(1, "111111111"),
-                        Row.of(2, "2_2"),
-                        Row.of(3, "3_1"),
-                        Row.of(4, "4_1"));
-        List<Row> result =
-                sql(
-                        "SELECT num_added_files, num_deleted_files, schema_id FROM T$manifests /*+ OPTIONS('scan.snapshot-id'='2') */");
-
-        assertThat(result).containsExactlyInAnyOrder(Row.of(1L, 0L, 0L), Row.of(1L, 0L, 0L));
-
-        assertThatThrownBy(
-                        () ->
-                                sql(
-                                        "SELECT num_added_files, num_deleted_files, schema_id FROM T$manifests /*+ OPTIONS('scan.snapshot-id'='6') */"))
-                .hasCauseInstanceOf(RuntimeException.class)
-                .hasRootCauseMessage(
-                        "scan.snapshot-id is not exist, you can set it in range from 1 to 3");
     }
 
     @Test

@@ -45,7 +45,8 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.utils.FileStorePathFactoryTest.createNonPartFactory;
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.*;
+import static org.junit.Assert.assertThrows;
 
 /** Unit tests for {@link ManifestsTable}. */
 public class ManifestsTableTest extends TableTestBase {
@@ -118,8 +119,7 @@ public class ManifestsTableTest extends TableTestBase {
                 (ManifestsTable)
                         manifestsTable.copy(
                                 Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "3"));
-        List<InternalRow> result = read(manifestsTable);
-        assertThat(result).isEmpty();
+        assertThrows(RuntimeException.class, () -> read(manifestsTable));
     }
 
     private List<InternalRow> getExpectedResult(long snapshotId) {
