@@ -269,11 +269,23 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                 + "{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], {\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\","
                                 + "\"b.bb.bbb\":\"val2\",\"snapshot.num-retained.max\":\"20\"}, ]]");
 
-        result =
-                sql(
-                        "SELECT schema_id, fields, partition_keys, "
-                                + "primary_keys, options, `comment` FROM T$schemas where schema_id = 5");
-        assertThat(result.toString()).isEqualTo("[]");
+        // check with not exist schema id
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "SELECT schema_id, fields, partition_keys, "
+                                                + "primary_keys, options, `comment` FROM T$schemas where schema_id = 5"))
+                .hasCauseInstanceOf(RuntimeException.class)
+                .hasRootCauseMessage("schema id: 5 should not greater than max schema id: 4");
+
+        // check with not exist schema id
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "SELECT schema_id, fields, partition_keys, "
+                                                + "primary_keys, options, `comment` FROM T$schemas where schema_id>=6"))
+                .hasCauseInstanceOf(RuntimeException.class)
+                .hasRootCauseMessage("schema id: 6 should not greater than max schema id: 4");
     }
 
     @Test

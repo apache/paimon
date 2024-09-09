@@ -253,21 +253,11 @@ public class SchemasTable implements ReadonlyTable {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
             SchemasSplit schemasSplit = (SchemasSplit) split;
-            LeafPredicate predicate = schemasSplit.schemaId;
             Path location = schemasSplit.location;
             SchemaManager manager = new SchemaManager(fileIO, location, branch);
 
-            Collection<TableSchema> tableSchemas = Collections.emptyList();
-            if (predicate != null
-                    && predicate.function() instanceof Equal
-                    && predicate.literals().get(0) instanceof Long) {
-                Long equalValue = (Long) predicate.literals().get(0);
-                if (manager.schemaExists(equalValue)) {
-                    tableSchemas = Collections.singletonList(manager.schema(equalValue));
-                }
-            } else {
-                tableSchemas = manager.listAll();
-            }
+            Collection<TableSchema> tableSchemas =
+                    manager.listWithRange(optionalFilterSchemaIdMax, optionalFilterSchemaIdMin);
             Iterator<InternalRow> rows = Iterators.transform(tableSchemas.iterator(), this::toRow);
             if (projection != null) {
                 rows =

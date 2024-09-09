@@ -54,17 +54,12 @@ import javax.annotation.concurrent.ThreadSafe;
 import java.io.IOException;
 import java.io.Serializable;
 import java.io.UncheckedIOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.LongStream;
 
 import static org.apache.paimon.catalog.Catalog.DB_SUFFIX;
 import static org.apache.paimon.catalog.Identifier.UNKNOWN_DATABASE;
@@ -117,6 +112,49 @@ public class SchemaManager implements Serializable {
 
     public List<TableSchema> listAll() {
         return listAllIds().stream().map(this::schema).collect(Collectors.toList());
+    }
+
+    public List<TableSchema> listWithRange(
+            Optional<Long> optionalMaxSchemaId, Optional<Long> optionalMinSchemaId) {
+        Long lowerBoundSchemaId = 0L;
+        Long upperBoundSchematId = latest().get().id();
+
+        // null check on optionalMaxSnapshotId & optionalMaxSnapshotId return all schemas
+        if (!optionalMaxSchemaId.isPresent() && !optionalMinSchemaId.isPresent()) {
+            return listAll();
+        }
+
+        if (optionalMaxSchemaId.isPresent()) {
+            if (optionalMaxSchemaId.get() < lowerBoundSchemaId) {
+                throw new RuntimeException(
+                        String.format(
+                                "schema id: %s should not lower than min schema id: %s",
+                                optionalMaxSchemaId.get(), lowerBoundSchemaId));
+            }
+            upperBoundSchematId =
+                    optionalMaxSchemaId.get() > upperBoundSchematId
+                            ? upperBoundSchematId
+                            : optionalMaxSchemaId.get();
+        }
+
+        if (optionalMinSchemaId.isPresent()) {
+            if (optionalMinSchemaId.get() > upperBoundSchematId) {
+                throw new RuntimeException(
+                        String.format(
+                                "schema id: %s should not greater than max schema id: %s",
+                                optionalMinSchemaId.get(), upperBoundSchematId));
+            }
+            lowerBoundSchemaId =
+                    optionalMinSchemaId.get() > lowerBoundSchemaId
+                            ? optionalMinSchemaId.get()
+                            : lowerBoundSchemaId;
+        }
+
+        // +1 here to include the upperBoundSchemaId
+        return LongStream.range(lowerBoundSchemaId, upperBoundSchematId + 1)
+                .mapToObj(this::schema)
+                .sorted(Comparator.comparingLong(TableSchema::id))
+                .collect(Collectors.toList());
     }
 
     /** List all schema IDs. */
