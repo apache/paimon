@@ -147,6 +147,13 @@ public class SchemasTable implements ReadonlyTable {
 
         @Override
         public InnerTableScan withFilter(Predicate predicate) {
+            if (predicate == null) {
+                return this;
+            }
+
+            Map<String, LeafPredicate> leafPredicates =
+                    predicate.visit(LeafPredicateExtractor.INSTANCE);
+            schemaId = leafPredicates.get("schema_id");
             return this;
         }
 
