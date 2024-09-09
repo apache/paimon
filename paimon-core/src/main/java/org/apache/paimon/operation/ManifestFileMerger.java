@@ -28,7 +28,6 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
-import org.apache.paimon.utils.IOUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -226,6 +225,10 @@ public class ManifestFileMerger {
 
         // 2.2. merge
 
+        if (toBeMerged.size() <= 1) {
+            return Optional.empty();
+        }
+
         RollingFileWriter<ManifestEntry, ManifestFileMeta> writer =
                 manifestFile.createRollingWriter();
         Exception exception = null;
@@ -255,7 +258,7 @@ public class ManifestFileMerger {
             exception = e;
         } finally {
             if (exception != null) {
-                IOUtils.closeQuietly(writer);
+                writer.abort();
                 throw exception;
             }
             writer.close();
