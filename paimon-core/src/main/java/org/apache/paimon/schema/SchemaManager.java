@@ -126,7 +126,7 @@ public class SchemaManager implements Serializable {
         Long lowerBoundSchemaId = 0L;
         Long upperBoundSchematId = latest().get().id();
 
-        // null check on optionalMaxSnapshotId & optionalMaxSnapshotId return all schemas
+        // null check on optionalMaxSchemaId & optionalMinSchemaId return all schemas
         if (!optionalMaxSchemaId.isPresent() && !optionalMinSchemaId.isPresent()) {
             return listAll();
         }
