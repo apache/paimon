@@ -26,10 +26,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.predicate.Equal;
-import org.apache.paimon.predicate.LeafPredicate;
-import org.apache.paimon.predicate.LeafPredicateExtractor;
-import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.*;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -58,13 +55,7 @@ import javax.annotation.Nullable;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
@@ -140,13 +131,6 @@ public class SchemasTable implements ReadonlyTable {
 
         @Override
         public InnerTableScan withFilter(Predicate predicate) {
-            if (predicate == null) {
-                return this;
-            }
-
-            Map<String, LeafPredicate> leafPredicates =
-                    predicate.visit(LeafPredicateExtractor.INSTANCE);
-            schemaId = leafPredicates.get("schema_id");
             return this;
         }
 
@@ -194,13 +178,62 @@ public class SchemasTable implements ReadonlyTable {
         private final FileIO fileIO;
         private int[][] projection;
 
+        private Optional<Long> optionalFilterSchemaIdMax = Optional.empty();
+        private Optional<Long> optionalFilterSchemaIdMin = Optional.empty();
+
         public SchemasRead(FileIO fileIO) {
             this.fileIO = fileIO;
         }
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
+            if (predicate == null) {
+                return this;
+            }
+
+            String leafName = "schema_id";
+            if (predicate instanceof CompoundPredicate) {
+                CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
+                if ((compoundPredicate.function()) instanceof And) {
+                    List<Predicate> children = compoundPredicate.children();
+                    for (Predicate leaf : children) {
+                        handleLeafPredicate(leaf, leafName);
+                    }
+                }
+            } else {
+                handleLeafPredicate(predicate, leafName);
+            }
+
             return this;
+        }
+
+        public void handleLeafPredicate(Predicate predicate, String leafName) {
+            LeafPredicate snapshotPred =
+                    predicate.visit(LeafPredicateExtractor.INSTANCE).get(leafName);
+            if (snapshotPred != null) {
+                if (snapshotPred.function() instanceof Equal) {
+                    optionalFilterSchemaIdMin = Optional.of((Long) snapshotPred.literals().get(0));
+                    optionalFilterSchemaIdMax = Optional.of((Long) snapshotPred.literals().get(0));
+                }
+
+                if (snapshotPred.function() instanceof GreaterThan) {
+                    optionalFilterSchemaIdMin =
+                            Optional.of((Long) snapshotPred.literals().get(0) + 1);
+                }
+
+                if (snapshotPred.function() instanceof GreaterOrEqual) {
+                    optionalFilterSchemaIdMin = Optional.of((Long) snapshotPred.literals().get(0));
+                }
+
+                if (snapshotPred.function() instanceof LessThan) {
+                    optionalFilterSchemaIdMax =
+                            Optional.of((Long) snapshotPred.literals().get(0) - 1);
+                }
+
+                if (snapshotPred.function() instanceof LessOrEqual) {
+                    optionalFilterSchemaIdMax = Optional.of((Long) snapshotPred.literals().get(0));
+                }
+            }
         }
 
         @Override
