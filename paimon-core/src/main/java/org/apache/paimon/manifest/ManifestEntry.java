@@ -111,7 +111,7 @@ public class ManifestEntry implements FileEntry {
 
     @Override
     public Identifier identifier() {
-        return new Identifier(partition, bucket, file.level(), file.fileName());
+        return new Identifier(partition, bucket, file.level(), file.fileName(), file.extraFiles());
     }
 
     @Override

@@ -19,16 +19,22 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedExecute;
 
@@ -60,15 +66,22 @@ public interface FileEntry {
         public final int bucket;
         public final int level;
         public final String fileName;
+        public final List<String> extraFiles;
 
         /* Cache the hash code for the string */
         private Integer hash;
 
-        public Identifier(BinaryRow partition, int bucket, int level, String fileName) {
+        public Identifier(
+                BinaryRow partition,
+                int bucket,
+                int level,
+                String fileName,
+                List<String> extraFiles) {
             this.partition = partition;
             this.bucket = bucket;
             this.level = level;
             this.fileName = fileName;
+            this.extraFiles = extraFiles;
         }
 
         @Override
@@ -80,20 +93,22 @@ public interface FileEntry {
             return Objects.equals(partition, that.partition)
                     && bucket == that.bucket
                     && level == that.level
-                    && Objects.equals(fileName, that.fileName);
+                    && Objects.equals(fileName, that.fileName)
+                    && Objects.equals(extraFiles, that.extraFiles);
         }
 
         @Override
         public int hashCode() {
             if (hash == null) {
-                hash = Objects.hash(partition, bucket, level, fileName);
+                hash = Objects.hash(partition, bucket, level, fileName, extraFiles);
             }
             return hash;
         }
 
         @Override
         public String toString() {
-            return String.format("{%s, %d, %d, %s}", partition, bucket, level, fileName);
+            return String.format(
+                    "{%s, %d, %d, %s, %s}", partition, bucket, level, fileName, extraFiles);
         }
 
         public String toString(FileStorePathFactory pathFactory) {
@@ -103,7 +118,9 @@ public interface FileEntry {
                     + ", level "
                     + level
                     + ", file "
-                    + fileName;
+                    + fileName
+                    + ", extraFiles "
+                    + extraFiles;
         }
     }
 
@@ -160,5 +177,38 @@ public interface FileEntry {
                 file -> manifestFile.read(file.fileName(), file.fileSize()),
                 manifestFiles,
                 manifestReadParallelism);
+    }
+
+    static Set<Identifier> readDeletedEntries(
+            ManifestFile manifestFile,
+            List<ManifestFileMeta> manifestFiles,
+            @Nullable Integer manifestReadParallelism) {
+        manifestFiles =
+                manifestFiles.stream()
+                        .filter(file -> file.numDeletedFiles() > 0)
+                        .collect(Collectors.toList());
+        Function<ManifestFileMeta, List<Identifier>> processor =
+                file ->
+                        manifestFile
+                                .read(
+                                        file.fileName(),
+                                        file.fileSize(),
+                                        Filter.alwaysTrue(),
+                                        deletedFilter())
+                                .stream()
+                                .map(ManifestEntry::identifier)
+                                .collect(Collectors.toList());
+        Iterable<Identifier> identifiers =
+                sequentialBatchedExecute(processor, manifestFiles, manifestReadParallelism);
+        Set<Identifier> result = new HashSet<>();
+        for (Identifier identifier : identifiers) {
+            result.add(identifier);
+        }
+        return result;
+    }
+
+    static Filter<InternalRow> deletedFilter() {
+        Function<InternalRow, FileKind> getter = ManifestEntrySerializer.kindGetter();
+        return row -> getter.apply(row) == FileKind.DELETE;
     }
 }

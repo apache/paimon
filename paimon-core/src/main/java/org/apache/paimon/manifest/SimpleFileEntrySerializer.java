@@ -22,6 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.utils.VersionedObjectSerializer;
 
+import static org.apache.paimon.utils.InternalRowUtils.fromStringArrayData;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 
 /** A {@link VersionedObjectSerializer} for {@link SimpleFileEntry}, only supports reading. */
@@ -59,6 +60,7 @@ public class SimpleFileEntrySerializer extends VersionedObjectSerializer<SimpleF
                 row.getInt(2),
                 file.getInt(10),
                 file.getString(0).toString(),
+                fromStringArrayData(file.getArray(11)),
                 deserializeBinaryRow(file.getBinary(3)),
                 deserializeBinaryRow(file.getBinary(4)));
     }

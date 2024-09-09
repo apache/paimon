@@ -134,13 +134,13 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     public void testCleanUpWithFullCompaction() throws IOException {
         List<ManifestFileMeta> input = new ArrayList<>();
         createData(ThreadLocalRandom.current().nextInt(5), input, null);
-        testCleanUp(input, 0L);
+        testCleanUp(input, 1L);
     }
 
     @Test
     public void testMerge() {
         List<ManifestFileMeta> input = createBaseManifestFileMetas(true);
-        // delta with delete apply parititon 1,2
+        // delta with delete apply partition 1,2
         addDeltaManifests(input, true);
         // trigger full compaction
         List<ManifestFileMeta> merged =
