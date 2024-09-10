@@ -25,6 +25,7 @@ org.apache.paimon.flink.action.CreateTagActionFactory
 org.apache.paimon.flink.action.CreateTagFromTimestampActionFactory
 org.apache.paimon.flink.action.CreateTagFromWatermarkActionFactory
 org.apache.paimon.flink.action.DeleteTagActionFactory
+org.apache.paimon.flink.action.ExpireTagsActionFactory
 org.apache.paimon.flink.action.ResetConsumerActionFactory
 org.apache.paimon.flink.action.MigrateTableActionFactory
 org.apache.paimon.flink.action.MigrateFileActionFactory
