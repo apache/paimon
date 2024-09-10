@@ -27,6 +27,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -358,6 +359,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public List<PartitionEntry> partitionEntries() {
             return snapshotReader.partitionEntries();
+        }
+
+        @Override
+        public List<BucketEntry> bucketEntries() {
+            return snapshotReader.bucketEntries();
         }
     }
 

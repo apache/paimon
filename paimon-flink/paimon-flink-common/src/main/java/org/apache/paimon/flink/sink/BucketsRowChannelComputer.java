@@ -20,13 +20,13 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.table.sink.ChannelComputer;
-import org.apache.paimon.table.system.BucketsTable;
+import org.apache.paimon.table.system.CompactBucketsTable;
 
 import org.apache.flink.table.data.RowData;
 
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 
-/** {@link ChannelComputer} to partition {@link RowData} from {@link BucketsTable}. */
+/** {@link ChannelComputer} to partition {@link RowData} from {@link CompactBucketsTable}. */
 public class BucketsRowChannelComputer implements ChannelComputer<RowData> {
 
     private transient int numberOfChannels;

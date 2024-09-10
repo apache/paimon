@@ -66,11 +66,12 @@ import static org.apache.paimon.utils.SerializationUtils.newBytesType;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
 /**
- * A table to produce modified partitions and buckets for each snapshot.
+ * A table to produce modified partitions and buckets (also including files in streaming mode) for
+ * each snapshot.
  *
  * <p>Only used internally by dedicated compact job sources.
  */
-public class BucketsTable implements DataTable, ReadonlyTable {
+public class CompactBucketsTable implements DataTable, ReadonlyTable {
 
     private static final long serialVersionUID = 1L;
 
@@ -98,12 +99,12 @@ public class BucketsTable implements DataTable, ReadonlyTable {
                         "_TABLE_NAME"
                     });
 
-    public BucketsTable(FileStoreTable wrapped, boolean isContinuous) {
+    public CompactBucketsTable(FileStoreTable wrapped, boolean isContinuous) {
         this(wrapped, isContinuous, null);
     }
 
     // if need to specify the database of a table, use this method
-    public BucketsTable(FileStoreTable wrapped, boolean isContinuous, String databaseName) {
+    public CompactBucketsTable(FileStoreTable wrapped, boolean isContinuous, String databaseName) {
         this.wrapped = wrapped;
         this.isContinuous = isContinuous;
         this.databaseName = databaseName;
@@ -156,7 +157,8 @@ public class BucketsTable implements DataTable, ReadonlyTable {
 
     @Override
     public DataTable switchToBranch(String branchName) {
-        return new BucketsTable(wrapped.switchToBranch(branchName), isContinuous, databaseName);
+        return new CompactBucketsTable(
+                wrapped.switchToBranch(branchName), isContinuous, databaseName);
     }
 
     @Override
@@ -205,8 +207,8 @@ public class BucketsTable implements DataTable, ReadonlyTable {
     }
 
     @Override
-    public BucketsTable copy(Map<String, String> dynamicOptions) {
-        return new BucketsTable(wrapped.copy(dynamicOptions), isContinuous, databaseName);
+    public CompactBucketsTable copy(Map<String, String> dynamicOptions) {
+        return new CompactBucketsTable(wrapped.copy(dynamicOptions), isContinuous, databaseName);
     }
 
     @Override

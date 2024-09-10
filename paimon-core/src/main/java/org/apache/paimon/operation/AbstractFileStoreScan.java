@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -55,7 +56,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ThreadPoolExecutor;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -259,14 +259,24 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     public List<PartitionEntry> readPartitionEntries() {
         List<ManifestFileMeta> manifests = readManifests().getRight();
         Map<BinaryRow, PartitionEntry> partitions = new ConcurrentHashMap<>();
-        // Can be executed in disorder
-        ThreadPoolExecutor executor = getExecutorService(scanManifestParallelism);
         Consumer<ManifestFileMeta> processor =
                 m ->
                         PartitionEntry.merge(
                                 PartitionEntry.merge(readManifestFileMeta(m)), partitions);
-        randomlyOnlyExecute(executor, processor, manifests);
+        randomlyOnlyExecute(getExecutorService(scanManifestParallelism), processor, manifests);
         return partitions.values().stream()
+                .filter(p -> p.fileCount() > 0)
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    public List<BucketEntry> readBucketEntries() {
+        List<ManifestFileMeta> manifests = readManifests().getRight();
+        Map<BinaryRow, BucketEntry> buckets = new ConcurrentHashMap<>();
+        Consumer<ManifestFileMeta> processor =
+                m -> BucketEntry.merge(BucketEntry.merge(readManifestFileMeta(m)), buckets);
+        randomlyOnlyExecute(getExecutorService(scanManifestParallelism), processor, manifests);
+        return buckets.values().stream()
                 .filter(p -> p.fileCount() > 0)
                 .collect(Collectors.toList());
     }
