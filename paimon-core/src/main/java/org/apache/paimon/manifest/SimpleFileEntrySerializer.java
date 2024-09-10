@@ -61,6 +61,7 @@ public class SimpleFileEntrySerializer extends VersionedObjectSerializer<SimpleF
                 file.getInt(10),
                 file.getString(0).toString(),
                 fromStringArrayData(file.getArray(11)),
+                file.isNullAt(14) ? null : file.getBinary(14),
                 deserializeBinaryRow(file.getBinary(3)),
                 deserializeBinaryRow(file.getBinary(4)));
     }
