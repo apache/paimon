@@ -339,24 +339,24 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
         }
     }
 
-    private CatalogPlugin sessionCatalog() {
+    private CatalogPlugin getDelegateCatalog() {
         checkNotNull(
                 sessionCatalog,
-                "Delegated SessionCatalog is missing. "
-                        + "SparkGenericCatalog can only be used with 'spark_catalog'.");
+                "Delegated SessionCatalog is missing, '%s' can only be used with 'spark_catalog'.",
+                SparkGenericCatalog.class.getName());
         return sessionCatalog;
     }
 
     private TableCatalog asTableCatalog() {
-        return (TableCatalog) sessionCatalog();
+        return (TableCatalog) getDelegateCatalog();
     }
 
     private SupportsNamespaces asNamespaceCatalog() {
-        return (SupportsNamespaces) sessionCatalog();
+        return (SupportsNamespaces) getDelegateCatalog();
     }
 
     private FunctionCatalog asFunctionCatalog() {
-        return (FunctionCatalog) sessionCatalog();
+        return (FunctionCatalog) getDelegateCatalog();
     }
 
     @Override
