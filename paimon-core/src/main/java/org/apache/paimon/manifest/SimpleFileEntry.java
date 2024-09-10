@@ -20,6 +20,8 @@ package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
@@ -32,6 +34,8 @@ public class SimpleFileEntry implements FileEntry {
     private final int bucket;
     private final int level;
     private final String fileName;
+    private final List<String> extraFiles;
+    @Nullable private final byte[] embeddedIndex;
     private final BinaryRow minKey;
     private final BinaryRow maxKey;
 
@@ -41,6 +45,8 @@ public class SimpleFileEntry implements FileEntry {
             int bucket,
             int level,
             String fileName,
+            List<String> extraFiles,
+            @Nullable byte[] embeddedIndex,
             BinaryRow minKey,
             BinaryRow maxKey) {
         this.kind = kind;
@@ -48,6 +54,8 @@ public class SimpleFileEntry implements FileEntry {
         this.bucket = bucket;
         this.level = level;
         this.fileName = fileName;
+        this.extraFiles = extraFiles;
+        this.embeddedIndex = embeddedIndex;
         this.minKey = minKey;
         this.maxKey = maxKey;
     }
@@ -59,6 +67,8 @@ public class SimpleFileEntry implements FileEntry {
                 entry.bucket(),
                 entry.level(),
                 entry.fileName(),
+                entry.file().extraFiles(),
+                entry.file().embeddedIndex(),
                 entry.minKey(),
                 entry.maxKey());
     }
@@ -94,7 +104,7 @@ public class SimpleFileEntry implements FileEntry {
 
     @Override
     public Identifier identifier() {
-        return new Identifier(partition, bucket, level, fileName);
+        return new Identifier(partition, bucket, level, fileName, extraFiles, embeddedIndex);
     }
 
     @Override
@@ -121,13 +131,14 @@ public class SimpleFileEntry implements FileEntry {
                 && kind == that.kind
                 && Objects.equals(partition, that.partition)
                 && Objects.equals(fileName, that.fileName)
+                && Objects.equals(extraFiles, that.extraFiles)
                 && Objects.equals(minKey, that.minKey)
                 && Objects.equals(maxKey, that.maxKey);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(kind, partition, bucket, level, fileName, minKey, maxKey);
+        return Objects.hash(kind, partition, bucket, level, fileName, extraFiles, minKey, maxKey);
     }
 
     @Override
@@ -141,9 +152,10 @@ public class SimpleFileEntry implements FileEntry {
                 + bucket
                 + ", level="
                 + level
-                + ", fileName='"
+                + ", fileName="
                 + fileName
-                + '\''
+                + ", extraFiles="
+                + extraFiles
                 + ", minKey="
                 + minKey
                 + ", maxKey="
