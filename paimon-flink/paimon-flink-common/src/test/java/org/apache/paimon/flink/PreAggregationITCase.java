@@ -47,6 +47,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -1322,6 +1323,39 @@ public class PreAggregationITCase {
         }
 
         @Test
+        public void testUseCaseWithNullValue() {
+            sql(
+                    "INSERT INTO order_wide\n"
+                            + "SELECT 6, CAST (NULL AS STRING), CAST (NULL AS STRING), "
+                            + "ARRAY[cast(null as ROW<daily_id INT, today STRING, product_name STRING, price BIGINT>)]");
+
+            List<Row> result =
+                    sql("SELECT * FROM order_wide").stream()
+                            .sorted(Comparator.comparingInt(r -> r.getFieldAs(0)))
+                            .collect(Collectors.toList());
+
+            assertThat(checkOneRecord(result.get(0), 6, null, null, (Row) null)).isTrue();
+
+            sql(
+                    "INSERT INTO order_wide\n"
+                            + "SELECT 6, 'Sun', CAST (NULL AS STRING), "
+                            + "ARRAY[ROW(1, '01-01','Apple', 6999)]");
+
+            result =
+                    sql("SELECT * FROM order_wide").stream()
+                            .sorted(Comparator.comparingInt(r -> r.getFieldAs(0)))
+                            .collect(Collectors.toList());
+            assertThat(
+                            checkOneRecord(
+                                    result.get(0),
+                                    6,
+                                    "Sun",
+                                    null,
+                                    Row.of(1, "01-01", "Apple", 6999L)))
+                    .isTrue();
+        }
+
+        @Test
         public void testUseCaseAppend() {
             sql(
                     "INSERT INTO orders VALUES "
@@ -1429,10 +1463,10 @@ public class PreAggregationITCase {
             if ((int) record.getField(0) != orderId) {
                 return false;
             }
-            if (!record.getFieldAs(1).equals(userName)) {
+            if (!Objects.equals(record.getFieldAs(1), userName)) {
                 return false;
             }
-            if (!record.getFieldAs(2).equals(address)) {
+            if (!Objects.equals(record.getFieldAs(2), address)) {
                 return false;
             }
 
@@ -1455,7 +1489,7 @@ public class PreAggregationITCase {
                     Arrays.stream(subOrders).sorted(comparator).collect(Collectors.toList());
 
             for (int i = 0; i < sortedActual.size(); i++) {
-                if (!sortedActual.get(i).equals(sortedExpected.get(i))) {
+                if (!Objects.equals(sortedActual.get(i), sortedExpected.get(i))) {
                     return false;
                 }
             }
