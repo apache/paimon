@@ -26,7 +26,6 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.shade.guava30.com.google.common.cache.Cache;
 import org.apache.paimon.shade.guava30.com.google.common.cache.CacheBuilder;
 
-import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
@@ -39,13 +38,7 @@ import static org.apache.paimon.codegen.CodeGenLoader.getCodeGenerator;
 public class CodeGenUtils {
 
     private static final Cache<ClassKey, Pair<Class<?>, Object[]>> COMPILED_CLASS_CACHE =
-            CacheBuilder.newBuilder()
-                    // assume the table schema will stay the same for a period of time
-                    .expireAfterAccess(Duration.ofMinutes(30))
-                    // estimated cache size
-                    .maximumSize(300)
-                    .softValues()
-                    .build();
+            CacheBuilder.newBuilder().maximumSize(300).softValues().build();
 
     public static final Projection EMPTY_PROJECTION = input -> BinaryRow.EMPTY_ROW;
 
