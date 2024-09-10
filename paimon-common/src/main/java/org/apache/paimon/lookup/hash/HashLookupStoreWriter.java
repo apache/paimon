@@ -247,7 +247,6 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
             // Write bloom filter file
             if (bloomFilter != null) {
                 File bloomFilterFile = new File(tempFolder, "bloomfilter.dat");
-                bloomFilterFile.deleteOnExit();
                 try (FileOutputStream bfOutputStream = new FileOutputStream(bloomFilterFile)) {
                     bfOutputStream.write(bloomFilter.getBuffer().getArray());
                     LOG.info("Bloom filter size: {} bytes", bloomFilter.getBuffer().size());
@@ -459,7 +458,6 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
         DataOutputStream dos = dataStreams[keyLength];
         if (dos == null) {
             File file = new File(tempFolder, "data" + keyLength + ".dat");
-            file.deleteOnExit();
             dataFiles[keyLength] = file;
 
             dos = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(file)));
@@ -488,7 +486,6 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
         DataOutputStream dos = indexStreams[keyLength];
         if (dos == null) {
             File file = new File(tempFolder, "temp_index" + keyLength + ".dat");
-            file.deleteOnExit();
             indexFiles[keyLength] = file;
 
             dos = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(file)));
