@@ -879,13 +879,13 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         paimonTable("T$branch_branch3").createTag("tag_branch1", 2);
 
         List<Row> result =
-                sql("SELECT branch_name, created_from_tag FROM T$branches ORDER BY branch_name");
-
+                sql(
+                        "SELECT branch_name, created_from_tag, created_from_snapshot FROM T$branches ORDER BY branch_name");
         assertThat(result)
                 .containsExactly(
-                        Row.of("branch1", "tag1"),
-                        Row.of("branch2", "tag1"),
-                        Row.of("branch3", null));
+                        Row.of("branch1", "tag1", 1L),
+                        Row.of("branch2", "tag1", 1L),
+                        Row.of("branch3", null, null));
     }
 
     @Test
