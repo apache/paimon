@@ -20,11 +20,21 @@ package org.apache.paimon.flink.compact;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.append.UnawareAppendCompactionTask;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
+import org.apache.paimon.operation.metrics.CompactionMetrics;
+import org.apache.paimon.operation.metrics.MetricUtils;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.TableCommitImpl;
+
+import org.apache.flink.metrics.MetricGroup;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -39,6 +49,8 @@ import java.util.stream.Collectors;
 /** The Compactor of unaware bucket table to execute {@link UnawareAppendCompactionTask}. */
 public class UnawareBucketCompactor {
 
+    private static final Logger LOG = LoggerFactory.getLogger(UnawareBucketCompactor.class);
+
     private final FileStoreTable table;
     private final String commitUser;
 
@@ -47,29 +59,80 @@ public class UnawareBucketCompactor {
     protected final transient Queue<Future<CommitMessage>> result;
 
     private final transient Supplier<ExecutorService> compactExecutorsupplier;
+    @Nullable private final transient CompactionMetrics metricGroup;
+    @Nullable private final transient CompactionMetrics.Reporter metricsReporter;
 
     public UnawareBucketCompactor(
             FileStoreTable table,
             String commitUser,
-            Supplier<ExecutorService> lazyCompactExecutor) {
+            Supplier<ExecutorService> lazyCompactExecutor,
+            @Nullable MetricGroup metricGroup) {
         this.table = table;
         this.commitUser = commitUser;
         this.write = (AppendOnlyFileStoreWrite) table.store().newWrite(commitUser);
         this.result = new LinkedList<>();
         this.compactExecutorsupplier = lazyCompactExecutor;
+        this.metricGroup =
+                new CompactionMetrics(new FlinkMetricRegistry(metricGroup), table.name());
+        this.metricsReporter =
+                metricGroup == null
+                        ? null
+                        // partition and bucket fields are no use.
+                        : this.metricGroup.createReporter(BinaryRow.EMPTY_ROW, 0);
     }
 
     public void processElement(UnawareAppendCompactionTask task) throws Exception {
-        result.add(compactExecutorsupplier.get().submit(() -> task.doCompact(table, write)));
+        result.add(
+                compactExecutorsupplier
+                        .get()
+                        .submit(
+                                () -> {
+                                    MetricUtils.safeCall(this::startTimer, LOG);
+
+                                    try {
+                                        long startMillis = System.currentTimeMillis();
+                                        CommitMessage commitMessage = task.doCompact(table, write);
+                                        MetricUtils.safeCall(
+                                                () -> {
+                                                    if (metricsReporter != null) {
+                                                        metricsReporter.reportCompactionTime(
+                                                                System.currentTimeMillis()
+                                                                        - startMillis);
+                                                    }
+                                                },
+                                                LOG);
+                                        return commitMessage;
+                                    } finally {
+                                        MetricUtils.safeCall(this::stopTimer, LOG);
+                                    }
+                                }));
+    }
+
+    private void startTimer() {
+        if (metricsReporter != null) {
+            metricsReporter.getCompactTimer().start();
+        }
+    }
+
+    private void stopTimer() {
+        if (metricsReporter != null) {
+            metricsReporter.getCompactTimer().finish();
+        }
     }
 
     public void close() throws Exception {
         shutdown();
+        if (metricsReporter != null) {
+            MetricUtils.safeCall(metricsReporter::unregister, LOG);
+        }
+
+        if (metricGroup != null) {
+            MetricUtils.safeCall(metricGroup::close, LOG);
+        }
     }
 
     @VisibleForTesting
     void shutdown() throws Exception {
-
         List<CommitMessage> messages = new ArrayList<>();
         for (Future<CommitMessage> resultFuture : result) {
             if (!resultFuture.isDone()) {
