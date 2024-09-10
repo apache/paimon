@@ -40,7 +40,6 @@ import org.apache.paimon.table.source.ReadOnceTableScan;
 import org.apache.paimon.table.source.SingletonSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
-import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
@@ -70,7 +69,6 @@ import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 import static org.apache.paimon.utils.BranchManager.BRANCH_PREFIX;
 import static org.apache.paimon.utils.BranchManager.branchPath;
 import static org.apache.paimon.utils.FileUtils.listVersionedDirectories;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A {@link Table} for showing branches of table. */
 public class BranchesTable implements ReadonlyTable {
@@ -86,8 +84,7 @@ public class BranchesTable implements ReadonlyTable {
                                     0, "branch_name", SerializationUtils.newStringType(false)),
                             new DataField(
                                     1, "created_from_tag", SerializationUtils.newStringType(true)),
-                            new DataField(2, "created_from_snapshot", new BigIntType(true)),
-                            new DataField(3, "create_time", new TimestampType(false, 3))));
+                            new DataField(2, "create_time", new TimestampType(false, 3))));
 
     private final FileIO fileIO;
     private final Path location;
@@ -238,7 +235,6 @@ public class BranchesTable implements ReadonlyTable {
             for (Pair<Path, Long> path : paths) {
                 String branchName = path.getLeft().getName().substring(BRANCH_PREFIX.length());
                 String basedTag = null;
-                Long basedSnapshotId = null;
                 long creationTime = path.getRight();
 
                 Optional<TableSchema> tableSchema =
@@ -250,20 +246,14 @@ public class BranchesTable implements ReadonlyTable {
                     SortedMap<Snapshot, List<String>> snapshotTags =
                             branchTable.tagManager().tags();
                     Long earliestSnapshotId = branchTable.snapshotManager().earliestSnapshotId();
-                    if (snapshotTags.isEmpty()) {
-                        // create based on snapshotId
-                        basedSnapshotId = earliestSnapshotId;
-                    } else {
+                    if (!snapshotTags.isEmpty()) {
                         Snapshot snapshot = snapshotTags.firstKey();
-                        if (Objects.equals(earliestSnapshotId, snapshot.id())) {
-                            // create based on tag
-                            List<String> tags = snapshotTags.get(snapshot);
-                            checkArgument(tags.size() == 1);
+                        if (earliestSnapshotId >= snapshot.id()) {
+                            List<String> tags =
+                                    branchTable
+                                            .tagManager()
+                                            .sortTagsOfOneSnapshot(snapshotTags.get(snapshot));
                             basedTag = tags.get(0);
-                            basedSnapshotId = snapshot.id();
-                        } else {
-                            // create based on snapshotId
-                            basedSnapshotId = earliestSnapshotId;
                         }
                     }
                 }
@@ -272,7 +262,6 @@ public class BranchesTable implements ReadonlyTable {
                         GenericRow.of(
                                 BinaryString.fromString(branchName),
                                 BinaryString.fromString(basedTag),
-                                basedSnapshotId,
                                 Timestamp.fromLocalDateTime(
                                         DateTimeUtils.toLocalDateTime(creationTime))));
             }
