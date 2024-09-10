@@ -66,6 +66,7 @@ import static org.apache.paimon.options.CatalogOptions.METASTORE;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
 import static org.apache.paimon.spark.SparkCatalogOptions.CREATE_UNDERLYING_SESSION_CATALOG;
 import static org.apache.paimon.spark.SparkCatalogOptions.DEFAULT_DATABASE;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /* This file is based on source code from the Iceberg Project (http://iceberg.apache.org/), licensed by the Apache
  * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
@@ -338,16 +339,24 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
         }
     }
 
+    private CatalogPlugin sessionCatalog() {
+        checkNotNull(
+                sessionCatalog,
+                "Delegated SessionCatalog is missing. "
+                        + "SparkGenericCatalog can only be used with 'spark_catalog'.");
+        return sessionCatalog;
+    }
+
     private TableCatalog asTableCatalog() {
-        return (TableCatalog) sessionCatalog;
+        return (TableCatalog) sessionCatalog();
     }
 
     private SupportsNamespaces asNamespaceCatalog() {
-        return (SupportsNamespaces) sessionCatalog;
+        return (SupportsNamespaces) sessionCatalog();
     }
 
     private FunctionCatalog asFunctionCatalog() {
-        return (FunctionCatalog) sessionCatalog;
+        return (FunctionCatalog) sessionCatalog();
     }
 
     @Override
