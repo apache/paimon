@@ -50,6 +50,7 @@ import java.util.concurrent.Executors;
 import static org.apache.paimon.operation.metrics.CompactionMetrics.AVG_COMPACTION_TIME;
 import static org.apache.paimon.operation.metrics.CompactionMetrics.COMPACTION_THREAD_BUSY;
 
+/** Test for {@link UnawareBucketCompactor}. */
 public class UnawareBucketCompactorTest {
 
     @TempDir private Path dir;
@@ -142,6 +143,7 @@ public class UnawareBucketCompactorTest {
         return schemaBuilder.build();
     }
 
+    /** Mock compaction task for test. */
     private static class MockCompactionTask extends UnawareAppendCompactionTask {
 
         public MockCompactionTask() {
