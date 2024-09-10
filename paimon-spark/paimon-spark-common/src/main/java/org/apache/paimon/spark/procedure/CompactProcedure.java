@@ -279,10 +279,22 @@ public class CompactProcedure extends BaseProcedure {
             return;
         }
 
+        int defaultParallelism = partitionBuckets.size();
+        if (table.options().containsKey(CoreOptions.AWARE_BUCKET_COMPACTION_PARALLELISM.key())) {
+            int bucketReadParallelism =
+                    Integer.parseInt(
+                            table.options()
+                                    .get(CoreOptions.AWARE_BUCKET_COMPACTION_PARALLELISM.key()));
+            checkArgument(
+                    bucketReadParallelism > 0,
+                    "aware-bucket.compaction.read.parallelism config must be greater than 0.");
+            defaultParallelism = Math.min(defaultParallelism, bucketReadParallelism);
+        }
+
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         JavaRDD<byte[]> commitMessageJavaRDD =
                 javaSparkContext
-                        .parallelize(partitionBuckets)
+                        .parallelize(partitionBuckets, defaultParallelism)
                         .mapPartitions(
                                 (FlatMapFunction<Iterator<Pair<byte[], Integer>>, byte[]>)
                                         pairIterator -> {

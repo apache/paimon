@@ -24,6 +24,7 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.source.DataSplit
 
+import org.apache.spark.scheduler.{SparkListener, SparkListenerJobEnd, SparkListenerStageCompleted, SparkListenerStageSubmitted}
 import org.apache.spark.sql.{Dataset, Row}
 import org.apache.spark.sql.execution.streaming.MemoryStream
 import org.apache.spark.sql.streaming.StreamTest
@@ -645,6 +646,40 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
           .assertThat(dataSplit.dataFiles().size())
           .isEqualTo(1)
       }
+    }
+  }
+
+  test("Paimon Procedure: test aware-bucket compaction read parallelism") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, value STRING)
+                 |TBLPROPERTIES ('primary-key'='id', 'bucket'='3', 'write-only'='true')
+                 |""".stripMargin)
+
+    val table = loadTable("T")
+    for (i <- 1 to 10) {
+      sql(s"INSERT INTO T VALUES ($i, '$i')")
+    }
+    assertResult(10)(table.snapshotManager().snapshotCount())
+
+    val taskBuffer = scala.collection.mutable.ListBuffer.empty[Int]
+
+    val listener = new SparkListener {
+      override def onStageSubmitted(stageSubmitted: SparkListenerStageSubmitted): Unit = {
+        taskBuffer += stageSubmitted.stageInfo.numTasks
+      }
+    }
+
+    try {
+      spark.sparkContext.addSparkListener(listener)
+      spark.sql("CALL sys.compact(table => 'T')")
+      spark.sql(
+        "CALL sys.compact(table => 'T', options => 'aware-bucket.compaction.read.parallelism=1')")
+      // default equal to the bucket num
+      assertResult(3)(taskBuffer(0))
+      // equal to the configured value
+      assertResult(1)(taskBuffer(1))
+    } finally {
+      spark.sparkContext.removeSparkListener(listener)
     }
   }
 
