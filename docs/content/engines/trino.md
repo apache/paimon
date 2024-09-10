@@ -196,7 +196,17 @@ SELECT * FROM t FOR TIMESTAMP AS OF TIMESTAMP '2023-01-01 00:00:00 Asia/Shanghai
 
 -- read the snapshot with id 1L (use snapshot id as version)
 SELECT * FROM t FOR VERSION AS OF 1;
+
+-- read tag 'my-tag'
+SELECT * FROM t FOR VERSION AS OF 'my-tag';
+
 ```
+
+{{< hint warning >}}
+If tag's name is a number and equals to a snapshot id, the VERSION AS OF syntax will consider tag first. For example, if
+you have a tag named '1' based on snapshot 2, the statement `SELECT * FROM paimon.test_db.orders FOR VERSION AS OF '1'` actually queries snapshot 2
+instead of snapshot 1.
+{{< /hint >}}
 
 {{< /tab >}}
 
