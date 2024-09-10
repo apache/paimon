@@ -24,6 +24,7 @@ import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.schema.JdbcSchemaUtils;
 import org.apache.paimon.flink.action.cdc.schema.JdbcSchemasInfo;
 import org.apache.paimon.flink.action.cdc.serialization.CdcDebeziumDeserializationSchema;
+import org.apache.paimon.flink.action.cdc.watermark.CdcTimestampExtractor;
 import org.apache.paimon.schema.Schema;
 
 import org.apache.flink.cdc.connectors.mysql.source.MySqlSource;
@@ -274,5 +275,9 @@ public class MySqlActionUtils {
                         "No suitable driver found. Cannot find class com.mysql.cj.jdbc.Driver and com.mysql.jdbc.Driver.");
             }
         }
+    }
+
+    public static CdcTimestampExtractor createCdcTimestampExtractor() {
+        return new MysqlCdcTimestampExtractor();
     }
 }

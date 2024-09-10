@@ -22,6 +22,7 @@ import org.apache.paimon.flink.action.cdc.CdcActionCommonUtils;
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.SyncDatabaseActionBase;
 import org.apache.paimon.flink.action.cdc.SyncJobHandler;
+import org.apache.paimon.flink.action.cdc.watermark.CdcTimestampExtractor;
 
 import org.apache.flink.cdc.connectors.mongodb.source.MongoDBSource;
 import org.apache.flink.cdc.connectors.mongodb.source.config.MongoDBSourceOptions;
@@ -56,6 +57,11 @@ public class MongoDBSyncDatabaseAction extends SyncDatabaseActionBase {
             Map<String, String> catalogConfig,
             Map<String, String> mongodbConfig) {
         super(warehouse, database, catalogConfig, mongodbConfig, SyncJobHandler.SourceType.MONGODB);
+    }
+
+    @Override
+    protected CdcTimestampExtractor createCdcTimestampExtractor() {
+        return MongoDBActionUtils.createCdcTimestampExtractor();
     }
 
     @Override
