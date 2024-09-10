@@ -218,6 +218,9 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql(
                 "CREATE TABLE T(a INT, b INT, c STRING, PRIMARY KEY (a) NOT ENFORCED) with ('a.aa.aaa'='val1', 'b.bb.bbb'='val2')");
         sql("ALTER TABLE T SET ('snapshot.time-retained' = '5 h')");
+        sql("ALTER TABLE T SET ('snapshot.num-retained.max' = '20')");
+        sql("ALTER TABLE T SET ('snapshot.num-retained.min' = '18')");
+        sql("ALTER TABLE T SET ('manifest.format' = 'avro')");
 
         assertThat(sql("SHOW CREATE TABLE T$schemas").toString())
                 .isEqualTo(
@@ -239,13 +242,20 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         assertThat(result.toString())
                 .isEqualTo(
                         "[+I[0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},"
-                                + "{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},"
-                                + "{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], "
+                                + "{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], "
                                 + "{\"a.aa.aaa\":\"val1\",\"b.bb.bbb\":\"val2\"}, ], "
                                 + "+I[1, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},"
-                                + "{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},"
+                                + "{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], "
+                                + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\"}, ], "
+                                + "+I[2, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},"
+                                + "{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], "
+                                + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\",\"snapshot.num-retained.max\":\"20\"}, ], "
+                                + "+I[3, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},"
                                 + "{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], "
-                                + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\"}, ]]");
+                                + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\",\"snapshot.num-retained.max\":\"20\",\"snapshot.num-retained.min\":\"18\"}, ], "
+                                + "+I[4, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], "
+                                + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\",\"snapshot.num-retained.max\":\"20\",\"manifest.format\":\"avro\","
+                                + "\"snapshot.num-retained.min\":\"18\"}, ]]");
 
         result =
                 sql(
@@ -261,8 +271,33 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         result =
                 sql(
                         "SELECT schema_id, fields, partition_keys, "
-                                + "primary_keys, options, `comment` FROM T$schemas where schema_id = 5");
-        assertThat(result.toString()).isEqualTo("[]");
+                                + "primary_keys, options, `comment` FROM T$schemas where schema_id>0 and schema_id<3");
+        assertThat(result.toString())
+                .isEqualTo(
+                        "[+I[1, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},"
+                                + "{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], "
+                                + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\"}, ], "
+                                + "+I[2, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},"
+                                + "{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], {\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\","
+                                + "\"b.bb.bbb\":\"val2\",\"snapshot.num-retained.max\":\"20\"}, ]]");
+
+        // check with not exist schema id
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "SELECT schema_id, fields, partition_keys, "
+                                                + "primary_keys, options, `comment` FROM T$schemas where schema_id = 5"))
+                .hasCauseInstanceOf(RuntimeException.class)
+                .hasRootCauseMessage("schema id: 5 should not greater than max schema id: 4");
+
+        // check with not exist schema id
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "SELECT schema_id, fields, partition_keys, "
+                                                + "primary_keys, options, `comment` FROM T$schemas where schema_id>=6"))
+                .hasCauseInstanceOf(RuntimeException.class)
+                .hasRootCauseMessage("schema id: 6 should not greater than max schema id: 4");
     }
 
     @Test

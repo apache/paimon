@@ -26,9 +26,15 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.predicate.And;
+import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.Equal;
+import org.apache.paimon.predicate.GreaterOrEqual;
+import org.apache.paimon.predicate.GreaterThan;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.LeafPredicateExtractor;
+import org.apache.paimon.predicate.LessOrEqual;
+import org.apache.paimon.predicate.LessThan;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
@@ -65,6 +71,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
@@ -194,13 +201,62 @@ public class SchemasTable implements ReadonlyTable {
         private final FileIO fileIO;
         private int[][] projection;
 
+        private Optional<Long> optionalFilterSchemaIdMax = Optional.empty();
+        private Optional<Long> optionalFilterSchemaIdMin = Optional.empty();
+
         public SchemasRead(FileIO fileIO) {
             this.fileIO = fileIO;
         }
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
+            if (predicate == null) {
+                return this;
+            }
+
+            String leafName = "schema_id";
+            if (predicate instanceof CompoundPredicate) {
+                CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
+                if ((compoundPredicate.function()) instanceof And) {
+                    List<Predicate> children = compoundPredicate.children();
+                    for (Predicate leaf : children) {
+                        handleLeafPredicate(leaf, leafName);
+                    }
+                }
+            } else {
+                handleLeafPredicate(predicate, leafName);
+            }
+
             return this;
+        }
+
+        public void handleLeafPredicate(Predicate predicate, String leafName) {
+            LeafPredicate snapshotPred =
+                    predicate.visit(LeafPredicateExtractor.INSTANCE).get(leafName);
+            if (snapshotPred != null) {
+                if (snapshotPred.function() instanceof Equal) {
+                    optionalFilterSchemaIdMin = Optional.of((Long) snapshotPred.literals().get(0));
+                    optionalFilterSchemaIdMax = Optional.of((Long) snapshotPred.literals().get(0));
+                }
+
+                if (snapshotPred.function() instanceof GreaterThan) {
+                    optionalFilterSchemaIdMin =
+                            Optional.of((Long) snapshotPred.literals().get(0) + 1);
+                }
+
+                if (snapshotPred.function() instanceof GreaterOrEqual) {
+                    optionalFilterSchemaIdMin = Optional.of((Long) snapshotPred.literals().get(0));
+                }
+
+                if (snapshotPred.function() instanceof LessThan) {
+                    optionalFilterSchemaIdMax =
+                            Optional.of((Long) snapshotPred.literals().get(0) - 1);
+                }
+
+                if (snapshotPred.function() instanceof LessOrEqual) {
+                    optionalFilterSchemaIdMax = Optional.of((Long) snapshotPred.literals().get(0));
+                }
+            }
         }
 
         @Override
@@ -220,21 +276,11 @@ public class SchemasTable implements ReadonlyTable {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
             SchemasSplit schemasSplit = (SchemasSplit) split;
-            LeafPredicate predicate = schemasSplit.schemaId;
             Path location = schemasSplit.location;
             SchemaManager manager = new SchemaManager(fileIO, location, branch);
 
-            Collection<TableSchema> tableSchemas = Collections.emptyList();
-            if (predicate != null
-                    && predicate.function() instanceof Equal
-                    && predicate.literals().get(0) instanceof Long) {
-                Long equalValue = (Long) predicate.literals().get(0);
-                if (manager.schemaExists(equalValue)) {
-                    tableSchemas = Collections.singletonList(manager.schema(equalValue));
-                }
-            } else {
-                tableSchemas = manager.listAll();
-            }
+            Collection<TableSchema> tableSchemas =
+                    manager.listWithRange(optionalFilterSchemaIdMax, optionalFilterSchemaIdMin);
             Iterator<InternalRow> rows = Iterators.transform(tableSchemas.iterator(), this::toRow);
             if (projection != null) {
                 rows =
