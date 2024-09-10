@@ -40,6 +40,7 @@ import org.apache.paimon.table.source.ReadOnceTableScan;
 import org.apache.paimon.table.source.SingletonSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
@@ -84,7 +85,8 @@ public class BranchesTable implements ReadonlyTable {
                                     0, "branch_name", SerializationUtils.newStringType(false)),
                             new DataField(
                                     1, "created_from_tag", SerializationUtils.newStringType(true)),
-                            new DataField(2, "create_time", new TimestampType(false, 3))));
+                            new DataField(2, "created_from_snapshot", new BigIntType(true)),
+                            new DataField(3, "create_time", new TimestampType(false, 3))));
 
     private final FileIO fileIO;
     private final Path location;
@@ -235,6 +237,7 @@ public class BranchesTable implements ReadonlyTable {
             for (Pair<Path, Long> path : paths) {
                 String branchName = path.getLeft().getName().substring(BRANCH_PREFIX.length());
                 String basedTag = null;
+                Long basedSnapshotId = null;
                 long creationTime = path.getRight();
 
                 Optional<TableSchema> tableSchema =
@@ -246,6 +249,7 @@ public class BranchesTable implements ReadonlyTable {
                     SortedMap<Snapshot, List<String>> snapshotTags =
                             branchTable.tagManager().tags();
                     Long earliestSnapshotId = branchTable.snapshotManager().earliestSnapshotId();
+
                     if (!snapshotTags.isEmpty()) {
                         Snapshot snapshot = snapshotTags.firstKey();
                         if (earliestSnapshotId >= snapshot.id()) {
@@ -254,6 +258,7 @@ public class BranchesTable implements ReadonlyTable {
                                             .tagManager()
                                             .sortTagsOfOneSnapshot(snapshotTags.get(snapshot));
                             basedTag = tags.get(0);
+                            basedSnapshotId = snapshot.id();
                         }
                     }
                 }
@@ -262,6 +267,7 @@ public class BranchesTable implements ReadonlyTable {
                         GenericRow.of(
                                 BinaryString.fromString(branchName),
                                 BinaryString.fromString(basedTag),
+                                basedSnapshotId,
                                 Timestamp.fromLocalDateTime(
                                         DateTimeUtils.toLocalDateTime(creationTime))));
             }
