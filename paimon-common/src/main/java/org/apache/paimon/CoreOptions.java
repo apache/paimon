@@ -560,6 +560,13 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to generate -U, +U changelog for the same record. This configuration is only valid for the changelog-producer is lookup or full-compaction.");
 
+    public static final ConfigOption<String> CHANGELOG_PRODUCER_ROW_DEDUPLICATE_IGNORE_FIELDS =
+            key("changelog-producer.row-deduplicate-ignore-fields")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Fields that are ignored for comparison while generating -U, +U changelog for the same record. This configuration is only valid for the changelog-producer.row-deduplicate is true.");
+
     @Immutable
     public static final ConfigOption<String> SEQUENCE_FIELD =
             key("sequence.field")
@@ -1774,6 +1781,12 @@ public class CoreOptions implements Serializable {
 
     public boolean changelogRowDeduplicate() {
         return options.get(CHANGELOG_PRODUCER_ROW_DEDUPLICATE);
+    }
+
+    public List<String> changelogRowDeduplicateIgnoreSequenceField() {
+        return options.getOptional(CHANGELOG_PRODUCER_ROW_DEDUPLICATE_IGNORE_FIELDS)
+                .map(s -> Arrays.asList(s.split(",")))
+                .orElse(Collections.emptyList());
     }
 
     public boolean scanPlanSortPartition() {

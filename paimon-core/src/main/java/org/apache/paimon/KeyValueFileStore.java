@@ -40,10 +40,10 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ChangelogDeduplicateEqualiserSupplier;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.KeyComparatorSupplier;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
-import org.apache.paimon.utils.ValueEqualiserSupplier;
 
 import java.util.Comparator;
 import java.util.HashMap;
@@ -52,6 +52,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
+import java.util.stream.IntStream;
 
 import static org.apache.paimon.predicate.PredicateBuilder.and;
 import static org.apache.paimon.predicate.PredicateBuilder.pickTransformFieldMapping;
@@ -93,7 +94,13 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
         this.keyValueFieldsExtractor = keyValueFieldsExtractor;
         this.mfFactory = mfFactory;
         this.keyComparatorSupplier = new KeyComparatorSupplier(keyType);
-        this.valueEqualiserSupplier = new ValueEqualiserSupplier(valueType);
+        List<String> ignoreFields = options.changelogRowDeduplicateIgnoreSequenceField();
+        int[] projection =
+                options.changelogRowDeduplicate() && !ignoreFields.isEmpty()
+                        ? getProjectionWithIgnoreFields(valueType, ignoreFields)
+                        : null;
+        this.valueEqualiserSupplier =
+                new ChangelogDeduplicateEqualiserSupplier(valueType, projection);
         this.tableName = tableName;
     }
 
@@ -242,5 +249,13 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     @Override
     public Comparator<InternalRow> newKeyComparator() {
         return keyComparatorSupplier.get();
+    }
+
+    private int[] getProjectionWithIgnoreFields(RowType rowType, List<String> ignoreFields) {
+        List<String> fieldNames = rowType.getFieldNames();
+        IntStream projectionStream = IntStream.range(0, rowType.getFieldCount());
+        return projectionStream
+                .filter(idx -> !ignoreFields.contains(fieldNames.get(idx)))
+                .toArray();
     }
 }

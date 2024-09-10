@@ -28,18 +28,29 @@ import java.util.function.Supplier;
 import static org.apache.paimon.codegen.CodeGenUtils.newRecordEqualiser;
 
 /** A {@link Supplier} that returns the equaliser for the file store value. */
-public class ValueEqualiserSupplier implements SerializableSupplier<RecordEqualiser> {
+public class ChangelogDeduplicateEqualiserSupplier
+        implements SerializableSupplier<RecordEqualiser> {
 
     private static final long serialVersionUID = 1L;
 
     private final List<DataType> fieldTypes;
 
-    public ValueEqualiserSupplier(RowType keyType) {
+    private final int[] projection;
+
+    public ChangelogDeduplicateEqualiserSupplier(RowType keyType) {
         this.fieldTypes = keyType.getFieldTypes();
+        this.projection = null;
+    }
+
+    public ChangelogDeduplicateEqualiserSupplier(RowType keyType, int[] projection) {
+        this.fieldTypes = keyType.getFieldTypes();
+        this.projection = projection;
     }
 
     @Override
     public RecordEqualiser get() {
-        return newRecordEqualiser(fieldTypes);
+        return this.projection == null
+                ? newRecordEqualiser(fieldTypes)
+                : newRecordEqualiser(fieldTypes, projection);
     }
 }
