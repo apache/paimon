@@ -20,6 +20,7 @@ package org.apache.paimon.manifest;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.utils.Pair;
 
 import java.util.Collection;
 import java.util.HashMap;
@@ -98,19 +99,22 @@ public class BucketEntry {
     }
 
     public static Collection<BucketEntry> merge(Collection<ManifestEntry> fileEntries) {
-        Map<BinaryRow, BucketEntry> buckets = new HashMap<>();
+        Map<Pair<BinaryRow, Integer>, BucketEntry> buckets = new HashMap<>();
         for (ManifestEntry entry : fileEntries) {
             BucketEntry bucketEntry = fromManifestEntry(entry);
             buckets.compute(
-                    entry.partition(),
+                    Pair.of(entry.partition(), entry.bucket()),
                     (part, old) -> old == null ? bucketEntry : old.merge(bucketEntry));
         }
         return buckets.values();
     }
 
-    public static void merge(Collection<BucketEntry> from, Map<BinaryRow, BucketEntry> to) {
+    public static void merge(
+            Collection<BucketEntry> from, Map<Pair<BinaryRow, Integer>, BucketEntry> to) {
         for (BucketEntry entry : from) {
-            to.compute(entry.partition(), (part, old) -> old == null ? entry : old.merge(entry));
+            to.compute(
+                    Pair.of(entry.partition(), entry.bucket),
+                    (part, old) -> old == null ? entry : old.merge(entry));
         }
     }
 

@@ -272,7 +272,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     @Override
     public List<BucketEntry> readBucketEntries() {
         List<ManifestFileMeta> manifests = readManifests().getRight();
-        Map<BinaryRow, BucketEntry> buckets = new ConcurrentHashMap<>();
+        Map<Pair<BinaryRow, Integer>, BucketEntry> buckets = new ConcurrentHashMap<>();
         Consumer<ManifestFileMeta> processor =
                 m -> BucketEntry.merge(BucketEntry.merge(readManifestFileMeta(m)), buckets);
         randomlyOnlyExecute(getExecutorService(scanManifestParallelism), processor, manifests);
