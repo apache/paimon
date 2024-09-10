@@ -80,9 +80,15 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
 
         List<InternalRow> rows = new ArrayList<>();
         for (int i = 0; i < acc.size(); i++) {
+            if (acc.isNullAt(i)) {
+                continue;
+            }
             rows.add(acc.getRow(i, nestedFields));
         }
         for (int i = 0; i < input.size(); i++) {
+            if (input.isNullAt(i)) {
+                continue;
+            }
             rows.add(input.getRow(i, nestedFields));
         }
 
