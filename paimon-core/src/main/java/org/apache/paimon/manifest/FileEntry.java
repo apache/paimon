@@ -102,20 +102,22 @@ public interface FileEntry {
                     && Objects.equals(partition, that.partition)
                     && Objects.equals(fileName, that.fileName)
                     && Objects.equals(extraFiles, that.extraFiles)
-                    && Objects.deepEquals(embeddedIndex, that.embeddedIndex)
-                    && Objects.equals(hash, that.hash);
+                    && Objects.deepEquals(embeddedIndex, that.embeddedIndex);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(
-                    partition,
-                    bucket,
-                    level,
-                    fileName,
-                    extraFiles,
-                    Arrays.hashCode(embeddedIndex),
-                    hash);
+            if (hash == null) {
+                hash =
+                        Objects.hash(
+                                partition,
+                                bucket,
+                                level,
+                                fileName,
+                                extraFiles,
+                                Arrays.hashCode(embeddedIndex));
+            }
+            return hash;
         }
 
         @Override
