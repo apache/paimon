@@ -27,6 +27,8 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.predicate.And;
+import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.GreaterOrEqual;
 import org.apache.paimon.predicate.GreaterThan;
@@ -215,8 +217,25 @@ public class SnapshotsTable implements ReadonlyTable {
                 return this;
             }
 
+            String leafName = "snapshot_id";
+            if (predicate instanceof CompoundPredicate) {
+                CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
+                if ((compoundPredicate.function()) instanceof And) {
+                    List<Predicate> children = compoundPredicate.children();
+                    for (Predicate leaf : children) {
+                        handleLeafPredicate(leaf, leafName);
+                    }
+                }
+            } else {
+                handleLeafPredicate(predicate, leafName);
+            }
+
+            return this;
+        }
+
+        public void handleLeafPredicate(Predicate predicate, String leafName) {
             LeafPredicate snapshotPred =
-                    predicate.visit(LeafPredicateExtractor.INSTANCE).get("snapshot_id");
+                    predicate.visit(LeafPredicateExtractor.INSTANCE).get(leafName);
             if (snapshotPred != null) {
                 if (snapshotPred.function() instanceof Equal) {
                     optionalFilterSnapshotIdMin =
@@ -245,8 +264,6 @@ public class SnapshotsTable implements ReadonlyTable {
                             Optional.of((Long) snapshotPred.literals().get(0));
                 }
             }
-
-            return this;
         }
 
         @Override
