@@ -83,11 +83,15 @@ public class CodeGenUtils {
     }
 
     public static RecordEqualiser newRecordEqualiser(List<DataType> fieldTypes) {
+        return newRecordEqualiser(fieldTypes, IntStream.range(0, fieldTypes.size()).toArray());
+    }
+
+    public static RecordEqualiser newRecordEqualiser(List<DataType> fieldTypes, int[] fields) {
         return generate(
                 RecordEqualiser.class,
                 fieldTypes,
-                IntStream.range(0, fieldTypes.size()).toArray(),
-                () -> getCodeGenerator().generateRecordEqualiser(fieldTypes));
+                fields,
+                () -> getCodeGenerator().generateRecordEqualiser(fieldTypes, fields));
     }
 
     private static <T> T generate(
