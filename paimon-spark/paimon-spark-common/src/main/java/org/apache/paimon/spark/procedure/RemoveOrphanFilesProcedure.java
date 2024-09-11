@@ -92,7 +92,7 @@ public class RemoveOrphanFilesProcedure extends BaseProcedure {
         String tableId = args.getString(0);
         String parallelism = args.isNullAt(3) ? null : args.getString(3);
         Map<String, String> dynamicOptions =
-                !StringUtils.isNullOrWhitespaceOnly(parallelism)
+                StringUtils.isNullOrWhitespaceOnly(parallelism)
                         ? Collections.emptyMap()
                         : new HashMap<String, String>() {
                             {

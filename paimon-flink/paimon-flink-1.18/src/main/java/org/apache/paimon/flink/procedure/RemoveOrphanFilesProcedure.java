@@ -77,7 +77,7 @@ public class RemoveOrphanFilesProcedure extends ProcedureBase {
         String tableName = identifier.getObjectName();
 
         Map<String, String> dynamicOptions =
-                !StringUtils.isNullOrWhitespaceOnly(parallelism)
+                StringUtils.isNullOrWhitespaceOnly(parallelism)
                         ? Collections.emptyMap()
                         : new HashMap<String, String>() {
                             {
