@@ -23,7 +23,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
@@ -46,7 +46,6 @@ import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
-import java.io.IOException;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -59,31 +58,32 @@ import java.util.Map;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
-/** A {@link Table} for showing partitions info. */
-public class PartitionsTable implements ReadonlyTable {
+/** A {@link Table} for showing buckets info. */
+public class BucketsTable implements ReadonlyTable {
 
     private static final long serialVersionUID = 1L;
 
-    public static final String PARTITIONS = "partitions";
+    public static final String BUCKETS = "buckets";
 
     public static final RowType TABLE_TYPE =
             new RowType(
                     Arrays.asList(
                             new DataField(0, "partition", SerializationUtils.newStringType(true)),
-                            new DataField(1, "record_count", new BigIntType(false)),
-                            new DataField(2, "file_size_in_bytes", new BigIntType(false)),
-                            new DataField(3, "file_count", new BigIntType(false)),
-                            new DataField(4, "last_update_time", DataTypes.TIMESTAMP_MILLIS())));
+                            new DataField(1, "bucket", DataTypes.INT().notNull()),
+                            new DataField(2, "record_count", new BigIntType(false)),
+                            new DataField(3, "file_size_in_bytes", new BigIntType(false)),
+                            new DataField(4, "file_count", new BigIntType(false)),
+                            new DataField(5, "last_update_time", DataTypes.TIMESTAMP_MILLIS())));
 
     private final FileStoreTable storeTable;
 
-    public PartitionsTable(FileStoreTable storeTable) {
+    public BucketsTable(FileStoreTable storeTable) {
         this.storeTable = storeTable;
     }
 
     @Override
     public String name() {
-        return storeTable.name() + SYSTEM_TABLE_SPLITTER + PARTITIONS;
+        return storeTable.name() + SYSTEM_TABLE_SPLITTER + BUCKETS;
     }
 
     @Override
@@ -93,25 +93,25 @@ public class PartitionsTable implements ReadonlyTable {
 
     @Override
     public List<String> primaryKeys() {
-        return Collections.singletonList("partition");
+        return Arrays.asList("partition", "bucket");
     }
 
     @Override
     public InnerTableScan newScan() {
-        return new PartitionsScan();
+        return new BucketsScan();
     }
 
     @Override
     public InnerTableRead newRead() {
-        return new PartitionsRead(storeTable);
+        return new BucketsRead(storeTable);
     }
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new PartitionsTable(storeTable.copy(dynamicOptions));
+        return new BucketsTable(storeTable.copy(dynamicOptions));
     }
 
-    private static class PartitionsScan extends ReadOnceTableScan {
+    private static class BucketsScan extends ReadOnceTableScan {
 
         @Override
         public InnerTableScan withFilter(Predicate predicate) {
@@ -120,11 +120,11 @@ public class PartitionsTable implements ReadonlyTable {
 
         @Override
         public Plan innerPlan() {
-            return () -> Collections.singletonList(new PartitionsSplit());
+            return () -> Collections.singletonList(new BucketsSplit());
         }
     }
 
-    private static class PartitionsSplit extends SingletonSplit {
+    private static class BucketsSplit extends SingletonSplit {
 
         private static final long serialVersionUID = 1L;
 
@@ -142,13 +142,13 @@ public class PartitionsTable implements ReadonlyTable {
         }
     }
 
-    private static class PartitionsRead implements InnerTableRead {
+    private static class BucketsRead implements InnerTableRead {
 
         private final FileStoreTable fileStoreTable;
 
         private int[][] projection;
 
-        public PartitionsRead(FileStoreTable table) {
+        public BucketsRead(FileStoreTable table) {
             this.fileStoreTable = table;
         }
 
@@ -170,19 +170,19 @@ public class PartitionsTable implements ReadonlyTable {
         }
 
         @Override
-        public RecordReader<InternalRow> createReader(Split split) throws IOException {
-            if (!(split instanceof PartitionsSplit)) {
+        public RecordReader<InternalRow> createReader(Split split) {
+            if (!(split instanceof BucketsSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
 
-            List<PartitionEntry> partitions = fileStoreTable.newSnapshotReader().partitionEntries();
+            List<BucketEntry> buckets = fileStoreTable.newSnapshotReader().bucketEntries();
 
             RowDataToObjectArrayConverter converter =
                     new RowDataToObjectArrayConverter(
                             fileStoreTable.schema().logicalPartitionType());
 
-            List<InternalRow> results = new ArrayList<>(partitions.size());
-            for (PartitionEntry entry : partitions) {
+            List<InternalRow> results = new ArrayList<>(buckets.size());
+            for (BucketEntry entry : buckets) {
                 results.add(toRow(entry, converter));
             }
 
@@ -196,12 +196,13 @@ public class PartitionsTable implements ReadonlyTable {
         }
 
         private GenericRow toRow(
-                PartitionEntry entry, RowDataToObjectArrayConverter partitionConverter) {
+                BucketEntry entry, RowDataToObjectArrayConverter partitionConverter) {
             BinaryString partitionId =
                     BinaryString.fromString(
                             Arrays.toString(partitionConverter.convert(entry.partition())));
             return GenericRow.of(
                     partitionId,
+                    entry.bucket(),
                     entry.recordCount(),
                     entry.fileSizeInBytes(),
                     entry.fileCount(),
