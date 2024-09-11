@@ -213,7 +213,7 @@ public abstract class SynchronizationActionBase extends ActionBase {
                 UpdatedDataFieldsProcessFunction.extractSchemaChanges(
                         new SchemaManager(table.fileIO(), table.location()),
                         paimonSchema.fields(),
-                        caseSensitive);
+                        allowUpperCase);
 
         optionChanges.addAll(columnChanges);
         try {
