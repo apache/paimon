@@ -66,17 +66,16 @@ public class UnawareBucketCompactor {
             FileStoreTable table,
             String commitUser,
             Supplier<ExecutorService> lazyCompactExecutor,
-            @Nullable MetricGroup compactionMetrics) {
+            @Nullable MetricGroup metricGroup) {
         this.table = table;
         this.commitUser = commitUser;
         this.write = (AppendOnlyFileStoreWrite) table.store().newWrite(commitUser);
         this.result = new LinkedList<>();
         this.compactExecutorsupplier = lazyCompactExecutor;
         this.compactionMetrics =
-                compactionMetrics == null
+                metricGroup == null
                         ? null
-                        : new CompactionMetrics(
-                                new FlinkMetricRegistry(compactionMetrics), table.name());
+                        : new CompactionMetrics(new FlinkMetricRegistry(metricGroup), table.name());
         this.metricsReporter =
                 compactionMetrics == null
                         ? null
