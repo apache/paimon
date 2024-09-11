@@ -151,7 +151,7 @@ CALL sys.compact(`table` => 'default.T', `where` => 'dt>10 and h<20');
 
 {{< hint info >}}
 Similarly, the default is synchronous compaction, which may cause checkpoint timeouts.
-You can configure `table_conf` to use [Asynchronous Compaction]({{< ref "maintenance/write-performance#asynchronous-compaction" >}}).
+You can configure `table_conf` to use [Asynchronous Compaction]({{< ref "primary-key-table/compaction#asynchronous-compaction" >}}).
 {{< /hint >}}
 
 ## Database Compaction Job

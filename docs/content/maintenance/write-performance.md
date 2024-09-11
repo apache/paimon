@@ -40,7 +40,7 @@ large impact on write performance, if it is a snapshot / full synchronization ph
 then enable them again in the incremental phase.
 
 If you find that the input of the job shows a jagged pattern in the case of backpressure, it may be imbalanced work
-nodes. You can consider turning on [Asynchronous Compaction]({{< ref "#asynchronous-compaction" >}}) to observe if the
+nodes. You can consider turning on [Asynchronous Compaction]({{< ref "primary-key-table/compaction#asynchronous-compaction" >}}) to observe if the
 throughput is increased.
 
 ## Parallelism
