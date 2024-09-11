@@ -264,9 +264,8 @@ public class CompactProcedure extends BaseProcedure {
         Set<BinaryRow> partitionToBeCompacted =
                 getHistoryPartition(snapshotReader, partitionIdleTime);
         List<Pair<byte[], Integer>> partitionBuckets =
-                snapshotReader.read().splits().stream()
-                        .map(split -> (DataSplit) split)
-                        .map(dataSplit -> Pair.of(dataSplit.partition(), dataSplit.bucket()))
+                snapshotReader.bucketEntries().stream()
+                        .map(entry -> Pair.of(entry.partition(), entry.bucket()))
                         .distinct()
                         .filter(pair -> partitionToBeCompacted.contains(pair.getKey()))
                         .map(

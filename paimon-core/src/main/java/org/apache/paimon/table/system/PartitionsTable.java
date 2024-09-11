@@ -115,7 +115,6 @@ public class PartitionsTable implements ReadonlyTable {
 
         @Override
         public InnerTableScan withFilter(Predicate predicate) {
-            // TODO
             return this;
         }
 

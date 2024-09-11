@@ -309,6 +309,22 @@ SELECT * FROM my_table$partitions;
 */
 ```
 
+### Buckets Table
+
+You can query the bucket files of the table.
+
+```sql
+SELECT * FROM my_table$buckets;
+
+/*
++---------------+--------+----------------+--------------------+--------------------+------------------------+
+|  partition    | bucket |   record_count |  file_size_in_bytes|          file_count|        last_update_time|
++---------------+--------+----------------+--------------------+--------------------+------------------------+
+|  [1]          |   0    |           1    |             645    |                1   | 2024-06-24 10:25:57.400|
++---------------+--------+----------------+--------------------+--------------------+------------------------+
+*/
+```
+
 ## Global System Table
 
 Global system tables contain the statistical information of all the tables exists in paimon. For convenient of searching, we create a reference system database called `sys`.
