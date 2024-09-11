@@ -148,6 +148,7 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
                         allowUpperCase,
                         partitionKeys,
                         primaryKeys,
+                        requirePrimaryKeys(),
                         partitionKeyMultiple,
                         metadataConverters);
         Pattern includingPattern = Pattern.compile(includingTables);
@@ -169,6 +170,8 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
                         tableNameConverter,
                         createdTables);
     }
+
+    protected abstract boolean requirePrimaryKeys();
 
     @Override
     protected void buildSink(
