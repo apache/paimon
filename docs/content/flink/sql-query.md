@@ -204,6 +204,21 @@ First, you need to stop the streaming task using this consumer ID, and then exec
 
 Run the following command:
 
+{{< tabs "reset_consumer" >}}
+
+{{< tab "Flink SQL" >}}
+
+```sql
+CALL sys.reset_consumer(
+   `table` => 'database_name.table_name', 
+   consumer_id => 'consumer_id', 
+   next_snapshot_id -> <snapshot_id>
+);
+```
+{{< /tab >}}
+
+{{< tab "Flink Action" >}}
+
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
@@ -215,6 +230,9 @@ Run the following command:
     [--next_snapshot <next-snapshot-id>] \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
 ```
+{{< /tab >}}
+
+{{< /tabs >}}
 
 please don't specify --next_snapshot parameter if you want to delete the consumer.
 

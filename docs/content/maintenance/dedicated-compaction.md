@@ -133,17 +133,12 @@ For more usage of the compact action, see
 Run the following sql:
 
 ```sql
--- compact table
-CALL sys.compact(`table` => 'default.T');
-
--- compact table with options
-CALL sys.compact(`table` => 'default.T', `options` => 'sink.parallelism=4');
-
--- compact table partition
-CALL sys.compact(`table` => 'default.T', `partitions` => 'p=0');
-
--- compact table partition with filter
-CALL sys.compact(`table` => 'default.T', `where` => 'dt>10 and h<20');
+CALL sys.compact(
+  `table` => 'default.T', 
+  partitions => 'p=0', 
+  options => 'sink.parallelism=4',
+  `where` => 'dt>10 and h<20'
+);
 ```
 {{< /tab >}}
 
@@ -248,18 +243,22 @@ For more usage of the compact_database action, see
 Run the following sql:
 
 ```sql
-CALL sys.compact_database('includingDatabases')
-
-CALL sys.compact_database('includingDatabases', 'mode')
-
-CALL sys.compact_database('includingDatabases', 'mode', 'includingTables')
-
-CALL sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables')
-
-CALL sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables', 'tableOptions')
+CALL sys.compact_database(
+  including_databases => 'includingDatabases', 
+  mode => 'mode', 
+  including_tables => 'includingTables', 
+  excluding_tables => 'excludingTables', 
+  table_options => 'tableOptions'
+)
 
 -- example
-CALL sys.compact_database('db1|db2', 'combined', 'table_.*', 'ignore', 'sink.parallelism=4')
+CALL sys.compact_database(
+  including_databases => 'db1|db2', 
+  mode => 'combined', 
+  including_tables => 'table_.*', 
+  excluding_tables => 'ignore', 
+  table_options => 'sink.parallelism=4'
+)
 ```
 {{< /tab >}}
 
@@ -404,14 +403,25 @@ Run the following sql:
 
 ```sql
 -- history partition compact table
-CALL sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables', 'tableOptions', 'partition_idle_time')
+CALL sys.compact_database(
+  including_databases => 'includingDatabases', 
+  mode => 'mode', 
+  including_tables => 'includingTables',
+  excluding_tables => 'excludingTables',
+  table_options => 'tableOptions',
+  partition_idle_time => 'partition_idle_time'
+);
 ```
 
 Example: compact historical partitions for tables in database
 
 ```sql
 -- history partition compact table
-CALL sys.compact_database('test_db', 'combined', '', '', '', '1 d')
+CALL sys.compact_database(
+  includingDatabases => 'test_db', 
+  mode => 'combined', 
+  partition_idle_time => '1 d'
+);
 ```
 
 {{< /tab >}}

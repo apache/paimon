@@ -245,6 +245,22 @@ is needed in order to reduce the number of small files.
 Let's trigger the full-compaction now, and run a dedicated compaction job through `flink run`:
 
 {{< label Batch >}}
+
+{{< tabs "compact" >}}
+
+{{< tab "Flink SQL" >}}
+```sql  
+CALL sys.compact(
+   `table` => 'database_name.table_name', 
+   partitions => 'partition_name', 
+   order_strategy => 'order_strategy',
+   order_by => 'order_by',
+   options => 'paimon_table_dynamic_conf'
+);
+```
+{{< /tab >}}
+
+{{< tab "Flink Action" >}}
 ```bash  
 <FLINK_HOME>/bin/flink run \
     -D execution.runtime-mode=batch \
@@ -257,8 +273,22 @@ Let's trigger the full-compaction now, and run a dedicated compaction job throug
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
     [--table_conf <paimon-table-dynamic-conf> [--table_conf <paimon-table-dynamic-conf>] ...]
 ```
+{{< /tab >}}
+
+{{< /tabs >}}
 
 an example would be (suppose you're already in Flink home)
+
+{{< tabs "compact example" >}}
+
+{{< tab "Flink SQL" >}}
+
+```sql
+CALL sys.compact('T');
+```
+{{< /tab >}}
+
+{{< tab "Flink Action" >}}
 
 ```bash
 ./bin/flink run \
@@ -266,6 +296,9 @@ an example would be (suppose you're already in Flink home)
     compact \
     --path file:///tmp/paimon/default.db/T
 ```
+{{< /tab >}}
+
+{{< /tabs >}}
 
 All current table files will be compacted and a new snapshot, namely `snapshot-4`, is
 made and contains the following information:

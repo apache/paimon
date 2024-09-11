@@ -33,6 +33,46 @@ To clone a table, run the following command to submit a clone job.
 If the table you clone is not modified at the same time, it is recommended to submit a Flink batch job for better performance.
 However, if you want to clone the table while writing it at the same time, submit a Flink streaming job for automatic failure recovery.
 
+{{< tabs "clone" >}}
+
+{{< tab "Flink SQL" >}}
+
+```sql
+CALL sys.clone(
+    warehouse => 'source_warehouse_path`,
+    [`database` => 'source_database_name',]
+    [`table` => 'source_table_name',] 
+    target_warehouse => 'target_warehouse_path`,
+    [target_database => 'target_database_name',]
+    [target_table => 'target_table_name',]
+    [parallelism => <parallelism>]
+);
+```
+
+{{< hint info >}}
+1. If `database` is not specified, all tables in all databases of the specified warehouse will be cloned.
+2. If `table` is not specified, all tables of the specified database will be cloned.
+   {{< /hint >}}
+
+Example: Clone `test_db.test_table` from source warehouse to target warehouse.
+
+```sql
+CALL sys.clone(
+    warehouse => 's3:///path/to/warehouse_source`,
+    `database` => 'test_db',
+    `table` => 'test_table', 
+    catalog_conf => 's3.endpoint=https://****.com;s3.access-key=*****;s3.secret-key=*****',
+    target_warehouse => 's3:///path/to/warehouse_target',
+    target_database => 'test_db',
+    target_table => 'test_table',
+    target_catalog_conf => 's3.endpoint=https://****.com;s3.access-key=*****;s3.secret-key=*****'
+);
+```
+
+{{< /tab >}}
+
+{{< tab "Flink Action" >}}
+
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
@@ -80,3 +120,7 @@ For more usage of the clone action, see
     /path/to/paimon-flink-action-{{< version >}}.jar \
     clone --help
 ```
+
+{{< /tab >}}
+
+{{< /tabs >}}
