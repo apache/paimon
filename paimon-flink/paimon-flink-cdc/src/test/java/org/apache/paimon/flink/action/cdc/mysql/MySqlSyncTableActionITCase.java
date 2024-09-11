@@ -1478,4 +1478,23 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
             waitForResult(expected, table, rowType, primaryKeys);
         }
     }
+
+    @Test
+    @Timeout(60)
+    public void testUnknowMysqlScanStartupMode() {
+        String scanStartupMode = "abc";
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", DATABASE_NAME);
+        mySqlConfig.put("table-name", "schema_evolution_multiple");
+        mySqlConfig.put("scan.startup.mode", scanStartupMode);
+
+        MySqlSyncTableAction action = syncTableActionBuilder(mySqlConfig).build();
+        assertThatThrownBy(action::run)
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Unknown scan.startup.mode='"
+                                        + scanStartupMode
+                                        + "'. Valid scan.startup.mode for MySQL CDC are [initial, earliest-offset, latest-offset, specific-offset, timestamp, snapshot]"));
+    }
 }
