@@ -314,7 +314,8 @@ CALL sys.remove_orphan_files(table => "my_db.*", [older_than => "2023-10-31 12:0
     --database <database-name> \ 
     --table <table-name> \
     [--older_than <timestamp>] \
-    [--dry_run <false/true>] 
+    [--dry_run <false/true>] \
+    [--parallelism <parallelism>]
 ```
 
 To avoid deleting files that are newly added by other writing jobs, this action only deletes orphan files older than

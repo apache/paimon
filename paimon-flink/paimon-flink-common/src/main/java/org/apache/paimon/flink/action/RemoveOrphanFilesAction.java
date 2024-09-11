@@ -37,11 +37,13 @@ public class RemoveOrphanFilesAction extends ActionBase {
             String warehouse,
             String databaseName,
             @Nullable String tableName,
-            Map<String, String> catalogConfig)
+            Map<String, String> catalogConfig,
+            Map<String, String> dynamicOptions)
             throws Catalog.TableNotExistException, Catalog.DatabaseNotExistException {
         super(warehouse, catalogConfig);
         this.tableCleans =
-                OrphanFilesClean.createOrphanFilesCleans(catalog, databaseName, tableName);
+                OrphanFilesClean.createOrphanFilesCleans(
+                        catalog, dynamicOptions, databaseName, tableName);
     }
 
     public void olderThan(String olderThan) {
