@@ -92,8 +92,6 @@ public class UnawareBucketCompactorTest {
         for (int i = 0; i < 320; i++) {
             unawareBucketCompactor.processElement(new MockCompactionTask());
             Thread.sleep(250);
-            System.out.println(map.get(COMPACTION_THREAD_BUSY).getValue());
-            System.out.println(map.get(AVG_COMPACTION_TIME).getValue());
         }
 
         double compactionThreadBusy = (double) map.get(COMPACTION_THREAD_BUSY).getValue();

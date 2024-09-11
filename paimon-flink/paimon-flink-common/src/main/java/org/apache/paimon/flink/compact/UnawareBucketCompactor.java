@@ -59,26 +59,29 @@ public class UnawareBucketCompactor {
     protected final transient Queue<Future<CommitMessage>> result;
 
     private final transient Supplier<ExecutorService> compactExecutorsupplier;
-    @Nullable private final transient CompactionMetrics metricGroup;
+    @Nullable private final transient CompactionMetrics compactionMetrics;
     @Nullable private final transient CompactionMetrics.Reporter metricsReporter;
 
     public UnawareBucketCompactor(
             FileStoreTable table,
             String commitUser,
             Supplier<ExecutorService> lazyCompactExecutor,
-            @Nullable MetricGroup metricGroup) {
+            @Nullable MetricGroup compactionMetrics) {
         this.table = table;
         this.commitUser = commitUser;
         this.write = (AppendOnlyFileStoreWrite) table.store().newWrite(commitUser);
         this.result = new LinkedList<>();
         this.compactExecutorsupplier = lazyCompactExecutor;
-        this.metricGroup =
-                new CompactionMetrics(new FlinkMetricRegistry(metricGroup), table.name());
+        this.compactionMetrics =
+                compactionMetrics == null
+                        ? null
+                        : new CompactionMetrics(
+                                new FlinkMetricRegistry(compactionMetrics), table.name());
         this.metricsReporter =
-                metricGroup == null
+                compactionMetrics == null
                         ? null
                         // partition and bucket fields are no use.
-                        : this.metricGroup.createReporter(BinaryRow.EMPTY_ROW, 0);
+                        : this.compactionMetrics.createReporter(BinaryRow.EMPTY_ROW, 0);
     }
 
     public void processElement(UnawareAppendCompactionTask task) throws Exception {
@@ -126,8 +129,8 @@ public class UnawareBucketCompactor {
             MetricUtils.safeCall(metricsReporter::unregister, LOG);
         }
 
-        if (metricGroup != null) {
-            MetricUtils.safeCall(metricGroup::close, LOG);
+        if (compactionMetrics != null) {
+            MetricUtils.safeCall(compactionMetrics::close, LOG);
         }
     }
 
