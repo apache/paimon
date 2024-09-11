@@ -80,8 +80,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.io.DataFilePathFactory.DEFAULT_CHANGELOG_FILE_PREFIX;
-import static org.apache.paimon.io.DataFilePathFactory.DEFAULT_DATA_FILE_PREFIX;
 import static org.apache.paimon.utils.BranchManager.branchPath;
 import static org.apache.paimon.utils.FileStorePathFactory.BUCKET_PATH_PREFIX;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -587,7 +585,9 @@ public class OrphanFilesCleanTest {
                     path,
                     1,
                     Arrays.asList(
-                            DEFAULT_DATA_FILE_PREFIX, DEFAULT_CHANGELOG_FILE_PREFIX, "UNKNOWN-"));
+                            table.coreOptions().dataFilePrefix(),
+                            table.coreOptions().changelogFilePrefix(),
+                            "UNKNOWN-"));
         }
         addedFiles += corruptedBuckets.size();
 

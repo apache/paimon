@@ -174,13 +174,13 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<String> DATA_FILE_PREFIX =
             key("data-file.prefix")
                     .stringType()
-                    .noDefaultValue()
+                    .defaultValue("data-")
                     .withDescription("Specify the file name prefix of data files.");
 
     public static final ConfigOption<String> CHANGELOG_FILE_PREFIX =
             key("changelog-file.prefix")
                     .stringType()
-                    .noDefaultValue()
+                    .defaultValue("changelog-")
                     .withDescription("Specify the file name prefix of changelog files.");
 
     public static final ConfigOption<MemorySize> FILE_BLOCK_SIZE =

@@ -20,7 +20,6 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.concurrent.ThreadSafe;
 
@@ -30,10 +29,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 /** Factory which produces new {@link Path}s for data files. */
 @ThreadSafe
 public class DataFilePathFactory {
-
-    public static final String DEFAULT_DATA_FILE_PREFIX = "data-";
-
-    public static final String DEFAULT_CHANGELOG_FILE_PREFIX = "changelog-";
 
     public static final String INDEX_PATH_SUFFIX = ".index";
 
@@ -59,17 +54,11 @@ public class DataFilePathFactory {
     }
 
     public Path newPath() {
-        if (!StringUtils.isNullOrWhitespaceOnly(dataFilePrefix)) {
-            return newPath(dataFilePrefix);
-        }
-        return newPath(DEFAULT_DATA_FILE_PREFIX);
+        return newPath(dataFilePrefix);
     }
 
     public Path newChangelogPath() {
-        if (!StringUtils.isNullOrWhitespaceOnly(changelogFilePrefix)) {
-            return newPath(changelogFilePrefix);
-        }
-        return newPath(DEFAULT_CHANGELOG_FILE_PREFIX);
+        return newPath(changelogFilePrefix);
     }
 
     private Path newPath(String prefix) {
