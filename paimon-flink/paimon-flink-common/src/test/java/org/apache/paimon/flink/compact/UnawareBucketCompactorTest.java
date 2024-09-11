@@ -59,7 +59,7 @@ public class UnawareBucketCompactorTest {
     private Catalog catalog;
 
     @Test
-    public void testxxx() throws Exception {
+    public void testGaugeCollection() throws Exception {
         createTable();
         ExecutorService executorService =
                 Executors.newSingleThreadScheduledExecutor(
