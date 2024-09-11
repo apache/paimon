@@ -24,6 +24,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compact.CompactResult;
+import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.CompactIncrement;
@@ -59,7 +60,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     private final boolean writeBufferSpillable;
     private final MemorySize maxDiskSize;
     private final int sortMaxFan;
-    private final String sortCompression;
+    private final CompressOptions sortCompression;
     private final IOManager ioManager;
 
     private final RowType keyType;
@@ -89,7 +90,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             boolean writeBufferSpillable,
             MemorySize maxDiskSize,
             int sortMaxFan,
-            String sortCompression,
+            CompressOptions sortCompression,
             IOManager ioManager,
             CompactManager compactManager,
             long maxSequenceNumber,
@@ -227,6 +228,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                         changelogWriter == null ? null : changelogWriter::write,
                         dataWriter::write);
             } finally {
+                writeBuffer.clear();
                 if (changelogWriter != null) {
                     changelogWriter.close();
                 }
@@ -251,8 +253,6 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                 newFiles.add(dataMeta);
                 compactManager.addNewFile(dataMeta);
             }
-
-            writeBuffer.clear();
         }
 
         trySyncLatestCompaction(waitForLatestCompaction);
@@ -307,7 +307,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                         new ArrayList<>(compactBefore.values()),
                         new ArrayList<>(compactAfter),
                         new ArrayList<>(compactChangelog));
-        CompactDeletionFile drainDeletionFile = this.compactDeletionFile;
+        CompactDeletionFile drainDeletionFile = compactDeletionFile;
 
         newFiles.clear();
         deletedFiles.clear();
@@ -315,7 +315,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         compactBefore.clear();
         compactAfter.clear();
         compactChangelog.clear();
-        this.compactDeletionFile = null;
+        compactDeletionFile = null;
 
         return new CommitIncrement(dataIncrement, compactIncrement, drainDeletionFile);
     }

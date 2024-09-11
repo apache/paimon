@@ -20,6 +20,8 @@ package org.apache.paimon.flink.sink.partition;
 
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.partition.actions.SuccessFileMarkDoneAction;
+import org.apache.paimon.partition.file.SuccessFile;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

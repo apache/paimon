@@ -34,7 +34,7 @@ public class SecurityConfiguration {
             key("security.kerberos.login.keytab")
                     .stringType()
                     .noDefaultValue()
-                    .withDeprecatedKeys("security.keytab")
+                    .withFallbackKeys("security.keytab")
                     .withDescription(
                             "Absolute path to a Kerberos keytab file that contains the user credentials.");
 
@@ -42,7 +42,7 @@ public class SecurityConfiguration {
             key("security.kerberos.login.principal")
                     .stringType()
                     .noDefaultValue()
-                    .withDeprecatedKeys("security.principal")
+                    .withFallbackKeys("security.principal")
                     .withDescription("Kerberos principal name associated with the keytab.");
 
     public static final ConfigOption<Boolean> KERBEROS_LOGIN_USETICKETCACHE =
@@ -83,11 +83,12 @@ public class SecurityConfiguration {
     }
 
     public boolean isLegal() {
-        if (StringUtils.isBlank(keytab) != StringUtils.isBlank(principal)) {
+        if (StringUtils.isNullOrWhitespaceOnly(keytab)
+                != StringUtils.isNullOrWhitespaceOnly(principal)) {
             return false;
         }
 
-        if (!StringUtils.isBlank(keytab)) {
+        if (!StringUtils.isNullOrWhitespaceOnly(keytab)) {
             File keytabFile = new File(keytab);
             return keytabFile.exists() && keytabFile.isFile() && keytabFile.canRead();
         }

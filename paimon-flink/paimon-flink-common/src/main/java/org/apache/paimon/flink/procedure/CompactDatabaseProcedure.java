@@ -20,7 +20,11 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.flink.action.CompactDatabaseAction;
 import org.apache.paimon.utils.StringUtils;
+import org.apache.paimon.utils.TimeUtils;
 
+import org.apache.flink.table.annotation.ArgumentHint;
+import org.apache.flink.table.annotation.DataTypeHint;
+import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 import java.util.Map;
@@ -56,48 +60,40 @@ public class CompactDatabaseProcedure extends ProcedureBase {
 
     public static final String IDENTIFIER = "compact_database";
 
-    public String[] call(ProcedureContext procedureContext) throws Exception {
-        return call(procedureContext, "");
-    }
-
-    public String[] call(ProcedureContext procedureContext, String includingDatabases)
-            throws Exception {
-        return call(procedureContext, includingDatabases, "");
-    }
-
-    public String[] call(ProcedureContext procedureContext, String includingDatabases, String mode)
-            throws Exception {
-        return call(procedureContext, includingDatabases, mode, "");
-    }
-
-    public String[] call(
-            ProcedureContext procedureContext,
-            String includingDatabases,
-            String mode,
-            String includingTables)
-            throws Exception {
-        return call(procedureContext, includingDatabases, mode, includingTables, "");
-    }
-
-    public String[] call(
-            ProcedureContext procedureContext,
-            String includingDatabases,
-            String mode,
-            String includingTables,
-            String excludingTables)
-            throws Exception {
-        return call(
-                procedureContext, includingDatabases, mode, includingTables, excludingTables, "");
-    }
-
+    @ProcedureHint(
+            argument = {
+                @ArgumentHint(
+                        name = "including_databases",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(name = "mode", type = @DataTypeHint("STRING"), isOptional = true),
+                @ArgumentHint(
+                        name = "including_tables",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "excluding_tables",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "table_options",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "partition_idle_time",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true)
+            })
     public String[] call(
             ProcedureContext procedureContext,
             String includingDatabases,
             String mode,
             String includingTables,
             String excludingTables,
-            String tableOptions)
+            String tableOptions,
+            String partitionIdleTime)
             throws Exception {
+        partitionIdleTime = notnull(partitionIdleTime);
         String warehouse = catalog.warehouse();
         Map<String, String> catalogOptions = catalog.options();
         CompactDatabaseAction action =
@@ -106,8 +102,11 @@ public class CompactDatabaseProcedure extends ProcedureBase {
                         .includingTables(nullable(includingTables))
                         .excludingTables(nullable(excludingTables))
                         .withDatabaseCompactMode(nullable(mode));
-        if (!StringUtils.isBlank(tableOptions)) {
+        if (!StringUtils.isNullOrWhitespaceOnly(tableOptions)) {
             action.withTableOptions(parseCommaSeparatedKeyValues(tableOptions));
+        }
+        if (!StringUtils.isNullOrWhitespaceOnly(partitionIdleTime)) {
+            action.withPartitionIdleTime(TimeUtils.parseDuration(partitionIdleTime));
         }
 
         return execute(procedureContext, action, "Compact database job");

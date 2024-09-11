@@ -20,10 +20,10 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.sink.FlinkSinkBuilder;
-import org.apache.paimon.flink.sink.partition.SuccessFile;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.file.SuccessFile;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;

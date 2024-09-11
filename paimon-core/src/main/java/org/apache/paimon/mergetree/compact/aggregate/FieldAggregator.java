@@ -23,6 +23,7 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VarBinaryType;
 
 import javax.annotation.Nullable;
 
@@ -73,7 +74,7 @@ public abstract class FieldAggregator implements Serializable {
                         fieldAggregator = new FieldLastValueAgg(fieldType);
                         break;
                     case FieldListaggAgg.NAME:
-                        fieldAggregator = new FieldListaggAgg(fieldType);
+                        fieldAggregator = new FieldListaggAgg(fieldType, options, field);
                         break;
                     case FieldBoolOrAgg.NAME:
                         fieldAggregator = new FieldBoolOrAgg(fieldType);
@@ -87,9 +88,6 @@ public abstract class FieldAggregator implements Serializable {
                     case FieldFirstNonNullValueAgg.NAME:
                     case FieldFirstNonNullValueAgg.LEGACY_NAME:
                         fieldAggregator = new FieldFirstNonNullValueAgg(fieldType);
-                        break;
-                    case FieldCountAgg.NAME:
-                        fieldAggregator = new FieldCountAgg(fieldType);
                         break;
                     case FieldProductAgg.NAME:
                         fieldAggregator = new FieldProductAgg(fieldType);
@@ -115,6 +113,34 @@ public abstract class FieldAggregator implements Serializable {
                                 "Data type of merge map column must be 'MAP' but was '%s'",
                                 fieldType);
                         fieldAggregator = new FieldMergeMapAgg((MapType) fieldType);
+                        break;
+                    case FieldThetaSketchAgg.NAME:
+                        checkArgument(
+                                fieldType instanceof VarBinaryType,
+                                "Data type for theta sketch column must be 'VarBinaryType' but was '%s'.",
+                                fieldType);
+                        fieldAggregator = new FieldThetaSketchAgg((VarBinaryType) fieldType);
+                        break;
+                    case FieldHllSketchAgg.NAME:
+                        checkArgument(
+                                fieldType instanceof VarBinaryType,
+                                "Data type for hll sketch column must be 'VarBinaryType' but was '%s'.",
+                                fieldType);
+                        fieldAggregator = new FieldHllSketchAgg((VarBinaryType) fieldType);
+                        break;
+                    case FieldRoaringBitmap32Agg.NAME:
+                        checkArgument(
+                                fieldType instanceof VarBinaryType,
+                                "Data type for roaring bitmap column must be 'VarBinaryType' but was '%s'.",
+                                fieldType);
+                        fieldAggregator = new FieldRoaringBitmap32Agg((VarBinaryType) fieldType);
+                        break;
+                    case FieldRoaringBitmap64Agg.NAME:
+                        checkArgument(
+                                fieldType instanceof VarBinaryType,
+                                "Data type for roaring bitmap column must be 'VarBinaryType' but was '%s'.",
+                                fieldType);
+                        fieldAggregator = new FieldRoaringBitmap64Agg((VarBinaryType) fieldType);
                         break;
                     default:
                         throw new RuntimeException(
@@ -149,6 +175,10 @@ public abstract class FieldAggregator implements Serializable {
     abstract String name();
 
     public abstract Object agg(Object accumulator, Object inputField);
+
+    public Object aggReversed(Object accumulator, Object inputField) {
+        return agg(inputField, accumulator);
+    }
 
     /** reset the aggregator to a clean start state. */
     public void reset() {}

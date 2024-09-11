@@ -70,6 +70,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
+import static org.apache.paimon.CoreOptions.COMPACTION_MAX_FILE_NUM;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
 
@@ -131,6 +132,7 @@ class StoreMultiCommitterTest {
         Options secondOptions = new Options();
         secondOptions.setString("bucket", "1");
         secondOptions.setString("bucket-key", "a");
+        secondOptions.set(COMPACTION_MAX_FILE_NUM, 50);
         Schema secondTableSchema =
                 new Schema(
                         rowType2.getFields(),

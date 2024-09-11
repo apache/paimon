@@ -27,12 +27,12 @@ import org.apache.paimon.flink.action.cdc.serialization.CdcDebeziumDeserializati
 import org.apache.paimon.options.OptionsUtils;
 import org.apache.paimon.schema.Schema;
 
-import com.ververica.cdc.connectors.base.options.StartupOptions;
-import com.ververica.cdc.connectors.base.source.jdbc.JdbcIncrementalSource;
-import com.ververica.cdc.connectors.postgres.source.PostgresSourceBuilder;
-import com.ververica.cdc.connectors.postgres.source.PostgresSourceBuilder.PostgresIncrementalSource;
-import com.ververica.cdc.connectors.postgres.source.config.PostgresSourceOptions;
-import com.ververica.cdc.debezium.table.DebeziumOptions;
+import org.apache.flink.cdc.connectors.base.options.StartupOptions;
+import org.apache.flink.cdc.connectors.base.source.jdbc.JdbcIncrementalSource;
+import org.apache.flink.cdc.connectors.postgres.source.PostgresSourceBuilder;
+import org.apache.flink.cdc.connectors.postgres.source.PostgresSourceBuilder.PostgresIncrementalSource;
+import org.apache.flink.cdc.connectors.postgres.source.config.PostgresSourceOptions;
+import org.apache.flink.cdc.debezium.table.DebeziumOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.kafka.connect.json.JsonConverterConfig;
 
@@ -138,7 +138,7 @@ public class PostgresActionUtils {
 
         // Postgres CDC using increment snapshot, splitSize is used instead of fetchSize (as in JDBC
         // connector). splitSize is the number of records in each snapshot split. see
-        // https://ververica.github.io/flink-cdc-connectors/master/content/connectors/postgres-cdc.html#incremental-snapshot-options
+        // https://nightlies.apache.org/flink/flink-cdc-docs-release-3.1/docs/connectors/flink-sources/postgres-cdc/#incremental-snapshot-options
         postgresConfig
                 .getOptional(PostgresSourceOptions.SCAN_INCREMENTAL_SNAPSHOT_CHUNK_SIZE)
                 .ifPresent(sourceBuilder::splitSize);
@@ -154,6 +154,12 @@ public class PostgresActionUtils {
         postgresConfig
                 .getOptional(PostgresSourceOptions.HEARTBEAT_INTERVAL)
                 .ifPresent(sourceBuilder::heartbeatInterval);
+        postgresConfig
+                .getOptional(PostgresSourceOptions.SCAN_INCREMENTAL_CLOSE_IDLE_READER_ENABLED)
+                .ifPresent(sourceBuilder::closeIdleReaders);
+        postgresConfig
+                .getOptional(PostgresSourceOptions.SCAN_INCREMENTAL_SNAPSHOT_BACKFILL_SKIP)
+                .ifPresent(sourceBuilder::skipSnapshotBackfill);
 
         String startupMode = postgresConfig.get(PostgresSourceOptions.SCAN_STARTUP_MODE);
 
@@ -161,6 +167,13 @@ public class PostgresActionUtils {
             sourceBuilder.startupOptions(StartupOptions.initial());
         } else if ("latest-offset".equalsIgnoreCase(startupMode)) {
             sourceBuilder.startupOptions(StartupOptions.latest());
+        } else if ("snapshot".equalsIgnoreCase(startupMode)) {
+            sourceBuilder.startupOptions(StartupOptions.snapshot());
+        } else {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Unknown scan.startup.mode='%s'. Valid scan.startup.mode for Postgres CDC are [initial, latest-offset, snapshot]",
+                            startupMode));
         }
 
         Properties debeziumProperties = new Properties();

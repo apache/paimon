@@ -116,18 +116,18 @@ public class FullCompactTaskTest {
         }
     }
 
-    /** A Mock {@link AppendOnlyCompactManager.FullCompactTask} to test. */
-    private static class MockFullCompactTask extends AppendOnlyCompactManager.FullCompactTask {
+    /** A Mock {@link BucketedAppendCompactManager.FullCompactTask} to test. */
+    private static class MockFullCompactTask extends BucketedAppendCompactManager.FullCompactTask {
 
         public MockFullCompactTask(
                 Collection<DataFileMeta> inputs,
                 long targetFileSize,
-                AppendOnlyCompactManager.CompactRewriter rewriter) {
-            super(inputs, targetFileSize, rewriter, null);
+                BucketedAppendCompactManager.CompactRewriter rewriter) {
+            super(null, inputs, targetFileSize, rewriter, null);
         }
     }
 
-    private AppendOnlyCompactManager.CompactRewriter rewriter() {
+    private BucketedAppendCompactManager.CompactRewriter rewriter() {
         return compactBefore -> {
             List<DataFileMeta> compactAfter = new ArrayList<>();
             long totalFileSize = 0L;

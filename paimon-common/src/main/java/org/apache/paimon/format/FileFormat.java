@@ -76,7 +76,7 @@ public abstract class FileFormat {
 
     @VisibleForTesting
     public static FileFormat fromIdentifier(String identifier, Options options) {
-        return fromIdentifier(identifier, new FormatContext(options, 1024));
+        return fromIdentifier(identifier, new FormatContext(options, 1024, 1024));
     }
 
     /** Create a {@link FileFormat} from format identifier and format options. */
@@ -108,6 +108,7 @@ public abstract class FileFormat {
                 new FormatContext(
                         options.removePrefix(formatIdentifier + "."),
                         options.get(CoreOptions.READ_BATCH_SIZE),
+                        options.get(CoreOptions.WRITE_BATCH_SIZE),
                         options.get(CoreOptions.FILE_COMPRESSION_ZSTD_LEVEL),
                         options.get(CoreOptions.FILE_BLOCK_SIZE));
         return FileFormat.fromIdentifier(formatIdentifier, context);

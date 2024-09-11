@@ -36,6 +36,32 @@ ALTER TABLE my_table SET TBLPROPERTIES (
 );
 ```
 
+## Removing Table Properties
+
+The following SQL removes `write-buffer-size` table property.
+
+```sql
+ALTER TABLE my_table UNSET TBLPROPERTIES ('write-buffer-size');
+```
+
+##  Changing/Adding Table Comment
+
+The following SQL changes comment of table `my_table` to `table comment`.
+
+```sql
+ALTER TABLE my_table SET TBLPROPERTIES (
+    'comment' = 'table comment'
+    );
+```
+
+## Removing Table Comment
+
+The following SQL removes table comment.
+
+```sql
+ALTER TABLE my_table UNSET TBLPROPERTIES ('comment');
+```
+
 ## Rename Table Name
 
 The following SQL rename the table name to new name.
@@ -57,14 +83,6 @@ ALTER TABLE catalog.database.test1 RENAME to catalog.database.test2;
 {{< hint info >}}
 If you use object storage, such as S3 or OSS, please use this syntax carefully, because the renaming of object storage is not atomic, and only partial files may be moved in case of failure.
 {{< /hint >}}
-
-## Removing Table Properties
-
-The following SQL removes `write-buffer-size` table property.
-
-```sql
-ALTER TABLE my_table UNSET TBLPROPERTIES ('write-buffer-size');
-```
 
 ## Adding New Columns
 

@@ -229,6 +229,54 @@ public class StartupModeTest extends ScannerTestBase {
     }
 
     @Test
+    public void testStartFromSnapshotWithDelayDuration() throws Exception {
+        Map<String, String> properties = new HashMap<>();
+        properties.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "2");
+        properties.put(CoreOptions.STREAMING_READ_SNAPSHOT_DELAY.key(), "5 s");
+        initializeTable(StartupMode.FROM_SNAPSHOT, properties);
+        initializeTestData(); // initialize 3 commits
+
+        // streaming Mode
+        StreamTableScan dataTableScan = table.newStreamScan();
+        TableScan.Plan firstPlan = dataTableScan.plan();
+        assertThat(firstPlan.splits()).isEmpty();
+
+        Thread.sleep(3000);
+        TableScan.Plan secondPlan = dataTableScan.plan();
+        assertThat(secondPlan.splits()).isEmpty();
+
+        Thread.sleep(5000);
+        TableScan.Plan thirdPlan = dataTableScan.plan();
+
+        assertThat(thirdPlan.splits())
+                .isEqualTo(snapshotReader.withSnapshot(2).withMode(ScanMode.DELTA).read().splits());
+    }
+
+    @Test
+    public void testStartFromSnapshotWithoutDelayDuration() throws Exception {
+        Map<String, String> properties = new HashMap<>();
+        properties.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "2");
+        initializeTable(StartupMode.FROM_SNAPSHOT, properties);
+        initializeTestData(); // initialize 3 commits
+
+        // streaming Mode
+        StreamTableScan dataTableScan = table.newStreamScan();
+        TableScan.Plan firstPlan = dataTableScan.plan();
+
+        long startTime = System.currentTimeMillis();
+        TableScan.Plan secondPlan = dataTableScan.plan();
+        long endTime = System.currentTimeMillis();
+        long duration = endTime - startTime;
+
+        // without delay read test
+        assertThat(duration).isLessThan(100);
+
+        assertThat(firstPlan.splits()).isEmpty();
+        assertThat(secondPlan.splits())
+                .isEqualTo(snapshotReader.withSnapshot(2).withMode(ScanMode.DELTA).read().splits());
+    }
+
+    @Test
     public void testTimeTravelFromExpiredSnapshot() throws Exception {
         Map<String, String> properties = new HashMap<>();
         // retain 2 snapshots

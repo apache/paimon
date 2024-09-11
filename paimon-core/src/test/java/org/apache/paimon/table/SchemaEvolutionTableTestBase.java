@@ -30,6 +30,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.Schema;
@@ -446,7 +447,7 @@ public abstract class SchemaEvolutionTableTestBase {
     protected List<String> getResult(
             TableRead read, List<Split> splits, Function<InternalRow, String> rowDataToString) {
         try {
-            List<ConcatRecordReader.ReaderSupplier<InternalRow>> readers = new ArrayList<>();
+            List<ReaderSupplier<InternalRow>> readers = new ArrayList<>();
             for (Split split : splits) {
                 readers.add(() -> read.createReader(split));
             }

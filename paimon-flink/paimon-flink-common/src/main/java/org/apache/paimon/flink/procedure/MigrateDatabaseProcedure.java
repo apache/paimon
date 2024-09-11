@@ -19,10 +19,12 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.flink.utils.TableMigrationUtils;
-import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.migrate.Migrator;
 import org.apache.paimon.utils.ParameterUtils;
 
+import org.apache.flink.table.annotation.ArgumentHint;
+import org.apache.flink.table.annotation.DataTypeHint;
+import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 import java.util.List;
@@ -35,26 +37,23 @@ public class MigrateDatabaseProcedure extends ProcedureBase {
         return "migrate_database";
     }
 
-    public String[] call(
-            ProcedureContext procedureContext, String connector, String sourceDatabasePath)
-            throws Exception {
-        return call(procedureContext, connector, sourceDatabasePath, "");
-    }
-
+    @ProcedureHint(
+            argument = {
+                @ArgumentHint(name = "connector", type = @DataTypeHint("STRING")),
+                @ArgumentHint(name = "source_database", type = @DataTypeHint("STRING")),
+                @ArgumentHint(name = "options", type = @DataTypeHint("STRING"), isOptional = true)
+            })
     public String[] call(
             ProcedureContext procedureContext,
             String connector,
             String sourceDatabasePath,
             String properties)
             throws Exception {
-        if (!(catalog instanceof HiveCatalog)) {
-            throw new IllegalArgumentException("Only support Hive Catalog");
-        }
-        HiveCatalog hiveCatalog = (HiveCatalog) this.catalog;
+        properties = notnull(properties);
         List<Migrator> migrators =
                 TableMigrationUtils.getImporters(
                         connector,
-                        hiveCatalog,
+                        catalog,
                         sourceDatabasePath,
                         ParameterUtils.parseCommaSeparatedKeyValues(properties));
 

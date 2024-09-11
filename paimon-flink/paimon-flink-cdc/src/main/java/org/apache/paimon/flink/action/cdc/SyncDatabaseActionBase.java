@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.action.cdc;
 
-import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.MultiTablesSinkMode;
@@ -37,6 +36,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -57,6 +57,7 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
     protected List<String> primaryKeys = new ArrayList<>();
     @Nullable protected String excludingTables;
     protected List<FileStoreTable> tables = new ArrayList<>();
+    protected Map<String, List<String>> partitionKeyMultiple = new HashMap<>();
 
     public SyncDatabaseActionBase(
             String warehouse,
@@ -120,9 +121,9 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
 
     @Override
     protected void validateCaseSensitivity() {
-        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Database", database);
-        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Table prefix", tablePrefix);
-        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Table suffix", tableSuffix);
+        Catalog.validateCaseInsensitive(allowUpperCase, "Database", database);
+        Catalog.validateCaseInsensitive(allowUpperCase, "Table prefix", tablePrefix);
+        Catalog.validateCaseInsensitive(allowUpperCase, "Table suffix", tableSuffix);
     }
 
     @Override
@@ -131,16 +132,29 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
                 Collections.emptyList(), typeMapping, metadataConverters);
     }
 
+    public SyncDatabaseActionBase withPartitionKeyMultiple(
+            Map<String, List<String>> partitionKeyMultiple) {
+        if (partitionKeyMultiple != null) {
+            this.partitionKeyMultiple = partitionKeyMultiple;
+        }
+        return this;
+    }
+
     @Override
     protected EventParser.Factory<RichCdcMultiplexRecord> buildEventParserFactory() {
         NewTableSchemaBuilder schemaBuilder =
                 new NewTableSchemaBuilder(
-                        tableConfig, caseSensitive, partitionKeys, primaryKeys, metadataConverters);
+                        tableConfig,
+                        allowUpperCase,
+                        partitionKeys,
+                        primaryKeys,
+                        partitionKeyMultiple,
+                        metadataConverters);
         Pattern includingPattern = Pattern.compile(includingTables);
         Pattern excludingPattern =
                 excludingTables == null ? null : Pattern.compile(excludingTables);
         TableNameConverter tableNameConverter =
-                new TableNameConverter(caseSensitive, mergeShards, tablePrefix, tableSuffix);
+                new TableNameConverter(allowUpperCase, mergeShards, tablePrefix, tableSuffix);
         Set<String> createdTables;
         try {
             createdTables = new HashSet<>(catalog.listTables(database));

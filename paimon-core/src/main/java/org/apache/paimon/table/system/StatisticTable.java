@@ -79,6 +79,10 @@ public class StatisticTable implements ReadonlyTable {
 
     private final FileStoreTable dataTable;
 
+    public StatisticTable(FileStoreTable dataTable) {
+        this(dataTable.fileIO(), dataTable.location(), dataTable);
+    }
+
     public StatisticTable(FileIO fileIO, Path location, FileStoreTable dataTable) {
         this.fileIO = fileIO;
         this.location = location;

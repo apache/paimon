@@ -24,6 +24,7 @@ import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.stats.{ColStats, Statistics}
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.BatchWriteBuilder
+import org.apache.paimon.table.source.DataSplit
 
 import org.apache.parquet.Preconditions
 import org.apache.spark.sql.{PaimonStatsUtils, Row, SparkSession}
@@ -61,10 +62,14 @@ case class PaimonAnalyzeTableColumnCommand(
     }
 
     // compute stats
-    val totalSize = PaimonStatsUtils.calculateTotalSize(
-      sparkSession.sessionState,
-      table.name(),
-      Some(table.location().toUri))
+    val totalSize = table
+      .newScan()
+      .plan()
+      .splits()
+      .asScala
+      .flatMap { case split: DataSplit => split.dataFiles().asScala }
+      .map(_.fileSize())
+      .sum
     val (mergedRecordCount, colStats) =
       PaimonStatsUtils.computeColumnStats(sparkSession, relation, attributes)
 

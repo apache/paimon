@@ -19,8 +19,10 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.utils.VersionedObjectSerializer;
 
+import static org.apache.paimon.utils.InternalRowUtils.fromStringArrayData;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 
 /** A {@link VersionedObjectSerializer} for {@link SimpleFileEntry}, only supports reading. */
@@ -31,7 +33,7 @@ public class SimpleFileEntrySerializer extends VersionedObjectSerializer<SimpleF
     private final int version;
 
     public SimpleFileEntrySerializer() {
-        super(ManifestEntry.schema());
+        super(ManifestEntry.SCHEMA);
         this.version = new ManifestEntrySerializer().getVersion();
     }
 
@@ -51,13 +53,15 @@ public class SimpleFileEntrySerializer extends VersionedObjectSerializer<SimpleF
             throw new IllegalArgumentException("Unsupported version: " + version);
         }
 
-        InternalRow file = row.getRow(4, 3);
+        InternalRow file = row.getRow(4, DataFileMeta.SCHEMA.getFieldCount());
         return new SimpleFileEntry(
                 FileKind.fromByteValue(row.getByte(0)),
                 deserializeBinaryRow(row.getBinary(1)),
                 row.getInt(2),
                 file.getInt(10),
                 file.getString(0).toString(),
+                fromStringArrayData(file.getArray(11)),
+                file.isNullAt(14) ? null : file.getBinary(14),
                 deserializeBinaryRow(file.getBinary(3)),
                 deserializeBinaryRow(file.getBinary(4)));
     }

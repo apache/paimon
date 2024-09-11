@@ -19,14 +19,7 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.DateTimeUtils;
 
@@ -38,7 +31,6 @@ import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -58,15 +50,33 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testAdaptiveParallelism() {
+    public void testAQEWithWriteManifest() {
+        batchSql("ALTER TABLE T SET ('write-manifest-cache' = '1 mb')");
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
         assertThatThrownBy(() -> batchSql("INSERT INTO T SELECT a, b, c FROM T GROUP BY a,b,c"))
                 .hasMessageContaining(
-                        "Paimon Sink does not support Flink's Adaptive Parallelism mode.");
+                        "Paimon Sink with [Write Manifest Cache] does not support Flink's Adaptive Parallelism mode.");
 
         // work fine
         batchSql(
                 "INSERT INTO T /*+ OPTIONS('sink.parallelism'='1') */ SELECT a, b, c FROM T GROUP BY a,b,c");
+
+        // work fine too
+        batchSql("ALTER TABLE T SET ('write-manifest-cache' = '0 b')");
+        batchSql("INSERT INTO T SELECT a, b, c FROM T GROUP BY a,b,c");
+    }
+
+    @Test
+    public void testAQEWithDynamicBucket() {
+        batchSql("CREATE TABLE IF NOT EXISTS D_T (a INT PRIMARY KEY NOT ENFORCED, b INT, c INT)");
+        batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
+        assertThatThrownBy(() -> batchSql("INSERT INTO D_T SELECT a, b, c FROM T GROUP BY a,b,c"))
+                .hasMessageContaining(
+                        "Paimon Sink with [Dynamic Bucket Mode] does not support Flink's Adaptive Parallelism mode.");
+
+        // work fine
+        batchSql(
+                "INSERT INTO D_T /*+ OPTIONS('sink.parallelism'='1') */ SELECT a, b, c FROM T GROUP BY a,b,c");
     }
 
     @Test
@@ -438,33 +448,6 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
 
         sql("INSERT INTO ignore_delete VALUES (1, 'B')");
         assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "B"));
-    }
-
-    @Test
-    public void testIgnoreDeleteCompatible() throws Exception {
-        sql(
-                "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING) "
-                        + "WITH ('merge-engine' = 'deduplicate', 'write-only' = 'true')");
-
-        sql("INSERT INTO ignore_delete VALUES (1, 'A')");
-        // write delete records
-        sql("DELETE FROM ignore_delete WHERE pk = 1");
-        assertThat(sql("SELECT * FROM ignore_delete")).isEmpty();
-
-        // set ignore-delete and read
-        Map<String, String> newOptions = new HashMap<>();
-        newOptions.put(CoreOptions.IGNORE_DELETE.key(), "true");
-        SchemaUtils.forceCommit(
-                new SchemaManager(LocalFileIO.create(), new Path(path, "default.db/ignore_delete")),
-                new Schema(
-                        Arrays.asList(
-                                new DataField(0, "pk", DataTypes.INT().notNull()),
-                                new DataField(1, "v", DataTypes.STRING())),
-                        Collections.emptyList(),
-                        Collections.singletonList("pk"),
-                        newOptions,
-                        null));
-        assertThat(sql("SELECT * FROM ignore_delete")).containsExactlyInAnyOrder(Row.of(1, "A"));
     }
 
     @Test

@@ -18,7 +18,9 @@
 
 package org.apache.paimon;
 
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
@@ -33,16 +35,17 @@ import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.service.ServiceManager;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
 import javax.annotation.Nullable;
 
-import java.io.Serializable;
 import java.util.List;
 
 /**
@@ -50,7 +53,7 @@ import java.util.List;
  *
  * @param <T> type of record to read and write.
  */
-public interface FileStore<T> extends Serializable {
+public interface FileStore<T> {
 
     FileStorePathFactory pathFactory();
 
@@ -68,6 +71,8 @@ public interface FileStore<T> extends Serializable {
 
     ManifestFile.Factory manifestFileFactory();
 
+    IndexManifestFile.Factory indexManifestFileFactory();
+
     IndexFileHandler newIndexFileHandler();
 
     StatsFileHandler newStatsFileHandler();
@@ -79,6 +84,8 @@ public interface FileStore<T> extends Serializable {
     FileStoreWrite<T> newWrite(String commitUser, ManifestCacheFilter manifestFilter);
 
     FileStoreCommit newCommit(String commitUser);
+
+    FileStoreCommit newCommit(String commitUser, List<CommitCallback> callbacks);
 
     SnapshotDeletion newSnapshotDeletion();
 
@@ -98,4 +105,6 @@ public interface FileStore<T> extends Serializable {
     boolean mergeSchema(RowType rowType, boolean allowExplicitCast);
 
     List<TagCallback> createTagCallbacks();
+
+    void setManifestCache(SegmentsCache<Path> manifestCache);
 }

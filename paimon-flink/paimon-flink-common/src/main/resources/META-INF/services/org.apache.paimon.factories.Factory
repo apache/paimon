@@ -22,9 +22,12 @@ org.apache.paimon.flink.action.DeleteActionFactory
 org.apache.paimon.flink.action.MergeIntoActionFactory
 org.apache.paimon.flink.action.RollbackToActionFactory
 org.apache.paimon.flink.action.CreateTagActionFactory
+org.apache.paimon.flink.action.CreateTagFromTimestampActionFactory
+org.apache.paimon.flink.action.CreateTagFromWatermarkActionFactory
 org.apache.paimon.flink.action.DeleteTagActionFactory
 org.apache.paimon.flink.action.ResetConsumerActionFactory
 org.apache.paimon.flink.action.MigrateTableActionFactory
+org.apache.paimon.flink.action.MigrateFileActionFactory
 org.apache.paimon.flink.action.MigrateDatabaseActionFactory
 org.apache.paimon.flink.action.RemoveOrphanFilesActionFactory
 org.apache.paimon.flink.action.QueryServiceActionFactory
@@ -34,12 +37,16 @@ org.apache.paimon.flink.action.CreateBranchActionFactory
 org.apache.paimon.flink.action.DeleteBranchActionFactory
 org.apache.paimon.flink.action.FastForwardActionFactory
 org.apache.paimon.flink.action.RepairActionFactory
+org.apache.paimon.flink.action.RewriteFileIndexActionFactory
+org.apache.paimon.flink.action.ExpireSnapshotsActionFactory
 
 ### procedure factories
 org.apache.paimon.flink.procedure.CompactDatabaseProcedure
 org.apache.paimon.flink.procedure.CompactProcedure
 org.apache.paimon.flink.procedure.RewriteFileIndexProcedure
 org.apache.paimon.flink.procedure.CreateTagProcedure
+org.apache.paimon.flink.procedure.CreateTagFromTimestampProcedure
+org.apache.paimon.flink.procedure.CreateTagFromWatermarkProcedure
 org.apache.paimon.flink.procedure.DeleteTagProcedure
 org.apache.paimon.flink.procedure.CreateBranchProcedure
 org.apache.paimon.flink.procedure.DeleteBranchProcedure
@@ -62,3 +69,4 @@ org.apache.paimon.flink.procedure.privilege.RevokePrivilegeFromUserProcedure
 org.apache.paimon.flink.procedure.RepairProcedure
 org.apache.paimon.flink.procedure.FastForwardProcedure
 org.apache.paimon.flink.procedure.MarkPartitionDoneProcedure
+org.apache.paimon.flink.procedure.CloneProcedure

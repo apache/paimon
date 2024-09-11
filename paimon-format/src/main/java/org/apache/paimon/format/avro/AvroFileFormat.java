@@ -41,7 +41,9 @@ import org.apache.avro.file.DataFileWriter;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.avro.file.DataFileConstants.SNAPPY_CODEC;
@@ -56,6 +58,9 @@ public class AvroFileFormat extends FileFormat {
                     .stringType()
                     .defaultValue(SNAPPY_CODEC)
                     .withDescription("The compression codec for avro");
+
+    public static final ConfigOption<Map<String, String>> AVRO_ROW_NAME_MAPPING =
+            ConfigOptions.key("row-name-mapping").mapType().defaultValue(new HashMap<>());
 
     private final FormatContext context;
 
@@ -85,7 +90,7 @@ public class AvroFileFormat extends FileFormat {
     public void validateDataFields(RowType rowType) {
         List<DataType> fieldTypes = rowType.getFieldTypes();
         for (DataType dataType : fieldTypes) {
-            AvroSchemaConverter.convertToSchema(dataType);
+            AvroSchemaConverter.convertToSchema(dataType, new HashMap<>());
         }
     }
 
@@ -110,11 +115,15 @@ public class AvroFileFormat extends FileFormat {
             this.factory =
                     new AvroWriterFactory<>(
                             (out, compression) -> {
-                                Schema schema = AvroSchemaConverter.convertToSchema(rowType);
+                                Schema schema =
+                                        AvroSchemaConverter.convertToSchema(
+                                                rowType,
+                                                context.formatOptions().get(AVRO_ROW_NAME_MAPPING));
                                 AvroRowDatumWriter datumWriter = new AvroRowDatumWriter(rowType);
                                 DataFileWriter<InternalRow> dataFileWriter =
                                         new DataFileWriter<>(datumWriter);
                                 dataFileWriter.setCodec(createCodecFactory(compression));
+                                dataFileWriter.setFlushOnEveryBlock(false);
                                 dataFileWriter.create(schema, out);
                                 return dataFileWriter;
                             });
@@ -132,13 +141,8 @@ public class AvroFileFormat extends FileFormat {
                 }
 
                 @Override
-                public void flush() throws IOException {
-                    writer.flush();
-                }
-
-                @Override
-                public void finish() throws IOException {
-                    writer.finish();
+                public void close() throws IOException {
+                    writer.close();
                 }
 
                 @Override

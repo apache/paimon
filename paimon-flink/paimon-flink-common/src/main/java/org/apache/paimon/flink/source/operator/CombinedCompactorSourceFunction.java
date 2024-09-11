@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.source.operator;
 
-import org.apache.paimon.append.AppendOnlyCompactionTask;
+import org.apache.paimon.append.UnawareAppendCompactionTask;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.table.source.Split;
 
@@ -33,7 +33,7 @@ import java.util.regex.Pattern;
  *
  * <ol>
  *   <li>Monitoring snapshots of the Paimon table.
- *   <li>Creating the splits {@link Split} or compaction task {@link AppendOnlyCompactionTask}
+ *   <li>Creating the splits {@link Split} or compaction task {@link UnawareAppendCompactionTask}
  *       corresponding to the incremental files
  *   <li>Assigning them to downstream tasks for further processing.
  * </ol>

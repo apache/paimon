@@ -245,7 +245,15 @@ public class AlignedContinuousFileSplitEnumeratorTest extends FileSplitEnumerato
 
         public AlignedContinuousFileSplitEnumerator build() {
             return new AlignedContinuousFileSplitEnumerator(
-                    context, initialSplits, null, discoveryInterval, scan, bucketMode, timeout, 10);
+                    context,
+                    initialSplits,
+                    null,
+                    discoveryInterval,
+                    scan,
+                    bucketMode,
+                    timeout,
+                    10,
+                    false);
         }
     }
 }

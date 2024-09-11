@@ -41,6 +41,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.manifest.ManifestEntry.recordCount;
+
 /** Scan operation which produces a plan. */
 public interface FileStoreScan {
 
@@ -66,7 +68,7 @@ public interface FileStoreScan {
 
     FileStoreScan withLevelFilter(Filter<Integer> levelFilter);
 
-    FileStoreScan withDataFileTimeMills(long dataFileTimeMills);
+    FileStoreScan withManifestEntryFilter(Filter<ManifestEntry> filter);
 
     FileStoreScan withManifestCacheFilter(ManifestCacheFilter manifestFilter);
 
@@ -76,6 +78,17 @@ public interface FileStoreScan {
 
     /** Produce a {@link Plan}. */
     Plan plan();
+
+    /**
+     * Return record count of all changes occurred in this snapshot given the scan.
+     *
+     * @return total record count of Snapshot.
+     */
+    default Long totalRecordCount(Snapshot snapshot) {
+        return snapshot.totalRecordCount() == null
+                ? (Long) recordCount(withSnapshot(snapshot.id()).plan().files())
+                : snapshot.totalRecordCount();
+    }
 
     /**
      * Read {@link SimpleFileEntry}s, SimpleFileEntry only retains some critical information, so it
@@ -98,13 +111,11 @@ public interface FileStoreScan {
         Long watermark();
 
         /**
-         * Snapshot id of this plan, return null if the table is empty or the manifest list is
+         * Snapshot of this plan, return null if the table is empty or the manifest list is
          * specified.
          */
         @Nullable
-        Long snapshotId();
-
-        ScanMode scanMode();
+        Snapshot snapshot();
 
         /** Result {@link ManifestEntry} files. */
         List<ManifestEntry> files();

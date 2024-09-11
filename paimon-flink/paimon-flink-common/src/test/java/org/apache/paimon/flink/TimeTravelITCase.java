@@ -112,8 +112,10 @@ public class TimeTravelITCase extends CatalogITCaseBase {
     public void testTravelToNonExistedTimestamp() {
         sql("CREATE TABLE t (k INT, v STRING)");
         sql("INSERT INTO t VALUES(1, 'hello'), (2, 'world')");
-        assertThat(sql("SELECT * FROM t FOR SYSTEM_TIME AS OF TIMESTAMP '1900-01-01 00:00:00'"))
-                .isEmpty();
+        assertThat(
+                        sql("SELECT * FROM t FOR SYSTEM_TIME AS OF TIMESTAMP '1900-01-01 00:00:00'")
+                                .toString())
+                .isEqualTo("[+I[1, hello], +I[2, world]]");
     }
 
     @Test

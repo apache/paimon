@@ -52,7 +52,7 @@ public class AvroFileFormatTest {
 
     @BeforeAll
     public static void before() {
-        fileFormat = new AvroFileFormat(new FormatContext(new Options(), 1024));
+        fileFormat = new AvroFileFormat(new FormatContext(new Options(), 1024, 1024));
     }
 
     @Test
@@ -106,7 +106,7 @@ public class AvroFileFormatTest {
     @Test
     void testReadRowPosition() throws IOException {
         RowType rowType = DataTypes.ROW(DataTypes.INT().notNull());
-        FileFormat format = new AvroFileFormat(new FormatContext(new Options(), 1024));
+        FileFormat format = new AvroFileFormat(new FormatContext(new Options(), 1024, 1024));
 
         LocalFileIO fileIO = LocalFileIO.create();
         Path file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
@@ -116,8 +116,7 @@ public class AvroFileFormatTest {
             for (int i = 0; i < 1000000; i++) {
                 writer.addElement(GenericRow.of(i));
             }
-            writer.flush();
-            writer.finish();
+            writer.close();
         }
 
         try (RecordReader<InternalRow> reader =

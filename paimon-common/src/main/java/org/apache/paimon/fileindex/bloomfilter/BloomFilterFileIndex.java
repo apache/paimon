@@ -92,14 +92,16 @@ public class BloomFilterFileIndex implements FileIndexer {
 
         @Override
         public void write(Object key) {
-            filter.addHash(hashFunction.hash(key));
+            if (key != null) {
+                filter.addHash(hashFunction.hash(key));
+            }
         }
 
         @Override
         public byte[] serializedBytes() {
             int numHashFunctions = filter.getNumHashFunctions();
             byte[] serialized = new byte[filter.getBitSet().bitSize() / Byte.SIZE + Integer.BYTES];
-            // little endian
+            // big endian
             serialized[0] = (byte) ((numHashFunctions >>> 24) & 0xFF);
             serialized[1] = (byte) ((numHashFunctions >>> 16) & 0xFF);
             serialized[2] = (byte) ((numHashFunctions >>> 8) & 0xFF);

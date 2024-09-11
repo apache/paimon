@@ -18,13 +18,9 @@
 
 package org.apache.paimon;
 
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.manifest.FileKind;
-import org.apache.paimon.manifest.ManifestEntry;
-import org.apache.paimon.manifest.ManifestFileMeta;
-import org.apache.paimon.manifest.ManifestList;
-import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -35,11 +31,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import javax.annotation.Nullable;
 
-import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -63,7 +55,10 @@ import java.util.Objects;
  *       commitIdentifier (which is a long value). Json can automatically perform type conversion so
  *       there is no compatibility issue.
  * </ul>
+ *
+ * @since 0.9.0
  */
+@Public
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Snapshot {
 
@@ -351,85 +346,6 @@ public class Snapshot {
         return statistics;
     }
 
-    /**
-     * Return all {@link ManifestFileMeta} instances for either data or changelog manifests in this
-     * snapshot.
-     *
-     * @param manifestList a {@link ManifestList} instance used for reading files at snapshot.
-     * @return a list of ManifestFileMeta.
-     */
-    public List<ManifestFileMeta> allManifests(ManifestList manifestList) {
-        List<ManifestFileMeta> result = new ArrayList<>();
-        result.addAll(dataManifests(manifestList));
-        result.addAll(changelogManifests(manifestList));
-        return result;
-    }
-
-    /**
-     * Return a {@link ManifestFileMeta} for each data manifest in this snapshot.
-     *
-     * @param manifestList a {@link ManifestList} instance used for reading files at snapshot.
-     * @return a list of ManifestFileMeta.
-     */
-    public List<ManifestFileMeta> dataManifests(ManifestList manifestList) {
-        List<ManifestFileMeta> result = new ArrayList<>();
-        result.addAll(manifestList.read(baseManifestList));
-        result.addAll(deltaManifests(manifestList));
-        return result;
-    }
-
-    /**
-     * Return a {@link ManifestFileMeta} for each delta manifest in this snapshot.
-     *
-     * @param manifestList a {@link ManifestList} instance used for reading files at snapshot.
-     * @return a list of ManifestFileMeta.
-     */
-    public List<ManifestFileMeta> deltaManifests(ManifestList manifestList) {
-        return manifestList.read(deltaManifestList);
-    }
-
-    /**
-     * Return a {@link ManifestFileMeta} for each changelog manifest in this snapshot.
-     *
-     * @param manifestList a {@link ManifestList} instance used for reading files at snapshot.
-     * @return a list of ManifestFileMeta.
-     */
-    public List<ManifestFileMeta> changelogManifests(ManifestList manifestList) {
-        return changelogManifestList == null
-                ? Collections.emptyList()
-                : manifestList.read(changelogManifestList);
-    }
-
-    /**
-     * Return record count of all changes occurred in this snapshot given the scan.
-     *
-     * @param scan a {@link FileStoreScan} instance used for count of reading files at snapshot.
-     * @return total record count of Snapshot.
-     */
-    public Long totalRecordCount(FileStoreScan scan) {
-        return totalRecordCount == null
-                ? recordCount(scan.withSnapshot(id).plan().files())
-                : totalRecordCount;
-    }
-
-    public static long recordCount(List<ManifestEntry> manifestEntries) {
-        return manifestEntries.stream().mapToLong(manifest -> manifest.file().rowCount()).sum();
-    }
-
-    public static long recordCountAdd(List<ManifestEntry> manifestEntries) {
-        return manifestEntries.stream()
-                .filter(manifestEntry -> FileKind.ADD.equals(manifestEntry.kind()))
-                .mapToLong(manifest -> manifest.file().rowCount())
-                .sum();
-    }
-
-    public static long recordCountDelete(List<ManifestEntry> manifestEntries) {
-        return manifestEntries.stream()
-                .filter(manifestEntry -> FileKind.DELETE.equals(manifestEntry.kind()))
-                .mapToLong(manifest -> manifest.file().rowCount())
-                .sum();
-    }
-
     public String toJson() {
         return JsonSerdeUtil.toJson(this);
     }
@@ -440,20 +356,9 @@ public class Snapshot {
 
     public static Snapshot fromPath(FileIO fileIO, Path path) {
         try {
-            String json = fileIO.readFileUtf8(path);
-            return Snapshot.fromJson(json);
+            return Snapshot.fromJson(fileIO.readFileUtf8(path));
         } catch (IOException e) {
             throw new RuntimeException("Fails to read snapshot from path " + path, e);
-        }
-    }
-
-    @Nullable
-    public static Snapshot safelyFromPath(FileIO fileIO, Path path) throws IOException {
-        try {
-            String json = fileIO.readFileUtf8(path);
-            return Snapshot.fromJson(json);
-        } catch (FileNotFoundException e) {
-            return null;
         }
     }
 

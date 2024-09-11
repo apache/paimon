@@ -26,18 +26,23 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.serializer.InternalSerializers;
+import org.apache.paimon.data.serializer.RowCompactedSerializer;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.cache.CacheManager;
-import org.apache.paimon.lookup.hash.HashLookupStoreFactory;
+import org.apache.paimon.lookup.LookupStoreFactory;
 import org.apache.paimon.mergetree.Levels;
+import org.apache.paimon.mergetree.LookupFile;
 import org.apache.paimon.mergetree.LookupLevels;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.KeyComparatorSupplier;
 import org.apache.paimon.utils.Preconditions;
+
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 
 import javax.annotation.Nullable;
 
@@ -50,6 +55,7 @@ import java.util.function.Supplier;
 
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 import static org.apache.paimon.lookup.LookupStoreFactory.bfGenerator;
+import static org.apache.paimon.mergetree.LookupFile.localFilePrefix;
 
 /** Implementation for {@link TableQuery} for caching data and file in local. */
 public class LocalTableQuery implements TableQuery {
@@ -62,11 +68,15 @@ public class LocalTableQuery implements TableQuery {
 
     private final KeyValueFileReaderFactory.Builder readerFactoryBuilder;
 
-    private final HashLookupStoreFactory hashLookupStoreFactory;
+    private final LookupStoreFactory lookupStoreFactory;
 
     private final int startLevel;
 
     private IOManager ioManager;
+
+    @Nullable private Cache<String, LookupFile> lookupFileCache;
+
+    private final RowType partitionType;
 
     public LocalTableQuery(FileStoreTable table) {
         this.options = table.coreOptions();
@@ -79,13 +89,14 @@ public class LocalTableQuery implements TableQuery {
         KeyValueFileStore store = (KeyValueFileStore) tableStore;
 
         this.readerFactoryBuilder = store.newReaderFactoryBuilder();
+        this.partitionType = table.schema().logicalPartitionType();
+        RowType keyType = readerFactoryBuilder.keyType();
         this.keyComparatorSupplier = new KeyComparatorSupplier(readerFactoryBuilder.keyType());
-        this.hashLookupStoreFactory =
-                new HashLookupStoreFactory(
+        this.lookupStoreFactory =
+                LookupStoreFactory.create(
+                        options,
                         new CacheManager(options.lookupCacheMaxMemory()),
-                        options.cachePageSize(),
-                        options.toConfiguration().get(CoreOptions.LOOKUP_HASH_LOAD_FACTOR),
-                        options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_SPILL_COMPRESSION));
+                        new RowCompactedSerializer(keyType).createSliceComparator());
 
         if (options.needLookup()) {
             startLevel = 1;
@@ -128,6 +139,13 @@ public class LocalTableQuery implements TableQuery {
         KeyValueFileReaderFactory factory =
                 readerFactoryBuilder.build(partition, bucket, DeletionVector.emptyFactory());
         Options options = this.options.toConfiguration();
+        if (lookupFileCache == null) {
+            lookupFileCache =
+                    LookupFile.createCache(
+                            options.get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
+                            options.get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE));
+        }
+
         LookupLevels<KeyValue> lookupLevels =
                 new LookupLevels<>(
                         levels,
@@ -141,14 +159,15 @@ public class LocalTableQuery implements TableQuery {
                                         file.fileName(),
                                         file.fileSize(),
                                         file.level()),
-                        () ->
+                        file ->
                                 Preconditions.checkNotNull(ioManager, "IOManager is required.")
-                                        .createChannel()
+                                        .createChannel(
+                                                localFilePrefix(
+                                                        partitionType, partition, bucket, file))
                                         .getPathFile(),
-                        hashLookupStoreFactory,
-                        options.get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
-                        options.get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE),
-                        bfGenerator(options));
+                        lookupStoreFactory,
+                        bfGenerator(options),
+                        lookupFileCache);
 
         tableView.computeIfAbsent(partition, k -> new HashMap<>()).put(bucket, lookupLevels);
     }
@@ -199,6 +218,9 @@ public class LocalTableQuery implements TableQuery {
                     buckets.getValue().entrySet()) {
                 bucket.getValue().close();
             }
+        }
+        if (lookupFileCache != null) {
+            lookupFileCache.invalidateAll();
         }
         tableView.clear();
     }

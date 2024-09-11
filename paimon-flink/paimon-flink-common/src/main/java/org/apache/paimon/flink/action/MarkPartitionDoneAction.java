@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.paimon.flink.sink.partition.PartitionMarkDoneAction;
+import org.apache.paimon.partition.actions.PartitionMarkDoneAction;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.PartitionPathUtils;

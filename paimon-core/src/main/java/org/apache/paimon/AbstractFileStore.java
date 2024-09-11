@@ -21,6 +21,7 @@ package org.apache.paimon;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.HashIndexFile;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.IndexManifestFile;
@@ -43,6 +44,7 @@ import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.sink.CallbackUtils;
+import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.types.RowType;
@@ -55,6 +57,7 @@ import javax.annotation.Nullable;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
@@ -72,7 +75,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     protected final RowType partitionType;
     private final CatalogEnvironment catalogEnvironment;
 
-    @Nullable private final SegmentsCache<String> writeManifestCache;
+    @Nullable private final SegmentsCache<Path> writeManifestCache;
+    @Nullable private SegmentsCache<Path> readManifestCache;
 
     protected AbstractFileStore(
             FileIO fileIO,
@@ -87,11 +91,9 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         this.options = options;
         this.partitionType = partitionType;
         this.catalogEnvironment = catalogEnvironment;
-        MemorySize writeManifestCache = options.writeManifestCache();
         this.writeManifestCache =
-                writeManifestCache.getBytes() == 0
-                        ? null
-                        : new SegmentsCache<>(options.pageSize(), writeManifestCache);
+                SegmentsCache.create(
+                        options.pageSize(), options.writeManifestCache(), Long.MAX_VALUE);
     }
 
     @Override
@@ -122,7 +124,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.manifestCompression(),
                 pathFactory(),
                 options.manifestTargetSize().getBytes(),
-                forWrite ? writeManifestCache : null);
+                forWrite ? writeManifestCache : readManifestCache);
     }
 
     @Override
@@ -136,12 +138,17 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.manifestFormat(),
                 options.manifestCompression(),
                 pathFactory(),
-                forWrite ? writeManifestCache : null);
+                forWrite ? writeManifestCache : readManifestCache);
     }
 
-    protected IndexManifestFile.Factory indexManifestFileFactory() {
+    @Override
+    public IndexManifestFile.Factory indexManifestFileFactory() {
         return new IndexManifestFile.Factory(
-                fileIO, options.manifestFormat(), options.manifestCompression(), pathFactory());
+                fileIO,
+                options.manifestFormat(),
+                options.manifestCompression(),
+                pathFactory(),
+                readManifestCache);
     }
 
     @Override
@@ -184,6 +191,11 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @Override
     public FileStoreCommitImpl newCommit(String commitUser) {
+        return newCommit(commitUser, Collections.emptyList());
+    }
+
+    @Override
+    public FileStoreCommitImpl newCommit(String commitUser, List<CommitCallback> callbacks) {
         return new FileStoreCommitImpl(
                 fileIO,
                 schemaManager,
@@ -205,7 +217,9 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.branch(),
                 newStatsFileHandler(),
                 bucketMode(),
-                options.scanManifestParallelism());
+                options.scanManifestParallelism(),
+                callbacks,
+                options.commitMaxRetries());
     }
 
     @Override
@@ -217,7 +231,9 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 manifestListFactory().create(),
                 newIndexFileHandler(),
                 newStatsFileHandler(),
-                options.changelogProducer() != CoreOptions.ChangelogProducer.NONE);
+                options.changelogProducer() != CoreOptions.ChangelogProducer.NONE,
+                options.cleanEmptyDirectories(),
+                options.deleteFileThreadNum());
     }
 
     @Override
@@ -228,7 +244,9 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 manifestFileFactory().create(),
                 manifestListFactory().create(),
                 newIndexFileHandler(),
-                newStatsFileHandler());
+                newStatsFileHandler(),
+                options.cleanEmptyDirectories(),
+                options.deleteFileThreadNum());
     }
 
     @Override
@@ -244,7 +262,9 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 manifestFileFactory().create(),
                 manifestListFactory().create(),
                 newIndexFileHandler(),
-                newStatsFileHandler());
+                newStatsFileHandler(),
+                options.cleanEmptyDirectories(),
+                options.deleteFileThreadNum());
     }
 
     public abstract Comparator<InternalRow> newKeyComparator();
@@ -270,7 +290,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 PartitionExpireStrategy.createPartitionExpireStrategy(options, partitionType()),
                 newScan(),
                 newCommit(commitUser),
-                metastoreClient);
+                metastoreClient,
+                options.endInputCheckPartitionExpire());
     }
 
     @Override
@@ -299,5 +320,10 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     @Override
     public ServiceManager newServiceManager() {
         return new ServiceManager(fileIO, options.path());
+    }
+
+    @Override
+    public void setManifestCache(SegmentsCache<Path> manifestCache) {
+        this.readManifestCache = manifestCache;
     }
 }

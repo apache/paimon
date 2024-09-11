@@ -31,19 +31,11 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.format.SimpleColStats;
-import org.apache.paimon.types.ArrayType;
-import org.apache.paimon.types.BigIntType;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ProjectedRow;
 
 import javax.annotation.Nullable;
-
-import java.util.ArrayList;
-import java.util.List;
-
-import static org.apache.paimon.utils.SerializationUtils.newBytesType;
 
 /** Converter for array of {@link SimpleColStats}. */
 public class SimpleStatsConverter {
@@ -106,14 +98,6 @@ public class SimpleStatsConverter {
         }
 
         return new NullCountsEvoArray(indexMapping, nullCounts, rowCount);
-    }
-
-    public static RowType schema() {
-        List<DataField> fields = new ArrayList<>();
-        fields.add(new DataField(0, "_MIN_VALUES", newBytesType(false)));
-        fields.add(new DataField(1, "_MAX_VALUES", newBytesType(false)));
-        fields.add(new DataField(2, "_NULL_COUNTS", new ArrayType(new BigIntType(true))));
-        return new RowType(fields);
     }
 
     private static RowType toAllFieldsNullableRowType(RowType rowType) {

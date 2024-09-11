@@ -24,10 +24,8 @@ public abstract class FileIndexWriter {
     private boolean empty = true;
 
     public void writeRecord(Object key) {
-        if (key != null) {
-            empty = false;
-            write(key);
-        }
+        empty = false;
+        write(key);
     }
 
     public abstract void write(Object key);

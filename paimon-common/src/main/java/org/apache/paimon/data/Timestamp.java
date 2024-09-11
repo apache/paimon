@@ -30,12 +30,14 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 
 /**
- * An internal data structure representing data of {@link TimestampType} and {@link
- * LocalZonedTimestampType}.
+ * An internal data structure representing data of {@link TimestampType}.
  *
  * <p>This data structure is immutable and consists of a milliseconds and nanos-of-millisecond since
  * {@code 1970-01-01 00:00:00}. It might be stored in a compact representation (as a long value) if
  * values are small enough.
+ *
+ * <p>Legacy: This class represents {@link LocalZonedTimestampType} too, now it is recommended to
+ * use {@link LocalZoneTimestamp}.
  *
  * @since 0.4.0
  */
@@ -45,7 +47,7 @@ public final class Timestamp implements Comparable<Timestamp>, Serializable {
     private static final long serialVersionUID = 1L;
 
     // the number of milliseconds in a day
-    private static final long MILLIS_PER_DAY = 86400000; // = 24 * 60 * 60 * 1000
+    public static final long MILLIS_PER_DAY = 86400000; // = 24 * 60 * 60 * 1000
 
     public static final long MICROS_PER_MILLIS = 1000L;
 
@@ -100,7 +102,12 @@ public final class Timestamp implements Comparable<Timestamp>, Serializable {
         return LocalDateTime.of(localDate, localTime);
     }
 
-    /** Converts this {@link Timestamp} object to a {@link Instant}. */
+    /**
+     * Converts this {@link Timestamp} object to a {@link Instant}.
+     *
+     * @deprecated use {@link LocalZoneTimestamp}.
+     */
+    @Deprecated
     public Instant toInstant() {
         long epochSecond = millisecond / 1000;
         int milliOfSecond = (int) (millisecond % 1000);
@@ -208,7 +215,9 @@ public final class Timestamp implements Comparable<Timestamp>, Serializable {
      * Creates an instance of {@link Timestamp} from an instance of {@link Instant}.
      *
      * @param instant an instance of {@link Instant}
+     * @deprecated use {@link LocalZoneTimestamp}.
      */
+    @Deprecated
     public static Timestamp fromInstant(Instant instant) {
         long epochSecond = instant.getEpochSecond();
         int nanoSecond = instant.getNano();

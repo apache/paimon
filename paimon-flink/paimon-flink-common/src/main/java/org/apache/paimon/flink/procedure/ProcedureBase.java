@@ -35,7 +35,12 @@ import org.apache.flink.table.procedures.Procedure;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+
 import static org.apache.flink.table.api.config.TableConfigOptions.TABLE_DML_SYNC;
+import static org.apache.paimon.utils.ParameterUtils.parseKeyValueString;
 
 /** Base implementation for flink {@link Procedure}. */
 public abstract class ProcedureBase implements Procedure, Factory {
@@ -51,9 +56,13 @@ public abstract class ProcedureBase implements Procedure, Factory {
         return catalog.getTable(Identifier.fromString(tableId));
     }
 
+    protected String notnull(@Nullable String arg) {
+        return arg == null ? "" : arg;
+    }
+
     @Nullable
     protected String nullable(String arg) {
-        return StringUtils.isBlank(arg) ? null : arg;
+        return StringUtils.isNullOrWhitespaceOnly(arg) ? null : arg;
     }
 
     protected String[] execute(
@@ -91,5 +100,17 @@ public abstract class ProcedureBase implements Procedure, Factory {
         } else {
             return new String[] {"JobID=" + jobId};
         }
+    }
+
+    protected Map<String, String> optionalConfigMap(String configStr) {
+        if (StringUtils.isNullOrWhitespaceOnly(configStr)) {
+            return Collections.emptyMap();
+        }
+
+        Map<String, String> config = new HashMap<>();
+        for (String kvString : configStr.split(";")) {
+            parseKeyValueString(config, kvString);
+        }
+        return config;
     }
 }

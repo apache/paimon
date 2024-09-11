@@ -24,6 +24,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
 
+import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.source.DynamicTableSource;
@@ -42,12 +43,20 @@ public class FlinkTableFactory extends AbstractFlinkTableFactory {
 
     @Override
     public DynamicTableSource createDynamicTableSource(Context context) {
+        CatalogTable table = context.getCatalogTable().getOrigin();
+        if (table instanceof FormatCatalogTable) {
+            return ((FormatCatalogTable) table).createTableSource(context);
+        }
         createTableIfNeeded(context);
         return super.createDynamicTableSource(context);
     }
 
     @Override
     public DynamicTableSink createDynamicTableSink(Context context) {
+        CatalogTable table = context.getCatalogTable().getOrigin();
+        if (table instanceof FormatCatalogTable) {
+            return ((FormatCatalogTable) table).createTableSink(context);
+        }
         createTableIfNeeded(context);
         return super.createDynamicTableSink(context);
     }

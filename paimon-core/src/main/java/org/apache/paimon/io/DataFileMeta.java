@@ -19,12 +19,12 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.SimpleStats;
-import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
@@ -50,19 +50,25 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.SerializationUtils.newBytesType;
 import static org.apache.paimon.utils.SerializationUtils.newStringType;
 
-/** Metadata of a data file. */
+/**
+ * Metadata of a data file.
+ *
+ * @since 0.9.0
+ */
+@Public
 public class DataFileMeta {
 
     public static final RowType SCHEMA =
             new RowType(
+                    false,
                     Arrays.asList(
                             new DataField(0, "_FILE_NAME", newStringType(false)),
                             new DataField(1, "_FILE_SIZE", new BigIntType(false)),
                             new DataField(2, "_ROW_COUNT", new BigIntType(false)),
                             new DataField(3, "_MIN_KEY", newBytesType(false)),
                             new DataField(4, "_MAX_KEY", newBytesType(false)),
-                            new DataField(5, "_KEY_STATS", SimpleStatsConverter.schema()),
-                            new DataField(6, "_VALUE_STATS", SimpleStatsConverter.schema()),
+                            new DataField(5, "_KEY_STATS", SimpleStats.SCHEMA),
+                            new DataField(6, "_VALUE_STATS", SimpleStats.SCHEMA),
                             new DataField(7, "_MIN_SEQUENCE_NUMBER", new BigIntType(false)),
                             new DataField(8, "_MAX_SEQUENCE_NUMBER", new BigIntType(false)),
                             new DataField(9, "_SCHEMA_ID", new BigIntType(false)),
@@ -488,10 +494,6 @@ public class DataFileMeta {
                 creationTime,
                 deleteRowCount,
                 fileSource);
-    }
-
-    public static RowType schema() {
-        return SCHEMA;
     }
 
     public static long getMaxSequenceNumber(List<DataFileMeta> fileMetas) {

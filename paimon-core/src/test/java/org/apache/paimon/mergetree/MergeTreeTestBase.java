@@ -23,6 +23,7 @@ import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.SortEngine;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.compact.CompactResult;
+import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -192,7 +193,7 @@ public abstract class MergeTreeTestBase {
                         valueType,
                         flushingAvro,
                         pathFactoryMap,
-                        this.options.targetFileSize());
+                        this.options.targetFileSize(true));
         writerFactory = writerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0, this.options);
         compactWriterFactory = writerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0, this.options);
         writer = createMergeTreeWriter(Collections.emptyList());
@@ -289,7 +290,7 @@ public abstract class MergeTreeTestBase {
                                 options.sortedRunSizeRatio(),
                                 options.numSortedRunCompactionTrigger()),
                         comparator,
-                        options.targetFileSize(),
+                        options.targetFileSize(true),
                         options.numSortedRunStopTrigger(),
                         new TestRewriter());
         writer = createMergeTreeWriter(dataFileMetas, mockFailResultCompactionManager);
@@ -514,7 +515,7 @@ public abstract class MergeTreeTestBase {
                         false,
                         MemorySize.ofKibiBytes(10),
                         128,
-                        "lz4",
+                        CompressOptions.defaultOptions(),
                         null,
                         compactManager,
                         maxSequenceNumber,
@@ -542,7 +543,7 @@ public abstract class MergeTreeTestBase {
                 new Levels(comparator, files, options.numLevels()),
                 strategy,
                 comparator,
-                options.compactionFileSize(),
+                options.compactionFileSize(true),
                 options.numSortedRunStopTrigger(),
                 new TestRewriter(),
                 null,

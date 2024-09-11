@@ -25,7 +25,7 @@ under the License.
     <parent>
         <groupId>org.apache.paimon</groupId>
         <artifactId>paimon-flink</artifactId>
-        <version>0.9-SNAPSHOT</version>
+        <version>1.0-SNAPSHOT</version>
     </parent>
 
     <packaging>jar</packaging>
@@ -34,15 +34,24 @@ under the License.
     <name>Paimon : Flink : CDC</name>
 
     <properties>
-        <flink.version>1.17.2</flink.version>
-        <flink.cdc.version>2.4.2</flink.cdc.version>
-        <flink.mongodb.cdc.version>2.4.1</flink.mongodb.cdc.version>
+        <flink.version>1.18.1</flink.version>
+        <flink.cdc.version>3.1.1</flink.cdc.version>
+        <flink.mongodb.cdc.version>3.1.1</flink.mongodb.cdc.version>
         <avro.version>1.11.1</avro.version>
         <geometry.version>2.2.0</geometry.version>
         <json-path.version>2.9.0</json-path.version>
         <mongodb.testcontainers.version>1.19.1</mongodb.testcontainers.version>
         <flink.connector.pulsar.version>4.0.0-1.17</flink.connector.pulsar.version>
+        <confluent.platform.version>7.5.0</confluent.platform.version>
+        <flink.connector.kafka.version>3.0.1-1.18</flink.connector.kafka.version>
     </properties>
+
+    <repositories>
+        <repository>
+            <id>confluent</id>
+            <url>https://packages.confluent.io/maven/</url>
+        </repository>
+    </repositories>
 
     <dependencies>
         <dependency>
@@ -76,14 +85,14 @@ under the License.
         <!-- CDC dependencies -->
 
         <dependency>
-            <groupId>com.ververica</groupId>
+            <groupId>org.apache.flink</groupId>
             <artifactId>flink-connector-postgres-cdc</artifactId>
             <version>${flink.cdc.version}</version>
             <scope>provided</scope>
         </dependency>
 
         <dependency>
-            <groupId>com.ververica</groupId>
+            <groupId>org.apache.flink</groupId>
             <artifactId>flink-connector-mysql-cdc</artifactId>
             <version>${flink.cdc.version}</version>
             <scope>provided</scope>
@@ -92,7 +101,7 @@ under the License.
         <dependency>
             <groupId>org.apache.flink</groupId>
             <artifactId>flink-connector-kafka</artifactId>
-            <version>${flink.version}</version>
+            <version>${flink.connector.kafka.version}</version>
             <scope>provided</scope>
         </dependency>
 
@@ -105,7 +114,7 @@ under the License.
 
 
         <dependency>
-            <groupId>com.ververica</groupId>
+            <groupId>org.apache.flink</groupId>
             <artifactId>flink-connector-mongodb-cdc</artifactId>
             <version>${flink.mongodb.cdc.version}</version>
             <scope>provided</scope>
@@ -122,6 +131,19 @@ under the License.
             <artifactId>avro</artifactId>
             <version>${avro.version}</version>
             <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>io.confluent</groupId>
+            <artifactId>kafka-avro-serializer</artifactId>
+            <version>${confluent.platform.version}</version>
+            <scope>provided</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.avro</groupId>
+                    <artifactId>avro</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <dependency>
@@ -282,7 +304,7 @@ under the License.
                                 <!-- Same as flink-sql-connector-kafka. -->
                                 <relocation>
                                     <pattern>org.apache.kafka.connect</pattern>
-                                    <shadedPattern>com.ververica.cdc.connectors.shaded.org.apache.kafka.connect</shadedPattern>
+                                    <shadedPattern>org.apache.flink.cdc.connectors.shaded.org.apache.kafka.connect</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>org.apache.kafka</pattern>

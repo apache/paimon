@@ -36,17 +36,24 @@ import io.debezium.time.MicroTime;
 import io.debezium.time.MicroTimestamp;
 import io.debezium.time.Timestamp;
 import io.debezium.time.ZonedTimestamp;
+import org.apache.avro.Schema;
+import org.apache.avro.generic.GenericRecord;
 import org.apache.kafka.connect.json.JsonConverterConfig;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.math.BigDecimal;
+import java.nio.ByteBuffer;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
+import java.util.function.Supplier;
 
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
 
@@ -56,13 +63,75 @@ import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_
  */
 public class DebeziumSchemaUtils {
 
-    /** Transform raw string value according to schema. */
+    public static final String FIELD_SCHEMA = "schema";
+    public static final String FIELD_PAYLOAD = "payload";
+    public static final String FIELD_SOURCE = "source";
+    public static final String FIELD_PRIMARY = "pkNames";
+    public static final String FIELD_DB = "db";
+
+    public static final String FIELD_BEFORE = "before";
+    public static final String FIELD_AFTER = "after";
+
+    public static final String FIELD_TYPE = "op";
+    public static final String OP_READE = "r";
+    public static final String OP_INSERT = "c";
+    public static final String OP_UPDATE = "u";
+    public static final String OP_DELETE = "d";
+    public static final String OP_TRUNCATE = "t";
+    public static final String OP_MESSAGE = "m";
+
     public static String transformRawValue(
             @Nullable String rawValue,
             String debeziumType,
             @Nullable String className,
             TypeMapping typeMapping,
             JsonNode origin,
+            ZoneId serverTimeZone) {
+        return transformRawValue(
+                rawValue,
+                debeziumType,
+                className,
+                typeMapping,
+                () -> {
+                    try {
+                        return ByteBuffer.wrap(origin.get(Geometry.WKB_FIELD).binaryValue());
+                    } catch (IOException e) {
+                        throw new IllegalArgumentException(
+                                String.format("Failed to convert %s to geometry JSON.", rawValue),
+                                e);
+                    }
+                },
+                serverTimeZone);
+    }
+
+    public static String transformAvroRawValue(
+            @Nullable String rawValue,
+            String debeziumType,
+            @Nullable String className,
+            TypeMapping typeMapping,
+            Object origin,
+            ZoneId serverTimeZone) {
+
+        if (rawValue != null && "bytes".equals(debeziumType) && className == null) {
+            return new String(((ByteBuffer) origin).array());
+        }
+
+        return transformRawValue(
+                rawValue,
+                debeziumType,
+                className,
+                typeMapping,
+                () -> (ByteBuffer) ((GenericRecord) origin).get(Geometry.WKB_FIELD),
+                serverTimeZone);
+    }
+
+    /** Transform raw string value according to schema. */
+    public static String transformRawValue(
+            @Nullable String rawValue,
+            String debeziumType,
+            @Nullable String className,
+            TypeMapping typeMapping,
+            Supplier<ByteBuffer> geometryGetter,
             ZoneId serverTimeZone) {
         if (rawValue == null) {
             return null;
@@ -158,8 +227,7 @@ public class DebeziumSchemaUtils {
         } else if (Point.LOGICAL_NAME.equals(className)
                 || Geometry.LOGICAL_NAME.equals(className)) {
             try {
-                byte[] wkb = origin.get(Geometry.WKB_FIELD).binaryValue();
-                transformed = MySqlTypeUtils.convertWkbArray(wkb);
+                transformed = MySqlTypeUtils.convertWkbArray(geometryGetter.get());
             } catch (Exception e) {
                 throw new IllegalArgumentException(
                         String.format("Failed to convert %s to geometry JSON.", rawValue), e);
@@ -225,6 +293,7 @@ public class DebeziumSchemaUtils {
                 return DataTypes.INT();
             case "int64":
                 return DataTypes.BIGINT();
+            case "float":
             case "float32":
             case "float64":
                 return DataTypes.FLOAT();
@@ -250,5 +319,70 @@ public class DebeziumSchemaUtils {
      */
     public static String decimalLogicalName() {
         return "org.apache.#.connect.data.Decimal".replace("#", "kafka");
+    }
+
+    protected static final String CONNECT_PARAMETERS_PROP = "connect.parameters";
+    protected static final String CONNECT_NAME_PROP = "connect.name";
+
+    static final String SCHEMA_PARAMETER_COLUMN_TYPE = "__debezium.source.column.type";
+    private static final String SCHEMA_PARAMETER_COLUMN_SIZE = "__debezium.source.column.length";
+    private static final String SCHEMA_PARAMETER_COLUMN_PRECISION =
+            "__debezium.source.column.scale";
+    static final String SCHEMA_PARAMETER_COLUMN_NAME = "__debezium.source.column.name";
+
+    public static Map<String, String> getAvroConnectParameters(Schema schema) {
+        // Mapping by mysql types
+        // Parse actual source column type from connect.parameters if enable debezium property
+        // "column.propagate.source.type", otherwise will infer avro schema type mapping to paimon
+        if (schema.getObjectProp(CONNECT_PARAMETERS_PROP) != null) {
+            return (Map<String, String>) schema.getObjectProp(CONNECT_PARAMETERS_PROP);
+        }
+        return new HashMap<>();
+    }
+
+    public static DataType avroToPaimonDataType(Schema schema) {
+        Map<String, String> connectParameters = getAvroConnectParameters(schema);
+        if (!connectParameters.isEmpty()) {
+            String typeName =
+                    connectParameters.getOrDefault(
+                            SCHEMA_PARAMETER_COLUMN_TYPE, schema.getType().name());
+            Integer length =
+                    Optional.ofNullable(connectParameters.get(SCHEMA_PARAMETER_COLUMN_SIZE))
+                            .map(Integer::valueOf)
+                            .orElse(null);
+            Integer scale =
+                    Optional.ofNullable(connectParameters.get(SCHEMA_PARAMETER_COLUMN_PRECISION))
+                            .map(Integer::valueOf)
+                            .orElse(null);
+            return MySqlTypeUtils.toDataType(typeName, length, scale, TypeMapping.defaultMapping());
+        }
+
+        // Mapping by avro schema type
+        return fromDebeziumAvroType(schema);
+    }
+
+    private static DataType fromDebeziumAvroType(Schema schema) {
+        Schema.Type avroType = schema.getType();
+        switch (avroType) {
+            case BOOLEAN:
+                return DataTypes.BOOLEAN();
+            case BYTES:
+            case FIXED:
+                return DataTypes.BYTES();
+            case DOUBLE:
+                return DataTypes.DOUBLE();
+            case FLOAT:
+                return DataTypes.FLOAT();
+            case INT:
+                return DataTypes.INT();
+            case LONG:
+                return DataTypes.BIGINT();
+            case STRING:
+            case RECORD:
+                return DataTypes.STRING();
+            default:
+                throw new UnsupportedOperationException(
+                        String.format("Don't support avro type '%s' yet.", avroType));
+        }
     }
 }

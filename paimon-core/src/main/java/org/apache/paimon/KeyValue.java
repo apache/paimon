@@ -23,6 +23,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TinyIntType;
@@ -33,6 +34,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static org.apache.paimon.schema.SystemColumns.LEVEL;
 import static org.apache.paimon.schema.SystemColumns.SEQUENCE_NUMBER;
 import static org.apache.paimon.schema.SystemColumns.VALUE_KIND;
 import static org.apache.paimon.utils.Preconditions.checkState;
@@ -118,6 +120,15 @@ public class KeyValue {
         fields.add(new DataField(1, VALUE_KIND, new TinyIntType(false)));
         fields.addAll(valueType.getFields());
         return new RowType(fields);
+    }
+
+    public static RowType schemaWithLevel(RowType keyType, RowType valueType) {
+        RowType.Builder builder = RowType.builder();
+        schema(keyType, valueType)
+                .getFields()
+                .forEach(f -> builder.field(f.name(), f.type(), f.description()));
+        builder.field(LEVEL, DataTypes.INT().notNull());
+        return builder.build();
     }
 
     /**

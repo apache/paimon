@@ -40,7 +40,6 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ArrayNode;
 
-import com.ververica.cdc.connectors.postgres.source.config.PostgresSourceOptions;
 import io.debezium.connector.AbstractSourceInfo;
 import io.debezium.data.Bits;
 import io.debezium.time.Date;
@@ -49,6 +48,7 @@ import io.debezium.time.MicroTimestamp;
 import io.debezium.time.Timestamp;
 import io.debezium.time.ZonedTimestamp;
 import org.apache.flink.api.common.functions.FlatMapFunction;
+import org.apache.flink.cdc.connectors.postgres.source.config.PostgresSourceOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.util.Collector;
 import org.apache.kafka.connect.json.JsonConverterConfig;
@@ -188,7 +188,7 @@ public class PostgresRecordParser
                     return DataTypes.DECIMAL(precision, scale);
                 } else if (Bits.LOGICAL_NAME.equals(field.name())) {
                     String stringifyLength = field.parameters().get("length").asText();
-                    if (StringUtils.isBlank(stringifyLength)) {
+                    if (StringUtils.isNullOrWhitespaceOnly(stringifyLength)) {
                         return DataTypes.BOOLEAN();
                     }
                     Integer length = Integer.valueOf(stringifyLength);

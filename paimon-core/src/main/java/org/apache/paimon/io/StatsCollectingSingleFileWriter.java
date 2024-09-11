@@ -53,8 +53,9 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
             RowType writeSchema,
             @Nullable SimpleStatsExtractor simpleStatsExtractor,
             String compression,
-            SimpleColStatsCollector.Factory[] statsCollectors) {
-        super(fileIO, factory, path, converter, compression);
+            SimpleColStatsCollector.Factory[] statsCollectors,
+            boolean asyncWrite) {
+        super(fileIO, factory, path, converter, compression, asyncWrite);
         this.simpleStatsExtractor = simpleStatsExtractor;
         if (this.simpleStatsExtractor == null) {
             this.simpleStatsCollector = new SimpleStatsCollector(writeSchema, statsCollectors);
@@ -70,6 +71,15 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
         if (simpleStatsCollector != null && !simpleStatsCollector.isDisabled()) {
             simpleStatsCollector.collect(rowData);
         }
+    }
+
+    @Override
+    public void writeBundle(BundleRecords bundle) throws IOException {
+        Preconditions.checkState(
+                simpleStatsExtractor != null,
+                "Can't write bundle without simpleStatsExtractor, we may lose all the statistical information");
+
+        super.writeBundle(bundle);
     }
 
     public SimpleColStats[] fieldStats() throws IOException {

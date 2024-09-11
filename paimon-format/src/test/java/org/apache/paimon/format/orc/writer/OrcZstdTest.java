@@ -64,7 +64,7 @@ class OrcZstdTest {
         options.set("compression.zstd.level", "1");
         OrcFileFormat orc =
                 new OrcFileFormatFactory()
-                        .create(new FileFormatFactory.FormatContext(options, 1024));
+                        .create(new FileFormatFactory.FormatContext(options, 1024, 1024));
         Assertions.assertThat(orc).isInstanceOf(OrcFileFormat.class);
 
         Assertions.assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".compress", ""))
@@ -109,7 +109,7 @@ class OrcZstdTest {
                                     UUID.randomUUID().toString() + random.nextInt()));
             formatWriter.addElement(element);
         }
-        formatWriter.finish();
+        formatWriter.close();
         OrcFile.ReaderOptions readerOptions = OrcFile.readerOptions(new Configuration());
         Reader reader =
                 OrcFile.createReader(new org.apache.hadoop.fs.Path(path.toString()), readerOptions);

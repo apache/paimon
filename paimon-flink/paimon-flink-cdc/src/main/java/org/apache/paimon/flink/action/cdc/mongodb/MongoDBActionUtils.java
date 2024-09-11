@@ -20,12 +20,13 @@ package org.apache.paimon.flink.action.cdc.mongodb;
 
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.serialization.CdcDebeziumDeserializationSchema;
+import org.apache.paimon.flink.action.cdc.watermark.CdcTimestampExtractor;
 
-import com.ververica.cdc.connectors.base.options.SourceOptions;
-import com.ververica.cdc.connectors.base.options.StartupOptions;
-import com.ververica.cdc.connectors.mongodb.source.MongoDBSource;
-import com.ververica.cdc.connectors.mongodb.source.MongoDBSourceBuilder;
-import com.ververica.cdc.connectors.mongodb.source.config.MongoDBSourceOptions;
+import org.apache.flink.cdc.connectors.base.options.SourceOptions;
+import org.apache.flink.cdc.connectors.base.options.StartupOptions;
+import org.apache.flink.cdc.connectors.mongodb.source.MongoDBSource;
+import org.apache.flink.cdc.connectors.mongodb.source.MongoDBSourceBuilder;
+import org.apache.flink.cdc.connectors.mongodb.source.config.MongoDBSourceOptions;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
@@ -58,6 +59,7 @@ public class MongoDBActionUtils {
     private static final String INITIAL_MODE = "initial";
     private static final String LATEST_OFFSET_MODE = "latest-offset";
     private static final String TIMESTAMP_MODE = "timestamp";
+    private static final String SNAPSHOT_MODE = "snapshot";
 
     public static final ConfigOption<String> FIELD_NAME =
             ConfigOptions.key("field.name")
@@ -128,8 +130,14 @@ public class MongoDBActionUtils {
                         StartupOptions.timestamp(
                                 mongodbConfig.get(SourceOptions.SCAN_STARTUP_TIMESTAMP_MILLIS)));
                 break;
+            case SNAPSHOT_MODE:
+                sourceBuilder.startupOptions(StartupOptions.snapshot());
+                break;
             default:
-                throw new IllegalArgumentException("Unsupported startup mode: " + startupMode);
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Unknown scan.startup.mode='%s'. Valid scan.startup.mode for MongoDB CDC are [initial, latest-offset, timestamp, snapshot]",
+                                startupMode));
         }
 
         Map<String, Object> customConverterConfigs = new HashMap<>();
@@ -138,5 +146,9 @@ public class MongoDBActionUtils {
                 new CdcDebeziumDeserializationSchema(false, customConverterConfigs);
 
         return sourceBuilder.deserializer(schema).build();
+    }
+
+    public static CdcTimestampExtractor createCdcTimestampExtractor() {
+        return new MongoDBCdcTimestampExtractor();
     }
 }

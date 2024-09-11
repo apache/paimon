@@ -28,6 +28,7 @@ import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.DefaultValueAssigner;
@@ -46,6 +47,8 @@ import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -57,6 +60,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiConsumer;
 
+import static org.apache.paimon.Snapshot.FIRST_SNAPSHOT_ID;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.operation.FileStoreScan.Plan.groupByPartFiles;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
@@ -98,7 +102,10 @@ public class SnapshotReaderImpl implements SnapshotReader {
         this.deletionVectors = options.deletionVectorsEnabled();
         this.snapshotManager = snapshotManager;
         this.consumerManager =
-                new ConsumerManager(snapshotManager.fileIO(), snapshotManager.tablePath());
+                new ConsumerManager(
+                        snapshotManager.fileIO(),
+                        snapshotManager.tablePath(),
+                        snapshotManager.branch());
         this.splitGenerator = splitGenerator;
         this.nonPartitionFilterConsumer = nonPartitionFilterConsumer;
         this.defaultValueAssigner = defaultValueAssigner;
@@ -155,6 +162,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
+    public SnapshotReader withPartitionFilter(List<BinaryRow> partitions) {
+        scan.withPartitionFilter(partitions);
+        return this;
+    }
+
+    @Override
     public SnapshotReader withFilter(Predicate predicate) {
         List<String> partitionKeys = tableSchema.partitionKeys();
         int[] fieldIdxToPartitionIdx =
@@ -198,8 +211,8 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
-    public SnapshotReader withDataFileTimeMills(long dataFileTimeMills) {
-        scan.withDataFileTimeMills(dataFileTimeMills);
+    public SnapshotReader withManifestEntryFilter(Filter<ManifestEntry> filter) {
+        scan.withManifestEntryFilter(filter);
         return this;
     }
 
@@ -244,7 +257,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Override
     public Plan read() {
         FileStoreScan.Plan plan = scan.plan();
-        Long snapshotId = plan.snapshotId();
+        @Nullable Snapshot snapshot = plan.snapshot();
 
         Map<BinaryRow, Map<Integer, List<DataFileMeta>>> files =
                 groupByPartFiles(plan.files(FileKind.ADD));
@@ -256,25 +269,22 @@ public class SnapshotReaderImpl implements SnapshotReader {
             files = newFiles;
         }
         List<DataSplit> splits =
-                generateSplits(
-                        snapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : snapshotId,
-                        scanMode != ScanMode.ALL,
-                        splitGenerator,
-                        files);
-        return new PlanImpl(plan.watermark(), plan.snapshotId(), (List) splits);
+                generateSplits(snapshot, scanMode != ScanMode.ALL, splitGenerator, files);
+        return new PlanImpl(
+                plan.watermark(), snapshot == null ? null : snapshot.id(), (List) splits);
     }
 
     private List<DataSplit> generateSplits(
-            long snapshotId,
+            @Nullable Snapshot snapshot,
             boolean isStreaming,
             SplitGenerator splitGenerator,
             Map<BinaryRow, Map<Integer, List<DataFileMeta>>> groupedDataFiles) {
         List<DataSplit> splits = new ArrayList<>();
         // Read deletion indexes at once to reduce file IO
         Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> deletionIndexFilesMap =
-                deletionVectors
+                deletionVectors && snapshot != null
                         ? indexFileHandler.scan(
-                                snapshotId, DELETION_VECTORS_INDEX, groupedDataFiles.keySet())
+                                snapshot, DELETION_VECTORS_INDEX, groupedDataFiles.keySet())
                         : Collections.emptyMap();
         for (Map.Entry<BinaryRow, Map<Integer, List<DataFileMeta>>> entry :
                 groupedDataFiles.entrySet()) {
@@ -285,7 +295,8 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 List<DataFileMeta> bucketFiles = bucketEntry.getValue();
                 DataSplit.Builder builder =
                         DataSplit.builder()
-                                .withSnapshot(snapshotId)
+                                .withSnapshot(
+                                        snapshot == null ? FIRST_SNAPSHOT_ID - 1 : snapshot.id())
                                 .withPartition(partition)
                                 .withBucket(bucket)
                                 .isStreaming(isStreaming);
@@ -334,7 +345,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
         Map<BinaryRow, Map<Integer, List<DataFileMeta>>> dataFiles =
                 groupByPartFiles(plan.files(FileKind.ADD));
 
-        return toChangesPlan(true, plan, plan.snapshotId() - 1, beforeFiles, dataFiles);
+        return toChangesPlan(true, plan, plan.snapshot().id() - 1, beforeFiles, dataFiles);
     }
 
     private Plan toChangesPlan(
@@ -343,6 +354,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
             long beforeSnapshotId,
             Map<BinaryRow, Map<Integer, List<DataFileMeta>>> beforeFiles,
             Map<BinaryRow, Map<Integer, List<DataFileMeta>>> dataFiles) {
+        Snapshot snapshot = plan.snapshot();
         List<DataSplit> splits = new ArrayList<>();
         Map<BinaryRow, Set<Integer>> buckets = new HashMap<>();
         beforeFiles.forEach(
@@ -362,7 +374,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
         Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> deletionIndexFilesMap =
                 deletionVectors
                         ? indexFileHandler.scan(
-                                plan.snapshotId(), DELETION_VECTORS_INDEX, dataFiles.keySet())
+                                snapshot, DELETION_VECTORS_INDEX, dataFiles.keySet())
                         : Collections.emptyMap();
 
         for (Map.Entry<BinaryRow, Set<Integer>> entry : buckets.entrySet()) {
@@ -382,7 +394,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
                 DataSplit.Builder builder =
                         DataSplit.builder()
-                                .withSnapshot(plan.snapshotId())
+                                .withSnapshot(snapshot.id())
                                 .withPartition(part)
                                 .withBucket(bucket)
                                 .withBeforeFiles(before)
@@ -405,7 +417,8 @@ public class SnapshotReaderImpl implements SnapshotReader {
             }
         }
 
-        return new PlanImpl(plan.watermark(), plan.snapshotId(), (List) splits);
+        return new PlanImpl(
+                plan.watermark(), snapshot == null ? null : snapshot.id(), (List) splits);
     }
 
     @Override

@@ -36,7 +36,7 @@ public class ParameterUtils {
 
     public static Map<String, String> parseCommaSeparatedKeyValues(String keyValues) {
         Map<String, String> kvs = new HashMap<>();
-        if (!StringUtils.isBlank(keyValues)) {
+        if (!StringUtils.isNullOrWhitespaceOnly(keyValues)) {
             for (String kvString : keyValues.split(",")) {
                 parseKeyValueString(kvs, kvString);
             }
@@ -53,5 +53,21 @@ public class ParameterUtils {
                             kvString));
         }
         map.put(kv[0].trim(), kv[1].trim());
+    }
+
+    public static void parseKeyValueList(Map<String, List<String>> mapList, String kvString) {
+        String[] kv = kvString.split("=", 2);
+        if (kv.length != 2) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Invalid key-value string '%s'. Please use format 'key=value'",
+                            kvString));
+        }
+        String[] valueArr = kv[1].trim().split(",");
+        List<String> valueList = new ArrayList<>();
+        for (String value : valueArr) {
+            valueList.add(value);
+        }
+        mapList.put(kv[0].trim(), valueList);
     }
 }

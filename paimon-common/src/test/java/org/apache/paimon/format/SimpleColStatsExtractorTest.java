@@ -89,7 +89,7 @@ public abstract class SimpleColStatsExtractorTest {
         for (GenericRow row : data) {
             writer.addElement(row);
         }
-        writer.finish();
+        writer.close();
 
         SimpleStatsCollector collector = new SimpleStatsCollector(rowType, stats);
         for (GenericRow row : data) {

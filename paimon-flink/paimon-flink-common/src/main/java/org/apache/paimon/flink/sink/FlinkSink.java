@@ -24,6 +24,7 @@ import org.apache.paimon.CoreOptions.TagCreationMode;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SerializableRunnable;
@@ -47,8 +48,10 @@ import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedList;
+import java.util.List;
 import java.util.Queue;
 import java.util.Set;
 
@@ -134,8 +137,7 @@ public abstract class FlinkSink<T> implements Serializable {
             }
         }
 
-        if (changelogProducer == ChangelogProducer.LOOKUP
-                && !coreOptions.prepareCommitWaitCompaction()) {
+        if (coreOptions.needLookup() && !coreOptions.prepareCommitWaitCompaction()) {
             return (table, commitUser, state, ioManager, memoryPool, metricGroup) -> {
                 assertNoSinkMaterializer.run();
                 return new AsyncLookupSinkWrite(
@@ -223,8 +225,11 @@ public abstract class FlinkSink<T> implements Serializable {
                                         commitUser))
                         .setParallelism(parallelism == null ? input.getParallelism() : parallelism);
 
-        if (!isStreaming) {
-            assertBatchConfiguration(env, written.getParallelism());
+        boolean writeMCacheEnabled = table.coreOptions().writeManifestCache().getBytes() > 0;
+        boolean hashDynamicMode = table.bucketMode() == BucketMode.HASH_DYNAMIC;
+        if (!isStreaming && (writeMCacheEnabled || hashDynamicMode)) {
+            assertBatchAdaptiveParallelism(
+                    env, written.getParallelism(), writeMCacheEnabled, hashDynamicMode);
         }
 
         Options options = Options.fromMap(table.options());
@@ -315,13 +320,39 @@ public abstract class FlinkSink<T> implements Serializable {
                         + " to exactly-once");
     }
 
-    public static void assertBatchConfiguration(
+    public static void assertBatchAdaptiveParallelism(
             StreamExecutionEnvironment env, int sinkParallelism) {
+        String msg =
+                "Paimon Sink does not support Flink's Adaptive Parallelism mode. "
+                        + "Please manually turn it off or set Paimon `sink.parallelism` manually.";
+        assertBatchAdaptiveParallelism(env, sinkParallelism, msg);
+    }
+
+    public static void assertBatchAdaptiveParallelism(
+            StreamExecutionEnvironment env,
+            int sinkParallelism,
+            boolean writeMCacheEnabled,
+            boolean hashDynamicMode) {
+        List<String> messages = new ArrayList<>();
+        if (writeMCacheEnabled) {
+            messages.add("Write Manifest Cache");
+        }
+        if (hashDynamicMode) {
+            messages.add("Dynamic Bucket Mode");
+        }
+        String msg =
+                String.format(
+                        "Paimon Sink with %s does not support Flink's Adaptive Parallelism mode. "
+                                + "Please manually turn it off or set Paimon `sink.parallelism` manually.",
+                        messages);
+        assertBatchAdaptiveParallelism(env, sinkParallelism, msg);
+    }
+
+    public static void assertBatchAdaptiveParallelism(
+            StreamExecutionEnvironment env, int sinkParallelism, String exceptionMsg) {
         try {
             checkArgument(
-                    sinkParallelism != -1 || !AdaptiveParallelism.isEnabled(env),
-                    "Paimon Sink does not support Flink's Adaptive Parallelism mode. "
-                            + "Please manually turn it off or set Paimon `sink.parallelism` manually.");
+                    sinkParallelism != -1 || !AdaptiveParallelism.isEnabled(env), exceptionMsg);
         } catch (NoClassDefFoundError ignored) {
             // before 1.17, there is no adaptive parallelism
         }

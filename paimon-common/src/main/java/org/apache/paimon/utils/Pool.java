@@ -20,7 +20,9 @@ package org.apache.paimon.utils;
 
 import javax.annotation.Nullable;
 
+import java.time.Duration;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
 /** A pool to cache and recycle heavyweight objects, to reduce object allocation. */
 public class Pool<T> {
@@ -66,6 +68,10 @@ public class Pool<T> {
     /** Gets the next cached entry. This blocks until the next entry is available. */
     public T pollEntry() throws InterruptedException {
         return pool.take();
+    }
+
+    public T pollEntry(Duration timeout) throws InterruptedException {
+        return pool.poll(timeout.toMillis(), TimeUnit.MILLISECONDS);
     }
 
     /** Tries to get the next cached entry. If the pool is empty, this method returns null. */

@@ -33,11 +33,11 @@ import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.metrics.CommitMetrics;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.utils.ExecutorThreadFactory;
-import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PathFactory;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
 
 import org.slf4j.Logger;
@@ -55,8 +55,6 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
@@ -64,16 +62,19 @@ import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import static java.util.Collections.emptyList;
+import static java.util.Collections.singletonList;
 import static org.apache.paimon.CoreOptions.ExpireExecutionMode;
 import static org.apache.paimon.table.sink.BatchWriteBuilder.COMMIT_IDENTIFIER;
+import static org.apache.paimon.utils.ManifestReadThreadPool.getExecutorService;
 import static org.apache.paimon.utils.Preconditions.checkState;
+import static org.apache.paimon.utils.ThreadPoolUtils.randomlyExecute;
 
 /** An abstraction layer above {@link FileStoreCommit} to provide snapshot commit and expiration. */
 public class TableCommitImpl implements InnerTableCommit {
     private static final Logger LOG = LoggerFactory.getLogger(TableCommitImpl.class);
 
     private final FileStoreCommit commit;
-    private final List<CommitCallback> commitCallbacks;
     @Nullable private final Runnable expireSnapshots;
     @Nullable private final PartitionExpire partitionExpire;
     @Nullable private final TagAutoManager tagAutoManager;
@@ -93,7 +94,6 @@ public class TableCommitImpl implements InnerTableCommit {
 
     public TableCommitImpl(
             FileStoreCommit commit,
-            List<CommitCallback> commitCallbacks,
             @Nullable Runnable expireSnapshots,
             @Nullable PartitionExpire partitionExpire,
             @Nullable TagAutoManager tagAutoManager,
@@ -106,10 +106,10 @@ public class TableCommitImpl implements InnerTableCommit {
         commit.withLock(lock);
         if (partitionExpire != null) {
             partitionExpire.withLock(lock);
+            commit.withPartitionExpire(partitionExpire);
         }
 
         this.commit = commit;
-        this.commitCallbacks = commitCallbacks;
         this.expireSnapshots = expireSnapshots;
         this.partitionExpire = partitionExpire;
         this.tagAutoManager = tagAutoManager;
@@ -200,7 +200,7 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     public void commit(ManifestCommittable committable) {
-        commitMultiple(Collections.singletonList(committable), false);
+        commitMultiple(singletonList(committable), false);
     }
 
     public void commitMultiple(List<ManifestCommittable> committables, boolean checkAppendFiles) {
@@ -228,8 +228,6 @@ public class TableCommitImpl implements InnerTableCommit {
             commit.overwrite(overwritePartition, committable, Collections.emptyMap());
             expire(committable.identifier(), expireMainExecutor);
         }
-
-        commitCallbacks.forEach(c -> c.call(committables));
     }
 
     public int filterAndCommitMultiple(List<ManifestCommittable> committables) {
@@ -238,26 +236,13 @@ public class TableCommitImpl implements InnerTableCommit {
 
     public int filterAndCommitMultiple(
             List<ManifestCommittable> committables, boolean checkAppendFiles) {
-        Set<Long> retryIdentifiers =
-                commit.filterCommitted(
-                        committables.stream()
-                                .map(ManifestCommittable::identifier)
-                                .collect(Collectors.toSet()));
-
-        // commitCallback may fail after the snapshot file is successfully created,
-        // so we have to try all of them again
-        List<ManifestCommittable> succeededCommittables =
+        List<ManifestCommittable> sortedCommittables =
                 committables.stream()
-                        .filter(c -> !retryIdentifiers.contains(c.identifier()))
-                        .collect(Collectors.toList());
-        commitCallbacks.forEach(c -> c.call(succeededCommittables));
-
-        List<ManifestCommittable> retryCommittables =
-                committables.stream()
-                        .filter(c -> retryIdentifiers.contains(c.identifier()))
                         // identifier must be in increasing order
                         .sorted(Comparator.comparingLong(ManifestCommittable::identifier))
                         .collect(Collectors.toList());
+        List<ManifestCommittable> retryCommittables = commit.filterCommitted(sortedCommittables);
+
         if (!retryCommittables.isEmpty()) {
             checkFilesExistence(retryCommittables);
             commitMultiple(retryCommittables, checkAppendFiles);
@@ -304,22 +289,13 @@ public class TableCommitImpl implements InnerTableCommit {
                         throw new UncheckedIOException(e);
                     }
                 };
-        List<Path> nonExistFiles;
-        try {
-            nonExistFiles =
-                    FileUtils.COMMON_IO_FORK_JOIN_POOL
-                            .submit(
-                                    () ->
-                                            files.parallelStream()
-                                                    .filter(nonExists)
-                                                    .collect(Collectors.toList()))
-                            .get();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException(e);
-        } catch (ExecutionException e) {
-            throw new RuntimeException(e.getCause());
-        }
+
+        List<Path> nonExistFiles =
+                Lists.newArrayList(
+                        randomlyExecute(
+                                getExecutorService(null),
+                                f -> nonExists.test(f) ? singletonList(f) : emptyList(),
+                                files));
 
         if (nonExistFiles.size() > 0) {
             String message =
@@ -378,9 +354,7 @@ public class TableCommitImpl implements InnerTableCommit {
 
     @Override
     public void close() throws Exception {
-        for (CommitCallback commitCallback : commitCallbacks) {
-            IOUtils.closeQuietly(commitCallback);
-        }
+        commit.close();
         IOUtils.closeQuietly(lock);
         expireMainExecutor.shutdownNow();
     }

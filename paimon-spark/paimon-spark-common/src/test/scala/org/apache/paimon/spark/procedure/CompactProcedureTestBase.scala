@@ -22,6 +22,7 @@ import org.apache.paimon.Snapshot.CommitKind
 import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.table.source.DataSplit
 
 import org.apache.spark.sql.{Dataset, Row}
 import org.apache.spark.sql.execution.streaming.MemoryStream
@@ -249,7 +250,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     }
   }
 
-  test("Paimon Procedure: sort compact with max_concurrent_jobs") {
+  test("Paimon Procedure: sort compact with multi-partitions") {
     Seq("order", "zorder").foreach {
       orderStrategy =>
         {
@@ -275,7 +276,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
 
             checkAnswer(
               spark.sql(
-                s"CALL sys.compact(table => 'T', order_strategy => '$orderStrategy', order_by => 'id', max_concurrent_jobs => 2)"),
+                s"CALL sys.compact(table => 'T', order_strategy => '$orderStrategy', order_by => 'id')"),
               Seq(true).toDF())
 
             val result = List(Row(1), Row(2), Row(3), Row(4)).asJava
@@ -480,6 +481,11 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     assert(intercept[IllegalArgumentException] {
       spark.sql("CALL sys.compact(table => 'T', order_strategy => 'sort', order_by => 'pt')")
     }.getMessage.contains("order_by should not contain partition cols"))
+
+    assert(intercept[IllegalArgumentException] {
+      spark.sql(
+        "CALL sys.compact(table => 'T', order_strategy => 'sort', order_by => 'id', partition_idle_time =>'5s')")
+    }.getMessage.contains("sort compact do not support 'partition_idle_time'"))
   }
 
   test("Paimon Procedure: compact with where") {
@@ -559,6 +565,87 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       spark.sql(s"SELECT * FROM T ORDER BY id"),
       Row(1, "a", "p1") :: Row(2, "b", "p2") :: Row(3, "c", "p1") :: Row(4, "d", "p2") ::
         Row(5, "e", "p1") :: Row(6, "f", "p2") :: Nil)
+  }
+
+  test("Paimon Procedure: compact with partition_idle_time for pk table") {
+    Seq(1, -1).foreach(
+      bucket => {
+        withTable("T") {
+          val dynamicBucketArgs = if (bucket == -1) " ,'dynamic-bucket.initial-buckets'='1'" else ""
+          spark.sql(
+            s"""
+               |CREATE TABLE T (id INT, value STRING, dt STRING, hh INT)
+               |TBLPROPERTIES ('primary-key'='id, dt, hh', 'bucket'='$bucket', 'write-only'='true'$dynamicBucketArgs)
+               |PARTITIONED BY (dt, hh)
+               |""".stripMargin)
+
+          val table = loadTable("T")
+
+          spark.sql(s"INSERT INTO T VALUES (1, '1', '2024-01-01', 0), (2, '2', '2024-01-01', 1)")
+          spark.sql(s"INSERT INTO T VALUES (5, '5', '2024-01-02', 0), (6, '6', '2024-01-02', 1)")
+          spark.sql(s"INSERT INTO T VALUES (3, '3', '2024-01-01', 0), (4, '4', '2024-01-01', 1)")
+          spark.sql(s"INSERT INTO T VALUES (7, '7', '2024-01-02', 0), (8, '8', '2024-01-02', 1)")
+
+          Thread.sleep(10000);
+          spark.sql(s"INSERT INTO T VALUES (9, '9', '2024-01-01', 0), (10, '10', '2024-01-02', 0)")
+
+          spark.sql("CALL sys.compact(table => 'T', partition_idle_time => '10s')")
+          val dataSplits = table.newSnapshotReader.read.dataSplits.asScala.toList
+          Assertions
+            .assertThat(dataSplits.size)
+            .isEqualTo(4)
+          Assertions.assertThat(lastSnapshotCommand(table).equals(CommitKind.COMPACT)).isTrue
+          for (dataSplit: DataSplit <- dataSplits) {
+            if (dataSplit.partition().getInt(1) == 0) {
+              Assertions
+                .assertThat(dataSplit.dataFiles().size())
+                .isEqualTo(3)
+            } else {
+              Assertions
+                .assertThat(dataSplit.dataFiles().size())
+                .isEqualTo(1)
+            }
+          }
+        }
+      })
+
+  }
+
+  test("Paimon Procedure: compact with partition_idle_time for unaware bucket append table") {
+    spark.sql(
+      s"""
+         |CREATE TABLE T (id INT, value STRING, dt STRING, hh INT)
+         |TBLPROPERTIES ('bucket'='-1', 'write-only'='true', 'compaction.min.file-num'='2', 'compaction.max.file-num'='2')
+         |PARTITIONED BY (dt, hh)
+         |""".stripMargin)
+
+    val table = loadTable("T")
+
+    spark.sql(s"INSERT INTO T VALUES (1, '1', '2024-01-01', 0), (2, '2', '2024-01-01', 1)")
+    spark.sql(s"INSERT INTO T VALUES (5, '5', '2024-01-02', 0), (6, '6', '2024-01-02', 1)")
+    spark.sql(s"INSERT INTO T VALUES (3, '3', '2024-01-01', 0), (4, '4', '2024-01-01', 1)")
+    spark.sql(s"INSERT INTO T VALUES (7, '7', '2024-01-02', 0), (8, '8', '2024-01-02', 1)")
+
+    Thread.sleep(10000);
+    spark.sql(s"INSERT INTO T VALUES (9, '9', '2024-01-01', 0), (10, '10', '2024-01-02', 0)")
+
+    spark.sql("CALL sys.compact(table => 'T', partition_idle_time => '10s')")
+    val dataSplits = table.newSnapshotReader.read.dataSplits.asScala.toList
+    Assertions
+      .assertThat(dataSplits.size)
+      .isEqualTo(4)
+    Assertions.assertThat(lastSnapshotCommand(table).equals(CommitKind.COMPACT)).isTrue
+    for (dataSplit: DataSplit <- dataSplits) {
+      if (dataSplit.partition().getInt(1) == 0) {
+        Assertions
+          .assertThat(dataSplit.dataFiles().size())
+          .isEqualTo(3)
+      } else {
+        Assertions
+          .assertThat(dataSplit.dataFiles().size())
+          .isEqualTo(1)
+      }
+    }
   }
 
   def lastSnapshotCommand(table: FileStoreTable): CommitKind = {

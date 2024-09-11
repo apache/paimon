@@ -136,7 +136,7 @@ public class FilesTableTest extends TableTestBase {
 
     @Test
     public void testReadFilesFromLatest() throws Exception {
-        List<InternalRow> expectedRow = getExceptedResult(2L);
+        List<InternalRow> expectedRow = getExpectedResult(2L);
         List<InternalRow> result = read(filesTable);
         assertThat(result).containsExactlyInAnyOrderElementsOf(expectedRow);
     }
@@ -149,7 +149,7 @@ public class FilesTableTest extends TableTestBase {
 
     @Test
     public void testReadFilesFromSpecifiedSnapshot() throws Exception {
-        List<InternalRow> expectedRow = getExceptedResult(1L);
+        List<InternalRow> expectedRow = getExpectedResult(1L);
         filesTable =
                 (FilesTable)
                         filesTable.copy(
@@ -169,7 +169,7 @@ public class FilesTableTest extends TableTestBase {
                 .satisfies(anyCauseMatches(IllegalArgumentException.class));
     }
 
-    private List<InternalRow> getExceptedResult(long snapshotId) {
+    private List<InternalRow> getExpectedResult(long snapshotId) {
         if (!snapshotManager.snapshotExists(snapshotId)) {
             return Collections.emptyList();
         }

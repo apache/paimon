@@ -32,6 +32,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.Schema;
@@ -284,7 +285,7 @@ public class OrphanFilesCleanTest {
         while (id <= max) {
             List<Split> splits = scan.plan().splits();
             if (!splits.isEmpty()) {
-                List<ConcatRecordReader.ReaderSupplier<InternalRow>> readers = new ArrayList<>();
+                List<ReaderSupplier<InternalRow>> readers = new ArrayList<>();
                 for (Split split : splits) {
                     readers.add(() -> scanTable.newRead().createReader(split));
                 }
@@ -318,7 +319,7 @@ public class OrphanFilesCleanTest {
 
     private void validateSnapshot(Snapshot snapshot, List<TestPojo> data) throws Exception {
         List<Split> splits = table.newSnapshotReader().withSnapshot(snapshot).read().splits();
-        List<ConcatRecordReader.ReaderSupplier<InternalRow>> readers = new ArrayList<>();
+        List<ReaderSupplier<InternalRow>> readers = new ArrayList<>();
         for (Split split : splits) {
             readers.add(() -> table.newRead().createReader(split));
         }
@@ -360,6 +361,9 @@ public class OrphanFilesCleanTest {
         SnapshotManager snapshotManager = table.snapshotManager();
         writeData(snapshotManager, committedData, snapshotData, changelogData, commitTimes);
 
+        // create empty branch with same schema
+        table.createBranch("branch1");
+
         // generate non used files
         int shouldBeDeleted = generateUnUsedFile();
         assertThat(manuallyAddedFiles.size()).isEqualTo(shouldBeDeleted);
@@ -391,8 +395,8 @@ public class OrphanFilesCleanTest {
         List<Path> manifests = new ArrayList<>();
         ManifestList manifestList = table.store().manifestListFactory().create();
         FileStorePathFactory pathFactory = table.store().pathFactory();
-        snapshot1
-                .allManifests(manifestList)
+        manifestList
+                .readAllManifests(snapshot1)
                 .forEach(m -> manifests.add(pathFactory.toManifestFilePath(m.fileName())));
 
         Path manifest = manifests.get(RANDOM.nextInt(manifests.size()));

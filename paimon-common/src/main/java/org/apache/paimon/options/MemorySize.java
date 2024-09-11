@@ -56,6 +56,10 @@ public class MemorySize implements java.io.Serializable, Comparable<MemorySize> 
 
     public static final MemorySize MAX_VALUE = new MemorySize(Long.MAX_VALUE);
 
+    public static final MemorySize VALUE_128_MB = MemorySize.ofMebiBytes(128);
+
+    public static final MemorySize VALUE_256_MB = MemorySize.ofMebiBytes(256);
+
     private static final List<MemoryUnit> ORDERED_UNITS =
             Arrays.asList(BYTES, KILO_BYTES, MEGA_BYTES, GIGA_BYTES, TERA_BYTES);
 

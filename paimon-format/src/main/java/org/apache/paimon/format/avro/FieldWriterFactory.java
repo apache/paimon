@@ -20,11 +20,13 @@ package org.apache.paimon.format.avro;
 
 import org.apache.paimon.data.DataGetters;
 import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.RowType;
 
 import org.apache.avro.AvroRuntimeException;
 import org.apache.avro.Schema;
@@ -156,6 +158,36 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
             for (int i = 0; i < numElements; i += 1) {
                 encoder.startItem();
                 elementWriter.write(array, i, encoder);
+            }
+            encoder.writeArrayEnd();
+        };
+    }
+
+    @Override
+    public FieldWriter visitArrayMap(Schema schema, DataType keyType, DataType valueType) {
+        RowWriter entryWriter =
+                new RowWriter(
+                        schema.getElementType(),
+                        RowType.of(
+                                        new DataType[] {keyType, valueType},
+                                        new String[] {"key", "value"})
+                                .getFields());
+        InternalArray.ElementGetter keyGetter = InternalArray.createElementGetter(keyType);
+        InternalArray.ElementGetter valueGetter = InternalArray.createElementGetter(valueType);
+        return (container, index, encoder) -> {
+            InternalMap map = container.getMap(index);
+            encoder.writeArrayStart();
+            int numElements = map.size();
+            InternalArray keyArray = map.keyArray();
+            InternalArray valueArray = map.valueArray();
+            encoder.setItemCount(numElements);
+            for (int i = 0; i < numElements; i += 1) {
+                encoder.startItem();
+                entryWriter.writeRow(
+                        GenericRow.of(
+                                keyGetter.getElementOrNull(keyArray, i),
+                                valueGetter.getElementOrNull(valueArray, i)),
+                        encoder);
             }
             encoder.writeArrayEnd();
         };

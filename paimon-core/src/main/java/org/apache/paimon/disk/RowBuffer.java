@@ -18,6 +18,7 @@
 
 package org.apache.paimon.disk;
 
+import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.AbstractRowDataSerializer;
@@ -60,7 +61,7 @@ public interface RowBuffer {
             AbstractRowDataSerializer<InternalRow> serializer,
             boolean spillable,
             MemorySize maxDiskSize,
-            String compression) {
+            CompressOptions compression) {
         if (spillable) {
             return new ExternalBuffer(ioManager, memoryPool, serializer, maxDiskSize, compression);
         } else {

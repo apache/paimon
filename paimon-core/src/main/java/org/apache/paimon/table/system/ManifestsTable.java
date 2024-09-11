@@ -45,6 +45,7 @@ import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.SerializationUtils;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.SnapshotNotExistException;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
@@ -195,7 +196,16 @@ public class ManifestsTable implements ReadonlyTable {
         SnapshotManager snapshotManager = dataTable.snapshotManager();
         Long snapshotId = coreOptions.scanSnapshotId();
         Snapshot snapshot = null;
-        if (snapshotId != null && snapshotManager.snapshotExists(snapshotId)) {
+        if (snapshotId != null) {
+            // reminder user with snapshot id range
+            if (!snapshotManager.snapshotExists(snapshotId)) {
+                Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
+                Long latestSnapshotId = snapshotManager.latestSnapshotId();
+                throw new SnapshotNotExistException(
+                        String.format(
+                                "Specified scan.snapshot-id %s is not exist, you can set it in range from %s to %s",
+                                snapshotId, earliestSnapshotId, latestSnapshotId));
+            }
             snapshot = snapshotManager.snapshot(snapshotId);
         } else if (snapshotId == null) {
             snapshot = snapshotManager.latestSnapshot();
@@ -213,6 +223,6 @@ public class ManifestsTable implements ReadonlyTable {
                                 fileStorePathFactory,
                                 null)
                         .create();
-        return snapshot.allManifests(manifestList);
+        return manifestList.readAllManifests(snapshot);
     }
 }

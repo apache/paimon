@@ -59,14 +59,11 @@ You can use the following strategies for your table:
 ```shell
 num-sorted-run.stop-trigger = 2147483647
 sort-spill-threshold = 10
-changelog-producer.lookup-wait = false
+lookup-wait = false
 ```
 
 This configuration will generate more files during peak write periods and gradually merge into optimal read
 performance during low write periods.
-
-In the case of `'changelog-producer' = 'lookup'`, by default, the lookup will be completed at checkpointing, which
-will block the checkpoint. So if you want an asynchronous lookup, you should also set `'changelog-producer.lookup-wait' = 'false'`.
 
 ## Dedicated compaction job
 
@@ -78,9 +75,23 @@ use [dedicated compaction job]({{< ref "maintenance/dedicated-compaction#dedicat
 In compaction, you can configure record-Level expire time to expire records, you should configure:
 
 1. `'record-level.expire-time'`: time retain for records.
-2. `'record-level.time-field'`: time field for record level expire, it should be a seconds INT.
+2. `'record-level.time-field'`: time field for record level expire.
+3. `'record-level.time-field-type'`: time field type for record level expire, it can be seconds-int,seconds-long or millis-long.
 
 Expiration happens in compaction, and there is no strong guarantee to expire records in time.
+
+## Full Compaction
+
+Paimon Compaction uses [Universal-Compaction](https://github.com/facebook/rocksdb/wiki/Universal-Compaction).
+By default, when there is too much incremental data, Full Compaction will be automatically performed. You don't usually
+have to worry about it.
+
+Paimon also provides a configuration that allows for regular execution of Full Compaction.
+
+1. 'compaction.optimization-interval': Implying how often to perform an optimization full compaction, this
+    configuration is used to ensure the query timeliness of the read-optimized system table.
+2. 'full-compaction.delta-commits': Full compaction will be constantly triggered after delta commits. its disadvantage
+    is that it can only perform compaction synchronously, which will affect writing efficiency.
 
 ## Compaction Options
 

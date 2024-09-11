@@ -19,6 +19,7 @@
 package org.apache.paimon.append;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -590,11 +591,12 @@ public class AppendOnlyWriterTest {
             CountDownLatch latch) {
         FileFormat fileFormat = FileFormat.fromIdentifier(AVRO, new Options());
         LinkedList<DataFileMeta> toCompact = new LinkedList<>(scannedFiles);
-        AppendOnlyCompactManager compactManager =
-                new AppendOnlyCompactManager(
+        BucketedAppendCompactManager compactManager =
+                new BucketedAppendCompactManager(
                         Executors.newSingleThreadScheduledExecutor(
                                 new ExecutorThreadFactory("compaction-thread")),
                         toCompact,
+                        null,
                         MIN_FILE_NUM,
                         MAX_FILE_NUM,
                         targetFileSize,
@@ -624,11 +626,12 @@ public class AppendOnlyWriterTest {
                         useWriteBuffer,
                         spillable,
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
-                        CoreOptions.SPILL_COMPRESSION.defaultValue(),
+                        CompressOptions.defaultOptions(),
                         StatsCollectorFactories.createStatsFactories(
                                 options, AppendOnlyWriterTest.SCHEMA.getFieldNames()),
                         MemorySize.MAX_VALUE,
-                        new FileIndexOptions());
+                        new FileIndexOptions(),
+                        true);
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         return Pair.of(writer, compactManager.allFiles());

@@ -22,11 +22,13 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.ObjectsFile;
 import org.apache.paimon.utils.PathFactory;
+import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import javax.annotation.Nullable;
@@ -38,18 +40,21 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
 
     private IndexManifestFile(
             FileIO fileIO,
+            RowType schema,
             FormatReaderFactory readerFactory,
             FormatWriterFactory writerFactory,
             String compression,
-            PathFactory pathFactory) {
+            PathFactory pathFactory,
+            @Nullable SegmentsCache<Path> cache) {
         super(
                 fileIO,
                 new IndexManifestEntrySerializer(),
+                schema,
                 readerFactory,
                 writerFactory,
                 compression,
                 pathFactory,
-                null);
+                cache);
     }
 
     /** Write new index files to index manifest. */
@@ -72,26 +77,31 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
         private final FileFormat fileFormat;
         private final String compression;
         private final FileStorePathFactory pathFactory;
+        @Nullable private final SegmentsCache<Path> cache;
 
         public Factory(
                 FileIO fileIO,
                 FileFormat fileFormat,
                 String compression,
-                FileStorePathFactory pathFactory) {
+                FileStorePathFactory pathFactory,
+                @Nullable SegmentsCache<Path> cache) {
             this.fileIO = fileIO;
             this.fileFormat = fileFormat;
             this.compression = compression;
             this.pathFactory = pathFactory;
+            this.cache = cache;
         }
 
         public IndexManifestFile create() {
-            RowType schema = VersionedObjectSerializer.versionType(IndexManifestEntry.schema());
+            RowType schema = VersionedObjectSerializer.versionType(IndexManifestEntry.SCHEMA);
             return new IndexManifestFile(
                     fileIO,
+                    schema,
                     fileFormat.createReaderFactory(schema),
                     fileFormat.createWriterFactory(schema),
                     compression,
-                    pathFactory.indexManifestFileFactory());
+                    pathFactory.indexManifestFileFactory(),
+                    cache);
         }
     }
 }

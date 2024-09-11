@@ -73,12 +73,12 @@ public class SchemasTableTest extends TableTestBase {
 
     @Test
     public void testSchemasTable() throws Exception {
-        List<InternalRow> expectRow = getExceptedResult();
+        List<InternalRow> expectRow = getExpectedResult();
         List<InternalRow> result = read(schemasTable);
         assertThat(result).containsExactlyElementsOf(expectRow);
     }
 
-    private List<InternalRow> getExceptedResult() {
+    private List<InternalRow> getExpectedResult() {
         List<TableSchema> tableSchemas = schemaManager.listAll();
 
         List<InternalRow> expectedRow = new ArrayList<>();

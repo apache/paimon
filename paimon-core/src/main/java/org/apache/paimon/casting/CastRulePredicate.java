@@ -24,9 +24,7 @@ import org.apache.paimon.types.DataTypeRoot;
 
 import java.util.Collections;
 import java.util.HashSet;
-import java.util.Optional;
 import java.util.Set;
-import java.util.function.BiPredicate;
 
 /**
  * In order to apply a {@link CastRule}, the runtime checks if a particular rule matches the tuple
@@ -46,13 +44,7 @@ import java.util.function.BiPredicate;
  *         <li>{@link #getInputTypeFamilies()} includes one of the {@link DataTypeFamily} of input
  *             type
  *       </ol>
- *   <li>Or, if {@link #getCustomPredicate()} is not null, the input {@link DataType} and target
- *       {@link DataType} matches the predicate.
  * </ol>
- *
- * <p>The {@code customPredicate} should be used in cases where {@link DataTypeRoot} and {@link
- * DataTypeFamily} are not enough to identify whether a rule is applicable or not, for example when
- * the matching depends on a field of the provided input {@link DataType} instance.
  */
 public class CastRulePredicate {
 
@@ -64,21 +56,17 @@ public class CastRulePredicate {
     private final Set<DataTypeFamily> inputTypeFamilies;
     private final Set<DataTypeFamily> targetTypeFamilies;
 
-    private final BiPredicate<DataType, DataType> customPredicate;
-
     private CastRulePredicate(
             Set<DataType> targetTypes,
             Set<DataTypeRoot> inputTypeRoots,
             Set<DataTypeRoot> targetTypeRoots,
             Set<DataTypeFamily> inputTypeFamilies,
-            Set<DataTypeFamily> targetTypeFamilies,
-            BiPredicate<DataType, DataType> customPredicate) {
+            Set<DataTypeFamily> targetTypeFamilies) {
         this.targetTypes = targetTypes;
         this.inputTypeRoots = inputTypeRoots;
         this.targetTypeRoots = targetTypeRoots;
         this.inputTypeFamilies = inputTypeFamilies;
         this.targetTypeFamilies = targetTypeFamilies;
-        this.customPredicate = customPredicate;
     }
 
     public Set<DataType> getTargetTypes() {
@@ -101,10 +89,6 @@ public class CastRulePredicate {
         return targetTypeFamilies;
     }
 
-    public Optional<BiPredicate<DataType, DataType>> getCustomPredicate() {
-        return Optional.ofNullable(customPredicate);
-    }
-
     public static Builder builder() {
         return new Builder();
     }
@@ -117,8 +101,6 @@ public class CastRulePredicate {
 
         private final Set<DataTypeFamily> inputTypeFamilies = new HashSet<>();
         private final Set<DataTypeFamily> targetTypeFamilies = new HashSet<>();
-
-        private BiPredicate<DataType, DataType> customPredicate;
 
         public Builder input(DataTypeRoot inputTypeRoot) {
             inputTypeRoots.add(inputTypeRoot);
@@ -145,19 +127,13 @@ public class CastRulePredicate {
             return this;
         }
 
-        public Builder predicate(BiPredicate<DataType, DataType> customPredicate) {
-            this.customPredicate = customPredicate;
-            return this;
-        }
-
         public CastRulePredicate build() {
             return new CastRulePredicate(
                     Collections.unmodifiableSet(targetTypes),
                     Collections.unmodifiableSet(inputTypeRoots),
                     Collections.unmodifiableSet(targetTypeRoots),
                     Collections.unmodifiableSet(inputTypeFamilies),
-                    Collections.unmodifiableSet(targetTypeFamilies),
-                    customPredicate);
+                    Collections.unmodifiableSet(targetTypeFamilies));
         }
     }
 }

@@ -36,6 +36,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -105,6 +106,14 @@ public class PredicateBuilder {
 
     public Predicate startsWith(int idx, Object patternLiteral) {
         return leaf(StartsWith.INSTANCE, idx, patternLiteral);
+    }
+
+    public Predicate endsWith(int idx, Object patternLiteral) {
+        return leaf(EndsWith.INSTANCE, idx, patternLiteral);
+    }
+
+    public Predicate contains(int idx, Object patternLiteral) {
+        return leaf(Contains.INSTANCE, idx, patternLiteral);
     }
 
     public Predicate leaf(NullFalseLeafBinaryFunction function, int idx, Object literal) {
@@ -278,18 +287,32 @@ public class PredicateBuilder {
                 int scale = decimalType.getScale();
                 return Decimal.fromBigDecimal((BigDecimal) o, precision, scale);
             case TIMESTAMP_WITHOUT_TIME_ZONE:
-            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                Timestamp timestamp;
                 if (o instanceof java.sql.Timestamp) {
-                    timestamp = Timestamp.fromSQLTimestamp((java.sql.Timestamp) o);
+                    return Timestamp.fromSQLTimestamp((java.sql.Timestamp) o);
                 } else if (o instanceof Instant) {
-                    timestamp = Timestamp.fromInstant((Instant) o);
+                    Instant o1 = (Instant) o;
+                    LocalDateTime dateTime = o1.atZone(ZoneId.systemDefault()).toLocalDateTime();
+                    return Timestamp.fromLocalDateTime(dateTime);
                 } else if (o instanceof LocalDateTime) {
-                    timestamp = Timestamp.fromLocalDateTime((LocalDateTime) o);
+                    return Timestamp.fromLocalDateTime((LocalDateTime) o);
                 } else {
-                    throw new UnsupportedOperationException("Unsupported object: " + o);
+                    throw new UnsupportedOperationException(
+                            String.format(
+                                    "Unsupported class %s for timestamp without timezone ",
+                                    o.getClass()));
                 }
-                return timestamp;
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                if (o instanceof java.sql.Timestamp) {
+                    java.sql.Timestamp timestamp = (java.sql.Timestamp) o;
+                    return Timestamp.fromInstant(timestamp.toInstant());
+                } else if (o instanceof Instant) {
+                    return Timestamp.fromInstant((Instant) o);
+                } else {
+                    throw new UnsupportedOperationException(
+                            String.format(
+                                    "Unsupported class %s for timestamp with local time zone ",
+                                    o.getClass()));
+                }
             default:
                 throw new UnsupportedOperationException(
                         "Unsupported predicate leaf type " + literalType.getTypeRoot().name());

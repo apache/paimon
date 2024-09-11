@@ -43,9 +43,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class ExpirePartitionsActionITCase extends ActionITCaseBase {
 
     private static final DataType[] FIELD_TYPES =
-            new DataType[] {DataTypes.STRING(), DataTypes.STRING()};
+            new DataType[] {DataTypes.STRING(), DataTypes.STRING(), DataTypes.STRING()};
 
-    private static final RowType ROW_TYPE = RowType.of(FIELD_TYPES, new String[] {"k", "v"});
+    private static final RowType ROW_TYPE = RowType.of(FIELD_TYPES, new String[] {"k", "dt", "hm"});
 
     @BeforeEach
     public void setUp() {
@@ -58,7 +58,7 @@ public class ExpirePartitionsActionITCase extends ActionITCaseBase {
         TableScan.Plan plan = table.newReadBuilder().newScan().plan();
         List<String> actual = getResult(table.newReadBuilder().newRead(), plan.splits(), ROW_TYPE);
         List<String> expected;
-        expected = Arrays.asList("+I[1, 2024-01-01]", "+I[2, 2024-12-31]");
+        expected = Arrays.asList("+I[1, 2024-01-01, 01:00]", "+I[2, 9999-09-20, 02:00]");
 
         assertThat(actual).isEqualTo(expected);
 
@@ -84,7 +84,42 @@ public class ExpirePartitionsActionITCase extends ActionITCaseBase {
         plan = table.newReadBuilder().newScan().plan();
         actual = getResult(table.newReadBuilder().newRead(), plan.splits(), ROW_TYPE);
 
-        expected = Arrays.asList("+I[2, 2024-12-31]");
+        expected = Arrays.asList("+I[2, 9999-09-20, 02:00]");
+
+        assertThat(actual).isEqualTo(expected);
+    }
+
+    @Test
+    public void testExpirePartitionsActionWithTimePartition() throws Exception {
+        FileStoreTable table = prepareTable();
+        TableScan.Plan plan = table.newReadBuilder().newScan().plan();
+        List<String> actual = getResult(table.newReadBuilder().newRead(), plan.splits(), ROW_TYPE);
+        List<String> expected;
+        expected = Arrays.asList("+I[1, 2024-01-01, 01:00]", "+I[2, 9999-09-20, 02:00]");
+
+        assertThat(actual).isEqualTo(expected);
+
+        createAction(
+                        ExpirePartitionsAction.class,
+                        "expire_partitions",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--expiration_time",
+                        "1 d",
+                        "--timestamp_formatter",
+                        "yyyy-MM-dd HH:mm",
+                        "--timestamp_pattern",
+                        "$dt $hm")
+                .run();
+
+        plan = table.newReadBuilder().newScan().plan();
+        actual = getResult(table.newReadBuilder().newRead(), plan.splits(), ROW_TYPE);
+
+        expected = Arrays.asList("+I[2, 9999-09-20, 02:00]");
 
         assertThat(actual).isEqualTo(expected);
     }
@@ -94,13 +129,14 @@ public class ExpirePartitionsActionITCase extends ActionITCaseBase {
 
         RowType rowType =
                 RowType.of(
-                        new DataType[] {DataTypes.STRING(), DataTypes.STRING()},
-                        new String[] {"k", "v"});
-        String[] pk = {"k", "v"};
+                        new DataType[] {DataTypes.STRING(), DataTypes.STRING(), DataTypes.STRING()},
+                        new String[] {"k", "dt", "hm"});
+        String[] pk = {"k", "dt", "hm"};
+        String[] partitions = {"dt", "hm"};
         FileStoreTable table =
                 createFileStoreTable(
                         rowType,
-                        Collections.singletonList("v"),
+                        new ArrayList<>(Arrays.asList(partitions)),
                         new ArrayList<>(Arrays.asList(pk)),
                         Collections.singletonList("k"),
                         Collections.emptyMap());
@@ -110,8 +146,16 @@ public class ExpirePartitionsActionITCase extends ActionITCaseBase {
         commit = writeBuilder.newCommit();
 
         // 3 snapshots
-        writeData(rowData(BinaryString.fromString("1"), BinaryString.fromString("2024-01-01")));
-        writeData(rowData(BinaryString.fromString("2"), BinaryString.fromString("2024-12-31")));
+        writeData(
+                rowData(
+                        BinaryString.fromString("1"),
+                        BinaryString.fromString("2024-01-01"),
+                        BinaryString.fromString("01:00")));
+        writeData(
+                rowData(
+                        BinaryString.fromString("2"),
+                        BinaryString.fromString("9999-09-20"),
+                        BinaryString.fromString("02:00")));
 
         return table;
     }

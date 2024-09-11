@@ -147,7 +147,7 @@ public class MySqlSyncDatabaseActionFactory
                         + "It can't be a regular expression.");
         System.out.println(
                 "For a complete list of supported configurations, "
-                        + "see https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mysql-cdc.html#connector-options");
+                        + "see https://nightlies.apache.org/flink/flink-cdc-docs-release-3.1/docs/connectors/flink-sources/mysql-cdc/#connector-options");
         System.out.println();
 
         System.out.println("Paimon catalog and table sink conf syntax:");

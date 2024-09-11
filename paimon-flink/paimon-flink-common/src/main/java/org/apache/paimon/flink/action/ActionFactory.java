@@ -38,6 +38,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.paimon.utils.ParameterUtils.parseCommaSeparatedKeyValues;
+import static org.apache.paimon.utils.ParameterUtils.parseKeyValueList;
 import static org.apache.paimon.utils.ParameterUtils.parseKeyValueString;
 
 /** Factory to create {@link Action}. */
@@ -56,6 +57,7 @@ public interface ActionFactory extends Factory {
     String EXPIRATIONTIME = "expiration_time";
     String TIMESTAMPFORMATTER = "timestamp_formatter";
     String EXPIRE_STRATEGY = "expire_strategy";
+    String TIMESTAMP_PATTERN = "timestamp_pattern";
 
     Optional<Action> create(MultipleParameterToolAdapter params);
 
@@ -162,5 +164,18 @@ public interface ActionFactory extends Factory {
     default String getRequiredValue(MultipleParameterToolAdapter params, String key) {
         checkRequiredArgument(params, key);
         return params.get(key);
+    }
+
+    default Map<String, List<String>> optionalConfigMapList(
+            MultipleParameterToolAdapter params, String key) {
+        if (!params.has(key)) {
+            return Collections.emptyMap();
+        }
+
+        Map<String, List<String>> config = new HashMap<>();
+        for (String kvString : params.getMultiParameter(key)) {
+            parseKeyValueList(config, kvString);
+        }
+        return config;
     }
 }

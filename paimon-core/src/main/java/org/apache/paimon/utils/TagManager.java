@@ -33,6 +33,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -40,6 +41,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.function.Predicate;
@@ -69,7 +71,7 @@ public class TagManager {
     public TagManager(FileIO fileIO, Path tablePath, String branch) {
         this.fileIO = fileIO;
         this.tablePath = tablePath;
-        this.branch = StringUtils.isBlank(branch) ? DEFAULT_MAIN_BRANCH : branch;
+        this.branch = StringUtils.isNullOrWhitespaceOnly(branch) ? DEFAULT_MAIN_BRANCH : branch;
     }
 
     public TagManager copyWithBranch(String branchName) {
@@ -92,7 +94,8 @@ public class TagManager {
             String tagName,
             @Nullable Duration timeRetained,
             List<TagCallback> callbacks) {
-        checkArgument(!StringUtils.isBlank(tagName), "Tag name '%s' is blank.", tagName);
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name '%s' is blank.", tagName);
 
         // When timeRetained is not defined, please do not write the tagCreatorTime field,
         // as this will cause older versions (<= 0.7) of readers to be unable to read this
@@ -158,7 +161,8 @@ public class TagManager {
             TagDeletion tagDeletion,
             SnapshotManager snapshotManager,
             List<TagCallback> callbacks) {
-        checkArgument(!StringUtils.isBlank(tagName), "Tag name '%s' is blank.", tagName);
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name '%s' is blank.", tagName);
         checkArgument(tagExists(tagName), "Tag '%s' doesn't exist.", tagName);
 
         Snapshot taggedSnapshot = taggedSnapshot(tagName);
@@ -230,12 +234,25 @@ public class TagManager {
         }
         if (success) {
             tagDeletion.cleanUnusedDataFiles(taggedSnapshot, dataFileSkipper);
-            tagDeletion.cleanDataDirectories();
+            tagDeletion.cleanEmptyDirectories();
         }
 
         // delete manifests
-        tagDeletion.cleanUnusedManifests(
-                taggedSnapshot, tagDeletion.manifestSkippingSet(skippedSnapshots));
+        success = true;
+        Set<String> manifestSkippingSet = null;
+        try {
+            manifestSkippingSet = tagDeletion.manifestSkippingSet(skippedSnapshots);
+        } catch (Exception e) {
+            LOG.info(
+                    String.format(
+                            "Skip cleaning manifest files for tag of snapshot %s due to failed to build skipping set.",
+                            taggedSnapshot.id()),
+                    e);
+            success = false;
+        }
+        if (success) {
+            tagDeletion.cleanUnusedManifests(taggedSnapshot, manifestSkippingSet);
+        }
     }
 
     /** Check if a tag exists. */
@@ -303,9 +320,10 @@ public class TagManager {
                 }
                 // If the tag file is not found, it might be deleted by
                 // other processes, so just skip this tag
-                Snapshot snapshot = Snapshot.safelyFromPath(fileIO, path);
-                if (snapshot != null) {
+                try {
+                    Snapshot snapshot = Snapshot.fromJson(fileIO.readFileUtf8(path));
                     tags.computeIfAbsent(snapshot, s -> new ArrayList<>()).add(tagName);
+                } catch (FileNotFoundException ignored) {
                 }
             }
         } catch (IOException e) {
@@ -367,35 +385,8 @@ public class TagManager {
                         taggedSnapshot.id()));
     }
 
-    public static List<Snapshot> findOverlappedSnapshots(
-            List<Snapshot> taggedSnapshots, long beginInclusive, long endExclusive) {
-        List<Snapshot> snapshots = new ArrayList<>();
-        int right = findPreviousTag(taggedSnapshots, endExclusive);
-        if (right >= 0) {
-            int left = Math.max(findPreviousOrEqualTag(taggedSnapshots, beginInclusive), 0);
-            for (int i = left; i <= right; i++) {
-                snapshots.add(taggedSnapshots.get(i));
-            }
-        }
-        return snapshots;
-    }
-
-    public static int findPreviousTag(List<Snapshot> taggedSnapshots, long targetSnapshotId) {
-        for (int i = taggedSnapshots.size() - 1; i >= 0; i--) {
-            if (taggedSnapshots.get(i).id() < targetSnapshotId) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
-    private static int findPreviousOrEqualTag(
-            List<Snapshot> taggedSnapshots, long targetSnapshotId) {
-        for (int i = taggedSnapshots.size() - 1; i >= 0; i--) {
-            if (taggedSnapshots.get(i).id() <= targetSnapshotId) {
-                return i;
-            }
-        }
-        return -1;
+    /** Read tag for tagName. */
+    public Tag tag(String tagName) {
+        return Tag.fromPath(fileIO, tagPath(tagName));
     }
 }

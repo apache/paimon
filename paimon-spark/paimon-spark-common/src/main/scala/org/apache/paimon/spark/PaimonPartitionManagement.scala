@@ -27,39 +27,44 @@ import org.apache.paimon.utils.{InternalRowPartitionComputer, TypeUtils}
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.{CatalystTypeConverters, InternalRow}
 import org.apache.spark.sql.catalyst.util.CharVarcharUtils
-import org.apache.spark.sql.connector.catalog.SupportsPartitionManagement
+import org.apache.spark.sql.connector.catalog.SupportsAtomicPartitionManagement
 import org.apache.spark.sql.types.StructType
 
-import java.util.{Collections, Map => JMap, Objects, UUID}
+import java.util.{Map => JMap, Objects, UUID}
 
 import scala.collection.JavaConverters._
 
-trait PaimonPartitionManagement extends SupportsPartitionManagement {
+trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
   self: SparkTable =>
 
   private lazy val partitionRowType: RowType = TypeUtils.project(table.rowType, table.partitionKeys)
 
   override lazy val partitionSchema: StructType = SparkTypeUtils.fromPaimonRowType(partitionRowType)
 
-  override def dropPartition(internalRow: InternalRow): Boolean = {
+  override def dropPartitions(internalRows: Array[InternalRow]): Boolean = {
     table match {
       case fileStoreTable: FileStoreTable =>
-        // convert internalRow to row
-        val row: Row = CatalystTypeConverters
+        val rowConverter = CatalystTypeConverters
           .createToScalaConverter(CharVarcharUtils.replaceCharVarcharWithString(partitionSchema))
-          .apply(internalRow)
-          .asInstanceOf[Row]
         val rowDataPartitionComputer = new InternalRowPartitionComputer(
           fileStoreTable.coreOptions().partitionDefaultName(),
           partitionRowType,
           table.partitionKeys().asScala.toArray)
-        val partitionMap =
-          rowDataPartitionComputer.generatePartValues(new SparkRow(partitionRowType, row))
+
+        val partitions = internalRows.map {
+          r =>
+            rowDataPartitionComputer
+              .generatePartValues(new SparkRow(partitionRowType, rowConverter(r).asInstanceOf[Row]))
+              .asInstanceOf[JMap[String, String]]
+        }
         val commit: FileStoreCommit = fileStoreTable.store.newCommit(UUID.randomUUID.toString)
-        commit.dropPartitions(
-          Collections.singletonList(partitionMap),
-          BatchWriteBuilder.COMMIT_IDENTIFIER)
+        try {
+          commit.dropPartitions(partitions.toSeq.asJava, BatchWriteBuilder.COMMIT_IDENTIFIER)
+        } finally {
+          commit.close()
+        }
         true
+
       case _ =>
         throw new UnsupportedOperationException("Only FileStoreTable supports drop partitions.")
     }
@@ -106,7 +111,9 @@ trait PaimonPartitionManagement extends SupportsPartitionManagement {
       .toArray
   }
 
-  override def createPartition(ident: InternalRow, properties: JMap[String, String]): Unit = {
+  override def createPartitions(
+      internalRows: Array[InternalRow],
+      maps: Array[JMap[String, String]]): Unit = {
     throw new UnsupportedOperationException("Create partition is not supported")
   }
 }

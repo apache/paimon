@@ -20,21 +20,19 @@ package org.apache.paimon.codegen
 
 import org.apache.paimon.codegen.GenerateUtils._
 import org.apache.paimon.codegen.ScalarOperatorGens.{generateEquals, generateRowEqualiser}
-import org.apache.paimon.types.{BooleanType, DataType, RowType}
+import org.apache.paimon.types.{BooleanType, DataType}
 import org.apache.paimon.types.DataTypeChecks.isCompositeType
 import org.apache.paimon.types.DataTypeRoot._
 import org.apache.paimon.utils.TypeUtils.isPrimitive
 
-import scala.collection.JavaConverters._
-
-class EqualiserCodeGenerator(fieldTypes: Array[DataType]) {
+class EqualiserCodeGenerator(fieldTypes: Array[DataType], fields: Array[Int]) {
 
   private val RECORD_EQUALISER = className[RecordEqualiser]
   private val LEFT_INPUT = "left"
   private val RIGHT_INPUT = "right"
 
-  def this(rowType: RowType) = {
-    this(rowType.getFieldTypes.asScala.toArray)
+  def this(fieldTypes: Array[DataType]) = {
+    this(fieldTypes, fieldTypes.indices.toArray)
   }
 
   def generateRecordEqualiser(name: String): GeneratedClass[RecordEqualiser] = {
@@ -42,8 +40,8 @@ class EqualiserCodeGenerator(fieldTypes: Array[DataType]) {
     val ctx = new CodeGeneratorContext
     val className = newName(name)
 
-    val equalsMethodCodes = for (idx <- fieldTypes.indices) yield generateEqualsMethod(ctx, idx)
-    val equalsMethodCalls = for (idx <- fieldTypes.indices) yield {
+    val equalsMethodCodes = for (idx <- fields) yield generateEqualsMethod(ctx, idx)
+    val equalsMethodCalls = for (idx <- fields) yield {
       val methodName = getEqualsMethodName(idx)
       s"""result = result && $methodName($LEFT_INPUT, $RIGHT_INPUT);"""
     }

@@ -329,7 +329,7 @@ public class StringUtils {
      * </pre>
      *
      * <p>NOTE: This method changed in Lang version 2.0. It no longer trims the CharSequence. That
-     * functionality is available in isBlank().
+     * functionality is available in isNullOrWhitespaceOnly().
      *
      * @param cs the CharSequence to check, may be null
      * @return {@code true} if the CharSequence is empty or null
@@ -373,7 +373,7 @@ public class StringUtils {
      * @return an array of parsed Strings, {@code null} if null String input
      */
     public static String[] split(final String str, final String separatorChars) {
-        return splitWorker(str, separatorChars, -1, false);
+        return split(str, separatorChars, -1, false);
     }
 
     /**
@@ -388,7 +388,7 @@ public class StringUtils {
      *     separators; if {@code false}, adjacent separators are treated as one separator.
      * @return an array of parsed Strings, {@code null} if null String input
      */
-    private static String[] splitWorker(
+    public static String[] split(
             final String str,
             final String separatorChars,
             final int max,
@@ -538,21 +538,12 @@ public class StringUtils {
         return buf.toString();
     }
 
-    public static boolean isBlank(String str) {
-        int strLen;
-        if (str == null || (strLen = str.length()) == 0) {
-            return true;
-        }
-        for (int i = 0; i < strLen; i++) {
-            if ((!Character.isWhitespace(str.charAt(i)))) {
-                return false;
-            }
-        }
-        return true;
+    public static String quote(String str) {
+        return "`" + str + "`";
     }
 
-    public static String caseSensitiveConversion(String str, boolean caseSensitive) {
-        return caseSensitive ? str : str.toLowerCase();
+    public static String caseSensitiveConversion(String str, boolean allowUpperCase) {
+        return allowUpperCase ? str : str.toLowerCase();
     }
 
     public static boolean isNumeric(final CharSequence cs) {

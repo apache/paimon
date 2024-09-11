@@ -292,11 +292,15 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
             throws Exception {
 
         String partitionKeysStr =
-                StringUtils.isBlank(partitionKeys) ? "" : "--partition-keys " + partitionKeys;
+                StringUtils.isNullOrWhitespaceOnly(partitionKeys)
+                        ? ""
+                        : "--partition-keys " + partitionKeys;
         String primaryKeysStr =
-                StringUtils.isBlank(primaryKeys) ? "" : "--primary-keys " + primaryKeys;
+                StringUtils.isNullOrWhitespaceOnly(primaryKeys)
+                        ? ""
+                        : "--primary-keys " + primaryKeys;
         String typeMappingStr =
-                StringUtils.isBlank(typeMappingOptions)
+                StringUtils.isNullOrWhitespaceOnly(typeMappingOptions)
                         ? ""
                         : "--type-mapping " + typeMappingOptions;
         String tableStr = action.equals(ACTION_SYNC_TABLE) ? "--table ts_table" : "";

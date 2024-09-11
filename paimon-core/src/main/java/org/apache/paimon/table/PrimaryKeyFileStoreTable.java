@@ -23,6 +23,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.iceberg.PrimaryKeyIcebergCommitCallback;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.mergetree.compact.LookupMergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
@@ -33,6 +34,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.query.LocalTableQuery;
+import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.KeyValueTableRead;
@@ -64,11 +66,6 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
             TableSchema tableSchema,
             CatalogEnvironment catalogEnvironment) {
         super(fileIO, path, tableSchema, catalogEnvironment);
-    }
-
-    @Override
-    public FileStoreTable copy(TableSchema newTableSchema) {
-        return new PrimaryKeyFileStoreTable(fileIO, path, newTableSchema, catalogEnvironment);
     }
 
     @Override
@@ -165,6 +162,7 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
             String commitUser, ManifestCacheFilter manifestFilter) {
         KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
+                rowType(),
                 store().newWrite(commitUser, manifestFilter),
                 createRowKeyExtractor(),
                 (record, rowKind) ->
@@ -180,5 +178,17 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
     @Override
     public LocalTableQuery newLocalTableQuery() {
         return new LocalTableQuery(this);
+    }
+
+    @Override
+    protected List<CommitCallback> createCommitCallbacks(String commitUser) {
+        List<CommitCallback> callbacks = super.createCommitCallbacks(commitUser);
+        CoreOptions options = coreOptions();
+
+        if (options.metadataIcebergCompatible()) {
+            callbacks.add(new PrimaryKeyIcebergCommitCallback(this, commitUser));
+        }
+
+        return callbacks;
     }
 }

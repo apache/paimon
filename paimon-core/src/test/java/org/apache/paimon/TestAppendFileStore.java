@@ -19,8 +19,9 @@
 package org.apache.paimon;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.deletionvectors.DeletionVectorIndexFileMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
+import org.apache.paimon.deletionvectors.append.AppendDeletionFileMaintainerHelper;
+import org.apache.paimon.deletionvectors.append.UnawareAppendDeletionFileMaintainer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
@@ -118,9 +119,10 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
         return fileHandler.scan(lastSnapshotId, DELETION_VECTORS_INDEX, partition, bucket);
     }
 
-    public DeletionVectorIndexFileMaintainer createDVIFMaintainer(
-            Map<String, DeletionFile> dataFileToDeletionFiles) {
-        return new DeletionVectorIndexFileMaintainer(fileHandler, dataFileToDeletionFiles);
+    public UnawareAppendDeletionFileMaintainer createDVIFMaintainer(
+            BinaryRow partition, Map<String, DeletionFile> dataFileToDeletionFiles) {
+        return AppendDeletionFileMaintainerHelper.fromDeletionFiles(
+                fileHandler, partition, dataFileToDeletionFiles);
     }
 
     public DeletionVectorsMaintainer createOrRestoreDVMaintainer(BinaryRow partition, int bucket) {

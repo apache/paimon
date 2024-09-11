@@ -135,7 +135,6 @@ public abstract class FlinkTableSinkBase
                                     new DataStream<>(
                                             dataStream.getExecutionEnvironment(),
                                             dataStream.getTransformation()))
-                            .inputBounded(context.isBounded())
                             .clusteringIfPossible(
                                     conf.get(CLUSTERING_COLUMNS),
                                     conf.get(CLUSTERING_STRATEGY),

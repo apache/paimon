@@ -20,6 +20,12 @@ package org.apache.paimon.compression;
 
 /** Implementation of {@link BlockCompressionFactory} for Lz4 codec. */
 public class Lz4BlockCompressionFactory implements BlockCompressionFactory {
+
+    @Override
+    public BlockCompressionType getCompressionType() {
+        return BlockCompressionType.LZ4;
+    }
+
     @Override
     public BlockCompressor getCompressor() {
         return new Lz4BlockCompressor();

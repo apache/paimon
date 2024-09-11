@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.system;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -28,6 +29,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerTableRead;
@@ -62,7 +64,7 @@ public class AggregationFieldsTable implements ReadonlyTable {
 
     private static final long serialVersionUID = 1L;
 
-    public static final String AGGREGATION = "aggregation_fields";
+    public static final String AGGREGATION_FIELDS = "aggregation_fields";
 
     public static final RowType TABLE_TYPE =
             new RowType(
@@ -76,15 +78,24 @@ public class AggregationFieldsTable implements ReadonlyTable {
 
     private final FileIO fileIO;
     private final Path location;
+    private final String branch;
 
-    public AggregationFieldsTable(FileIO fileIO, Path location) {
+    public AggregationFieldsTable(FileStoreTable dataTable) {
+        this(
+                dataTable.fileIO(),
+                dataTable.location(),
+                CoreOptions.branch(dataTable.schema().options()));
+    }
+
+    public AggregationFieldsTable(FileIO fileIO, Path location, String branchName) {
         this.fileIO = fileIO;
         this.location = location;
+        this.branch = branchName;
     }
 
     @Override
     public String name() {
-        return location.getName() + SYSTEM_TABLE_SPLITTER + AGGREGATION;
+        return location.getName() + SYSTEM_TABLE_SPLITTER + AGGREGATION_FIELDS;
     }
 
     @Override
@@ -109,7 +120,7 @@ public class AggregationFieldsTable implements ReadonlyTable {
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new AggregationFieldsTable(fileIO, location);
+        return new AggregationFieldsTable(fileIO, location, branch);
     }
 
     private class SchemasScan extends ReadOnceTableScan {
@@ -155,7 +166,7 @@ public class AggregationFieldsTable implements ReadonlyTable {
     }
 
     /** {@link TableRead} implementation for {@link AggregationFieldsTable}. */
-    private static class SchemasRead implements InnerTableRead {
+    private class SchemasRead implements InnerTableRead {
 
         private final FileIO fileIO;
         private int[][] projection;
@@ -186,7 +197,7 @@ public class AggregationFieldsTable implements ReadonlyTable {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
             Path location = ((AggregationSplit) split).location;
-            TableSchema schemas = new SchemaManager(fileIO, location).latest().get();
+            TableSchema schemas = new SchemaManager(fileIO, location, branch).latest().get();
             Iterator<InternalRow> rows = createInternalRowIterator(schemas);
             if (projection != null) {
                 rows =

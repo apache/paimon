@@ -161,7 +161,7 @@ public class SortUtils {
                                     options.writeBufferSize(),
                                     options.pageSize(),
                                     options.localSortMaxNumFileHandles(),
-                                    options.spillCompression(),
+                                    options.spillCompressOptions(),
                                     sinkParallelism,
                                     options.writeBufferSpillDiskSize()))
                     .setParallelism(sinkParallelism)

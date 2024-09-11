@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.compact;
 
-import org.apache.paimon.append.MultiTableAppendOnlyCompactionTask;
+import org.apache.paimon.append.MultiTableUnawareAppendCompactionTask;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.table.FileStoreTable;
@@ -44,7 +44,7 @@ import static org.apache.paimon.flink.utils.MultiTablesCompactorUtil.shouldCompa
  *     <ol>
  *       <li>Tuple2<{@link Split},String> for the table with multi buckets, such as dynamic or fixed
  *           bucket table.
- *       <li>{@link MultiTableAppendOnlyCompactionTask} for the table witch fixed single bucket
+ *       <li>{@link MultiTableUnawareAppendCompactionTask} for the table witch fixed single bucket
  *           ,such as unaware bucket table.
  *     </ol>
  */

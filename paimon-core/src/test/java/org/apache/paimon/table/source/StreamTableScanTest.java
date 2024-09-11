@@ -21,6 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.StreamTableCommit;
@@ -49,7 +50,11 @@ public class StreamTableScanTest extends ScannerTestBase {
         TableRead read = table.newRead();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
-        StreamTableScan scan = table.newStreamScan();
+
+        ReadBuilder readBuilder = table.newReadBuilder();
+        PredicateBuilder predicateBuilder = new PredicateBuilder(readBuilder.readType());
+        readBuilder.withFilter(predicateBuilder.lessOrEqual(2, 300L));
+        StreamTableScan scan = readBuilder.newStreamScan();
 
         // first call without any snapshot, should return empty plan
         assertThat(scan.plan().splits()).isEmpty();
@@ -85,6 +90,9 @@ public class StreamTableScanTest extends ScannerTestBase {
         write.write(rowData(1, 50, 500L));
         commit.commit(3, write.prepareCommit(true, 3));
 
+        write.write(rowData(1, 60, 600L));
+        commit.commit(4, write.prepareCommit(true, 4));
+
         // first incremental call, should return incremental records from 3rd commit
         plan = scan.plan();
         assertThat(getResult(read, plan.splits()))
@@ -94,6 +102,11 @@ public class StreamTableScanTest extends ScannerTestBase {
         plan = scan.plan();
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|103", "-D 1|40|400", "+I 1|50|500"));
+
+        // test value filter not affect to incremental scan
+        plan = scan.plan();
+        assertThat(getResult(read, plan.splits()))
+                .hasSameElementsAs(Collections.singletonList("+I 1|60|600"));
 
         // no more new snapshots, should return empty plan
         assertThat(scan.plan().splits()).isEmpty();
@@ -111,7 +124,11 @@ public class StreamTableScanTest extends ScannerTestBase {
         TableRead read = table.newRead();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
-        StreamTableScan scan = table.newStreamScan();
+
+        ReadBuilder readBuilder = table.newReadBuilder();
+        PredicateBuilder predicateBuilder = new PredicateBuilder(readBuilder.readType());
+        readBuilder.withFilter(predicateBuilder.lessOrEqual(2, 300L));
+        StreamTableScan scan = readBuilder.newStreamScan();
 
         // first call without any snapshot, should return empty plan
         assertThat(scan.plan().splits()).isEmpty();
@@ -156,8 +173,7 @@ public class StreamTableScanTest extends ScannerTestBase {
         commit.commit(4, write.prepareCommit(true, 4));
 
         // full compaction done, read new changelog
-        plan = scan.plan();
-        assertThat(getResult(read, plan.splits()))
+        assertThat(getResult(read, scan.plan().splits()))
                 .hasSameElementsAs(
                         Arrays.asList(
                                 "-U 1|10|101",
@@ -165,6 +181,21 @@ public class StreamTableScanTest extends ScannerTestBase {
                                 "-U 1|20|200",
                                 "+U 1|20|201",
                                 "+I 1|50|500"));
+
+        // clear all records
+        write.write(rowDataWithKind(RowKind.DELETE, 1, 10, 0L));
+        write.write(rowDataWithKind(RowKind.DELETE, 1, 20, 0L));
+        write.write(rowDataWithKind(RowKind.DELETE, 1, 50, 0L));
+        write.compact(binaryRow(1), 0, true);
+        commit.commit(5, write.prepareCommit(true, 5));
+        assertThat(getResult(read, scan.plan().splits()))
+                .hasSameElementsAs(Arrays.asList("-D 1|10|103", "-D 1|20|201", "-D 1|50|500"));
+
+        // test value filter to changelog
+        write.write(rowData(1, 60, 600L));
+        write.compact(binaryRow(1), 0, true);
+        commit.commit(6, write.prepareCommit(true, 6));
+        assertThat(getResult(read, scan.plan().splits())).isEmpty();
 
         // no more new snapshots, should return empty plan
         assertThat(scan.plan().splits()).isEmpty();

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.append.AppendOnlyCompactionTask;
+import org.apache.paimon.append.UnawareAppendCompactionTask;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
@@ -49,8 +49,9 @@ public class CompactionTaskSimpleSerializerTest {
     @Test
     public void testSerializer() throws IOException {
 
-        AppendOnlyCompactionTask task1 = new AppendOnlyCompactionTask(partition, newFiles(20));
-        AppendOnlyCompactionTask task2 = serializer.deserialize(2, serializer.serialize(task1));
+        UnawareAppendCompactionTask task1 =
+                new UnawareAppendCompactionTask(partition, newFiles(20));
+        UnawareAppendCompactionTask task2 = serializer.deserialize(2, serializer.serialize(task1));
 
         assertThat(task1).isEqualTo(task2);
     }

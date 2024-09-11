@@ -19,9 +19,10 @@
 package org.apache.paimon.spark.extensions
 
 import org.apache.paimon.spark.catalyst.analysis.{PaimonAnalysis, PaimonDeleteTable, PaimonIncompatiblePHRRules, PaimonIncompatibleResolutionRules, PaimonMergeInto, PaimonPostHocResolutionRules, PaimonProcedureResolver, PaimonUpdateTable}
-import org.apache.paimon.spark.catalyst.optimizer.{EvalSubqueriesForDeleteTable, MergePaimonScalarSubqueriers}
+import org.apache.paimon.spark.catalyst.optimizer.{EvalSubqueriesForDeleteTable, MergePaimonScalarSubqueries}
 import org.apache.paimon.spark.catalyst.plans.logical.PaimonTableValuedFunctions
 import org.apache.paimon.spark.execution.PaimonStrategy
+import org.apache.paimon.spark.execution.adaptive.DisableUnnecessaryPaimonBucketedScan
 
 import org.apache.spark.sql.SparkSessionExtensions
 import org.apache.spark.sql.catalyst.parser.extensions.PaimonSparkSqlExtensionsParser
@@ -54,9 +55,12 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
 
     // optimization rules
     extensions.injectOptimizerRule(_ => EvalSubqueriesForDeleteTable)
-    extensions.injectOptimizerRule(_ => MergePaimonScalarSubqueriers)
+    extensions.injectOptimizerRule(_ => MergePaimonScalarSubqueries)
 
     // planner extensions
     extensions.injectPlannerStrategy(spark => PaimonStrategy(spark))
+
+    // query stage preparation
+    extensions.injectQueryStagePrepRule(_ => DisableUnnecessaryPaimonBucketedScan)
   }
 }

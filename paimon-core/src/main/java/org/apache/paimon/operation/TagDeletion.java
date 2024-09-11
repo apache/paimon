@@ -53,8 +53,18 @@ public class TagDeletion extends FileDeletionBase<Snapshot> {
             ManifestFile manifestFile,
             ManifestList manifestList,
             IndexFileHandler indexFileHandler,
-            StatsFileHandler statsFileHandler) {
-        super(fileIO, pathFactory, manifestFile, manifestList, indexFileHandler, statsFileHandler);
+            StatsFileHandler statsFileHandler,
+            boolean cleanEmptyDirectories,
+            int deleteFileThreadNum) {
+        super(
+                fileIO,
+                pathFactory,
+                manifestFile,
+                manifestList,
+                indexFileHandler,
+                statsFileHandler,
+                cleanEmptyDirectories,
+                deleteFileThreadNum);
     }
 
     @Override

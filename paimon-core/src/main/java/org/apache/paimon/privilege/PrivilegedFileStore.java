@@ -21,7 +21,9 @@ package org.apache.paimon.privilege;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
@@ -36,10 +38,12 @@ import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.service.ServiceManager;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -49,8 +53,6 @@ import java.util.List;
 
 /** {@link FileStore} with privilege checks. */
 public class PrivilegedFileStore<T> implements FileStore<T> {
-
-    private static final long serialVersionUID = 1L;
 
     private final FileStore<T> wrapped;
     private final PrivilegeChecker privilegeChecker;
@@ -106,6 +108,11 @@ public class PrivilegedFileStore<T> implements FileStore<T> {
     }
 
     @Override
+    public IndexManifestFile.Factory indexManifestFileFactory() {
+        return wrapped.indexManifestFileFactory();
+    }
+
+    @Override
     public IndexFileHandler newIndexFileHandler() {
         return wrapped.newIndexFileHandler();
     }
@@ -137,6 +144,12 @@ public class PrivilegedFileStore<T> implements FileStore<T> {
     public FileStoreCommit newCommit(String commitUser) {
         privilegeChecker.assertCanInsert(identifier);
         return wrapped.newCommit(commitUser);
+    }
+
+    @Override
+    public FileStoreCommit newCommit(String commitUser, List<CommitCallback> callbacks) {
+        privilegeChecker.assertCanInsert(identifier);
+        return wrapped.newCommit(commitUser, callbacks);
     }
 
     @Override
@@ -191,5 +204,10 @@ public class PrivilegedFileStore<T> implements FileStore<T> {
     @Override
     public List<TagCallback> createTagCallbacks() {
         return wrapped.createTagCallbacks();
+    }
+
+    @Override
+    public void setManifestCache(SegmentsCache<Path> manifestCache) {
+        wrapped.setManifestCache(manifestCache);
     }
 }

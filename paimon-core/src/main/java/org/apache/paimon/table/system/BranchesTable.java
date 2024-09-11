@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table.system;
 
-import org.apache.paimon.branch.TableBranch;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -28,6 +28,8 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.ReadonlyTable;
@@ -42,21 +44,33 @@ import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.IteratorRecordReader;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.SortedMap;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
+import static org.apache.paimon.utils.BranchManager.BRANCH_PREFIX;
+import static org.apache.paimon.utils.BranchManager.branchPath;
+import static org.apache.paimon.utils.FileUtils.listVersionedDirectories;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A {@link Table} for showing branches of table. */
 public class BranchesTable implements ReadonlyTable {
@@ -77,6 +91,10 @@ public class BranchesTable implements ReadonlyTable {
 
     private final FileIO fileIO;
     private final Path location;
+
+    public BranchesTable(FileStoreTable dataTable) {
+        this(dataTable.fileIO(), dataTable.location());
+    }
 
     public BranchesTable(FileIO fileIO, Path location) {
         this.fileIO = fileIO;
@@ -185,25 +203,78 @@ public class BranchesTable implements ReadonlyTable {
             if (!(split instanceof BranchesSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
+
             Path location = ((BranchesSplit) split).location;
             FileStoreTable table = FileStoreTableFactory.create(fileIO, location);
-            List<TableBranch> branches = table.branchManager().branches();
-            Iterator<InternalRow> rows = Iterators.transform(branches.iterator(), this::toRow);
+            Iterator<InternalRow> rows;
+            try {
+                rows = branches(table).iterator();
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+
             if (projection != null) {
                 rows =
                         Iterators.transform(
                                 rows, row -> ProjectedRow.from(projection).replaceRow(row));
             }
+
             return new IteratorRecordReader<>(rows);
         }
 
-        private InternalRow toRow(TableBranch branch) {
-            return GenericRow.of(
-                    BinaryString.fromString(branch.getBranchName()),
-                    BinaryString.fromString(branch.getCreatedFromTag()),
-                    branch.getCreatedFromSnapshot(),
-                    Timestamp.fromLocalDateTime(
-                            DateTimeUtils.toLocalDateTime(branch.getCreateTime())));
+        private List<InternalRow> branches(FileStoreTable table) throws IOException {
+            BranchManager branchManager = table.branchManager();
+            SchemaManager schemaManager = new SchemaManager(fileIO, table.location());
+
+            List<Pair<Path, Long>> paths =
+                    listVersionedDirectories(fileIO, branchManager.branchDirectory(), BRANCH_PREFIX)
+                            .map(status -> Pair.of(status.getPath(), status.getModificationTime()))
+                            .collect(Collectors.toList());
+            List<InternalRow> result = new ArrayList<>();
+
+            for (Pair<Path, Long> path : paths) {
+                String branchName = path.getLeft().getName().substring(BRANCH_PREFIX.length());
+                String basedTag = null;
+                Long basedSnapshotId = null;
+                long creationTime = path.getRight();
+
+                Optional<TableSchema> tableSchema =
+                        schemaManager.copyWithBranch(branchName).latest();
+                if (tableSchema.isPresent()) {
+                    FileStoreTable branchTable =
+                            FileStoreTableFactory.create(
+                                    fileIO, new Path(branchPath(table.location(), branchName)));
+                    SortedMap<Snapshot, List<String>> snapshotTags =
+                            branchTable.tagManager().tags();
+                    Long earliestSnapshotId = branchTable.snapshotManager().earliestSnapshotId();
+                    if (snapshotTags.isEmpty()) {
+                        // create based on snapshotId
+                        basedSnapshotId = earliestSnapshotId;
+                    } else {
+                        Snapshot snapshot = snapshotTags.firstKey();
+                        if (Objects.equals(earliestSnapshotId, snapshot.id())) {
+                            // create based on tag
+                            List<String> tags = snapshotTags.get(snapshot);
+                            checkArgument(tags.size() == 1);
+                            basedTag = tags.get(0);
+                            basedSnapshotId = snapshot.id();
+                        } else {
+                            // create based on snapshotId
+                            basedSnapshotId = earliestSnapshotId;
+                        }
+                    }
+                }
+
+                result.add(
+                        GenericRow.of(
+                                BinaryString.fromString(branchName),
+                                BinaryString.fromString(basedTag),
+                                basedSnapshotId,
+                                Timestamp.fromLocalDateTime(
+                                        DateTimeUtils.toLocalDateTime(creationTime))));
+            }
+
+            return result;
         }
     }
 }

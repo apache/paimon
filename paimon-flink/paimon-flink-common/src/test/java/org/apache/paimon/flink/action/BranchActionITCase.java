@@ -85,8 +85,20 @@ class BranchActionITCase extends ActionITCaseBase {
 
         callProcedure(
                 String.format(
+                        "CALL sys.create_branch(`table` => '%s.%s', branch => 'branch_name_named_argument', tag => 'tag2')",
+                        database, tableName));
+        assertThat(branchManager.branchExists("branch_name_named_argument")).isTrue();
+
+        callProcedure(
+                String.format(
                         "CALL sys.delete_branch('%s.%s', 'branch_name')", database, tableName));
         assertThat(branchManager.branchExists("branch_name")).isFalse();
+
+        callProcedure(
+                String.format(
+                        "CALL sys.delete_branch(`table` => '%s.%s', branch => 'branch_name_named_argument')",
+                        database, tableName));
+        assertThat(branchManager.branchExists("branch_name_named_argument")).isFalse();
 
         createAction(
                         CreateBranchAction.class,
@@ -117,98 +129,6 @@ class BranchActionITCase extends ActionITCaseBase {
                         "branch_name")
                 .run();
         assertThat(branchManager.branchExists("branch_name")).isFalse();
-    }
-
-    @Test
-    void testCreateAndDeleteBranchWithSnapshotId() throws Exception {
-
-        init(warehouse);
-
-        RowType rowType =
-                RowType.of(
-                        new DataType[] {DataTypes.BIGINT(), DataTypes.STRING()},
-                        new String[] {"k", "v"});
-        FileStoreTable table =
-                createFileStoreTable(
-                        rowType,
-                        Collections.emptyList(),
-                        Collections.singletonList("k"),
-                        Collections.emptyList(),
-                        Collections.emptyMap());
-
-        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
-        write = writeBuilder.newWrite();
-        commit = writeBuilder.newCommit();
-
-        // 3 snapshots
-        writeData(rowData(1L, BinaryString.fromString("Hi")));
-        writeData(rowData(2L, BinaryString.fromString("Hello")));
-        writeData(rowData(3L, BinaryString.fromString("Paimon")));
-
-        BranchManager branchManager = table.branchManager();
-
-        callProcedure(
-                String.format(
-                        "CALL sys.create_branch('%s.%s', 'branch_name_with_snapshotId', 2)",
-                        database, tableName));
-        assertThat(branchManager.branchExists("branch_name_with_snapshotId")).isTrue();
-
-        callProcedure(
-                String.format(
-                        "CALL sys.delete_branch('%s.%s', 'branch_name_with_snapshotId')",
-                        database, tableName));
-        assertThat(branchManager.branchExists("branch_name_with_snapshotId")).isFalse();
-
-        // create branch1 and branch3
-        callProcedure(
-                String.format(
-                        "CALL sys.create_branch('%s.%s', 'branch_name_with_snapshotId_1', 1)",
-                        database, tableName));
-        assertThat(branchManager.branchExists("branch_name_with_snapshotId_1")).isTrue();
-
-        callProcedure(
-                String.format(
-                        "CALL sys.create_branch('%s.%s', 'branch_name_with_snapshotId_3', 3)",
-                        database, tableName));
-        assertThat(branchManager.branchExists("branch_name_with_snapshotId_3")).isTrue();
-
-        // delete branch1 and branch3 batch
-        callProcedure(
-                String.format(
-                        "CALL sys.delete_branch('%s.%s', 'branch_name_with_snapshotId_1,branch_name_with_snapshotId_3')",
-                        database, tableName));
-        assertThat(branchManager.branchExists("branch_name_with_snapshotId_1")).isFalse();
-        assertThat(branchManager.branchExists("branch_name_with_snapshotId_3")).isFalse();
-
-        createAction(
-                        CreateBranchAction.class,
-                        "create_branch",
-                        "--warehouse",
-                        warehouse,
-                        "--database",
-                        database,
-                        "--table",
-                        tableName,
-                        "--branch_name",
-                        "branch_name_with_snapshotId",
-                        "--snapshot",
-                        "2")
-                .run();
-        assertThat(branchManager.branchExists("branch_name_with_snapshotId")).isTrue();
-
-        createAction(
-                        DeleteBranchAction.class,
-                        "delete_branch",
-                        "--warehouse",
-                        warehouse,
-                        "--database",
-                        database,
-                        "--table",
-                        tableName,
-                        "--branch_name",
-                        "branch_name_with_snapshotId")
-                .run();
-        assertThat(branchManager.branchExists("branch_name_with_snapshotId")).isFalse();
     }
 
     @Test
@@ -246,9 +166,21 @@ class BranchActionITCase extends ActionITCaseBase {
 
         callProcedure(
                 String.format(
+                        "CALL sys.create_branch(`table` => '%s.%s', branch => 'empty_branch_named_argument')",
+                        database, tableName));
+        assertThat(branchManager.branchExists("empty_branch_named_argument")).isTrue();
+
+        callProcedure(
+                String.format(
                         "CALL sys.delete_branch('%s.%s', 'empty_branch_name')",
                         database, tableName));
         assertThat(branchManager.branchExists("empty_branch_name")).isFalse();
+
+        callProcedure(
+                String.format(
+                        "CALL sys.delete_branch(`table` => '%s.%s', branch => 'empty_branch_named_argument')",
+                        database, tableName));
+        assertThat(branchManager.branchExists("empty_branch_named_argument")).isFalse();
 
         createAction(
                         CreateBranchAction.class,
@@ -395,7 +327,8 @@ class BranchActionITCase extends ActionITCaseBase {
         // Fast-forward branch branch_name again
         callProcedure(
                 String.format(
-                        "CALL sys.fast_forward('%s.%s', 'branch_name')", database, tableName));
+                        "CALL sys.fast_forward(`table` => '%s.%s', branch => 'branch_name')",
+                        database, tableName));
 
         // Check main branch data
         result = readTableData(table);

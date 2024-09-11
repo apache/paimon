@@ -155,19 +155,10 @@ public class TestFileStore extends KeyValueFileStore {
     }
 
     public ExpireSnapshots newExpire(int numRetainedMin, int numRetainedMax, long millisRetained) {
-        return newExpire(numRetainedMin, numRetainedMax, millisRetained, true);
-    }
-
-    public ExpireSnapshots newExpire(
-            int numRetainedMin,
-            int numRetainedMax,
-            long millisRetained,
-            boolean snapshotExpireCleanEmptyDirectories) {
         return new ExpireSnapshotsImpl(
                         snapshotManager(),
                         newSnapshotDeletion(),
-                        new TagManager(fileIO, options.path()),
-                        snapshotExpireCleanEmptyDirectories)
+                        new TagManager(fileIO, options.path()))
                 .config(
                         ExpireConfig.builder()
                                 .snapshotRetainMax(numRetainedMax)
@@ -176,24 +167,20 @@ public class TestFileStore extends KeyValueFileStore {
                                 .build());
     }
 
-    public ExpireSnapshots newExpire(
-            ExpireConfig expireConfig, boolean snapshotExpireCleanEmptyDirectories) {
+    public ExpireSnapshots newExpire(ExpireConfig expireConfig) {
         return new ExpireSnapshotsImpl(
                         snapshotManager(),
                         newSnapshotDeletion(),
-                        new TagManager(fileIO, options.path()),
-                        snapshotExpireCleanEmptyDirectories)
+                        new TagManager(fileIO, options.path()))
                 .config(expireConfig);
     }
 
-    public ExpireSnapshots newChangelogExpire(
-            ExpireConfig config, boolean snapshotExpireCleanEmptyDirectories) {
+    public ExpireSnapshots newChangelogExpire(ExpireConfig config) {
         ExpireChangelogImpl impl =
                 new ExpireChangelogImpl(
                         snapshotManager(),
                         new TagManager(fileIO, options.path()),
-                        newChangelogDeletion(),
-                        snapshotExpireCleanEmptyDirectories);
+                        newChangelogDeletion());
         impl.config(config);
         return impl;
     }
@@ -259,14 +246,15 @@ public class TestFileStore extends KeyValueFileStore {
     }
 
     public Snapshot dropPartitions(List<Map<String, String>> partitions) {
-        FileStoreCommit commit = newCommit(commitUser);
-
         SnapshotManager snapshotManager = snapshotManager();
         Long snapshotIdBeforeCommit = snapshotManager.latestSnapshotId();
         if (snapshotIdBeforeCommit == null) {
             snapshotIdBeforeCommit = Snapshot.FIRST_SNAPSHOT_ID - 1;
         }
-        commit.dropPartitions(partitions, Long.MAX_VALUE);
+
+        try (FileStoreCommit commit = newCommit(commitUser)) {
+            commit.dropPartitions(partitions, Long.MAX_VALUE);
+        }
 
         Long snapshotIdAfterCommit = snapshotManager.latestSnapshotId();
         assertThat(snapshotIdAfterCommit).isNotNull();
@@ -329,7 +317,6 @@ public class TestFileStore extends KeyValueFileStore {
                     .write(kv);
         }
 
-        FileStoreCommit commit = newCommit(commitUser);
         ManifestCommittable committable =
                 new ManifestCommittable(
                         identifier == null ? commitIdentifier++ : identifier, watermark);
@@ -354,7 +341,11 @@ public class TestFileStore extends KeyValueFileStore {
         if (snapshotIdBeforeCommit == null) {
             snapshotIdBeforeCommit = Snapshot.FIRST_SNAPSHOT_ID - 1;
         }
-        commitFunction.accept(commit, committable);
+
+        try (FileStoreCommit commit = newCommit(commitUser)) {
+            commitFunction.accept(commit, committable);
+        }
+
         Long snapshotIdAfterCommit = snapshotManager.latestSnapshotId();
         if (snapshotIdAfterCommit == null) {
             snapshotIdAfterCommit = Snapshot.FIRST_SNAPSHOT_ID - 1;
@@ -629,7 +620,7 @@ public class TestFileStore extends KeyValueFileStore {
         }
 
         // manifests
-        List<ManifestFileMeta> manifests = snapshot.allManifests(manifestList);
+        List<ManifestFileMeta> manifests = manifestList.readAllManifests(snapshot);
         manifests.forEach(m -> result.add(pathFactory.toManifestFilePath(m.fileName())));
 
         // data file
@@ -648,7 +639,8 @@ public class TestFileStore extends KeyValueFileStore {
         // but it can only be cleaned after this snapshot expired, so we should add it to the file
         // use list.
         if (changelogDecoupled && !produceChangelog) {
-            entries = scan.withManifestList(snapshot.deltaManifests(manifestList)).plan().files();
+            entries =
+                    scan.withManifestList(manifestList.readDeltaManifests(snapshot)).plan().files();
             for (ManifestEntry entry : entries) {
                 // append delete file are delayed to delete
                 if (entry.kind() == FileKind.DELETE
@@ -695,9 +687,9 @@ public class TestFileStore extends KeyValueFileStore {
 
         // manifests
         List<ManifestFileMeta> manifests =
-                new ArrayList<>(changelog.changelogManifests(manifestList));
+                new ArrayList<>(manifestList.readChangelogManifests(changelog));
         if (!produceChangelog) {
-            manifests.addAll(changelog.dataManifests(manifestList));
+            manifests.addAll(manifestList.readDataManifests(changelog));
         }
 
         manifests.forEach(m -> result.add(pathFactory.toManifestFilePath(m.fileName())));
@@ -710,7 +702,9 @@ public class TestFileStore extends KeyValueFileStore {
         // delta file
         if (!produceChangelog) {
             for (ManifestEntry entry :
-                    scan.withManifestList(changelog.deltaManifests(manifestList)).plan().files()) {
+                    scan.withManifestList(manifestList.readDeltaManifests(changelog))
+                            .plan()
+                            .files()) {
                 if (entry.file().fileSource().orElse(FileSource.APPEND) == FileSource.APPEND) {
                     result.add(
                             new Path(
@@ -721,7 +715,7 @@ public class TestFileStore extends KeyValueFileStore {
         } else {
             // changelog
             for (ManifestEntry entry :
-                    scan.withManifestList(changelog.changelogManifests(manifestList))
+                    scan.withManifestList(manifestList.readChangelogManifests(changelog))
                             .plan()
                             .files()) {
                 result.add(
@@ -777,7 +771,8 @@ public class TestFileStore extends KeyValueFileStore {
         }
 
         public TestFileStore build() {
-            Options conf = new Options();
+            Options conf =
+                    tableSchema == null ? new Options() : Options.fromMap(tableSchema.options());
 
             conf.set(CoreOptions.WRITE_BUFFER_SIZE, WRITE_BUFFER_SIZE);
             conf.set(CoreOptions.PAGE_SIZE, PAGE_SIZE);

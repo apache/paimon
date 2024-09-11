@@ -27,7 +27,6 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.snapshot.AllDeltaFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.BoundedChecker;
 import org.apache.paimon.table.source.snapshot.CompactionChangelogFollowUpScanner;
-import org.apache.paimon.table.source.snapshot.ContinuousAppendAndCompactFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.DeltaFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.FollowUpScanner;
 import org.apache.paimon.table.source.snapshot.InputChangelogFollowUpScanner;
@@ -66,6 +65,8 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
     private boolean isFullPhaseEnd = false;
     @Nullable private Long currentWatermark;
     @Nullable private Long nextSnapshotId;
+
+    @Nullable private Long scanDelayMillis;
 
     public DataTableStreamScan(
             CoreOptions options,
@@ -118,6 +119,9 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
         }
         if (boundedChecker == null) {
             boundedChecker = createBoundedChecker();
+        }
+        if (scanDelayMillis == null) {
+            scanDelayMillis = getScanDelayMillis();
         }
         initialized = true;
     }
@@ -177,6 +181,10 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
                 throw new EndOfScanException();
             }
 
+            if (shouldDelaySnapshot(nextSnapshotId)) {
+                return SnapshotNotExistPlan.INSTANCE;
+            }
+
             // first check changes of overwrite
             if (snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE
                     && supportStreamingReadOverwrite) {
@@ -198,14 +206,25 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
         }
     }
 
+    private boolean shouldDelaySnapshot(long snapshotId) {
+        if (scanDelayMillis == null) {
+            return false;
+        }
+
+        long snapshotMills = System.currentTimeMillis() - scanDelayMillis;
+        if (snapshotManager.snapshotExists(snapshotId)
+                && snapshotManager.snapshot(snapshotId).timeMillis() > snapshotMills) {
+            return true;
+        }
+        return false;
+    }
+
     private FollowUpScanner createFollowUpScanner() {
         CoreOptions.StreamScanMode type =
                 options.toConfiguration().get(CoreOptions.STREAM_SCAN_MODE);
         switch (type) {
             case COMPACT_BUCKET_TABLE:
                 return new DeltaFollowUpScanner();
-            case COMPACT_APPEND_NO_BUCKET:
-                return new ContinuousAppendAndCompactFollowUpScanner();
             case FILE_MONITOR:
                 return new AllDeltaFollowUpScanner();
         }
@@ -235,6 +254,12 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
         return boundedWatermark != null
                 ? BoundedChecker.watermark(boundedWatermark)
                 : BoundedChecker.neverEnd();
+    }
+
+    private Long getScanDelayMillis() {
+        return options.streamingReadDelay() == null
+                ? null
+                : options.streamingReadDelay().toMillis();
     }
 
     @Nullable

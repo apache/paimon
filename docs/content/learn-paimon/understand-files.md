@@ -40,7 +40,7 @@ Before delving further into this page, please ensure that you have read through 
 following sections:
 
 1. [Basic Concepts]({{< ref "concepts/basic-concepts" >}}),
-2. [Primary Key Table]({{< ref "primary-key-table/overview" >}}) and
+2. [Primary Key Table]({{< ref "primary-key-table/overview" >}}) and [Append Table]({{< ref "append-table/overview" >}})
 3. How to use Paimon in [Flink]({{< ref "flink" >}}).
 
 ## Understand File Operations

@@ -27,11 +27,11 @@ import org.apache.paimon.types.RowType;
 
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testBatchRead;
@@ -49,8 +49,9 @@ public class RollbackToActionITCase extends ActionITCaseBase {
         init(warehouse);
     }
 
-    @Test
-    public void rollbackToSnapshotTest() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"action", "procedure_named", "procedure_indexed"})
+    public void rollbackToSnapshotTest(String invoker) throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         ROW_TYPE,
@@ -67,21 +68,35 @@ public class RollbackToActionITCase extends ActionITCaseBase {
         writeData(rowData(2L, BinaryString.fromString("World")));
         writeData(rowData(2L, BinaryString.fromString("Flink")));
 
-        if (ThreadLocalRandom.current().nextBoolean()) {
-            createAction(
-                            RollbackToAction.class,
-                            "rollback_to",
-                            "--warehouse",
-                            warehouse,
-                            "--database",
-                            database,
-                            "--table",
-                            tableName,
-                            "--version",
-                            "2")
-                    .run();
-        } else {
-            callProcedure(String.format("CALL sys.rollback_to('%s.%s', 2)", database, tableName));
+        switch (invoker) {
+            case "action":
+                createAction(
+                                RollbackToAction.class,
+                                "rollback_to",
+                                "--warehouse",
+                                warehouse,
+                                "--database",
+                                database,
+                                "--table",
+                                tableName,
+                                "--version",
+                                "2")
+                        .run();
+                break;
+            case "procedure_indexed":
+                callProcedure(
+                        String.format(
+                                "CALL sys.rollback_to('%s.%s', '', cast(2 as bigint))",
+                                database, tableName));
+                break;
+            case "procedure_named":
+                callProcedure(
+                        String.format(
+                                "CALL sys.rollback_to(`table` => '%s.%s', snapshot_id => cast(2 as bigint))",
+                                database, tableName));
+                break;
+            default:
+                throw new UnsupportedOperationException(invoker);
         }
 
         testBatchRead(
@@ -89,8 +104,9 @@ public class RollbackToActionITCase extends ActionITCaseBase {
                 Arrays.asList(Row.of(1L, "Hi"), Row.of(2L, "Hello")));
     }
 
-    @Test
-    public void rollbackToTagTest() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"action", "procedure_named", "procedure_indexed"})
+    public void rollbackToTagTest(String invoker) throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         ROW_TYPE,
@@ -110,22 +126,34 @@ public class RollbackToActionITCase extends ActionITCaseBase {
         table.createTag("tag2", 2);
         table.createTag("tag3", 3);
 
-        if (ThreadLocalRandom.current().nextBoolean()) {
-            createAction(
-                            RollbackToAction.class,
-                            "rollback_to",
-                            "--warehouse",
-                            warehouse,
-                            "--database",
-                            database,
-                            "--table",
-                            tableName,
-                            "--version",
-                            "tag2")
-                    .run();
-        } else {
-            callProcedure(
-                    String.format("CALL sys.rollback_to('%s.%s', 'tag2')", database, tableName));
+        switch (invoker) {
+            case "action":
+                createAction(
+                                RollbackToAction.class,
+                                "rollback_to",
+                                "--warehouse",
+                                warehouse,
+                                "--database",
+                                database,
+                                "--table",
+                                tableName,
+                                "--version",
+                                "tag2")
+                        .run();
+                break;
+            case "procedure_indexed":
+                callProcedure(
+                        String.format(
+                                "CALL sys.rollback_to('%s.%s', 'tag2')", database, tableName));
+                break;
+            case "procedure_named":
+                callProcedure(
+                        String.format(
+                                "CALL sys.rollback_to(`table` => '%s.%s', tag => 'tag2')",
+                                database, tableName));
+                break;
+            default:
+                throw new UnsupportedOperationException(invoker);
         }
 
         testBatchRead(

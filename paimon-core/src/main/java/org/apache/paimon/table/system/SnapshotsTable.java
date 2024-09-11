@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.system;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -26,6 +27,8 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.predicate.And;
+import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.GreaterOrEqual;
 import org.apache.paimon.predicate.GreaterThan;
@@ -75,7 +78,6 @@ public class SnapshotsTable implements ReadonlyTable {
     private static final long serialVersionUID = 1L;
 
     public static final String SNAPSHOTS = "snapshots";
-
     public static final RowType TABLE_TYPE =
             new RowType(
                     Arrays.asList(
@@ -106,13 +108,24 @@ public class SnapshotsTable implements ReadonlyTable {
 
     private final FileIO fileIO;
     private final Path location;
+    private final String branch;
 
     private final FileStoreTable dataTable;
 
-    public SnapshotsTable(FileIO fileIO, Path location, FileStoreTable dataTable) {
+    public SnapshotsTable(FileStoreTable dataTable) {
+        this(
+                dataTable.fileIO(),
+                dataTable.location(),
+                dataTable,
+                CoreOptions.branch(dataTable.schema().options()));
+    }
+
+    public SnapshotsTable(
+            FileIO fileIO, Path location, FileStoreTable dataTable, String branchName) {
         this.fileIO = fileIO;
         this.location = location;
         this.dataTable = dataTable;
+        this.branch = branchName;
     }
 
     @Override
@@ -142,7 +155,7 @@ public class SnapshotsTable implements ReadonlyTable {
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new SnapshotsTable(fileIO, location, dataTable.copy(dynamicOptions));
+        return new SnapshotsTable(fileIO, location, dataTable.copy(dynamicOptions), branch);
     }
 
     private class SnapshotsScan extends ReadOnceTableScan {
@@ -187,7 +200,7 @@ public class SnapshotsTable implements ReadonlyTable {
         }
     }
 
-    private static class SnapshotsRead implements InnerTableRead {
+    private class SnapshotsRead implements InnerTableRead {
 
         private final FileIO fileIO;
         private int[][] projection;
@@ -204,8 +217,25 @@ public class SnapshotsTable implements ReadonlyTable {
                 return this;
             }
 
+            String leafName = "snapshot_id";
+            if (predicate instanceof CompoundPredicate) {
+                CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
+                if ((compoundPredicate.function()) instanceof And) {
+                    List<Predicate> children = compoundPredicate.children();
+                    for (Predicate leaf : children) {
+                        handleLeafPredicate(leaf, leafName);
+                    }
+                }
+            } else {
+                handleLeafPredicate(predicate, leafName);
+            }
+
+            return this;
+        }
+
+        public void handleLeafPredicate(Predicate predicate, String leafName) {
             LeafPredicate snapshotPred =
-                    predicate.visit(LeafPredicateExtractor.INSTANCE).get("snapshot_id");
+                    predicate.visit(LeafPredicateExtractor.INSTANCE).get(leafName);
             if (snapshotPred != null) {
                 if (snapshotPred.function() instanceof Equal) {
                     optionalFilterSnapshotIdMin =
@@ -234,8 +264,6 @@ public class SnapshotsTable implements ReadonlyTable {
                             Optional.of((Long) snapshotPred.literals().get(0));
                 }
             }
-
-            return this;
         }
 
         @Override
@@ -255,7 +283,7 @@ public class SnapshotsTable implements ReadonlyTable {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
             SnapshotManager snapshotManager =
-                    new SnapshotManager(fileIO, ((SnapshotsSplit) split).location);
+                    new SnapshotManager(fileIO, ((SnapshotsSplit) split).location, branch);
             Iterator<Snapshot> snapshots =
                     snapshotManager.snapshotsWithinRange(
                             optionalFilterSnapshotIdMax, optionalFilterSnapshotIdMin);

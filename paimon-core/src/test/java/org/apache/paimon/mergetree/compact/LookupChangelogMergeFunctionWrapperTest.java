@@ -73,7 +73,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
                         highLevel::get,
                         EQUALISER,
                         changelogRowDeduplicate,
-                        LookupStrategy.from(false, true, false),
+                        LookupStrategy.from(false, true, false, false),
                         null,
                         null);
 
@@ -233,7 +233,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
                         key -> null,
                         EQUALISER,
                         changelogRowDeduplicate,
-                        LookupStrategy.from(false, true, false),
+                        LookupStrategy.from(false, true, false, false),
                         null,
                         null);
 
@@ -322,7 +322,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
                         highLevel::get,
                         EQUALISER,
                         false,
-                        LookupStrategy.from(false, true, false),
+                        LookupStrategy.from(false, true, false, false),
                         null,
                         UserDefinedSeqComparator.create(
                                 RowType.builder().field("f0", DataTypes.INT()).build(),

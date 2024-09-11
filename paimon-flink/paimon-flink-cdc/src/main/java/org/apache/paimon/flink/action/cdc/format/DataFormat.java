@@ -18,55 +18,34 @@
 
 package org.apache.paimon.flink.action.cdc.format;
 
+import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
-import org.apache.paimon.flink.action.cdc.format.canal.CanalRecordParser;
-import org.apache.paimon.flink.action.cdc.format.debezium.DebeziumRecordParser;
-import org.apache.paimon.flink.action.cdc.format.json.JsonRecordParser;
-import org.apache.paimon.flink.action.cdc.format.maxwell.MaxwellRecordParser;
-import org.apache.paimon.flink.action.cdc.format.ogg.OggRecordParser;
+
+import org.apache.flink.api.common.serialization.DeserializationSchema;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
 
 import java.util.List;
 
 /**
- * Enumerates the supported data formats for message queue and provides a mechanism to create their
- * associated {@link RecordParser}.
- *
- * <p>Each data format is associated with a specific implementation of {@link RecordParserFactory},
- * which can be used to create instances of {@link RecordParser} for that format.
+ * Supports the message queue's data format and provides definitions for the message queue's record
+ * deserialization class and parsing class {@link AbstractRecordParser}.
  */
-public enum DataFormat {
-    CANAL_JSON(CanalRecordParser::new),
-    OGG_JSON(OggRecordParser::new),
-    MAXWELL_JSON(MaxwellRecordParser::new),
-    DEBEZIUM_JSON(DebeziumRecordParser::new),
-    JSON(JsonRecordParser::new);
-    // Add more data formats here if needed
-
-    private final RecordParserFactory parser;
-
-    DataFormat(RecordParserFactory parser) {
-        this.parser = parser;
-    }
+public interface DataFormat {
 
     /**
-     * Creates a new instance of {@link RecordParser} for this data format with the specified
-     * configurations.
+     * Creates a new instance of {@link AbstractRecordParser} for this data format with the
+     * specified configurations.
      *
      * @param computedColumns List of computed columns to be considered by the parser.
-     * @return A new instance of {@link RecordParser}.
+     * @return A new instance of {@link AbstractRecordParser}.
      */
-    public RecordParser createParser(
-            TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        return parser.createParser(typeMapping, computedColumns);
-    }
+    AbstractRecordParser createParser(
+            TypeMapping typeMapping, List<ComputedColumn> computedColumns);
 
-    public static DataFormat fromConfigString(String format) {
-        try {
-            return DataFormat.valueOf(format.replace("-", "_").toUpperCase());
-        } catch (Exception e) {
-            throw new UnsupportedOperationException(
-                    String.format("This format: %s is not supported.", format));
-        }
-    }
+    KafkaDeserializationSchema<CdcSourceRecord> createKafkaDeserializer(
+            Configuration cdcSourceConfig);
+
+    DeserializationSchema<CdcSourceRecord> createPulsarDeserializer(Configuration cdcSourceConfig);
 }

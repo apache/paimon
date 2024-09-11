@@ -18,30 +18,28 @@
 
 package org.apache.paimon.spark.commands
 
-import org.apache.paimon.deletionvectors.{BitmapDeletionVector, DeletionVector}
+import org.apache.paimon.deletionvectors.BitmapDeletionVector
 import org.apache.paimon.fs.Path
 import org.apache.paimon.index.IndexFileMeta
 import org.apache.paimon.io.{CompactIncrement, DataFileMeta, DataIncrement, IndexIncrement}
-import org.apache.paimon.manifest.IndexManifestEntry
 import org.apache.paimon.spark.{PaimonSplitScan, SparkFilterConverter}
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.commands.SparkDataFileMeta.convertToSparkDataFileMeta
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.schema.PaimonMetadataColumn._
-import org.apache.paimon.table.BucketMode
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.types.RowType
 import org.apache.paimon.utils.SerializationUtils
 
-import org.apache.spark.sql.{Dataset, SparkSession}
+import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
-import org.apache.spark.sql.catalyst.plans.logical.{Filter => FilterLogicalNode, LogicalPlan, Project}
-import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
-import org.apache.spark.sql.sources.{AlwaysTrue, And, EqualNullSafe, Filter}
+import org.apache.spark.sql.catalyst.plans.logical.{Filter => FilterLogicalNode, LogicalPlan}
+import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2ScanRelation}
+import org.apache.spark.sql.sources.{AlwaysTrue, And, EqualNullSafe, EqualTo, Filter}
 
 import java.net.URI
 import java.util.Collections
@@ -60,23 +58,20 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
     filters.length == 1 && filters.head.isInstanceOf[AlwaysTrue]
   }
 
-  /**
-   * For the 'INSERT OVERWRITE T PARTITION (partitionVal, ...)' semantics of SQL, Spark will
-   * transform `partitionVal`s to EqualNullSafe Filters.
-   */
-  def convertFilterToMap(filter: Filter, partitionRowType: RowType): Map[String, String] = {
+  /** See [[ org.apache.paimon.spark.SparkWriteBuilder#failIfCanNotOverwrite]] */
+  def convertPartitionFilterToMap(
+      filter: Filter,
+      partitionRowType: RowType): Map[String, String] = {
     val converter = new SparkFilterConverter(partitionRowType)
     splitConjunctiveFilters(filter).map {
       case EqualNullSafe(attribute, value) =>
-        if (isNestedFilterInValue(value)) {
-          throw new RuntimeException(
-            s"Not support the complex partition value in EqualNullSafe when run `INSERT OVERWRITE`.")
-        } else {
-          (attribute, converter.convertLiteral(attribute, value).toString)
-        }
+        (attribute, converter.convertString(attribute, value))
+      case EqualTo(attribute, value) =>
+        (attribute, converter.convertString(attribute, value))
       case _ =>
+        // Should not happen
         throw new RuntimeException(
-          s"Only EqualNullSafe should be used when run `INSERT OVERWRITE`.")
+          s"Only support Overwrite filters with Equal and EqualNullSafe, but got: $filter")
     }.toMap
   }
 
@@ -86,10 +81,6 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
         splitConjunctiveFilters(filter1) ++ splitConjunctiveFilters(filter2)
       case other => other :: Nil
     }
-  }
-
-  private def isNestedFilterInValue(value: Any): Boolean = {
-    value.isInstanceOf[Filter]
   }
 
   /** Gets a relative path against the table path. */
@@ -103,7 +94,7 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
       output: Seq[Attribute]): Seq[DataSplit] = {
     // low level snapshot reader, it can not be affected by 'scan.mode'
     val snapshotReader = table.newSnapshotReader()
-    if (condition == TrueLiteral) {
+    if (condition != TrueLiteral) {
       val filter =
         convertConditionToPaimonPredicate(condition, output, rowType, ignoreFailure = true)
       filter.foreach(snapshotReader.withFilter)
@@ -117,8 +108,6 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
       condition: Expression,
       relation: DataSourceV2Relation,
       sparkSession: SparkSession): Array[String] = {
-    import sparkSession.implicits._
-
     for (split <- candidateDataSplits) {
       if (!split.rawConvertible()) {
         throw new IllegalArgumentException(
@@ -128,12 +117,34 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
 
     val metadataCols = Seq(FILE_PATH)
     val filteredRelation = createNewScanPlan(candidateDataSplits, condition, relation, metadataCols)
-    createDataset(sparkSession, filteredRelation)
+    findTouchedFiles(createDataset(sparkSession, filteredRelation), sparkSession)
+  }
+
+  protected def findTouchedFiles(
+      dataset: Dataset[Row],
+      sparkSession: SparkSession): Array[String] = {
+    import sparkSession.implicits._
+    dataset
       .select(FILE_PATH_COLUMN)
       .distinct()
       .as[String]
       .collect()
       .map(relativePath)
+  }
+
+  protected def createNewRelation(
+      filePaths: Array[String],
+      filePathToMeta: Map[String, SparkDataFileMeta],
+      relation: DataSourceV2Relation): (Array[SparkDataFileMeta], DataSourceV2ScanRelation) = {
+    val files = filePaths.map(
+      file => filePathToMeta.getOrElse(file, throw new RuntimeException(s"Missing file: $file")))
+    val touchedDataSplits =
+      SparkDataFileMeta.convertToDataSplits(files, rawConvertible = true, fileStore.pathFactory())
+    val newRelation = Compatibility.createDataSourceV2ScanRelation(
+      relation,
+      PaimonSplitScan(table, touchedDataSplits),
+      relation.output)
+    (files, newRelation)
   }
 
   /** Notice that, the key is a relative path, not just the file name. */
@@ -148,112 +159,66 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
       .toMap
   }
 
-  protected def getDeletedIndexFiles(
-      dataFilePathToMeta: Map[String, SparkDataFileMeta],
-      newDeletionVectors: Dataset[SparkDeletionVectors]
-  ): Seq[IndexManifestEntry] = {
-    val deletionFiles = dataFilePathToMeta.flatMap {
-      case (relativePath, sdf) =>
-        sdf.deletionFile match {
-          case Some(deletionFile) =>
-            Some((relativePath, deletionFile))
-          case None => None
-        }
-    }
-    val dvIndexFileMaintainer = fileStore
-      .newIndexFileHandler()
-      .createDVIndexFileMaintainer(deletionFiles.asJava)
-
-    val pathFactory = fileStore.pathFactory()
-    val touchedDataFileAndDeletionFiles = newDeletionVectors
-      .collect()
-      .flatMap {
-        sdv =>
-          val relativePaths = sdv.relativePaths(pathFactory)
-          relativePaths.flatMap {
-            relativePath =>
-              dataFilePathToMeta(relativePath).deletionFile match {
-                case Some(deletionFile) => Some(relativePath, deletionFile)
-                case _ => None
-              }
-          }
-      }
-      .toMap
-
-    dvIndexFileMaintainer.notifyDeletionFiles(touchedDataFileAndDeletionFiles.asJava)
-
-    dvIndexFileMaintainer.writeUnchangedDeletionVector().asScala
-  }
-
-  protected def updateDeletionVector(
-      deletionVectors: Dataset[SparkDeletionVectors],
-      dataFilePathToMeta: Map[String, SparkDataFileMeta],
-      writer: PaimonSparkWriter): Seq[CommitMessage] = {
-    // Step1: write the new deletion vectors
-    val newIndexCommitMsg = writer.persistDeletionVectors(deletionVectors)
-
-    // Step2: write the unchanged deletion vectors where store in touched dv index files, and mark these touched index files as DELETE if needed.
-    val rewriteIndexCommitMsg = fileStore.bucketMode() match {
-      case BucketMode.BUCKET_UNAWARE =>
-        val indexEntries = getDeletedIndexFiles(dataFilePathToMeta, deletionVectors)
-        writer.buildCommitMessageFromIndexManifestEntry(indexEntries)
-      case _ =>
-        Seq.empty[CommitMessage]
-    }
-
-    newIndexCommitMsg ++ rewriteIndexCommitMsg
-  }
-
   protected def collectDeletionVectors(
       candidateDataSplits: Seq[DataSplit],
       dataFilePathToMeta: Map[String, SparkDataFileMeta],
       condition: Expression,
       relation: DataSourceV2Relation,
       sparkSession: SparkSession): Dataset[SparkDeletionVectors] = {
-    import sparkSession.implicits._
-
-    val dataFileAndDeletionFile = dataFilePathToMeta.mapValues(_.toSparkDeletionFile).toArray
     val metadataCols = Seq(FILE_PATH, ROW_INDEX)
     val filteredRelation = createNewScanPlan(candidateDataSplits, condition, relation, metadataCols)
+    val dataWithMetadataColumns = createDataset(sparkSession, filteredRelation)
+    collectDeletionVectors(dataFilePathToMeta, dataWithMetadataColumns, sparkSession)
+  }
 
-    val store = table.store()
-    val fileIO = table.fileIO()
-    val location = table.location
-    createDataset(sparkSession, filteredRelation)
+  protected def collectDeletionVectors(
+      dataFilePathToMeta: Map[String, SparkDataFileMeta],
+      dataWithMetadataColumns: Dataset[Row],
+      sparkSession: SparkSession): Dataset[SparkDeletionVectors] = {
+    import sparkSession.implicits._
+
+    val resolver = sparkSession.sessionState.conf.resolver
+    Seq(FILE_PATH_COLUMN, ROW_INDEX_COLUMN).foreach {
+      metadata =>
+        dataWithMetadataColumns.schema
+          .find(field => resolver(field.name, metadata))
+          .orElse(throw new RuntimeException(
+            "This input dataset doesn't contains the required metadata columns: __paimon_file_path and __paimon_row_index."))
+    }
+
+    val dataFileToPartitionAndBucket =
+      dataFilePathToMeta.mapValues(meta => (meta.partition, meta.bucket)).toArray
+
+    val my_table = table
+    val location = my_table.location
+    dataWithMetadataColumns
       .select(FILE_PATH_COLUMN, ROW_INDEX_COLUMN)
       .as[(String, Long)]
       .groupByKey(_._1)
       .mapGroups {
         case (filePath, iter) =>
-          val fileNameToDeletionFile = dataFileAndDeletionFile.toMap
           val dv = new BitmapDeletionVector()
           while (iter.hasNext) {
             dv.delete(iter.next()._2)
           }
 
           val relativeFilePath = location.toUri.relativize(new URI(filePath)).toString
-          val sparkDeletionFile = fileNameToDeletionFile(relativeFilePath)
-          sparkDeletionFile.deletionFile match {
-            case Some(deletionFile) =>
-              dv.merge(DeletionVector.read(fileIO, deletionFile))
-            case None =>
-          }
-
-          val pathFactory = store.pathFactory()
+          val (partition, bucket) = dataFileToPartitionAndBucket.toMap.apply(relativeFilePath)
+          val pathFactory = my_table.store().pathFactory()
           val partitionAndBucket = pathFactory
-            .relativePartitionAndBucketPath(sparkDeletionFile.partition, sparkDeletionFile.bucket)
+            .relativePartitionAndBucketPath(partition, bucket)
             .toString
 
           SparkDeletionVectors(
             partitionAndBucket,
-            SerializationUtils.serializeBinaryRow(sparkDeletionFile.partition),
-            sparkDeletionFile.bucket,
+            SerializationUtils.serializeBinaryRow(partition),
+            bucket,
             Seq((new Path(filePath).getName, dv.serializeToBytes()))
           )
       }
   }
 
-  private def createNewScanPlan(
+  protected def createNewScanPlan(
       candidateDataSplits: Seq[DataSplit],
       condition: Expression,
       relation: DataSourceV2Relation,
@@ -261,11 +226,9 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
     val metadataProj = metadataCols.map(_.toAttribute)
     val newRelation = relation.copy(output = relation.output ++ metadataProj)
     val scan = PaimonSplitScan(table, candidateDataSplits.toArray, metadataCols)
-    Project(
-      metadataProj,
-      FilterLogicalNode(
-        condition,
-        Compatibility.createDataSourceV2ScanRelation(newRelation, scan, newRelation.output)))
+    FilterLogicalNode(
+      condition,
+      Compatibility.createDataSourceV2ScanRelation(newRelation, scan, newRelation.output))
 
   }
 

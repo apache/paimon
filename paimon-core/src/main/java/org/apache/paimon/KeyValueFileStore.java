@@ -61,8 +61,6 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** {@link FileStore} for querying and updating {@link KeyValue}s. */
 public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
 
-    private static final long serialVersionUID = 1L;
-
     private final boolean crossPartitionUpdate;
     private final RowType bucketKeyType;
     private final RowType keyType;
@@ -171,6 +169,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 schemaManager,
                 schema,
                 commitUser,
+                partitionType,
                 keyType,
                 valueType,
                 keyComparatorSupplier,
@@ -236,7 +235,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 forWrite,
                 options.scanManifestParallelism(),
                 options.deletionVectorsEnabled(),
-                options.mergeEngine());
+                options.mergeEngine(),
+                options.changelogProducer());
     }
 
     @Override

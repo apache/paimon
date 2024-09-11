@@ -178,6 +178,13 @@ public abstract class SparkReadTestBase {
                         tableName));
     }
 
+    protected static void createTableWithNonNullColumn(String tableName) {
+        spark.sql(
+                String.format(
+                        "CREATE TABLE paimon.default.%s (a INT NOT NULL, b BIGINT NOT NULL, c STRING) TBLPROPERTIES ('bucket' = '1', 'primary-key'='a', 'file.format'='avro')",
+                        tableName));
+    }
+
     protected static FileStoreTable getTable(String tableName) {
         return FileStoreTableFactory.create(
                 LocalFileIO.create(),
@@ -238,5 +245,9 @@ public abstract class SparkReadTestBase {
     // default schema
     protected String defaultShowCreateString(String table) {
         return showCreateString(table, "a INT NOT NULL", "b BIGINT", "c STRING");
+    }
+
+    protected String defaultShowCreateStringWithNonNullColumn(String table) {
+        return showCreateString(table, "a INT NOT NULL", "b BIGINT NOT NULL", "c STRING");
     }
 }

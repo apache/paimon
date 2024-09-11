@@ -18,6 +18,7 @@
 
 package org.apache.paimon.mergetree.compact;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordEqualiser;
@@ -52,6 +53,7 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
 
     private final LookupLevels<T> lookupLevels;
     private final MergeFunctionWrapperFactory<T> wrapperFactory;
+    private final boolean noSequenceField;
     @Nullable private final DeletionVectorsMaintainer dvMaintainer;
 
     public LookupMergeTreeCompactRewriter(
@@ -66,7 +68,8 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
             MergeSorter mergeSorter,
             MergeFunctionWrapperFactory<T> wrapperFactory,
             boolean produceChangelog,
-            @Nullable DeletionVectorsMaintainer dvMaintainer) {
+            @Nullable DeletionVectorsMaintainer dvMaintainer,
+            CoreOptions options) {
         super(
                 maxLevel,
                 mergeEngine,
@@ -81,6 +84,7 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
         this.dvMaintainer = dvMaintainer;
         this.lookupLevels = lookupLevels;
         this.wrapperFactory = wrapperFactory;
+        this.noSequenceField = options.sequenceField().isEmpty();
     }
 
     @Override
@@ -114,7 +118,7 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
 
         // DEDUPLICATE retains the latest records as the final result, so merging has no impact on
         // it at all.
-        if (mergeEngine == MergeEngine.DEDUPLICATE) {
+        if (mergeEngine == MergeEngine.DEDUPLICATE && noSequenceField) {
             return CHANGELOG_NO_REWRITE;
         }
 

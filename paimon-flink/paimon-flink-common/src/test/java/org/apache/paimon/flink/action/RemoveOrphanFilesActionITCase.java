@@ -18,10 +18,19 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.sink.StreamTableCommit;
+import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -31,12 +40,14 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -83,8 +94,9 @@ public class RemoveOrphanFilesActionITCase extends ActionITCaseBase {
         return new Path(table.location(), orphanFile);
     }
 
-    @Test
-    public void testRunWithoutException() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testRunWithoutException(boolean isNamedArgument) throws Exception {
         FileStoreTable table = createTableAndWriteData(tableName);
         Path orphanFile1 = getOrphanFilePath(table, ORPHAN_FILE_1);
         Path orphanFile2 = getOrphanFilePath(table, ORPHAN_FILE_2);
@@ -108,14 +120,22 @@ public class RemoveOrphanFilesActionITCase extends ActionITCaseBase {
         assertThatCode(action2::run).doesNotThrowAnyException();
 
         String withoutOlderThan =
-                String.format("CALL sys.remove_orphan_files('%s.%s')", database, tableName);
+                String.format(
+                        isNamedArgument
+                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s')"
+                                : "CALL sys.remove_orphan_files('%s.%s')",
+                        database,
+                        tableName);
         CloseableIterator<Row> withoutOlderThanCollect = callProcedure(withoutOlderThan);
         assertThat(ImmutableList.copyOf(withoutOlderThanCollect).size()).isEqualTo(0);
 
         String withDryRun =
                 String.format(
-                        "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59', true)",
-                        database, tableName);
+                        isNamedArgument
+                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '2999-12-31 23:59:59', dry_run => true)"
+                                : "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59', true)",
+                        database,
+                        tableName);
         ImmutableList<Row> actualDryRunDeleteFile = ImmutableList.copyOf(callProcedure(withDryRun));
         assertThat(actualDryRunDeleteFile)
                 .containsExactlyInAnyOrder(
@@ -124,8 +144,11 @@ public class RemoveOrphanFilesActionITCase extends ActionITCaseBase {
 
         String withOlderThan =
                 String.format(
-                        "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59')",
-                        database, tableName);
+                        isNamedArgument
+                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '2999-12-31 23:59:59')"
+                                : "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59')",
+                        database,
+                        tableName);
         ImmutableList<Row> actualDeleteFile = ImmutableList.copyOf(callProcedure(withOlderThan));
 
         assertThat(actualDeleteFile)
@@ -134,8 +157,9 @@ public class RemoveOrphanFilesActionITCase extends ActionITCaseBase {
                         Row.of(orphanFile2.toUri().getPath()));
     }
 
-    @Test
-    public void testRemoveDatabaseOrphanFilesITCase() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testRemoveDatabaseOrphanFilesITCase(boolean isNamedArgument) throws Exception {
         FileStoreTable table1 = createTableAndWriteData("tableName1");
         Path orphanFile11 = getOrphanFilePath(table1, ORPHAN_FILE_1);
         Path orphanFile12 = getOrphanFilePath(table1, ORPHAN_FILE_2);
@@ -162,14 +186,22 @@ public class RemoveOrphanFilesActionITCase extends ActionITCaseBase {
         assertThatCode(action2::run).doesNotThrowAnyException();
 
         String withoutOlderThan =
-                String.format("CALL sys.remove_orphan_files('%s.%s')", database, "*");
+                String.format(
+                        isNamedArgument
+                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s')"
+                                : "CALL sys.remove_orphan_files('%s.%s')",
+                        database,
+                        "*");
         CloseableIterator<Row> withoutOlderThanCollect = callProcedure(withoutOlderThan);
         assertThat(ImmutableList.copyOf(withoutOlderThanCollect).size()).isEqualTo(0);
 
         String withDryRun =
                 String.format(
-                        "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59', true)",
-                        database, "*");
+                        isNamedArgument
+                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '2999-12-31 23:59:59', dry_run => true)"
+                                : "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59', true)",
+                        database,
+                        "*");
         ImmutableList<Row> actualDryRunDeleteFile = ImmutableList.copyOf(callProcedure(withDryRun));
         assertThat(actualDryRunDeleteFile)
                 .containsExactlyInAnyOrder(
@@ -180,8 +212,11 @@ public class RemoveOrphanFilesActionITCase extends ActionITCaseBase {
 
         String withOlderThan =
                 String.format(
-                        "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59')",
-                        database, "*");
+                        isNamedArgument
+                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '2999-12-31 23:59:59')"
+                                : "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59')",
+                        database,
+                        "*");
         ImmutableList<Row> actualDeleteFile = ImmutableList.copyOf(callProcedure(withOlderThan));
 
         assertThat(actualDeleteFile)
@@ -190,5 +225,59 @@ public class RemoveOrphanFilesActionITCase extends ActionITCaseBase {
                         Row.of(orphanFile12.toUri().getPath()),
                         Row.of(orphanFile21.toUri().getPath()),
                         Row.of(orphanFile22.toUri().getPath()));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testCleanWithBranch(boolean isNamedArgument) throws Exception {
+        // create main branch
+        FileStoreTable table = createTableAndWriteData(tableName);
+        Path orphanFile1 = getOrphanFilePath(table, ORPHAN_FILE_1);
+        Path orphanFile2 = getOrphanFilePath(table, ORPHAN_FILE_2);
+
+        // create first branch and write some data
+        table.createBranch("br");
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location(), "br");
+        TableSchema branchSchema =
+                schemaManager.commitChanges(SchemaChange.addColumn("v2", DataTypes.INT()));
+        Options branchOptions = new Options(branchSchema.options());
+        branchOptions.set(CoreOptions.BRANCH, "br");
+        branchSchema = branchSchema.copy(branchOptions.toMap());
+        FileStoreTable branchTable =
+                FileStoreTableFactory.create(table.fileIO(), table.location(), branchSchema);
+
+        String commitUser = UUID.randomUUID().toString();
+        StreamTableWrite write = branchTable.newWrite(commitUser);
+        StreamTableCommit commit = branchTable.newCommit(commitUser);
+        write.write(GenericRow.of(2L, BinaryString.fromString("Hello"), 20));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+
+        // create orphan file in snapshot directory of first branch
+        Path orphanFile3 = new Path(table.location(), "branch/branch-br/snapshot/orphan_file3");
+        branchTable.fileIO().writeFile(orphanFile3, "x", true);
+
+        // create second branch, which is empty
+        table.createBranch("br2");
+
+        // create orphan file in snapshot directory of second branch
+        Path orphanFile4 = new Path(table.location(), "branch/branch-br2/snapshot/orphan_file4");
+        branchTable.fileIO().writeFile(orphanFile4, "y", true);
+
+        String procedure =
+                String.format(
+                        isNamedArgument
+                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '2999-12-31 23:59:59')"
+                                : "CALL sys.remove_orphan_files('%s.%s', '2999-12-31 23:59:59')",
+                        database,
+                        "*");
+        ImmutableList<Row> actualDeleteFile = ImmutableList.copyOf(callProcedure(procedure));
+        assertThat(actualDeleteFile)
+                .containsExactlyInAnyOrder(
+                        Row.of(orphanFile1.toUri().getPath()),
+                        Row.of(orphanFile2.toUri().getPath()),
+                        Row.of(orphanFile3.toUri().getPath()),
+                        Row.of(orphanFile4.toUri().getPath()));
     }
 }

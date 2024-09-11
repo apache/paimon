@@ -23,17 +23,18 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.clone.PickFilesUtil;
-import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Pair;
 
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.TableEnvironment;
+import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -47,35 +48,58 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link CloneAction}. */
-public class CloneActionITCase extends AbstractTestBase {
+public class CloneActionITCase extends ActionITCaseBase {
 
     // ------------------------------------------------------------------------
     //  Constructed Tests
     // ------------------------------------------------------------------------
 
-    @Test
-    public void testCloneTable() throws Exception {
+    @ParameterizedTest(name = "invoker = {0}")
+    @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
+    public void testCloneTable(String invoker) throws Exception {
         String sourceWarehouse = getTempDirPath("source-ware");
         prepareData(sourceWarehouse);
 
         String targetWarehouse = getTempDirPath("target-ware");
-        String[] args =
-                new String[] {
-                    "clone",
-                    "--warehouse",
-                    sourceWarehouse,
-                    "--database",
-                    "db1",
-                    "--table",
-                    "t1",
-                    "--target_warehouse",
-                    targetWarehouse,
-                    "--target_database",
-                    "mydb",
-                    "--target_table",
-                    "myt"
-                };
-        ActionFactory.createAction(args).get().run();
+        switch (invoker) {
+            case "action":
+                String[] args =
+                        new String[] {
+                            "clone",
+                            "--warehouse",
+                            sourceWarehouse,
+                            "--database",
+                            "db1",
+                            "--table",
+                            "t1",
+                            "--target_warehouse",
+                            targetWarehouse,
+                            "--target_database",
+                            "mydb",
+                            "--target_table",
+                            "myt"
+                        };
+                ActionFactory.createAction(args).get().run();
+                break;
+            case "procedure_indexed":
+                callProcedure(
+                        String.format(
+                                "CALL sys.clone('%s', 'db1', 't1', '', '%s', 'mydb', 'myt')",
+                                sourceWarehouse, targetWarehouse),
+                        true,
+                        true);
+                break;
+            case "procedure_named":
+                callProcedure(
+                        String.format(
+                                "CALL sys.clone(warehouse => '%s', database => 'db1', `table` => 't1', target_warehouse => '%s', target_database => 'mydb', target_table => 'myt')",
+                                sourceWarehouse, targetWarehouse),
+                        true,
+                        true);
+                break;
+            default:
+                throw new UnsupportedOperationException(invoker);
+        }
 
         // check result
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
@@ -93,25 +117,48 @@ public class CloneActionITCase extends AbstractTestBase {
         compareCloneFiles(sourceWarehouse, "db1", "t1", targetWarehouse, "mydb", "myt");
     }
 
-    @Test
-    public void testCloneDatabase() throws Exception {
+    @ParameterizedTest(name = "invoker = {0}")
+    @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
+    public void testCloneDatabase(String invoker) throws Exception {
         String sourceWarehouse = getTempDirPath("source-ware");
         prepareData(sourceWarehouse);
 
         String targetWarehouse = getTempDirPath("target-ware");
-        String[] args =
-                new String[] {
-                    "clone",
-                    "--warehouse",
-                    sourceWarehouse,
-                    "--database",
-                    "db1",
-                    "--target_warehouse",
-                    targetWarehouse,
-                    "--target_database",
-                    "mydb"
-                };
-        ActionFactory.createAction(args).get().run();
+        switch (invoker) {
+            case "action":
+                String[] args =
+                        new String[] {
+                            "clone",
+                            "--warehouse",
+                            sourceWarehouse,
+                            "--database",
+                            "db1",
+                            "--target_warehouse",
+                            targetWarehouse,
+                            "--target_database",
+                            "mydb"
+                        };
+                ActionFactory.createAction(args).get().run();
+                break;
+            case "procedure_indexed":
+                callProcedure(
+                        String.format(
+                                "CALL sys.clone('%s', 'db1', '', '', '%s', 'mydb')",
+                                sourceWarehouse, targetWarehouse),
+                        true,
+                        true);
+                break;
+            case "procedure_named":
+                callProcedure(
+                        String.format(
+                                "CALL sys.clone(warehouse => '%s', database => 'db1', target_warehouse => '%s', target_database => 'mydb')",
+                                sourceWarehouse, targetWarehouse),
+                        true,
+                        true);
+                break;
+            default:
+                throw new UnsupportedOperationException(invoker);
+        }
 
         // check result
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
@@ -134,17 +181,44 @@ public class CloneActionITCase extends AbstractTestBase {
         compareCloneFiles(sourceWarehouse, "db1", "t2", targetWarehouse, "mydb", "t2");
     }
 
-    @Test
-    public void testCloneWarehouse() throws Exception {
+    @ParameterizedTest(name = "invoker = {0}")
+    @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
+    public void testCloneWarehouse(String invoker) throws Exception {
         String sourceWarehouse = getTempDirPath("source-ware");
         prepareData(sourceWarehouse);
 
         String targetWarehouse = getTempDirPath("target-ware");
-        String[] args =
-                new String[] {
-                    "clone", "--warehouse", sourceWarehouse, "--target_warehouse", targetWarehouse
-                };
-        ActionFactory.createAction(args).get().run();
+        switch (invoker) {
+            case "action":
+                String[] args =
+                        new String[] {
+                            "clone",
+                            "--warehouse",
+                            sourceWarehouse,
+                            "--target_warehouse",
+                            targetWarehouse
+                        };
+                ActionFactory.createAction(args).get().run();
+                break;
+            case "procedure_indexed":
+                callProcedure(
+                        String.format(
+                                "CALL sys.clone('%s', '', '', '', '%s')",
+                                sourceWarehouse, targetWarehouse),
+                        true,
+                        true);
+                break;
+            case "procedure_named":
+                callProcedure(
+                        String.format(
+                                "CALL sys.clone(warehouse => '%s', target_warehouse => '%s')",
+                                sourceWarehouse, targetWarehouse),
+                        true,
+                        true);
+                break;
+            default:
+                throw new UnsupportedOperationException(invoker);
+        }
 
         // check result
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
@@ -285,8 +359,9 @@ public class CloneActionITCase extends AbstractTestBase {
                 .await();
     }
 
-    @Test
-    public void testCloneWithSchemaEvolution() throws Exception {
+    @ParameterizedTest(name = "invoker = {0}")
+    @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
+    public void testCloneWithSchemaEvolution(String invoker) throws Exception {
         String sourceWarehouse = getTempDirPath("source-ware");
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql(
@@ -320,11 +395,37 @@ public class CloneActionITCase extends AbstractTestBase {
                 .await();
 
         String targetWarehouse = getTempDirPath("target-ware");
-        String[] args =
-                new String[] {
-                    "clone", "--warehouse", sourceWarehouse, "--target_warehouse", targetWarehouse
-                };
-        ActionFactory.createAction(args).get().run();
+        switch (invoker) {
+            case "action":
+                String[] args =
+                        new String[] {
+                            "clone",
+                            "--warehouse",
+                            sourceWarehouse,
+                            "--target_warehouse",
+                            targetWarehouse
+                        };
+                ActionFactory.createAction(args).get().run();
+                break;
+            case "procedure_indexed":
+                callProcedure(
+                        String.format(
+                                "CALL sys.clone('%s', '', '', '', '%s')",
+                                sourceWarehouse, targetWarehouse),
+                        true,
+                        true);
+                break;
+            case "procedure_named":
+                callProcedure(
+                        String.format(
+                                "CALL sys.clone(warehouse => '%s', target_warehouse => '%s')",
+                                sourceWarehouse, targetWarehouse),
+                        true,
+                        true);
+                break;
+            default:
+                throw new UnsupportedOperationException(invoker);
+        }
 
         // check result
         tEnv.executeSql(
@@ -400,9 +501,10 @@ public class CloneActionITCase extends AbstractTestBase {
     //  Random Tests
     // ------------------------------------------------------------------------
 
-    @Test
+    @ParameterizedTest(name = "invoker = {0}")
+    @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
     @Timeout(180)
-    public void testCloneTableWithExpiration() throws Exception {
+    public void testCloneTableWithExpiration(String invoker) throws Exception {
         String sourceWarehouse = getTempDirPath("source-ware");
 
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().parallelism(1).build();
@@ -478,24 +580,47 @@ public class CloneActionITCase extends AbstractTestBase {
 
         Thread.sleep(ThreadLocalRandom.current().nextInt(2000));
         String targetWarehouse = getTempDirPath("target-ware");
-        String[] args =
-                new String[] {
-                    "clone",
-                    "--warehouse",
-                    // special file io to make cloning slower, thus more likely to face
-                    // FileNotFoundException, see CloneActionSlowFileIO
-                    "clone-slow://" + sourceWarehouse,
-                    "--target_warehouse",
-                    "clone-slow://" + targetWarehouse,
-                    "--parallelism",
-                    "1"
-                };
-        CloneAction action = (CloneAction) ActionFactory.createAction(args).get();
+        switch (invoker) {
+            case "action":
+                String[] args =
+                        new String[] {
+                            "clone",
+                            "--warehouse",
+                            // special file io to make cloning slower, thus more likely to face
+                            // FileNotFoundException, see CloneActionSlowFileIO
+                            "clone-slow://" + sourceWarehouse,
+                            "--target_warehouse",
+                            "clone-slow://" + targetWarehouse,
+                            "--parallelism",
+                            "1"
+                        };
+                CloneAction action = (CloneAction) ActionFactory.createAction(args).get();
 
-        StreamExecutionEnvironment env =
-                streamExecutionEnvironmentBuilder().streamingMode().allowRestart().build();
-        action.withStreamExecutionEnvironment(env).build();
-        env.execute();
+                StreamExecutionEnvironment env =
+                        streamExecutionEnvironmentBuilder().streamingMode().allowRestart().build();
+                action.withStreamExecutionEnvironment(env).build();
+                env.execute();
+                break;
+            case "procedure_indexed":
+                callProcedureWithRestartAllowed(
+                        String.format(
+                                "CALL sys.clone('clone-slow://%s', '', '', '', 'clone-slow://%s', '', '', '', 1)",
+                                sourceWarehouse, targetWarehouse),
+                        true,
+                        true);
+                break;
+            case "procedure_named":
+                callProcedureWithRestartAllowed(
+                        String.format(
+                                "CALL sys.clone(warehouse => 'clone-slow://%s', target_warehouse => 'clone-slow://%s', parallelism => 1)",
+                                sourceWarehouse, targetWarehouse),
+                        true,
+                        true);
+                break;
+            default:
+                throw new UnsupportedOperationException(invoker);
+        }
+
         running.set(false);
         thread.join();
 
@@ -518,6 +643,31 @@ public class CloneActionITCase extends AbstractTestBase {
     // ------------------------------------------------------------------------
     //  Utils
     // ------------------------------------------------------------------------
+
+    private CloseableIterator<Row> callProcedureWithRestartAllowed(
+            String procedureStatement, boolean isStreaming, boolean dmlSync) {
+        TableEnvironment tEnv;
+        if (isStreaming) {
+            tEnv =
+                    tableEnvironmentBuilder()
+                            .streamingMode()
+                            .allowRestart()
+                            .checkpointIntervalMs(500)
+                            .build();
+        } else {
+            tEnv = tableEnvironmentBuilder().batchMode().allowRestart().build();
+        }
+
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, dmlSync);
+
+        tEnv.executeSql(
+                String.format(
+                        "CREATE CATALOG PAIMON WITH ('type'='paimon', 'warehouse'='%s');",
+                        warehouse));
+        tEnv.useCatalog("PAIMON");
+
+        return tEnv.executeSql(procedureStatement).collect();
+    }
 
     private List<String> collect(TableEnvironment tEnv, String sql) throws Exception {
         List<String> actual = new ArrayList<>();

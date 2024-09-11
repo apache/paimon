@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action.cdc.watermark;
 
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
-import org.apache.paimon.flink.action.cdc.watermark.CdcTimestampExtractorFactory.CdcTimestampExtractor;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 
@@ -56,8 +55,12 @@ public class CdcWatermarkStrategy implements WatermarkStrategy<CdcSourceRecord> 
                 } catch (JsonProcessingException e) {
                     throw new RuntimeException(e);
                 }
-                currentMaxTimestamp = Math.max(currentMaxTimestamp, tMs);
-                output.emitWatermark(new Watermark(currentMaxTimestamp - 1));
+                // If the record is a schema-change event ts_ms would be null, just ignore the
+                // record.
+                if (tMs != Long.MIN_VALUE) {
+                    currentMaxTimestamp = Math.max(currentMaxTimestamp, tMs);
+                    output.emitWatermark(new Watermark(currentMaxTimestamp - 1));
+                }
             }
 
             @Override

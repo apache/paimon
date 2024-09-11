@@ -29,8 +29,10 @@ import org.junit.jupiter.api.Timeout;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -639,5 +641,30 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                 table2,
                 rowType2,
                 Collections.singletonList("k"));
+    }
+
+    @Test
+    @Timeout(60)
+    public void testMultipleTablePartitionKeys() throws Exception {
+        final String topic = "multiple-table-partition-keys";
+        createTestTopic(topic, 1, 1);
+        writeRecordsToKafka(
+                topic, "kafka/canal/database/multipletablepartitionkeys/canal-data-1.txt");
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
+        kafkaConfig.put(TOPIC.key(), topic);
+        Map<String, String> partitionKeyMultiple = new HashMap<>();
+        partitionKeyMultiple.put("tt_1", "k1,k2");
+        partitionKeyMultiple.put("tt_2", "k1,k3");
+        KafkaSyncDatabaseAction action =
+                syncDatabaseActionBuilder(kafkaConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .withPartitionKeyMultiple(partitionKeyMultiple)
+                        .build();
+        runActionWithDefaultEnv(action);
+        // check paimon tables
+        List<String> tableNames = new ArrayList<>(partitionKeyMultiple.keySet());
+        waitingTables(tableNames);
+        assertTablePartitionKeys(partitionKeyMultiple);
     }
 }

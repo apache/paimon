@@ -68,7 +68,12 @@ public interface SchemaChange extends Serializable {
     }
 
     static SchemaChange updateColumnType(String fieldName, DataType newDataType) {
-        return new UpdateColumnType(fieldName, newDataType);
+        return new UpdateColumnType(fieldName, newDataType, false);
+    }
+
+    static SchemaChange updateColumnType(
+            String fieldName, DataType newDataType, boolean keepNullability) {
+        return new UpdateColumnType(fieldName, newDataType, keepNullability);
     }
 
     static SchemaChange updateColumnNullability(String fieldName, boolean newNullability) {
@@ -338,10 +343,13 @@ public interface SchemaChange extends Serializable {
 
         private final String fieldName;
         private final DataType newDataType;
+        // If true, do not change the target field nullability
+        private final boolean keepNullability;
 
-        private UpdateColumnType(String fieldName, DataType newDataType) {
+        private UpdateColumnType(String fieldName, DataType newDataType, boolean keepNullability) {
             this.fieldName = fieldName;
             this.newDataType = newDataType;
+            this.keepNullability = keepNullability;
         }
 
         public String fieldName() {
@@ -350,6 +358,10 @@ public interface SchemaChange extends Serializable {
 
         public DataType newDataType() {
             return newDataType;
+        }
+
+        public boolean keepNullability() {
+            return keepNullability;
         }
 
         @Override

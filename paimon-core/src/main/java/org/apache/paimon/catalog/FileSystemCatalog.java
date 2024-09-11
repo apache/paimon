@@ -60,13 +60,8 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected boolean databaseExistsImpl(String databaseName) {
-        return uncheck(() -> fileIO.exists(newDatabasePath(databaseName)));
-    }
-
-    @Override
     protected void createDatabaseImpl(String name, Map<String, String> properties) {
-        if (properties.containsKey(AbstractCatalog.DB_LOCATION_PROP)) {
+        if (properties.containsKey(Catalog.DB_LOCATION_PROP)) {
             throw new IllegalArgumentException(
                     "Cannot specify location for a database when using fileSystem catalog.");
         }
@@ -79,7 +74,11 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
-    public Map<String, String> loadDatabasePropertiesImpl(String name) {
+    public Map<String, String> loadDatabasePropertiesImpl(String name)
+            throws DatabaseNotExistException {
+        if (!uncheck(() -> fileIO.exists(newDatabasePath(name)))) {
+            throw new DatabaseNotExistException(name);
+        }
         return Collections.emptyMap();
     }
 
@@ -99,19 +98,20 @@ public class FileSystemCatalog extends AbstractCatalog {
             return super.tableExists(identifier);
         }
 
-        return tableExistsInFileSystem(getDataTableLocation(identifier));
+        return tableExistsInFileSystem(
+                getTableLocation(identifier), identifier.getBranchNameOrDefault());
     }
 
     @Override
     public TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
-        return schemaManager(identifier)
-                .latest()
+        return tableSchemaInFileSystem(
+                        getTableLocation(identifier), identifier.getBranchNameOrDefault())
                 .orElseThrow(() -> new TableNotExistException(identifier));
     }
 
     @Override
     protected void dropTableImpl(Identifier identifier) {
-        Path path = getDataTableLocation(identifier);
+        Path path = getTableLocation(identifier);
         uncheck(() -> fileIO.delete(path, true));
     }
 
@@ -121,26 +121,22 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     private SchemaManager schemaManager(Identifier identifier) {
-        Path path = getDataTableLocation(identifier);
+        Path path = getTableLocation(identifier);
         CatalogLock catalogLock =
-                lockFactory()
-                        .map(
-                                fac ->
-                                        fac.createLock(
-                                                lockContext()
-                                                        .orElseThrow(
-                                                                () ->
-                                                                        new RuntimeException(
-                                                                                "No lock context when lock is enabled."))))
-                        .orElse(null);
-        return new SchemaManager(fileIO, path)
+                lockFactory().map(fac -> fac.createLock(assertGetLockContext())).orElse(null);
+        return new SchemaManager(fileIO, path, identifier.getBranchNameOrDefault())
                 .withLock(catalogLock == null ? null : Lock.fromCatalog(catalogLock, identifier));
+    }
+
+    private CatalogLockContext assertGetLockContext() {
+        return lockContext()
+                .orElseThrow(() -> new RuntimeException("No lock context when lock is enabled."));
     }
 
     @Override
     public void renameTableImpl(Identifier fromTable, Identifier toTable) {
-        Path fromPath = getDataTableLocation(fromTable);
-        Path toPath = getDataTableLocation(toTable);
+        Path fromPath = getTableLocation(fromTable);
+        Path toPath = getTableLocation(toTable);
         uncheck(() -> fileIO.rename(fromPath, toPath));
     }
 
@@ -167,7 +163,7 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
-    public boolean caseSensitive() {
+    public boolean allowUpperCase() {
         return catalogOptions.get(CASE_SENSITIVE);
     }
 }

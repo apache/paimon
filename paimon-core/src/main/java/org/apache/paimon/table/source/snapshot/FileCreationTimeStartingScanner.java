@@ -57,7 +57,8 @@ public class FileCreationTimeStartingScanner extends AbstractStartingScanner {
                 snapshotReader
                         .withMode(ScanMode.ALL)
                         .withSnapshot(startingSnapshotId)
-                        .withDataFileTimeMills(startupMillis)
+                        .withManifestEntryFilter(
+                                entry -> entry.file().creationTimeEpochMillis() >= startupMillis)
                         .read());
     }
 }

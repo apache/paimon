@@ -23,6 +23,9 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.table.Table;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.flink.table.annotation.ArgumentHint;
+import org.apache.flink.table.annotation.DataTypeHint;
+import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 /**
@@ -41,30 +44,18 @@ public class CreateBranchProcedure extends ProcedureBase {
         return IDENTIFIER;
     }
 
+    @ProcedureHint(
+            argument = {
+                @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
+                @ArgumentHint(name = "branch", type = @DataTypeHint("STRING")),
+                @ArgumentHint(name = "tag", type = @DataTypeHint("STRING"), isOptional = true)
+            })
     public String[] call(
             ProcedureContext procedureContext, String tableId, String branchName, String tagName)
-            throws Catalog.TableNotExistException {
-        return innerCall(tableId, branchName, tagName, 0);
-    }
-
-    public String[] call(ProcedureContext procedureContext, String tableId, String branchName)
-            throws Catalog.TableNotExistException {
-        return innerCall(tableId, branchName, null, 0);
-    }
-
-    public String[] call(
-            ProcedureContext procedureContext, String tableId, String branchName, long snapshotId)
-            throws Catalog.TableNotExistException {
-        return innerCall(tableId, branchName, null, snapshotId);
-    }
-
-    private String[] innerCall(String tableId, String branchName, String tagName, long snapshotId)
             throws Catalog.TableNotExistException {
         Table table = catalog.getTable(Identifier.fromString(tableId));
         if (!StringUtils.isBlank(tagName)) {
             table.createBranch(branchName, tagName);
-        } else if (snapshotId > 0) {
-            table.createBranch(branchName, snapshotId);
         } else {
             table.createBranch(branchName);
         }

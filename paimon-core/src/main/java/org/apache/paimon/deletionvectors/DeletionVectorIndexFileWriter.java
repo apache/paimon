@@ -54,6 +54,10 @@ public class DeletionVectorIndexFileWriter {
         this.targetSizeInBytes = targetSizePerIndexFile.getBytes();
     }
 
+    /**
+     * For unaware-bucket mode, this method will write out multiple index files, else, it will write
+     * out only one index file.
+     */
     public List<IndexFileMeta> write(Map<String, DeletionVector> input) throws IOException {
         if (input.isEmpty()) {
             return emptyIndexFile();
@@ -72,9 +76,8 @@ public class DeletionVectorIndexFileWriter {
         try {
             while (iterator.hasNext()) {
                 Map.Entry<String, DeletionVector> entry = iterator.next();
-                long currentSize = writer.write(entry.getKey(), entry.getValue());
-
-                if (writer.writtenSizeInBytes() + currentSize > targetSizeInBytes) {
+                writer.write(entry.getKey(), entry.getValue());
+                if (writer.writtenSizeInBytes() > targetSizeInBytes) {
                     break;
                 }
             }
@@ -92,50 +95,43 @@ public class DeletionVectorIndexFileWriter {
      * <p>TODO: We can consider sending a message to delete the deletion file in the future.
      */
     private List<IndexFileMeta> emptyIndexFile() throws IOException {
-        try (SingleIndexFileWriter writer = new SingleIndexFileWriter()) {
-            return Collections.singletonList(writer.writtenIndexFile());
-        }
+        SingleIndexFileWriter writer = new SingleIndexFileWriter();
+        writer.close();
+        return Collections.singletonList(writer.writtenIndexFile());
     }
 
     private class SingleIndexFileWriter implements Closeable {
 
         private final Path path;
-
         private final DataOutputStream dataOutputStream;
-
         private final LinkedHashMap<String, Pair<Integer, Integer>> dvRanges;
 
-        private long writtenSizeInBytes = 0L;
-
-        public SingleIndexFileWriter() throws IOException {
+        private SingleIndexFileWriter() throws IOException {
             this.path = indexPathFactory.newPath();
             this.dataOutputStream = new DataOutputStream(fileIO.newOutputStream(path, true));
             dataOutputStream.writeByte(VERSION_ID_V1);
             this.dvRanges = new LinkedHashMap<>();
         }
 
-        public long writtenSizeInBytes() {
-            return this.writtenSizeInBytes;
+        private long writtenSizeInBytes() {
+            return dataOutputStream.size();
         }
 
-        public long write(String key, DeletionVector deletionVector) throws IOException {
+        private void write(String key, DeletionVector deletionVector) throws IOException {
             Preconditions.checkNotNull(dataOutputStream);
             byte[] data = deletionVector.serializeToBytes();
             int size = data.length;
-
             dvRanges.put(key, Pair.of(dataOutputStream.size(), size));
             dataOutputStream.writeInt(size);
             dataOutputStream.write(data);
             dataOutputStream.writeInt(calculateChecksum(data));
-            writtenSizeInBytes += size;
-            return size;
         }
 
-        public IndexFileMeta writtenIndexFile() throws IOException {
+        public IndexFileMeta writtenIndexFile() {
             return new IndexFileMeta(
                     DELETION_VECTORS_INDEX,
                     path.getName(),
-                    fileIO.getFileSize(path),
+                    writtenSizeInBytes(),
                     dvRanges.size(),
                     dvRanges);
         }

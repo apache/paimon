@@ -18,15 +18,15 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.append.AppendOnlyCompactionTask;
+import org.apache.paimon.append.UnawareAppendCompactionTask;
 import org.apache.paimon.table.sink.CompactionTaskSerializer;
 
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 
-/** Type information of {@link AppendOnlyCompactionTask}. */
-public class CompactionTaskTypeInfo extends TypeInformation<AppendOnlyCompactionTask> {
+/** Type information of {@link UnawareAppendCompactionTask}. */
+public class CompactionTaskTypeInfo extends TypeInformation<UnawareAppendCompactionTask> {
 
     @Override
     public boolean isBasicType() {
@@ -49,8 +49,8 @@ public class CompactionTaskTypeInfo extends TypeInformation<AppendOnlyCompaction
     }
 
     @Override
-    public Class<AppendOnlyCompactionTask> getTypeClass() {
-        return AppendOnlyCompactionTask.class;
+    public Class<UnawareAppendCompactionTask> getTypeClass() {
+        return UnawareAppendCompactionTask.class;
     }
 
     @Override
@@ -59,9 +59,9 @@ public class CompactionTaskTypeInfo extends TypeInformation<AppendOnlyCompaction
     }
 
     @Override
-    public TypeSerializer<AppendOnlyCompactionTask> createSerializer(ExecutionConfig config) {
+    public TypeSerializer<UnawareAppendCompactionTask> createSerializer(ExecutionConfig config) {
         // we don't need copy for task
-        return new NoneCopyVersionedSerializerTypeSerializerProxy<AppendOnlyCompactionTask>(
+        return new NoneCopyVersionedSerializerTypeSerializerProxy<UnawareAppendCompactionTask>(
                 () -> new CompactionTaskSimpleSerializer(new CompactionTaskSerializer())) {};
     }
 

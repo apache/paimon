@@ -27,28 +27,22 @@ public class CreateBranchAction extends TableActionBase {
     private final String branchName;
     private final String tagName;
 
-    private final Long snapshotId;
-
     public CreateBranchAction(
             String warehouse,
             String databaseName,
             String tableName,
             Map<String, String> catalogConfig,
             String branchName,
-            String tagName,
-            Long snapshotId) {
+            String tagName) {
         super(warehouse, databaseName, tableName, catalogConfig);
         this.branchName = branchName;
         this.tagName = tagName;
-        this.snapshotId = snapshotId;
     }
 
     @Override
     public void run() throws Exception {
         if (!StringUtils.isBlank(tagName)) {
             table.createBranch(branchName, tagName);
-        } else if (snapshotId != null) {
-            table.createBranch(branchName, snapshotId);
         } else {
             table.createBranch(branchName);
         }

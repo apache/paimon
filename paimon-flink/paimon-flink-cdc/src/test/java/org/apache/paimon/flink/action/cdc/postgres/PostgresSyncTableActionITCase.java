@@ -26,7 +26,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
-import com.ververica.cdc.connectors.postgres.source.config.PostgresSourceOptions;
+import org.apache.flink.cdc.connectors.postgres.source.config.PostgresSourceOptions;
 import org.apache.flink.core.execution.JobClient;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;

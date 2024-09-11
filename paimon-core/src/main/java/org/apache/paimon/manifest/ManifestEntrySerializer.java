@@ -38,7 +38,7 @@ public class ManifestEntrySerializer extends VersionedObjectSerializer<ManifestE
     private final DataFileMetaSerializer dataFileMetaSerializer;
 
     public ManifestEntrySerializer() {
-        super(ManifestEntry.schema());
+        super(ManifestEntry.SCHEMA);
         this.dataFileMetaSerializer = new DataFileMetaSerializer();
     }
 
@@ -75,6 +75,10 @@ public class ManifestEntrySerializer extends VersionedObjectSerializer<ManifestE
                 row.getInt(2),
                 row.getInt(3),
                 dataFileMetaSerializer.fromRow(row.getRow(4, dataFileMetaSerializer.numFields())));
+    }
+
+    public static Function<InternalRow, FileKind> kindGetter() {
+        return row -> FileKind.fromByteValue(row.getByte(1));
     }
 
     public static Function<InternalRow, BinaryRow> partitionGetter() {

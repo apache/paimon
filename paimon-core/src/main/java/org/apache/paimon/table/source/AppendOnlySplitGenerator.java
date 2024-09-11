@@ -28,7 +28,7 @@ import java.util.List;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.append.AppendOnlyCompactManager.fileComparator;
+import static org.apache.paimon.append.BucketedAppendCompactManager.fileComparator;
 
 /** Append only implementation of {@link SplitGenerator}. */
 public class AppendOnlySplitGenerator implements SplitGenerator {

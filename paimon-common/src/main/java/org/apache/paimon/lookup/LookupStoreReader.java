@@ -18,6 +18,8 @@
 
 package org.apache.paimon.lookup;
 
+import javax.annotation.Nullable;
+
 import java.io.Closeable;
 import java.io.IOException;
 
@@ -25,5 +27,6 @@ import java.io.IOException;
 public interface LookupStoreReader extends Closeable {
 
     /** Lookup value by key. */
+    @Nullable
     byte[] lookup(byte[] key) throws IOException;
 }

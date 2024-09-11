@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink.index;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.crosspartition.IndexBootstrap;
+import org.apache.paimon.crosspartition.KeyPartOrRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.DynamicBucketRowWriteOperator;
@@ -111,7 +112,7 @@ public class GlobalDynamicBucketSink extends FlinkWriteSink<Tuple2<InternalRow, 
         DataStream<Tuple2<InternalRow, Integer>> bucketAssigned =
                 partitionByKeyHash
                         .transform(
-                                "dynamic-bucket-assigner",
+                                "cross-partition-bucket-assigner",
                                 rowWithBucketType,
                                 GlobalIndexAssignerOperator.forRowData(table))
                         .setParallelism(partitionByKeyHash.getParallelism());

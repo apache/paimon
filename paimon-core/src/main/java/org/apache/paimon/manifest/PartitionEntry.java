@@ -18,6 +18,7 @@
 
 package org.apache.paimon.manifest;
 
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.BinaryRow;
 
 import java.util.Collection;
@@ -28,6 +29,7 @@ import java.util.Objects;
 import static org.apache.paimon.manifest.FileKind.DELETE;
 
 /** Entry representing a partition. */
+@Public
 public class PartitionEntry {
 
     private final BinaryRow partition;

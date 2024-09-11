@@ -29,22 +29,43 @@ import javax.annotation.Nullable;
  */
 public interface BlockCompressionFactory {
 
+    BlockCompressionType getCompressionType();
+
     BlockCompressor getCompressor();
 
     BlockDecompressor getDecompressor();
 
     /** Creates {@link BlockCompressionFactory} according to the configuration. */
     @Nullable
-    static BlockCompressionFactory create(String compression) {
-        switch (compression.toUpperCase()) {
+    static BlockCompressionFactory create(CompressOptions compression) {
+        switch (compression.compress().toUpperCase()) {
             case "NONE":
                 return null;
+            case "ZSTD":
+                return new ZstdBlockCompressionFactory(compression.zstdLevel());
             case "LZ4":
                 return new Lz4BlockCompressionFactory();
             case "LZO":
-                return new AirCompressorFactory(new LzoCompressor(), new LzoDecompressor());
-            case "ZSTD":
-                return new ZstdBlockCompressionFactory();
+                return new AirCompressorFactory(
+                        BlockCompressionType.LZO, new LzoCompressor(), new LzoDecompressor());
+            default:
+                throw new IllegalStateException("Unknown CompressionMethod " + compression);
+        }
+    }
+
+    /** Creates {@link BlockCompressionFactory} according to the {@link BlockCompressionType}. */
+    @Nullable
+    static BlockCompressionFactory create(BlockCompressionType compression) {
+        switch (compression) {
+            case NONE:
+                return null;
+            case ZSTD:
+                return new ZstdBlockCompressionFactory(1);
+            case LZ4:
+                return new Lz4BlockCompressionFactory();
+            case LZO:
+                return new AirCompressorFactory(
+                        BlockCompressionType.LZO, new LzoCompressor(), new LzoDecompressor());
             default:
                 throw new IllegalStateException("Unknown CompressionMethod " + compression);
         }

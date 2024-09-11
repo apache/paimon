@@ -18,11 +18,16 @@
 
 package org.apache.paimon.flink.source.operator;
 
-import org.apache.paimon.append.MultiTableAppendOnlyCompactionTask;
+import org.apache.paimon.append.MultiTableUnawareAppendCompactionTask;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.compact.MultiTableScanBase;
 import org.apache.paimon.flink.compact.MultiUnawareBucketTableScan;
 import org.apache.paimon.flink.sink.MultiTableCompactionTaskTypeInfo;
+import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
 
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.configuration.Configuration;
@@ -36,7 +41,13 @@ import org.apache.flink.streaming.runtime.partitioner.RebalancePartitioner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
+import java.time.Duration;
+import java.util.List;
+import java.util.Map;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.compact.MultiTableScanBase.ScanResult.FINISHED;
 import static org.apache.paimon.flink.compact.MultiTableScanBase.ScanResult.IS_EMPTY;
@@ -46,11 +57,11 @@ import static org.apache.paimon.flink.compact.MultiTableScanBase.ScanResult.IS_E
  * mode.
  */
 public class CombinedUnawareBatchSourceFunction
-        extends CombinedCompactorSourceFunction<MultiTableAppendOnlyCompactionTask> {
+        extends CombinedCompactorSourceFunction<MultiTableUnawareAppendCompactionTask> {
 
     private static final Logger LOGGER =
             LoggerFactory.getLogger(CombinedUnawareBatchSourceFunction.class);
-    private transient MultiTableScanBase<MultiTableAppendOnlyCompactionTask> tableScan;
+    private transient MultiTableScanBase<MultiTableUnawareAppendCompactionTask> tableScan;
 
     public CombinedUnawareBatchSourceFunction(
             Catalog.Loader catalogLoader,
@@ -90,22 +101,23 @@ public class CombinedUnawareBatchSourceFunction
         }
     }
 
-    public static DataStream<MultiTableAppendOnlyCompactionTask> buildSource(
+    public static DataStream<MultiTableUnawareAppendCompactionTask> buildSource(
             StreamExecutionEnvironment env,
             String name,
             Catalog.Loader catalogLoader,
             Pattern includingPattern,
             Pattern excludingPattern,
-            Pattern databasePattern) {
+            Pattern databasePattern,
+            @Nullable Duration partitionIdleTime) {
         CombinedUnawareBatchSourceFunction function =
                 new CombinedUnawareBatchSourceFunction(
                         catalogLoader, includingPattern, excludingPattern, databasePattern);
-        StreamSource<MultiTableAppendOnlyCompactionTask, CombinedUnawareBatchSourceFunction>
+        StreamSource<MultiTableUnawareAppendCompactionTask, CombinedUnawareBatchSourceFunction>
                 sourceOperator = new StreamSource<>(function);
         MultiTableCompactionTaskTypeInfo compactionTaskTypeInfo =
                 new MultiTableCompactionTaskTypeInfo();
 
-        SingleOutputStreamOperator<MultiTableAppendOnlyCompactionTask> source =
+        SingleOutputStreamOperator<MultiTableUnawareAppendCompactionTask> source =
                 new DataStreamSource<>(
                                 env,
                                 compactionTaskTypeInfo,
@@ -115,11 +127,51 @@ public class CombinedUnawareBatchSourceFunction
                                 Boundedness.BOUNDED)
                         .forceNonParallel();
 
-        PartitionTransformation<MultiTableAppendOnlyCompactionTask> transformation =
+        if (partitionIdleTime != null) {
+            source =
+                    source.transform(
+                            name,
+                            compactionTaskTypeInfo,
+                            new MultiUnawareTablesReadOperator(catalogLoader, partitionIdleTime));
+        }
+
+        PartitionTransformation<MultiTableUnawareAppendCompactionTask> transformation =
                 new PartitionTransformation<>(
                         source.getTransformation(), new RebalancePartitioner<>());
 
         return new DataStream<>(env, transformation);
+    }
+
+    private static Long getPartitionInfo(
+            Identifier tableIdentifier,
+            BinaryRow partition,
+            Map<Identifier, Map<BinaryRow, Long>> multiTablesPartitionInfo,
+            Catalog catalog) {
+        Map<BinaryRow, Long> partitionInfo = multiTablesPartitionInfo.get(tableIdentifier);
+        if (partitionInfo == null) {
+            try {
+                Table table = catalog.getTable(tableIdentifier);
+                if (!(table instanceof FileStoreTable)) {
+                    LOGGER.error(
+                            String.format(
+                                    "Only FileStoreTable supports compact action. The table type is '%s'.",
+                                    table.getClass().getName()));
+                }
+                FileStoreTable fileStoreTable = (FileStoreTable) table;
+                List<PartitionEntry> partitions =
+                        fileStoreTable.newSnapshotReader().partitionEntries();
+                partitionInfo =
+                        partitions.stream()
+                                .collect(
+                                        Collectors.toMap(
+                                                PartitionEntry::partition,
+                                                PartitionEntry::lastFileCreationTime));
+                multiTablesPartitionInfo.put(tableIdentifier, partitionInfo);
+            } catch (Catalog.TableNotExistException e) {
+                LOGGER.error(String.format("table: %s not found.", tableIdentifier.getFullName()));
+            }
+        }
+        return partitionInfo.get(partition);
     }
 
     @Override

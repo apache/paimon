@@ -846,10 +846,30 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testSetAndResetImmutableOptions() throws Exception {
+    public void testSetAndResetImmutableOptionsOnEmptyTables() {
+        sql("CREATE TABLE T1 (a INT, b INT)");
+        sql(
+                "ALTER TABLE T1 SET ('primary-key' = 'a', 'bucket' = '1', 'merge-engine' = 'first-row')");
+        sql("INSERT INTO T1 VALUES (1, 10), (2, 20), (1, 11), (2, 21)");
+        assertThat(queryAndSort("SELECT * FROM T1")).containsExactly(Row.of(1, 10), Row.of(2, 20));
+        assertThatThrownBy(() -> sql("ALTER TABLE T1 SET ('merge-engine' = 'deduplicate')"))
+                .rootCause()
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Change 'merge-engine' is not supported yet.");
+
+        sql(
+                "CREATE TABLE T2 (a INT, b INT, PRIMARY KEY (a) NOT ENFORCED) WITH ('bucket' = '1', 'merge-engine' = 'first-row')");
+        sql("ALTER TABLE T2 RESET ('merge-engine')");
+        sql("INSERT INTO T2 VALUES (1, 10), (2, 20), (1, 11), (2, 21)");
+        assertThat(queryAndSort("SELECT * FROM T2")).containsExactly(Row.of(1, 11), Row.of(2, 21));
+    }
+
+    @Test
+    public void testSetAndResetImmutableOptionsOnNonEmptyTables() {
         // bucket-key is immutable
         sql(
                 "CREATE TABLE T1 (a STRING, b STRING, c STRING) WITH ('bucket' = '1', 'bucket-key' = 'a')");
+        sql("INSERT INTO T1 VALUES ('a', 'b', 'c')");
 
         assertThatThrownBy(() -> sql("ALTER TABLE T1 SET ('bucket-key' = 'c')"))
                 .rootCause()
@@ -858,6 +878,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
 
         sql(
                 "CREATE TABLE T2 (a STRING, b STRING, c STRING) WITH ('bucket' = '1', 'bucket-key' = 'c')");
+        sql("INSERT INTO T2 VALUES ('a', 'b', 'c')");
         assertThatThrownBy(() -> sql("ALTER TABLE T2 RESET ('bucket-key')"))
                 .rootCause()
                 .isInstanceOf(UnsupportedOperationException.class)
@@ -866,6 +887,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         // merge-engine is immutable
         sql(
                 "CREATE TABLE T4 (a STRING, b STRING, c STRING) WITH ('merge-engine' = 'partial-update')");
+        sql("INSERT INTO T4 VALUES ('a', 'b', 'c')");
         assertThatThrownBy(() -> sql("ALTER TABLE T4 RESET ('merge-engine')"))
                 .rootCause()
                 .isInstanceOf(UnsupportedOperationException.class)
@@ -873,10 +895,31 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
 
         // sequence.field is immutable
         sql("CREATE TABLE T5 (a STRING, b STRING, c STRING) WITH ('sequence.field' = 'b')");
+        sql("INSERT INTO T5 VALUES ('a', 'b', 'c')");
         assertThatThrownBy(() -> sql("ALTER TABLE T5 SET ('sequence.field' = 'c')"))
                 .rootCause()
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage("Change 'sequence.field' is not supported yet.");
+    }
+
+    @Test
+    public void testAlterTableComment() throws Exception {
+        sql("CREATE TABLE T (a STRING, b STRING, c STRING)");
+
+        // add table comment
+        sql("ALTER TABLE T SET ('comment'='t comment')");
+        String comment = table("T").getComment();
+        assertThat(comment).isEqualTo("t comment");
+
+        // update table comment
+        sql("ALTER TABLE T SET ('comment'='t comment v2')");
+        comment = table("T").getComment();
+        assertThat(comment).isEqualTo("t comment v2");
+
+        // remove table comment
+        sql("ALTER TABLE T RESET ('comment')");
+        comment = table("T").getComment();
+        assertThat(comment).isEmpty();
     }
 
     @Test
@@ -987,6 +1030,33 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                                 + ")")
                 .doesNotContain("schema");
         // change name from non-physical column to physical column is not allowed
-        assertThatThrownBy(() -> sql("ALTER TABLE T MODIFY name VARCHAR COMMENT 'header3'"));
+        assertThatThrownBy(() -> sql("ALTER TABLE T MODIFY name VARCHAR COMMENT 'header3'"))
+                .satisfies(
+                        anyCauseMatches(
+                                UnsupportedOperationException.class,
+                                "Change is not supported: class org.apache.flink.table.catalog.TableChange$ModifyColumn"));
+    }
+
+    @Test
+    public void testAlterBucket() {
+        sql("CREATE TABLE T1 (a INT PRIMARY KEY NOT ENFORCED, b STRING) WITH ('bucket' = '-1')");
+        sql("INSERT INTO T1 VALUES (1, '1')");
+        assertThatThrownBy(() -> sql("ALTER TABLE T1 RESET ('bucket')"))
+                .satisfies(
+                        anyCauseMatches(
+                                UnsupportedOperationException.class, "Cannot reset bucket."));
+        assertThatThrownBy(() -> sql("ALTER TABLE T1 SET ('bucket' = '1')"))
+                .satisfies(
+                        anyCauseMatches(
+                                UnsupportedOperationException.class,
+                                "Cannot change bucket when it is -1."));
+
+        sql("CREATE TABLE T2 (a INT PRIMARY KEY NOT ENFORCED, b STRING) WITH ('bucket' = '1')");
+        sql("INSERT INTO T2 VALUES (1, '1')");
+        assertThatThrownBy(() -> sql("ALTER TABLE T2 SET ('bucket' = '-1')"))
+                .satisfies(
+                        anyCauseMatches(
+                                UnsupportedOperationException.class,
+                                "Cannot change bucket to -1."));
     }
 }

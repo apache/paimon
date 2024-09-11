@@ -18,7 +18,14 @@
 
 package org.apache.paimon.manifest;
 
-/** Kind of a file. */
+import org.apache.paimon.annotation.Public;
+
+/**
+ * Kind of a file.
+ *
+ * @since 0.9.0
+ */
+@Public
 public enum FileKind {
     ADD((byte) 0),
 

@@ -201,6 +201,11 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
     </thead>
     <tbody>
         <tr>
+            <td>numWriters</td>
+            <td>Gauge</td>
+            <td>Number of writers in this parallelism.</td>
+        </tr>
+        <tr>
             <td>bufferPreemptCount</td>
             <td>Gauge</td>
             <td>The total number of memory preempted.</td>
@@ -243,6 +248,11 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
             <td>compactionThreadBusy</td>
             <td>Gauge</td>
             <td>The maximum business of compaction threads in this parallelism. Currently, there is only one compaction thread in each parallelism, so value of business ranges from 0 (idle) to 100 (compaction running all the time).</td>
+        </tr>
+        <tr>
+            <td>avgCompactionTime</td>
+            <td>Gauge</td>
+            <td>The average runtime of compaction threads, calculated based on recorded compaction time data in milliseconds. The value represents the average duration of compaction operations. Higher values indicate longer average compaction times, which may suggest the need for performance optimization.</td>
         </tr>
     </tbody>
 </table>

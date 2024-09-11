@@ -26,6 +26,7 @@ import org.apache.paimon.reader.RecordReader.RecordIterator;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.utils.Pool;
 
 import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitReader;
@@ -33,23 +34,28 @@ import org.apache.flink.connector.base.source.reader.splitreader.SplitsAddition;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsChange;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.connector.file.src.util.MutableRecordAndPosition;
-import org.apache.flink.connector.file.src.util.Pool;
 import org.apache.flink.connector.file.src.util.RecordAndPosition;
 import org.apache.flink.table.data.RowData;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.Objects;
 import java.util.Queue;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** The {@link SplitReader} implementation for the file store source. */
 public class FileStoreSourceSplitReader
         implements SplitReader<BulkFormat.RecordIterator<RowData>, FileStoreSourceSplit> {
+
+    private static final Logger LOG = LoggerFactory.getLogger(FileStoreSourceSplitReader.class);
 
     private final TableRead tableRead;
 
@@ -65,6 +71,7 @@ public class FileStoreSourceSplitReader
     private RecordIterator<InternalRow> currentFirstBatch;
 
     private boolean paused;
+    private final AtomicBoolean wakeup;
     private final FileStoreSourceReaderMetrics metrics;
 
     public FileStoreSourceSplitReader(
@@ -78,19 +85,24 @@ public class FileStoreSourceSplitReader
         this.pool.add(new FileStoreRecordIterator());
         this.paused = false;
         this.metrics = metrics;
+        this.wakeup = new AtomicBoolean(false);
     }
 
     @Override
     public RecordsWithSplitIds<BulkFormat.RecordIterator<RowData>> fetch() throws IOException {
         if (paused) {
-            return new RecordsWithPausedSplit<>();
+            return new EmptyRecordsWithSplitIds<>();
         }
 
         checkSplitOrStartNext();
 
-        // pool first, pool size is 1, the underlying implementation does not allow multiple batches
-        // to be read at the same time
-        FileStoreRecordIterator iterator = pool();
+        // poll from the pool first, pool size is 1, the underlying implementation does not allow
+        // multiple batches to be read at the same time
+        FileStoreRecordIterator iterator = poll();
+        if (iterator == null) {
+            LOG.info("Skip waiting for object pool due to wakeup");
+            return new EmptyRecordsWithSplitIds<>();
+        }
 
         RecordIterator<InternalRow> nextBatch;
         if (currentFirstBatch != null) {
@@ -113,13 +125,21 @@ public class FileStoreSourceSplitReader
         return limiter != null && limiter.reachLimit();
     }
 
-    private FileStoreRecordIterator pool() throws IOException {
-        try {
-            return this.pool.pollEntry();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IOException("Interrupted");
+    @Nullable
+    private FileStoreRecordIterator poll() throws IOException {
+        FileStoreRecordIterator iterator = null;
+        while (iterator == null && !wakeup.get()) {
+            try {
+                iterator = this.pool.pollEntry(Duration.ofSeconds(10));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("Interrupted");
+            }
         }
+        if (wakeup.get()) {
+            wakeup.compareAndSet(true, false);
+        }
+        return iterator;
     }
 
     @Override
@@ -156,7 +176,10 @@ public class FileStoreSourceSplitReader
     }
 
     @Override
-    public void wakeUp() {}
+    public void wakeUp() {
+        wakeup.compareAndSet(false, true);
+        LOG.info("Wake up the split reader.");
+    }
 
     @Override
     public void close() throws Exception {
@@ -181,7 +204,7 @@ public class FileStoreSourceSplitReader
         if (nextSplit.split() instanceof DataSplit) {
             long eventTime =
                     ((DataSplit) nextSplit.split())
-                            .latestFileCreationEpochMillis()
+                            .earliestFileCreationEpochMillis()
                             .orElse(FileStoreSourceReaderMetrics.UNDEFINED);
             metrics.recordSnapshotUpdate(eventTime);
         }
@@ -294,8 +317,11 @@ public class FileStoreSourceSplitReader
         }
     }
 
-    /** Indicates that the {@link FileStoreSourceSplitReader} is paused. */
-    private static class RecordsWithPausedSplit<T> implements RecordsWithSplitIds<T> {
+    /**
+     * An empty implementation of {@link RecordsWithSplitIds}. It is used to indicate that the
+     * {@link FileStoreSourceSplitReader} is paused or wakeup.
+     */
+    private static class EmptyRecordsWithSplitIds<T> implements RecordsWithSplitIds<T> {
 
         @Nullable
         @Override

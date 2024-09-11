@@ -263,7 +263,7 @@ public class KeyValueFileStoreScanTest {
         ManifestList manifestList = store.manifestListFactory().create();
         long wantedSnapshotId = random.nextLong(snapshotManager.latestSnapshotId()) + 1;
         Snapshot wantedSnapshot = snapshotManager.snapshot(wantedSnapshotId);
-        List<ManifestFileMeta> wantedManifests = wantedSnapshot.dataManifests(manifestList);
+        List<ManifestFileMeta> wantedManifests = manifestList.readDataManifests(wantedSnapshot);
 
         FileStoreScan scan = store.newScan();
         scan.withManifestList(wantedManifests);
@@ -294,7 +294,8 @@ public class KeyValueFileStoreScanTest {
     private Map<BinaryRow, BinaryRow> getActualKvMap(FileStoreScan scan, Long expectedSnapshotId)
             throws Exception {
         FileStoreScan.Plan plan = scan.plan();
-        assertThat(plan.snapshotId()).isEqualTo(expectedSnapshotId);
+        Snapshot snapshot = plan.snapshot();
+        assertThat(snapshot == null ? null : snapshot.id()).isEqualTo(expectedSnapshotId);
 
         List<KeyValue> actualKvs = store.readKvsFromManifestEntries(plan.files(), false);
         gen.sort(actualKvs);

@@ -19,10 +19,7 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.flink.sink.FixedBucketSink;
 import org.apache.paimon.flink.sink.FlinkSinkBuilder;
-import org.apache.paimon.flink.source.ContinuousFileStoreSource;
-import org.apache.paimon.flink.source.StaticFileStoreSource;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
@@ -64,10 +61,7 @@ import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
 import static org.apache.paimon.utils.FailingFileIO.retryArtificialException;
 
-/**
- * ITCase for {@link StaticFileStoreSource}, {@link ContinuousFileStoreSource} and {@link
- * FixedBucketSink}.
- */
+/** ITCase for user define watermark when end input. */
 @ExtendWith(ParameterizedTestExtension.class)
 public class FlinkEndInputWatermarkITCase extends CatalogITCaseBase {
 

@@ -38,6 +38,9 @@ import org.apache.flink.table.data.RowData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
+import java.time.Duration;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -53,6 +56,8 @@ public class CompactAction extends TableActionBase {
     private List<Map<String, String>> partitions;
 
     private String whereSql;
+
+    @Nullable private Duration partitionIdleTime = null;
 
     public CompactAction(String warehouse, String database, String tableName) {
         this(warehouse, database, tableName, Collections.emptyMap(), Collections.emptyMap());
@@ -90,6 +95,11 @@ public class CompactAction extends TableActionBase {
         return this;
     }
 
+    public CompactAction withPartitionIdleTime(@Nullable Duration partitionIdleTime) {
+        this.partitionIdleTime = partitionIdleTime;
+        return this;
+    }
+
     @Override
     public void build() throws Exception {
         ReadableConfig conf = env.getConfiguration();
@@ -114,13 +124,29 @@ public class CompactAction extends TableActionBase {
     private void buildForTraditionalCompaction(
             StreamExecutionEnvironment env, FileStoreTable table, boolean isStreaming)
             throws Exception {
+        if (isStreaming) {
+            // for completely asynchronous compaction
+            HashMap<String, String> dynamicOptions =
+                    new HashMap<String, String>() {
+                        {
+                            put(CoreOptions.NUM_SORTED_RUNS_STOP_TRIGGER.key(), "2147483647");
+                            put(CoreOptions.SORT_SPILL_THRESHOLD.key(), "10");
+                            put(CoreOptions.LOOKUP_WAIT.key(), "false");
+                        }
+                    };
+            table = table.copy(dynamicOptions);
+        }
         CompactorSourceBuilder sourceBuilder =
                 new CompactorSourceBuilder(identifier.getFullName(), table);
         CompactorSinkBuilder sinkBuilder = new CompactorSinkBuilder(table);
 
         sourceBuilder.withPartitionPredicate(getPredicate());
         DataStreamSource<RowData> source =
-                sourceBuilder.withEnv(env).withContinuousMode(isStreaming).build();
+                sourceBuilder
+                        .withEnv(env)
+                        .withContinuousMode(isStreaming)
+                        .withPartitionIdleTime(partitionIdleTime)
+                        .build();
         sinkBuilder.withInput(source).build();
     }
 
@@ -132,6 +158,7 @@ public class CompactAction extends TableActionBase {
 
         unawareBucketCompactionTopoBuilder.withPartitionPredicate(getPredicate());
         unawareBucketCompactionTopoBuilder.withContinuousMode(isStreaming);
+        unawareBucketCompactionTopoBuilder.withPartitionIdleTime(partitionIdleTime);
         unawareBucketCompactionTopoBuilder.build();
     }
 

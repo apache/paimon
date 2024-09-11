@@ -32,6 +32,12 @@ public class ZstdBlockCompressor implements BlockCompressor {
 
     private static final int MAX_BLOCK_SIZE = 128 * 1024;
 
+    private final int level;
+
+    public ZstdBlockCompressor(int level) {
+        this.level = level;
+    }
+
     @Override
     public int getMaxCompressedSize(int srcSize) {
         return HEADER_LENGTH + zstdMaxCompressedLength(srcSize);
@@ -51,7 +57,7 @@ public class ZstdBlockCompressor implements BlockCompressor {
             throws BufferCompressionException {
         ByteArrayOutputStream stream = new ByteArrayOutputStream(dst, dstOff);
         try (ZstdOutputStream zstdStream =
-                new ZstdOutputStream(stream, RecyclingBufferPool.INSTANCE, 1)) {
+                new ZstdOutputStream(stream, RecyclingBufferPool.INSTANCE, level)) {
             zstdStream.setWorkers(0);
             zstdStream.write(src, srcOff, srcLen);
         } catch (IOException e) {

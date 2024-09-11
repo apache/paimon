@@ -20,12 +20,14 @@ package org.apache.paimon.spark;
 
 import org.apache.paimon.spark.procedure.CompactProcedure;
 import org.apache.paimon.spark.procedure.CreateBranchProcedure;
+import org.apache.paimon.spark.procedure.CreateTagFromTimestampProcedure;
 import org.apache.paimon.spark.procedure.CreateTagProcedure;
 import org.apache.paimon.spark.procedure.DeleteBranchProcedure;
 import org.apache.paimon.spark.procedure.DeleteTagProcedure;
 import org.apache.paimon.spark.procedure.ExpirePartitionsProcedure;
 import org.apache.paimon.spark.procedure.ExpireSnapshotsProcedure;
 import org.apache.paimon.spark.procedure.FastForwardProcedure;
+import org.apache.paimon.spark.procedure.MarkPartitionDoneProcedure;
 import org.apache.paimon.spark.procedure.MigrateFileProcedure;
 import org.apache.paimon.spark.procedure.MigrateTableProcedure;
 import org.apache.paimon.spark.procedure.Procedure;
@@ -58,6 +60,8 @@ public class SparkProcedures {
                 ImmutableMap.builder();
         procedureBuilders.put("rollback", RollbackProcedure::builder);
         procedureBuilders.put("create_tag", CreateTagProcedure::builder);
+        procedureBuilders.put(
+                "create_tag_from_timestamp", CreateTagFromTimestampProcedure::builder);
         procedureBuilders.put("delete_tag", DeleteTagProcedure::builder);
         procedureBuilders.put("create_branch", CreateBranchProcedure::builder);
         procedureBuilders.put("delete_branch", DeleteBranchProcedure::builder);
@@ -70,6 +74,7 @@ public class SparkProcedures {
         procedureBuilders.put("repair", RepairProcedure::builder);
         procedureBuilders.put("fast_forward", FastForwardProcedure::builder);
         procedureBuilders.put("reset_consumer", ResetConsumerProcedure::builder);
+        procedureBuilders.put("mark_partition_done", MarkPartitionDoneProcedure::builder);
         return procedureBuilders.build();
     }
 }

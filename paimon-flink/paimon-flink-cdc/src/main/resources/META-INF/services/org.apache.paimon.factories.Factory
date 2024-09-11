@@ -25,3 +25,11 @@ org.apache.paimon.flink.action.cdc.pulsar.PulsarSyncDatabaseActionFactory
 org.apache.paimon.flink.action.cdc.mongodb.MongoDBSyncTableActionFactory
 org.apache.paimon.flink.action.cdc.mongodb.MongoDBSyncDatabaseActionFactory
 org.apache.paimon.flink.action.cdc.postgres.PostgresSyncTableActionFactory
+
+### message queue data format factories
+org.apache.paimon.flink.action.cdc.format.canal.CanalDataFormatFactory
+org.apache.paimon.flink.action.cdc.format.debezium.DebeziumAvroDataFormatFactory
+org.apache.paimon.flink.action.cdc.format.debezium.DebeziumJsonDataFormatFactory
+org.apache.paimon.flink.action.cdc.format.json.JsonDataFormatFactory
+org.apache.paimon.flink.action.cdc.format.maxwell.MaxwellDataFormatFactory
+org.apache.paimon.flink.action.cdc.format.ogg.OggDataFormatFactory

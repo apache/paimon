@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.append.MultiTableAppendOnlyCompactionTask;
+import org.apache.paimon.append.MultiTableUnawareAppendCompactionTask;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.manifest.WrappedManifestCommittable;
 import org.apache.paimon.options.Options;
@@ -44,7 +44,7 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.END_INPUT_WATERMARK;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_OPERATOR_CHAINING;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_MANAGED_WRITER_BUFFER_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
-import static org.apache.paimon.flink.sink.FlinkSink.assertBatchConfiguration;
+import static org.apache.paimon.flink.sink.FlinkSink.assertBatchAdaptiveParallelism;
 import static org.apache.paimon.flink.sink.FlinkSink.assertStreamingConfiguration;
 import static org.apache.paimon.flink.utils.ManagedMemoryUtils.declareManagedMemory;
 
@@ -67,7 +67,7 @@ public class CombinedTableCompactorSink implements Serializable {
 
     public DataStreamSink<?> sinkFrom(
             DataStream<RowData> awareBucketTableSource,
-            DataStream<MultiTableAppendOnlyCompactionTask> unawareBucketTableSource) {
+            DataStream<MultiTableUnawareAppendCompactionTask> unawareBucketTableSource) {
         // This commitUser is valid only for new jobs.
         // After the job starts, this commitUser will be recorded into the states of write and
         // commit operators.
@@ -79,7 +79,7 @@ public class CombinedTableCompactorSink implements Serializable {
 
     public DataStreamSink<?> sinkFrom(
             DataStream<RowData> awareBucketTableSource,
-            DataStream<MultiTableAppendOnlyCompactionTask> unawareBucketTableSource,
+            DataStream<MultiTableUnawareAppendCompactionTask> unawareBucketTableSource,
             String initialCommitUser) {
         // do the actually writing action, no snapshot generated in this stage
         DataStream<MultiTableCommittable> written =
@@ -91,7 +91,7 @@ public class CombinedTableCompactorSink implements Serializable {
 
     public DataStream<MultiTableCommittable> doWrite(
             DataStream<RowData> awareBucketTableSource,
-            DataStream<MultiTableAppendOnlyCompactionTask> unawareBucketTableSource,
+            DataStream<MultiTableUnawareAppendCompactionTask> unawareBucketTableSource,
             String commitUser) {
         StreamExecutionEnvironment env = awareBucketTableSource.getExecutionEnvironment();
         boolean isStreaming =
@@ -117,8 +117,8 @@ public class CombinedTableCompactorSink implements Serializable {
                         .setParallelism(unawareBucketTableSource.getParallelism());
 
         if (!isStreaming) {
-            assertBatchConfiguration(env, multiBucketTableRewriter.getParallelism());
-            assertBatchConfiguration(env, unawareBucketTableRewriter.getParallelism());
+            assertBatchAdaptiveParallelism(env, multiBucketTableRewriter.getParallelism());
+            assertBatchAdaptiveParallelism(env, unawareBucketTableRewriter.getParallelism());
         }
 
         if (options.get(SINK_USE_MANAGED_MEMORY)) {
@@ -142,8 +142,15 @@ public class CombinedTableCompactorSink implements Serializable {
         if (streamingCheckpointEnabled) {
             assertStreamingConfiguration(env);
         }
+
+        DataStream<MultiTableCommittable> partitioned =
+                FlinkStreamPartitioner.partition(
+                        written,
+                        new MultiTableCommittableChannelComputer(),
+                        written.getParallelism());
         SingleOutputStreamOperator<?> committed =
-                written.transform(
+                partitioned
+                        .transform(
                                 GLOBAL_COMMITTER_NAME,
                                 new MultiTableCommittableTypeInfo(),
                                 new CommitterOperator<>(
@@ -151,11 +158,10 @@ public class CombinedTableCompactorSink implements Serializable {
                                         false,
                                         options.get(SINK_COMMITTER_OPERATOR_CHAINING),
                                         commitUser,
-                                        createCommitterFactory(),
+                                        createCommitterFactory(isStreaming),
                                         createCommittableStateManager(),
                                         options.get(END_INPUT_WATERMARK)))
-                        .setParallelism(1)
-                        .setMaxParallelism(1);
+                        .setParallelism(written.getParallelism());
         return committed.addSink(new DiscardingSink<>()).name("end").setParallelism(1);
     }
 
@@ -173,9 +179,14 @@ public class CombinedTableCompactorSink implements Serializable {
     }
 
     protected Committer.Factory<MultiTableCommittable, WrappedManifestCommittable>
-            createCommitterFactory() {
+            createCommitterFactory(boolean isStreaming) {
         Map<String, String> dynamicOptions = options.toMap();
         dynamicOptions.put(CoreOptions.WRITE_ONLY.key(), "false");
+        if (isStreaming) {
+            dynamicOptions.put(CoreOptions.NUM_SORTED_RUNS_STOP_TRIGGER.key(), "2147483647");
+            dynamicOptions.put(CoreOptions.SORT_SPILL_THRESHOLD.key(), "10");
+            dynamicOptions.put(CoreOptions.LOOKUP_WAIT.key(), "false");
+        }
         return context -> new StoreMultiCommitter(catalogLoader, context, true, dynamicOptions);
     }
 

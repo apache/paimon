@@ -331,11 +331,18 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
 
     @Test
     public void testAlterColumnType() {
-        createTable("testAlterColumnType");
+        createTableWithNonNullColumn("testAlterColumnType");
         writeTable("testAlterColumnType", "(1, 2L, '1')", "(5, 6L, '3')");
 
+        assertThatThrownBy(
+                        () -> {
+                            writeTable("testAlterColumnType", "(1, null, 'a')");
+                        })
+                .hasMessageContaining("Cannot write null to non-null column(b)");
+
         List<Row> beforeAlter = spark.sql("SHOW CREATE TABLE testAlterColumnType").collectAsList();
-        assertThat(beforeAlter.toString()).contains(defaultShowCreateString("testAlterColumnType"));
+        assertThat(beforeAlter.toString())
+                .contains(defaultShowCreateStringWithNonNullColumn("testAlterColumnType"));
 
         spark.sql("ALTER TABLE testAlterColumnType ALTER COLUMN b TYPE DOUBLE");
         assertThat(spark.table("testAlterColumnType").collectAsList().toString())
@@ -345,7 +352,15 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         assertThat(afterAlter.toString())
                 .contains(
                         showCreateString(
-                                "testAlterColumnType", "a INT NOT NULL", "b DOUBLE", "c STRING"));
+                                "testAlterColumnType",
+                                "a INT NOT NULL",
+                                "b DOUBLE NOT NULL",
+                                "c STRING"));
+        assertThatThrownBy(
+                        () -> {
+                            writeTable("testAlterColumnType", "(1, null, 'a')");
+                        })
+                .hasMessageContaining("Cannot write null to non-null column(b)");
     }
 
     @Test

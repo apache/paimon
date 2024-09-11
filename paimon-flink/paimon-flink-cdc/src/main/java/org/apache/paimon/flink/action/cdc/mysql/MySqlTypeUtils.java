@@ -47,7 +47,7 @@ import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TIN
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
 
 /* This file is based on source code from MySqlTypeUtils in the flink-cdc-connectors Project
- * (https://ververica.github.io/flink-cdc-connectors/), licensed by the Apache Software Foundation (ASF)
+ * (https://github.com/apache/flink-cdc/), licensed by the Apache Software Foundation (ASF)
  * under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
  * additional information regarding copyright ownership. */
 
@@ -345,7 +345,11 @@ public class MySqlTypeUtils {
     }
 
     public static String convertWkbArray(byte[] wkb) throws JsonProcessingException {
-        String geoJson = OGCGeometry.fromBinary(ByteBuffer.wrap(wkb)).asGeoJson();
+        return convertWkbArray(ByteBuffer.wrap(wkb));
+    }
+
+    public static String convertWkbArray(ByteBuffer wkbByteBuffer) throws JsonProcessingException {
+        String geoJson = OGCGeometry.fromBinary(wkbByteBuffer).asGeoJson();
         JsonNode originGeoNode = objectMapper.readTree(geoJson);
 
         Optional<Integer> srid =

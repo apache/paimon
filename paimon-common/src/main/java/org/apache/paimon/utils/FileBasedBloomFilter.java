@@ -20,6 +20,7 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.io.PageFileInput;
+import org.apache.paimon.io.cache.CacheCallback;
 import org.apache.paimon.io.cache.CacheKey;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.MemorySegment;
@@ -62,7 +63,7 @@ public class FileBasedBloomFilter {
                     cacheManager.getPage(
                             CacheKey.forPosition(input.file(), readOffset, readLength),
                             key -> input.readPosition(readOffset, readLength),
-                            key -> filter.unsetMemorySegment());
+                            new BloomFilterCallBack(filter));
             filter.setMemorySegment(segment, 0);
             accessCount = 0;
         }
@@ -72,5 +73,20 @@ public class FileBasedBloomFilter {
     @VisibleForTesting
     BloomFilter bloomFilter() {
         return filter;
+    }
+
+    /** Call back for cache manager. */
+    private static class BloomFilterCallBack implements CacheCallback {
+
+        private final BloomFilter bloomFilter;
+
+        private BloomFilterCallBack(BloomFilter bloomFilter) {
+            this.bloomFilter = bloomFilter;
+        }
+
+        @Override
+        public void onRemoval(CacheKey key) {
+            this.bloomFilter.unsetMemorySegment();
+        }
     }
 }

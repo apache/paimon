@@ -36,6 +36,8 @@ import org.apache.spark.sql.sources.LessThan;
 import org.apache.spark.sql.sources.LessThanOrEqual;
 import org.apache.spark.sql.sources.Not;
 import org.apache.spark.sql.sources.Or;
+import org.apache.spark.sql.sources.StringContains;
+import org.apache.spark.sql.sources.StringEndsWith;
 import org.apache.spark.sql.sources.StringStartsWith;
 
 import java.util.Arrays;
@@ -61,7 +63,9 @@ public class SparkFilterConverter {
                     "And",
                     "Or",
                     "Not",
-                    "StringStartsWith");
+                    "StringStartsWith",
+                    "StringEndsWith",
+                    "StringContains");
 
     private final RowType rowType;
     private final PredicateBuilder builder;
@@ -141,6 +145,16 @@ public class SparkFilterConverter {
             int index = fieldIndex(startsWith.attribute());
             Object literal = convertLiteral(index, startsWith.value());
             return builder.startsWith(index, literal);
+        } else if (filter instanceof StringEndsWith) {
+            StringEndsWith endsWith = (StringEndsWith) filter;
+            int index = fieldIndex(endsWith.attribute());
+            Object literal = convertLiteral(index, endsWith.value());
+            return builder.endsWith(index, literal);
+        } else if (filter instanceof StringContains) {
+            StringContains contains = (StringContains) filter;
+            int index = fieldIndex(contains.attribute());
+            Object literal = convertLiteral(index, contains.value());
+            return builder.contains(index, literal);
         }
 
         // TODO: AlwaysTrue, AlwaysFalse
@@ -150,6 +164,11 @@ public class SparkFilterConverter {
 
     public Object convertLiteral(String field, Object value) {
         return convertLiteral(fieldIndex(field), value);
+    }
+
+    public String convertString(String field, Object value) {
+        Object literal = convertLiteral(field, value);
+        return literal == null ? null : literal.toString();
     }
 
     private int fieldIndex(String field) {

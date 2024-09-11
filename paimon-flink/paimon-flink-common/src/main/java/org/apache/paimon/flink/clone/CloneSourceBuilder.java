@@ -76,15 +76,15 @@ public class CloneSourceBuilder {
     private DataStream<Tuple2<String, String>> build(Catalog sourceCatalog) throws Exception {
         List<Tuple2<String, String>> result = new ArrayList<>();
 
-        if (database == null) {
+        if (StringUtils.isNullOrWhitespaceOnly(database)) {
             checkArgument(
-                    StringUtils.isBlank(tableName),
+                    StringUtils.isNullOrWhitespaceOnly(tableName),
                     "tableName must be blank when database is null.");
             checkArgument(
-                    StringUtils.isBlank(targetDatabase),
+                    StringUtils.isNullOrWhitespaceOnly(targetDatabase),
                     "targetDatabase must be blank when clone all tables in a catalog.");
             checkArgument(
-                    StringUtils.isBlank(targetTableName),
+                    StringUtils.isNullOrWhitespaceOnly(targetTableName),
                     "targetTableName must be blank when clone all tables in a catalog.");
             for (String db : sourceCatalog.listDatabases()) {
                 for (String table : sourceCatalog.listTables(db)) {
@@ -92,22 +92,22 @@ public class CloneSourceBuilder {
                     result.add(new Tuple2<>(s, s));
                 }
             }
-        } else if (tableName == null) {
+        } else if (StringUtils.isNullOrWhitespaceOnly(tableName)) {
             checkArgument(
-                    !StringUtils.isBlank(targetDatabase),
+                    !StringUtils.isNullOrWhitespaceOnly(targetDatabase),
                     "targetDatabase must not be blank when clone all tables in a database.");
             checkArgument(
-                    StringUtils.isBlank(targetTableName),
+                    StringUtils.isNullOrWhitespaceOnly(targetTableName),
                     "targetTableName must be blank when clone all tables in a catalog.");
             for (String table : sourceCatalog.listTables(database)) {
                 result.add(new Tuple2<>(database + "." + table, targetDatabase + "." + table));
             }
         } else {
             checkArgument(
-                    !StringUtils.isBlank(targetDatabase),
+                    !StringUtils.isNullOrWhitespaceOnly(targetDatabase),
                     "targetDatabase must not be blank when clone a table.");
             checkArgument(
-                    !StringUtils.isBlank(targetTableName),
+                    !StringUtils.isNullOrWhitespaceOnly(targetTableName),
                     "targetTableName must not be blank when clone a table.");
             result.add(
                     new Tuple2<>(

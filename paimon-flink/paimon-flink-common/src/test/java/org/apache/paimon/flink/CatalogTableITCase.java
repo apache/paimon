@@ -26,6 +26,9 @@ import org.apache.paimon.table.system.SourceTableLineageTable;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.flink.table.catalog.CatalogPartition;
+import org.apache.flink.table.catalog.CatalogPartitionSpec;
+import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.exceptions.PartitionNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotPartitionedException;
 import org.apache.flink.types.Row;
@@ -33,10 +36,16 @@ import org.junit.jupiter.api.Test;
 
 import javax.annotation.Nonnull;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.api.config.TableConfigOptions.TABLE_DML_SYNC;
+import static org.apache.paimon.flink.FlinkCatalog.LAST_UPDATE_TIME_KEY;
+import static org.apache.paimon.flink.FlinkCatalog.NUM_FILES_KEY;
+import static org.apache.paimon.flink.FlinkCatalog.NUM_ROWS_KEY;
+import static org.apache.paimon.flink.FlinkCatalog.TOTAL_SIZE_KEY;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -172,15 +181,14 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         assertThatThrownBy(() -> sql("CREATE TABLE T$snapshots (a INT, b INT)"))
                 .hasRootCauseMessage(
                         "Cannot 'createTable' for system table "
-                                + "'Identifier{database='default', table='T$snapshots'}', please use data table.");
+                                + "'Identifier{database='default', object='T$snapshots'}', please use data table.");
         assertThatThrownBy(() -> sql("CREATE TABLE T$aa$bb (a INT, b INT)"))
                 .hasRootCauseMessage(
-                        "Cannot 'createTable' for system table "
-                                + "'Identifier{database='default', table='T$aa$bb'}', please use data table.");
+                        "System table can only contain one '$' separator, but this is: T$aa$bb");
     }
 
     @Test
-    public void testManifestsTable() throws Exception {
+    public void testManifestsTable() {
         sql("CREATE TABLE T (a INT, b INT)");
         sql("INSERT INTO T VALUES (1, 2)");
 
@@ -206,10 +214,13 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testSchemasTable() throws Exception {
+    public void testSchemasTable() {
         sql(
                 "CREATE TABLE T(a INT, b INT, c STRING, PRIMARY KEY (a) NOT ENFORCED) with ('a.aa.aaa'='val1', 'b.bb.bbb'='val2')");
         sql("ALTER TABLE T SET ('snapshot.time-retained' = '5 h')");
+        sql("ALTER TABLE T SET ('snapshot.num-retained.max' = '20')");
+        sql("ALTER TABLE T SET ('snapshot.num-retained.min' = '18')");
+        sql("ALTER TABLE T SET ('manifest.format' = 'avro')");
 
         assertThat(sql("SHOW CREATE TABLE T$schemas").toString())
                 .isEqualTo(
@@ -231,17 +242,66 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         assertThat(result.toString())
                 .isEqualTo(
                         "[+I[0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},"
-                                + "{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},"
-                                + "{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], "
+                                + "{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], "
                                 + "{\"a.aa.aaa\":\"val1\",\"b.bb.bbb\":\"val2\"}, ], "
                                 + "+I[1, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},"
+                                + "{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], "
+                                + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\"}, ], "
+                                + "+I[2, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},"
+                                + "{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], "
+                                + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\",\"snapshot.num-retained.max\":\"20\"}, ], "
+                                + "+I[3, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},"
+                                + "{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], "
+                                + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\",\"snapshot.num-retained.max\":\"20\",\"snapshot.num-retained.min\":\"18\"}, ], "
+                                + "+I[4, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], "
+                                + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\",\"snapshot.num-retained.max\":\"20\",\"manifest.format\":\"avro\","
+                                + "\"snapshot.num-retained.min\":\"18\"}, ]]");
+
+        result =
+                sql(
+                        "SELECT schema_id, fields, partition_keys, "
+                                + "primary_keys, options, `comment` FROM T$schemas where schema_id = 0");
+        assertThat(result.toString())
+                .isEqualTo(
+                        "[+I[0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},"
                                 + "{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},"
                                 + "{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], "
-                                + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\"}, ]]");
+                                + "{\"a.aa.aaa\":\"val1\",\"b.bb.bbb\":\"val2\"}, ]]");
+
+        result =
+                sql(
+                        "SELECT schema_id, fields, partition_keys, "
+                                + "primary_keys, options, `comment` FROM T$schemas where schema_id>0 and schema_id<3");
+        assertThat(result.toString())
+                .isEqualTo(
+                        "[+I[1, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},"
+                                + "{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], "
+                                + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\"}, ], "
+                                + "+I[2, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},"
+                                + "{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], {\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\","
+                                + "\"b.bb.bbb\":\"val2\",\"snapshot.num-retained.max\":\"20\"}, ]]");
+
+        // check with not exist schema id
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "SELECT schema_id, fields, partition_keys, "
+                                                + "primary_keys, options, `comment` FROM T$schemas where schema_id = 5"))
+                .hasCauseInstanceOf(RuntimeException.class)
+                .hasRootCauseMessage("schema id: 5 should not greater than max schema id: 4");
+
+        // check with not exist schema id
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "SELECT schema_id, fields, partition_keys, "
+                                                + "primary_keys, options, `comment` FROM T$schemas where schema_id>=6"))
+                .hasCauseInstanceOf(RuntimeException.class)
+                .hasRootCauseMessage("schema id: 6 should not greater than max schema id: 4");
     }
 
     @Test
-    public void testSnapshotsSchemasTable() throws Exception {
+    public void testSnapshotsSchemasTable() {
         sql("CREATE TABLE T (a INT, b INT)");
         sql("INSERT INTO T VALUES (1, 2)");
         sql("INSERT INTO T VALUES (3, 4)");
@@ -262,9 +322,9 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testCreateTableLike() throws Exception {
+    public void testCreateTableLike() {
         sql("CREATE TABLE T (a INT)");
-        sql("CREATE TABLE T1 LIKE T");
+        sql("CREATE TABLE T1 LIKE T (EXCLUDING OPTIONS)");
         List<Row> result =
                 sql(
                         "SELECT schema_id, fields, partition_keys, "
@@ -479,6 +539,67 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
         result = sql("SHOW PARTITIONS PartitionTable partition (dt='2020-01-02', hh='11')");
         assertThat(result).containsExactlyInAnyOrder(Row.of("dt=2020-01-02/hh=11"));
+    }
+
+    @Test
+    void testPKTableGetPartition() throws Exception {
+        sql(
+                "CREATE TABLE IF NOT EXISTS PK_T (id INT PRIMARY KEY NOT ENFORCED, par STRING, word STRING) PARTITIONED BY(par)");
+        FlinkCatalog flinkCatalog = flinkCatalog();
+        ObjectPath tablePath = new ObjectPath(flinkCatalog.getDefaultDatabase(), "PK_T");
+        sql("INSERT INTO PK_T VALUES (1, 'p1', 'a'),(2, 'p1', 'b'),(3, 'p2', 'a'),(4, 'p2', 'b')");
+        List<CatalogPartitionSpec> partitions = flinkCatalog.listPartitions(tablePath);
+        Map<String, Map<String, String>> partitionPropertiesMap1 =
+                getPartitionProperties(flinkCatalog, tablePath, partitions);
+        assertThat(partitionPropertiesMap1)
+                .allSatisfy(
+                        (par, properties) -> {
+                            assertThat(properties.get(NUM_ROWS_KEY)).isEqualTo("2");
+                            assertThat(properties.get(LAST_UPDATE_TIME_KEY)).isNotBlank();
+                            assertThat(properties.get(NUM_FILES_KEY)).isEqualTo("1");
+                            assertThat(properties.get(TOTAL_SIZE_KEY)).isNotBlank();
+                        });
+        // update p1 data
+        sql("UPDATE PK_T SET word = 'c' WHERE id = 2");
+        Map<String, Map<String, String>> partitionPropertiesMap2 =
+                getPartitionProperties(flinkCatalog, tablePath, partitions);
+        assertPartitionNotUpdate("p2", partitionPropertiesMap1, partitionPropertiesMap2);
+        // we compute the count of changelog data, not distinct count(*).
+        assertPartitionUpdateTo("p1", partitionPropertiesMap1, partitionPropertiesMap2, 3L, 2L);
+
+        // delete data from p2
+        sql("DELETE FROM PK_T WHERE id = 3");
+        Map<String, Map<String, String>> partitionPropertiesMap3 =
+                getPartitionProperties(flinkCatalog, tablePath, partitions);
+        assertPartitionNotUpdate("p1", partitionPropertiesMap2, partitionPropertiesMap3);
+        // we compute the count of changelog data, not distinct count(*).
+        assertPartitionUpdateTo("p2", partitionPropertiesMap2, partitionPropertiesMap3, 3L, 2L);
+    }
+
+    @Test
+    void testNonPKTableGetPartition() throws Exception {
+        FlinkCatalog flinkCatalog = flinkCatalog();
+        ObjectPath tablePath = new ObjectPath(flinkCatalog.getDefaultDatabase(), "NON_PK_T");
+        sql("CREATE TABLE IF NOT EXISTS NON_PK_T (par STRING, a INT, b INT) PARTITIONED BY(par)");
+        sql("INSERT INTO NON_PK_T VALUES ('p1', 2, 3),('p2', 4, 5)");
+        List<CatalogPartitionSpec> partitions = flinkCatalog.listPartitions(tablePath);
+        Map<String, Map<String, String>> partitionPropertiesMap1 =
+                getPartitionProperties(flinkCatalog, tablePath, partitions);
+
+        assertThat(partitionPropertiesMap1)
+                .allSatisfy(
+                        (par, properties) -> {
+                            assertThat(properties.get(NUM_ROWS_KEY)).isEqualTo("1");
+                            assertThat(properties.get(LAST_UPDATE_TIME_KEY)).isNotBlank();
+                        });
+
+        // append data to p1
+        sql("INSERT INTO NON_PK_T VALUES ('p1', 6, 7), ('p1', 8, 9)");
+        Map<String, Map<String, String>> partitionPropertiesMap2 =
+                getPartitionProperties(flinkCatalog, tablePath, partitions);
+
+        assertPartitionNotUpdate("p2", partitionPropertiesMap1, partitionPropertiesMap2);
+        assertPartitionUpdateTo("p1", partitionPropertiesMap1, partitionPropertiesMap2, 3L, 2L);
     }
 
     @Test
@@ -732,6 +853,11 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                         "SELECT tag_name, snapshot_id, schema_id, record_count FROM T$tags ORDER BY tag_name");
 
         assertThat(result).containsExactly(Row.of("tag1", 1L, 0L, 1L), Row.of("tag2", 2L, 0L, 2L));
+
+        result =
+                sql(
+                        "SELECT tag_name, snapshot_id, schema_id, record_count FROM T$tags where tag_name = 'tag1' ");
+        assertThat(result).containsExactly(Row.of("tag1", 1L, 0L, 1L));
     }
 
     @Test
@@ -742,7 +868,8 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(
-                        streamSqlIter("SELECT * FROM T /*+ OPTIONS('consumer-id'='my1') */"));
+                        streamSqlIter(
+                                "SELECT * FROM T /*+ OPTIONS('consumer-id'='my1','consumer.expiration-time'='3h') */"));
 
         batchSql("INSERT INTO T VALUES (5, 6), (7, 8)");
         assertThat(iterator.collect(2)).containsExactlyInAnyOrder(Row.of(1, 2), Row.of(3, 4));
@@ -752,6 +879,34 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         assertThat(result).hasSize(1);
         assertThat(result.get(0).getField(0)).isEqualTo("my1");
         assertThat((Long) result.get(0).getField(1)).isGreaterThanOrEqualTo(3);
+    }
+
+    @Test
+    public void testConsumerIdExpInBatchMode() {
+        batchSql("CREATE TABLE T (a INT, b INT)");
+        batchSql("INSERT INTO T VALUES (1, 2)");
+        batchSql("INSERT INTO T VALUES (3, 4)");
+        batchSql("INSERT INTO T VALUES (5, 6), (7, 8)");
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "SELECT * FROM T /*+ OPTIONS('consumer-id' = 'test-id') */ WHERE a = 1"))
+                .rootCause()
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("consumer.expiration-time should be specified when using consumer-id.");
+    }
+
+    @Test
+    public void testConsumerIdExpInStreamingMode() {
+        batchSql("CREATE TABLE T (a INT, b INT)");
+        batchSql("INSERT INTO T VALUES (1, 2)");
+        batchSql("INSERT INTO T VALUES (3, 4)");
+        assertThatThrownBy(
+                        () ->
+                                streamSqlIter(
+                                        "SELECT * FROM T /*+ OPTIONS('consumer-id'='test-id') */"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("consumer.expiration-time should be specified when using consumer-id.");
     }
 
     @Test
@@ -872,5 +1027,49 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                 "INSERT INTO T /*+ OPTIONS('full-compaction.delta-commits' = '100') */ VALUES (2, 21), (3, 31)");
         result = sql("SELECT k, v FROM T$ro ORDER BY k");
         assertThat(result).containsExactly(Row.of(1, 11), Row.of(2, 21), Row.of(3, 31));
+    }
+
+    private static Map<String, Map<String, String>> getPartitionProperties(
+            FlinkCatalog flinkCatalog,
+            ObjectPath tablePath,
+            List<CatalogPartitionSpec> partitions) {
+        Map<String, Map<String, String>> partitionPropertiesMap = new HashMap<>();
+        partitions.forEach(
+                p -> {
+                    try {
+                        String partition = p.getPartitionSpec().get("par");
+                        CatalogPartition catalogPartition = flinkCatalog.getPartition(tablePath, p);
+                        Map<String, String> properties = catalogPartition.getProperties();
+                        partitionPropertiesMap.put(partition, properties);
+                    } catch (PartitionNotExistException e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+        return partitionPropertiesMap;
+    }
+
+    private static void assertPartitionNotUpdate(
+            String partition,
+            Map<String, Map<String, String>> oldProperties,
+            Map<String, Map<String, String>> newProperties) {
+        assertThat(oldProperties.get(partition)).isEqualTo(newProperties.get(partition));
+    }
+
+    private static void assertPartitionUpdateTo(
+            String partition,
+            Map<String, Map<String, String>> oldProperties,
+            Map<String, Map<String, String>> newProperties,
+            Long expectedNumRows,
+            Long expectedNumFiles) {
+        Map<String, String> newPartitionProperties = newProperties.get(partition);
+        Map<String, String> oldPartitionProperties = oldProperties.get(partition);
+        assertThat(newPartitionProperties.get(NUM_ROWS_KEY))
+                .isEqualTo(String.valueOf(expectedNumRows));
+        assertThat(Long.valueOf(newPartitionProperties.get(LAST_UPDATE_TIME_KEY)))
+                .isGreaterThan(Long.valueOf(oldPartitionProperties.get(LAST_UPDATE_TIME_KEY)));
+        assertThat(newPartitionProperties.get(NUM_FILES_KEY))
+                .isEqualTo(String.valueOf(expectedNumFiles));
+        assertThat(Long.valueOf(newPartitionProperties.get(TOTAL_SIZE_KEY)))
+                .isGreaterThan(Long.valueOf(oldPartitionProperties.get(TOTAL_SIZE_KEY)));
     }
 }

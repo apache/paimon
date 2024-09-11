@@ -18,14 +18,10 @@
 
 package org.apache.spark.sql
 
-import org.apache.spark.sql.catalyst.TableIdentifier
 import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.plans.logical.{ColumnStat, LogicalPlan}
 import org.apache.spark.sql.execution.command.CommandUtils
-import org.apache.spark.sql.internal.SessionState
-import org.apache.spark.sql.types.{BinaryType, BooleanType, DataType, DatetimeType, DecimalType, DoubleType, FloatType, IntegralType, StringType}
-
-import java.net.URI
+import org.apache.spark.sql.types._
 
 /**
  * Some classes or methods defined in the spark project are marked as private under
@@ -33,16 +29,6 @@ import java.net.URI
  * indirectly.
  */
 object PaimonStatsUtils {
-
-  def calculateTotalSize(
-      sessionState: SessionState,
-      tableName: String,
-      locationUri: Option[URI]): Long = {
-    CommandUtils.calculateSingleLocationSize(
-      sessionState,
-      new TableIdentifier(tableName),
-      locationUri)
-  }
 
   def computeColumnStats(
       sparkSession: SparkSession,

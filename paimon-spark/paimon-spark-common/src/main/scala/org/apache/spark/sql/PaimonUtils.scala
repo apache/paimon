@@ -18,6 +18,7 @@
 
 package org.apache.spark.sql
 
+import org.apache.spark.executor.OutputMetrics
 import org.apache.spark.rdd.InputFileBlockHolder
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
@@ -64,7 +65,7 @@ object PaimonUtils {
   }
 
   def fieldReference(name: String): NamedReference = {
-    FieldReference.column(name)
+    FieldReference(Seq(name))
   }
 
   def bytesToString(size: Long): String = {
@@ -77,5 +78,13 @@ object PaimonUtils {
 
   def unsetInputFileName(): Unit = {
     InputFileBlockHolder.unset()
+  }
+
+  def updateOutputMetrics(
+      outputMetrics: OutputMetrics,
+      bytesWritten: Long,
+      recordsWritten: Long): Unit = {
+    outputMetrics.setBytesWritten(bytesWritten)
+    outputMetrics.setRecordsWritten(recordsWritten)
   }
 }

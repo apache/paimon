@@ -29,13 +29,14 @@ import org.apache.paimon.flink.action.cdc.SyncJobHandler;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.schema.JdbcSchemasInfo;
 import org.apache.paimon.flink.action.cdc.schema.JdbcTableInfo;
+import org.apache.paimon.flink.action.cdc.watermark.CdcTimestampExtractor;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
 
-import com.ververica.cdc.connectors.mysql.source.MySqlSource;
-import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
+import org.apache.flink.cdc.connectors.mysql.source.MySqlSource;
+import org.apache.flink.cdc.connectors.mysql.source.config.MySqlSourceOptions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -58,7 +59,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * An {@link Action} which synchronize the whole MySQL database into one Paimon database.
  *
  * <p>You should specify MySQL source database in {@code mySqlConfig}. See <a
- * href="https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mysql-cdc.html#connector-options">document
+ * href="https://nightlies.apache.org/flink/flink-cdc-docs-release-3.1/docs/connectors/flink-sources/mysql-cdc/#connector-options">document
  * of flink-cdc-connectors</a> for detailed keys and values.
  *
  * <p>For each MySQL table to be synchronized, if the corresponding Paimon table does not exist,
@@ -137,7 +138,7 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                         + ", or MySQL database does not exist.");
 
         TableNameConverter tableNameConverter =
-                new TableNameConverter(caseSensitive, mergeShards, tablePrefix, tableSuffix);
+                new TableNameConverter(allowUpperCase, mergeShards, tablePrefix, tableSuffix);
         for (JdbcTableInfo tableInfo : jdbcTableInfos) {
             Identifier identifier =
                     Identifier.create(
@@ -152,7 +153,7 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                             tableConfig,
                             tableInfo.schema(),
                             metadataConverters,
-                            caseSensitive,
+                            allowUpperCase,
                             false,
                             true);
             try {
@@ -178,6 +179,11 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                 !monitoredTables.isEmpty(),
                 "No tables to be synchronized. Possible cause is the schemas of all tables in specified "
                         + "MySQL database are not compatible with those of existed Paimon tables. Please check the log.");
+    }
+
+    @Override
+    protected CdcTimestampExtractor createCdcTimestampExtractor() {
+        return MySqlActionUtils.createCdcTimestampExtractor();
     }
 
     @Override

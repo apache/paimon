@@ -21,10 +21,11 @@ package org.apache.paimon.flink.action.cdc.mongodb;
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.SyncJobHandler;
 import org.apache.paimon.flink.action.cdc.SyncTableActionBase;
+import org.apache.paimon.flink.action.cdc.watermark.CdcTimestampExtractor;
 import org.apache.paimon.schema.Schema;
 
-import com.ververica.cdc.connectors.mongodb.source.MongoDBSource;
-import com.ververica.cdc.connectors.mongodb.source.config.MongoDBSourceOptions;
+import org.apache.flink.cdc.connectors.mongodb.source.MongoDBSource;
+import org.apache.flink.cdc.connectors.mongodb.source.config.MongoDBSourceOptions;
 
 import java.util.Map;
 
@@ -67,6 +68,11 @@ public class MongoDBSyncTableAction extends SyncTableActionBase {
     @Override
     protected Schema retrieveSchema() {
         return MongodbSchemaUtils.getMongodbSchema(cdcSourceConfig);
+    }
+
+    @Override
+    protected CdcTimestampExtractor createCdcTimestampExtractor() {
+        return MongoDBActionUtils.createCdcTimestampExtractor();
     }
 
     @Override
