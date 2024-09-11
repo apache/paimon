@@ -52,7 +52,6 @@ public class DataFilePathFactory {
             String changelogFilePrefix) {
         this.parent = parent;
         this.uuid = UUID.randomUUID().toString();
-
         this.pathCount = new AtomicInteger(0);
         this.formatIdentifier = formatIdentifier;
         this.dataFilePrefix = dataFilePrefix;
@@ -60,14 +59,14 @@ public class DataFilePathFactory {
     }
 
     public Path newPath() {
-        if (!StringUtils.isBlank(dataFilePrefix)) {
+        if (!StringUtils.isNullOrWhitespaceOnly(dataFilePrefix)) {
             return newPath(dataFilePrefix);
         }
         return newPath(DEFAULT_DATA_FILE_PREFIX);
     }
 
     public Path newChangelogPath() {
-        if (!StringUtils.isBlank(changelogFilePrefix)) {
+        if (!StringUtils.isNullOrWhitespaceOnly(changelogFilePrefix)) {
             return newPath(changelogFilePrefix);
         }
         return newPath(DEFAULT_CHANGELOG_FILE_PREFIX);
