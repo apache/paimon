@@ -1783,7 +1783,7 @@ public class CoreOptions implements Serializable {
         return options.get(CHANGELOG_PRODUCER_ROW_DEDUPLICATE);
     }
 
-    public List<String> changelogRowDeduplicateIgnoreSequenceField() {
+    public List<String> changelogRowDeduplicateIgnoreFields() {
         return options.getOptional(CHANGELOG_PRODUCER_ROW_DEDUPLICATE_IGNORE_FIELDS)
                 .map(s -> Arrays.asList(s.split(",")))
                 .orElse(Collections.emptyList());

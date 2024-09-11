@@ -20,7 +20,11 @@ package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordEqualiser;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ValueEqualiserSupplier;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -31,6 +35,7 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.io.DataFileTestUtils.row;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link FullChangelogMergeFunctionWrapper}. */
 public abstract class FullChangelogMergeFunctionWrapperTestBase {
@@ -213,6 +218,64 @@ public abstract class FullChangelogMergeFunctionWrapperTestBase {
         @Override
         protected boolean changelogRowDeduplicate() {
             return true;
+        }
+
+        @Test
+        public void testFullChangelogMergeFunctionWrapperWithIgnoreFields() {
+            RowType valueType =
+                    RowType.builder()
+                            .fields(
+                                    new DataType[] {DataTypes.INT(), DataTypes.INT()},
+                                    new String[] {"f0", "f1"})
+                            .build();
+            List<String> ignoreFields = Collections.singletonList("f1");
+            ValueEqualiserSupplier logDedupEqualSupplier =
+                    ValueEqualiserSupplier.fromIgnoreFields(valueType, ignoreFields);
+            FullChangelogMergeFunctionWrapper function =
+                    new FullChangelogMergeFunctionWrapper(
+                            createMergeFunction(), MAX_LEVEL, logDedupEqualSupplier.get(), true);
+
+            // With level-0 'insert' record, with max level same record. Notice that the specified
+            // ignored
+            // fields in records are different.
+            function.reset();
+            function.add(
+                    new KeyValue()
+                            .replace(row(1), 1, RowKind.INSERT, row(1, 1))
+                            .setLevel(MAX_LEVEL));
+            function.add(new KeyValue().replace(row(1), 2, RowKind.INSERT, row(1, 2)).setLevel(0));
+            ChangelogResult result = function.getResult();
+            assertThat(result).isNotNull();
+            List<KeyValue> changelogs = result.changelogs();
+            assertThat(changelogs).isEmpty();
+            KeyValue kv = result.result();
+            assertThat(kv).isNotNull();
+            assertThat(kv.valueKind()).isEqualTo(RowKind.INSERT);
+            assertThat(kv.value().getInt(0)).isEqualTo(1);
+            assertThat(kv.value().getInt(1)).isEqualTo(2);
+
+            // With level-0 'insert' record, with max level different record.
+            function.reset();
+            function.add(
+                    new KeyValue()
+                            .replace(row(1), 1, RowKind.INSERT, row(1, 1))
+                            .setLevel(MAX_LEVEL));
+            function.add(new KeyValue().replace(row(1), 2, RowKind.INSERT, row(2, 2)).setLevel(0));
+            result = function.getResult();
+            assertThat(result).isNotNull();
+            changelogs = result.changelogs();
+            assertThat(changelogs).hasSize(2);
+            assertThat(changelogs.get(0).valueKind()).isEqualTo(RowKind.UPDATE_BEFORE);
+            assertThat(changelogs.get(0).value().getInt(0)).isEqualTo(1);
+            assertThat(changelogs.get(0).value().getInt(1)).isEqualTo(1);
+            assertThat(changelogs.get(1).valueKind()).isEqualTo(RowKind.UPDATE_AFTER);
+            assertThat(changelogs.get(1).value().getInt(0)).isEqualTo(2);
+            assertThat(changelogs.get(1).value().getInt(1)).isEqualTo(2);
+            kv = result.result();
+            assertThat(kv).isNotNull();
+            assertThat(kv.valueKind()).isEqualTo(RowKind.INSERT);
+            assertThat(kv.value().getInt(0)).isEqualTo(2);
+            assertThat(kv.value().getInt(1)).isEqualTo(2);
         }
     }
 }

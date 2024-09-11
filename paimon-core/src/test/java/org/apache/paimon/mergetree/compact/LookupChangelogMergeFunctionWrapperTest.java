@@ -33,8 +33,8 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.ChangelogDeduplicateEqualiserSupplier;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
+import org.apache.paimon.utils.ValueEqualiserSupplier;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
@@ -49,7 +49,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.IntStream;
 
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.apache.paimon.types.RowKind.DELETE;
@@ -219,7 +218,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
     }
 
     @Test
-    public void testDeduplicateIgnoreSequenceField() {
+    public void testDeduplicateWithIgnoreFields() {
         Map<InternalRow, KeyValue> highLevel = new HashMap<>();
         RowType valueType =
                 RowType.builder()
@@ -232,14 +231,8 @@ public class LookupChangelogMergeFunctionWrapperTest {
                         valueType, CoreOptions.fromMap(ImmutableMap.of("sequence.field", "f1")));
         assert userDefinedSeqComparator != null;
         List<String> ignoreFields = Collections.singletonList("f1");
-        List<String> fieldNames = valueType.getFieldNames();
-        IntStream projectionStream = IntStream.range(0, valueType.getFieldCount());
-        int[] projection =
-                projectionStream
-                        .filter(idx -> !ignoreFields.contains(fieldNames.get(idx)))
-                        .toArray();
-        ChangelogDeduplicateEqualiserSupplier changelogDeduplicateEqualiserSupplier =
-                new ChangelogDeduplicateEqualiserSupplier(valueType, projection);
+        ValueEqualiserSupplier logDedupEqualSupplier =
+                ValueEqualiserSupplier.fromIgnoreFields(valueType, ignoreFields);
         LookupChangelogMergeFunctionWrapper function =
                 new LookupChangelogMergeFunctionWrapper(
                         LookupMergeFunction.wrap(
@@ -247,13 +240,14 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                 RowType.of(DataTypes.INT()),
                                 valueType),
                         highLevel::get,
-                        changelogDeduplicateEqualiserSupplier.get(),
+                        logDedupEqualSupplier.get(),
                         true,
                         LookupStrategy.from(false, true, false, false),
                         null,
                         userDefinedSeqComparator);
 
-        // With level-0 'insert' record, with level-x (x > 0) same record. Notice that sequence
+        // With level-0 'insert' record, with level-x (x > 0) same record. Notice that the specified
+        // ignored
         // fields in records are different.
         function.reset();
         function.add(new KeyValue().replace(row(1), 1, INSERT, row(1, 1)).setLevel(2));
