@@ -67,7 +67,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     private final RowType valueType;
     private final KeyValueFieldsExtractor keyValueFieldsExtractor;
     private final Supplier<Comparator<InternalRow>> keyComparatorSupplier;
-    private final Supplier<RecordEqualiser> valueEqualiserSupplier;
+    private final Supplier<RecordEqualiser> logDedupEqualSupplier;
     private final MergeFunctionFactory<KeyValue> mfFactory;
     private final String tableName;
 
@@ -93,7 +93,11 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
         this.keyValueFieldsExtractor = keyValueFieldsExtractor;
         this.mfFactory = mfFactory;
         this.keyComparatorSupplier = new KeyComparatorSupplier(keyType);
-        this.valueEqualiserSupplier = new ValueEqualiserSupplier(valueType);
+        List<String> ignoreFields = options.changelogRowDeduplicateIgnoreFields();
+        this.logDedupEqualSupplier =
+                options.changelogRowDeduplicate() && !ignoreFields.isEmpty()
+                        ? ValueEqualiserSupplier.fromIgnoreFields(valueType, ignoreFields)
+                        : new ValueEqualiserSupplier(valueType);
         this.tableName = tableName;
     }
 
@@ -174,7 +178,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 valueType,
                 keyComparatorSupplier,
                 () -> UserDefinedSeqComparator.create(valueType, options),
-                valueEqualiserSupplier,
+                logDedupEqualSupplier,
                 mfFactory,
                 pathFactory(),
                 format2PathFactory(),

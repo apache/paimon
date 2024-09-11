@@ -22,8 +22,11 @@ import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 import java.util.function.Supplier;
+import java.util.stream.IntStream;
 
 import static org.apache.paimon.codegen.CodeGenUtils.newRecordEqualiser;
 
@@ -34,12 +37,36 @@ public class ValueEqualiserSupplier implements SerializableSupplier<RecordEquali
 
     private final List<DataType> fieldTypes;
 
+    private final int[] projection;
+
     public ValueEqualiserSupplier(RowType keyType) {
         this.fieldTypes = keyType.getFieldTypes();
+        this.projection = null;
+    }
+
+    public ValueEqualiserSupplier(RowType keyType, int[] projection) {
+        this.fieldTypes = keyType.getFieldTypes();
+        this.projection = projection;
     }
 
     @Override
     public RecordEqualiser get() {
-        return newRecordEqualiser(fieldTypes);
+        return this.projection == null
+                ? newRecordEqualiser(fieldTypes)
+                : newRecordEqualiser(fieldTypes, projection);
+    }
+
+    public static ValueEqualiserSupplier fromIgnoreFields(
+            RowType rowType, @Nullable List<String> ignoreFields) {
+        int[] projection = getProjectionWithIgnoreFields(rowType, ignoreFields);
+        return new ValueEqualiserSupplier(rowType, projection);
+    }
+
+    private static int[] getProjectionWithIgnoreFields(RowType rowType, List<String> ignoreFields) {
+        List<String> fieldNames = rowType.getFieldNames();
+        IntStream projectionStream = IntStream.range(0, rowType.getFieldCount());
+        return projectionStream
+                .filter(idx -> !ignoreFields.contains(fieldNames.get(idx)))
+                .toArray();
     }
 }
