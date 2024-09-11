@@ -93,11 +93,11 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
         this.keyValueFieldsExtractor = keyValueFieldsExtractor;
         this.mfFactory = mfFactory;
         this.keyComparatorSupplier = new KeyComparatorSupplier(keyType);
-        List<String> ignoreFields = options.changelogRowDeduplicateIgnoreFields();
+        List<String> logDedupIgnoreFields = options.changelogRowDeduplicateIgnoreFields();
         this.logDedupEqualSupplier =
-                options.changelogRowDeduplicate() && !ignoreFields.isEmpty()
-                        ? ValueEqualiserSupplier.fromIgnoreFields(valueType, ignoreFields)
-                        : new ValueEqualiserSupplier(valueType);
+                options.changelogRowDeduplicate()
+                        ? ValueEqualiserSupplier.fromIgnoreFields(valueType, logDedupIgnoreFields)
+                        : () -> null;
         this.tableName = tableName;
     }
 

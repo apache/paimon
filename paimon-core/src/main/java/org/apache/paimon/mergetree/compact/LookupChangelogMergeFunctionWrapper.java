@@ -63,8 +63,7 @@ public class LookupChangelogMergeFunctionWrapper<T>
     private final ChangelogResult reusedResult = new ChangelogResult();
     private final KeyValue reusedBefore = new KeyValue();
     private final KeyValue reusedAfter = new KeyValue();
-    private final RecordEqualiser valueEqualiser;
-    private final boolean changelogRowDeduplicate;
+    @Nullable private final RecordEqualiser valueEqualiser;
     private final LookupStrategy lookupStrategy;
     private final @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer;
     private final Comparator<KeyValue> comparator;
@@ -72,8 +71,7 @@ public class LookupChangelogMergeFunctionWrapper<T>
     public LookupChangelogMergeFunctionWrapper(
             MergeFunctionFactory<KeyValue> mergeFunctionFactory,
             Function<InternalRow, T> lookup,
-            RecordEqualiser valueEqualiser,
-            boolean changelogRowDeduplicate,
+            @Nullable RecordEqualiser valueEqualiser,
             LookupStrategy lookupStrategy,
             @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer,
             @Nullable UserDefinedSeqComparator userDefinedSeqComparator) {
@@ -91,7 +89,6 @@ public class LookupChangelogMergeFunctionWrapper<T>
         this.mergeFunction2 = mergeFunctionFactory.create();
         this.lookup = lookup;
         this.valueEqualiser = valueEqualiser;
-        this.changelogRowDeduplicate = changelogRowDeduplicate;
         this.lookupStrategy = lookupStrategy;
         this.deletionVectorsMaintainer = deletionVectorsMaintainer;
         this.comparator = createSequenceComparator(userDefinedSeqComparator);
@@ -179,7 +176,7 @@ public class LookupChangelogMergeFunctionWrapper<T>
         } else {
             if (!after.isAdd()) {
                 reusedResult.addChangelog(replaceBefore(RowKind.DELETE, before));
-            } else if (!changelogRowDeduplicate
+            } else if (valueEqualiser == null
                     || !valueEqualiser.equals(before.value(), after.value())) {
                 reusedResult
                         .addChangelog(replaceBefore(RowKind.UPDATE_BEFORE, before))

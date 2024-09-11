@@ -306,8 +306,7 @@ public class ChangelogMergeTreeRewriterTest {
 
         @Override
         protected MergeFunctionWrapper<ChangelogResult> createMergeWrapper(int outputLevel) {
-            return new FullChangelogMergeFunctionWrapper(
-                    mfFactory.create(), MAX_LEVEL, null, false);
+            return new FullChangelogMergeFunctionWrapper(mfFactory.create(), MAX_LEVEL, null);
         }
 
         @Override

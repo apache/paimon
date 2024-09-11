@@ -55,7 +55,9 @@ public abstract class FullChangelogMergeFunctionWrapperTestBase {
     public void beforeEach() {
         wrapper =
                 new FullChangelogMergeFunctionWrapper(
-                        createMergeFunction(), MAX_LEVEL, EQUALISER, changelogRowDeduplicate());
+                        createMergeFunction(),
+                        MAX_LEVEL,
+                        changelogRowDeduplicate() ? EQUALISER : null);
     }
 
     private static final List<List<KeyValue>> INPUT_KVS =
@@ -233,7 +235,7 @@ public abstract class FullChangelogMergeFunctionWrapperTestBase {
                     ValueEqualiserSupplier.fromIgnoreFields(valueType, ignoreFields);
             FullChangelogMergeFunctionWrapper function =
                     new FullChangelogMergeFunctionWrapper(
-                            createMergeFunction(), MAX_LEVEL, logDedupEqualSupplier.get(), true);
+                            createMergeFunction(), MAX_LEVEL, logDedupEqualSupplier.get());
 
             // With level-0 'insert' record, with max level same record. Notice that the specified
             // ignored

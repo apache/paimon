@@ -74,8 +74,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                 RowType.of(DataTypes.INT()),
                                 RowType.of(DataTypes.INT())),
                         highLevel::get,
-                        EQUALISER,
-                        changelogRowDeduplicate,
+                        changelogRowDeduplicate ? EQUALISER : null,
                         LookupStrategy.from(false, true, false, false),
                         null,
                         null);
@@ -241,7 +240,6 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                 valueType),
                         highLevel::get,
                         logDedupEqualSupplier.get(),
-                        true,
                         LookupStrategy.from(false, true, false, false),
                         null,
                         userDefinedSeqComparator);
@@ -300,8 +298,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                 RowType.of(DataTypes.INT()),
                                 RowType.of(DataTypes.INT())),
                         key -> null,
-                        EQUALISER,
-                        changelogRowDeduplicate,
+                        changelogRowDeduplicate ? EQUALISER : null,
                         LookupStrategy.from(false, true, false, false),
                         null,
                         null);
@@ -389,8 +386,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                 RowType.of(DataTypes.INT()),
                                 RowType.of(DataTypes.INT())),
                         highLevel::get,
-                        EQUALISER,
-                        false,
+                        null,
                         LookupStrategy.from(false, true, false, false),
                         null,
                         UserDefinedSeqComparator.create(

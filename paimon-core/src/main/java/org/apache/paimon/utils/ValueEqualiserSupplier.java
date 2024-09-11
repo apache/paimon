@@ -58,15 +58,14 @@ public class ValueEqualiserSupplier implements SerializableSupplier<RecordEquali
 
     public static ValueEqualiserSupplier fromIgnoreFields(
             RowType rowType, @Nullable List<String> ignoreFields) {
-        int[] projection = getProjectionWithIgnoreFields(rowType, ignoreFields);
+        int[] projection = null;
+        if (ignoreFields != null) {
+            List<String> fieldNames = rowType.getFieldNames();
+            projection =
+                    IntStream.range(0, rowType.getFieldCount())
+                            .filter(idx -> !ignoreFields.contains(fieldNames.get(idx)))
+                            .toArray();
+        }
         return new ValueEqualiserSupplier(rowType, projection);
-    }
-
-    private static int[] getProjectionWithIgnoreFields(RowType rowType, List<String> ignoreFields) {
-        List<String> fieldNames = rowType.getFieldNames();
-        IntStream projectionStream = IntStream.range(0, rowType.getFieldCount());
-        return projectionStream
-                .filter(idx -> !ignoreFields.contains(fieldNames.get(idx)))
-                .toArray();
     }
 }

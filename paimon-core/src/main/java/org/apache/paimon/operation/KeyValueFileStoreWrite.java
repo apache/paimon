@@ -99,7 +99,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     private final KeyValueFileWriterFactory.Builder writerFactoryBuilder;
     private final Supplier<Comparator<InternalRow>> keyComparatorSupplier;
     private final Supplier<FieldsComparator> udsComparatorSupplier;
-    private final Supplier<RecordEqualiser> valueEqualiserSupplier;
+    private final Supplier<RecordEqualiser> logDedupEqualSupplier;
     private final MergeFunctionFactory<KeyValue> mfFactory;
     private final CoreOptions options;
     private final FileIO fileIO;
@@ -119,7 +119,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             RowType valueType,
             Supplier<Comparator<InternalRow>> keyComparatorSupplier,
             Supplier<FieldsComparator> udsComparatorSupplier,
-            Supplier<RecordEqualiser> valueEqualiserSupplier,
+            Supplier<RecordEqualiser> logDedupEqualSupplier,
             MergeFunctionFactory<KeyValue> mfFactory,
             FileStorePathFactory pathFactory,
             Map<String, FileStorePathFactory> format2PathFactory,
@@ -165,7 +165,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         format2PathFactory,
                         options.targetFileSize(true));
         this.keyComparatorSupplier = keyComparatorSupplier;
-        this.valueEqualiserSupplier = valueEqualiserSupplier;
+        this.logDedupEqualSupplier = logDedupEqualSupplier;
         this.mfFactory = mfFactory;
         this.options = options;
     }
@@ -294,8 +294,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                     userDefinedSeqComparator,
                     mfFactory,
                     mergeSorter,
-                    valueEqualiserSupplier.get(),
-                    options.changelogRowDeduplicate());
+                    logDedupEqualSupplier.get());
         } else if (lookupStrategy.needLookup) {
             LookupLevels.ValueProcessor<?> processor;
             LookupMergeTreeCompactRewriter.MergeFunctionWrapperFactory<?> wrapperFactory;
@@ -323,8 +322,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                                 : new KeyValueProcessor(valueType);
                 wrapperFactory =
                         new LookupMergeFunctionWrapperFactory<>(
-                                valueEqualiserSupplier.get(),
-                                options.changelogRowDeduplicate(),
+                                logDedupEqualSupplier.get(),
                                 lookupStrategy,
                                 UserDefinedSeqComparator.create(valueType, options));
             }
