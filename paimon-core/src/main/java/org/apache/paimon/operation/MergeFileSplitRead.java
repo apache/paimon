@@ -60,7 +60,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.io.DataFilePathFactory.CHANGELOG_FILE_PREFIX;
+import static org.apache.paimon.io.DataFilePathFactory.DEFAULT_CHANGELOG_FILE_PREFIX;
 import static org.apache.paimon.predicate.PredicateBuilder.containsFields;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 
@@ -314,7 +314,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
 
     private Optional<String> changelogFile(DataFileMeta fileMeta) {
         for (String file : fileMeta.extraFiles()) {
-            if (file.startsWith(CHANGELOG_FILE_PREFIX)) {
+            if (file.startsWith(DEFAULT_CHANGELOG_FILE_PREFIX)) {
                 return Optional.of(file);
             }
         }

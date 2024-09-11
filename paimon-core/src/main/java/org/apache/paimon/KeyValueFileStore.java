@@ -203,7 +203,9 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                                         options.path(),
                                         partitionType,
                                         options.partitionDefaultName(),
-                                        format)));
+                                        format,
+                                        options.dataFilePrefix(),
+                                        options.changelogFilePrefix())));
         return pathFactoryMap;
     }
 

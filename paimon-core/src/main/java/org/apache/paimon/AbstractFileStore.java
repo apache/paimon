@@ -102,7 +102,9 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.path(),
                 partitionType,
                 options.partitionDefaultName(),
-                options.fileFormat().getFormatIdentifier());
+                options.fileFormat().getFormatIdentifier(),
+                options.dataFilePrefix(),
+                options.changelogFilePrefix());
     }
 
     @Override

@@ -31,7 +31,7 @@ public class SparkWriteWithKyroITCase extends SparkWriteITCase {
     @BeforeAll
     @Override
     public void startMetastoreAndSpark(@TempDir java.nio.file.Path tempDir) {
-        Path warehousePath = new Path("file:" + tempDir.toString());
+        warehousePath = new Path("file:" + tempDir.toString());
         spark =
                 SparkSession.builder()
                         .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")

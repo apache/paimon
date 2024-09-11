@@ -20,6 +20,7 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.concurrent.ThreadSafe;
 
@@ -30,9 +31,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 @ThreadSafe
 public class DataFilePathFactory {
 
-    public static final String DATA_FILE_PREFIX = "data-";
+    public static final String DEFAULT_DATA_FILE_PREFIX = "data-";
 
-    public static final String CHANGELOG_FILE_PREFIX = "changelog-";
+    public static final String DEFAULT_CHANGELOG_FILE_PREFIX = "changelog-";
 
     public static final String INDEX_PATH_SUFFIX = ".index";
 
@@ -41,21 +42,35 @@ public class DataFilePathFactory {
 
     private final AtomicInteger pathCount;
     private final String formatIdentifier;
+    private final String dataFilePrefix;
+    private final String changelogFilePrefix;
 
-    public DataFilePathFactory(Path parent, String formatIdentifier) {
+    public DataFilePathFactory(
+            Path parent,
+            String formatIdentifier,
+            String dataFilePrefix,
+            String changelogFilePrefix) {
         this.parent = parent;
         this.uuid = UUID.randomUUID().toString();
 
         this.pathCount = new AtomicInteger(0);
         this.formatIdentifier = formatIdentifier;
+        this.dataFilePrefix = dataFilePrefix;
+        this.changelogFilePrefix = changelogFilePrefix;
     }
 
     public Path newPath() {
-        return newPath(DATA_FILE_PREFIX);
+        if (!StringUtils.isBlank(dataFilePrefix)) {
+            return newPath(dataFilePrefix);
+        }
+        return newPath(DEFAULT_DATA_FILE_PREFIX);
     }
 
     public Path newChangelogPath() {
-        return newPath(CHANGELOG_FILE_PREFIX);
+        if (!StringUtils.isBlank(changelogFilePrefix)) {
+            return newPath(changelogFilePrefix);
+        }
+        return newPath(DEFAULT_CHANGELOG_FILE_PREFIX);
     }
 
     private Path newPath(String prefix) {
