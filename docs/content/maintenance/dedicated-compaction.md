@@ -81,6 +81,20 @@ To run a dedicated job for compaction, follow these instructions.
 
 {{< tabs "dedicated-compaction-job" >}}
 
+{{< tab "Flink SQL" >}}
+
+Run the following sql:
+
+```sql
+CALL sys.compact(
+  `table` => 'default.T', 
+  partitions => 'p=0', 
+  options => 'sink.parallelism=4',
+  `where` => 'dt>10 and h<20'
+);
+```
+{{< /tab >}}
+
 {{< tab "Flink Action Jar" >}}
 
 Run the following command to submit a compaction job for the table.
@@ -128,20 +142,6 @@ For more usage of the compact action, see
 
 {{< /tab >}}
 
-{{< tab "Flink SQL" >}}
-
-Run the following sql:
-
-```sql
-CALL sys.compact(
-  `table` => 'default.T', 
-  partitions => 'p=0', 
-  options => 'sink.parallelism=4',
-  `where` => 'dt>10 and h<20'
-);
-```
-{{< /tab >}}
-
 {{< /tabs >}}
 
 {{< hint info >}}
@@ -154,6 +154,30 @@ You can configure `table_conf` to use [Asynchronous Compaction]({{< ref "mainten
 You can run the following command to submit a compaction job for multiple database.
 
 {{< tabs "database-compaction-job" >}}
+
+{{< tab "Flink SQL" >}}
+
+Run the following sql:
+
+```sql
+CALL sys.compact_database(
+  including_databases => 'includingDatabases', 
+  mode => 'mode', 
+  including_tables => 'includingTables', 
+  excluding_tables => 'excludingTables', 
+  table_options => 'tableOptions'
+)
+
+-- example
+CALL sys.compact_database(
+  including_databases => 'db1|db2', 
+  mode => 'combined', 
+  including_tables => 'table_.*', 
+  excluding_tables => 'ignore', 
+  table_options => 'sink.parallelism=4'
+)
+```
+{{< /tab >}}
 
 {{< tab "Flink Action Jar" >}}
 
@@ -238,30 +262,6 @@ For more usage of the compact_database action, see
 
 {{< /tab >}}
 
-{{< tab "Flink SQL" >}}
-
-Run the following sql:
-
-```sql
-CALL sys.compact_database(
-  including_databases => 'includingDatabases', 
-  mode => 'mode', 
-  including_tables => 'includingTables', 
-  excluding_tables => 'excludingTables', 
-  table_options => 'tableOptions'
-)
-
--- example
-CALL sys.compact_database(
-  including_databases => 'db1|db2', 
-  mode => 'combined', 
-  including_tables => 'table_.*', 
-  excluding_tables => 'ignore', 
-  table_options => 'sink.parallelism=4'
-)
-```
-{{< /tab >}}
-
 {{< /tabs >}}
 
 ## Sort Compact
@@ -271,6 +271,16 @@ or [append table]({{< ref "append-table/overview" >}}) ,
 you can trigger a compact with specified column sort to speed up queries.
 
 {{< tabs "sort-compaction-job" >}}
+
+{{< tab "Flink SQL" >}}
+
+Run the following sql:
+
+```sql
+-- sort compact table
+CALL sys.compact(`table` => 'default.T', order_strategy => 'zorder', order_by => 'a,b')
+```
+{{< /tab >}}
 
 {{< tab "Flink Action Jar" >}}
 
@@ -295,16 +305,6 @@ The sort parallelism is the same as the sink parallelism, you can dynamically sp
 
 {{< /tab >}}
 
-{{< tab "Flink SQL" >}}
-
-Run the following sql:
-
-```sql
--- sort compact table
-CALL sys.compact(`table` => 'default.T', order_strategy => 'zorder', order_by => 'a,b')
-```
-{{< /tab >}}
-
 {{< /tabs >}}
 
 ## Historical Partition Compact
@@ -322,6 +322,17 @@ This feature now is only used in batch mode.
 
 This is for one table.
 {{< tabs "history-partition-compaction-job for table" >}}
+
+{{< tab "Flink SQL" >}}
+
+Run the following sql:
+
+```sql
+-- history partition compact table
+CALL sys.compact(`table` => 'default.T', 'partition_idle_time' => '1 d')
+```
+
+{{< /tab >}}
 
 {{< tab "Flink Action Jar" >}}
 
@@ -346,23 +357,41 @@ There are one new configuration in `Historical Partition Compact`
 
 {{< /tab >}}
 
-{{< tab "Flink SQL" >}}
-
-Run the following sql:
-
-```sql
--- history partition compact table
-CALL sys.compact(`table` => 'default.T', 'partition_idle_time' => '1 d')
-```
-
-{{< /tab >}}
-
 {{< /tabs >}}
 
 ### For Databases
 
 This is for multiple tables in different databases.
 {{< tabs "history-partition-compaction-job for databases" >}}
+
+{{< tab "Flink SQL" >}}
+
+Run the following sql:
+
+```sql
+-- history partition compact table
+CALL sys.compact_database(
+  including_databases => 'includingDatabases', 
+  mode => 'mode', 
+  including_tables => 'includingTables',
+  excluding_tables => 'excludingTables',
+  table_options => 'tableOptions',
+  partition_idle_time => 'partition_idle_time'
+);
+```
+
+Example: compact historical partitions for tables in database
+
+```sql
+-- history partition compact table
+CALL sys.compact_database(
+  includingDatabases => 'test_db', 
+  mode => 'combined', 
+  partition_idle_time => '1 d'
+);
+```
+
+{{< /tab >}}
 
 {{< tab "Flink Action Jar" >}}
 
@@ -393,35 +422,6 @@ Example: compact historical partitions for tables in database
     --catalog_conf s3.endpoint=https://****.com \
     --catalog_conf s3.access-key=***** \
     --catalog_conf s3.secret-key=*****
-```
-
-{{< /tab >}}
-
-{{< tab "Flink SQL" >}}
-
-Run the following sql:
-
-```sql
--- history partition compact table
-CALL sys.compact_database(
-  including_databases => 'includingDatabases', 
-  mode => 'mode', 
-  including_tables => 'includingTables',
-  excluding_tables => 'excludingTables',
-  table_options => 'tableOptions',
-  partition_idle_time => 'partition_idle_time'
-);
-```
-
-Example: compact historical partitions for tables in database
-
-```sql
--- history partition compact table
-CALL sys.compact_database(
-  includingDatabases => 'test_db', 
-  mode => 'combined', 
-  partition_idle_time => '1 d'
-);
 ```
 
 {{< /tab >}}
