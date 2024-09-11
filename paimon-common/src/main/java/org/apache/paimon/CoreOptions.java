@@ -493,6 +493,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether to force a compaction before commit.");
 
+    public static final ConfigOption<Integer> COMMIT_MAX_RETRIES =
+            key("commit.max-retries")
+                    .intType()
+                    .defaultValue(10)
+                    .withDescription("Maximum number of retries when commit failed.");
+
     public static final ConfigOption<Integer> COMPACTION_MAX_SIZE_AMPLIFICATION_PERCENT =
             key("compaction.max-size-amplification-percent")
                     .intType()
@@ -1734,6 +1740,10 @@ public class CoreOptions implements Serializable {
 
     public boolean commitForceCompact() {
         return options.get(COMMIT_FORCE_COMPACT);
+    }
+
+    public int commitMaxRetries() {
+        return options.get(COMMIT_MAX_RETRIES);
     }
 
     public int maxSizeAmplificationPercent() {
