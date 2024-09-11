@@ -68,6 +68,19 @@ Run the following command:
 ```
 {{< /tab >}}
 
+{{< tab "Spark SQL" >}}
+
+Run the following sql:
+
+```sql
+-- create branch named 'branch1' from tag 'tag1'
+CALL sys.create_branch('default.T', 'branch1', 'tag1');
+
+-- create empty branch named 'branch1'
+CALL sys.create_branch('default.T', 'empty_branch');
+```
+{{< /tab >}}
+
 {{< /tabs >}}
 
 ## Delete Branches
@@ -101,6 +114,15 @@ Run the following command:
 ```
 {{< /tab >}}
 
+{{< tab "Spark SQL" >}}
+
+Run the following sql:
+
+```sql
+CALL sys.delete_branch('default.T', 'branch1');
+```
+{{< /tab >}}
+
 {{< /tabs >}}
 
 ## Read / Write With Branch
@@ -118,6 +140,27 @@ SELECT * FROM `t$branch_branch1` /*+ OPTIONS('consumer-id' = 'myid') */;
 
 -- write to branch 'branch1'
 INSERT INTO `t$branch_branch1` SELECT ...
+```
+
+{{< /tab >}}
+
+{{< tab "Spark SQL" >}}
+
+```sql
+-- read from branch 'branch1'
+SELECT * FROM `t$branch_branch1`;
+
+-- write to branch 'branch1'
+INSERT INTO `t$branch_branch1` SELECT ...
+```
+
+{{< /tab >}}
+
+{{< tab "Spark DataFrame" >}}
+
+```sql
+-- read from branch 'branch1'
+spark.read.format("paimon").option("branch", "branch1").table("t")
 ```
 
 {{< /tab >}}
