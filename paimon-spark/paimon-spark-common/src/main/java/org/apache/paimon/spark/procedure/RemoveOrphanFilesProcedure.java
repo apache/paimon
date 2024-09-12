@@ -18,11 +18,11 @@
 
 package org.apache.paimon.spark.procedure;
 
-import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.operation.LocalOrphanFilesClean;
 import org.apache.paimon.operation.OrphanFilesClean;
 import org.apache.paimon.spark.catalog.WithPaimonCatalog;
 import org.apache.paimon.utils.Preconditions;
-import org.apache.paimon.utils.StringUtils;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
@@ -35,13 +35,11 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
-import static org.apache.paimon.operation.OrphanFilesClean.executeOrphanFilesClean;
+import static org.apache.paimon.operation.LocalOrphanFilesClean.executeOrphanFilesClean;
 import static org.apache.spark.sql.types.DataTypes.BooleanType;
+import static org.apache.spark.sql.types.DataTypes.IntegerType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /**
@@ -63,7 +61,7 @@ public class RemoveOrphanFilesProcedure extends BaseProcedure {
                 ProcedureParameter.required("table", StringType),
                 ProcedureParameter.optional("older_than", StringType),
                 ProcedureParameter.optional("dry_run", BooleanType),
-                ProcedureParameter.optional("parallelism", StringType)
+                ProcedureParameter.optional("parallelism", IntegerType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -90,16 +88,6 @@ public class RemoveOrphanFilesProcedure extends BaseProcedure {
     public InternalRow[] call(InternalRow args) {
         org.apache.paimon.catalog.Identifier identifier;
         String tableId = args.getString(0);
-        String parallelism = args.isNullAt(3) ? null : args.getString(3);
-        Map<String, String> dynamicOptions =
-                StringUtils.isNullOrWhitespaceOnly(parallelism)
-                        ? Collections.emptyMap()
-                        : new HashMap<String, String>() {
-                            {
-                                put(CoreOptions.DELETE_FILE_THREAD_NUM.key(), parallelism);
-                            }
-                        };
-
         Preconditions.checkArgument(
                 tableId != null && !tableId.isEmpty(),
                 "Cannot handle an empty tableId for argument %s",
@@ -114,26 +102,21 @@ public class RemoveOrphanFilesProcedure extends BaseProcedure {
         }
         LOG.info("identifier is {}.", identifier);
 
-        List<OrphanFilesClean> tableCleans;
+        List<LocalOrphanFilesClean> tableCleans;
         try {
+            Catalog catalog = ((WithPaimonCatalog) tableCatalog()).paimonCatalog();
             tableCleans =
-                    OrphanFilesClean.createOrphanFilesCleans(
-                            ((WithPaimonCatalog) tableCatalog()).paimonCatalog(),
-                            dynamicOptions,
+                    LocalOrphanFilesClean.createOrphanFilesCleans(
+                            catalog,
                             identifier.getDatabaseName(),
-                            identifier.getObjectName());
+                            identifier.getObjectName(),
+                            OrphanFilesClean.olderThanMillis(
+                                    args.isNullAt(1) ? null : args.getString(1)),
+                            OrphanFilesClean.createFileCleaner(
+                                    catalog, !args.isNullAt(2) && args.getBoolean(2)),
+                            args.isNullAt(3) ? null : args.getInt(3));
         } catch (Exception e) {
             throw new RuntimeException(e);
-        }
-
-        String olderThan = args.isNullAt(1) ? null : args.getString(1);
-        if (!StringUtils.isNullOrWhitespaceOnly(olderThan)) {
-            tableCleans.forEach(clean -> clean.olderThan(olderThan));
-        }
-
-        boolean dryRun = !args.isNullAt(2) && args.getBoolean(2);
-        if (dryRun) {
-            tableCleans.forEach(clean -> clean.fileCleaner(path -> {}));
         }
 
         String[] result = executeOrphanFilesClean(tableCleans);

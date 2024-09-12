@@ -18,44 +18,53 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.operation.OrphanFilesClean;
-
 import javax.annotation.Nullable;
 
-import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.operation.OrphanFilesClean.executeOrphanFilesClean;
+import static org.apache.paimon.flink.orphan.FlinkOrphanFilesClean.executeDatabaseOrphanFiles;
+import static org.apache.paimon.operation.OrphanFilesClean.createFileCleaner;
+import static org.apache.paimon.operation.OrphanFilesClean.olderThanMillis;
 
 /** Action to remove the orphan data files and metadata files. */
 public class RemoveOrphanFilesAction extends ActionBase {
 
-    private final List<OrphanFilesClean> tableCleans;
+    private final String databaseName;
+    @Nullable private final String tableName;
+    private final String parallelism;
+
+    private String olderThan = null;
+    private boolean dryRun = false;
 
     public RemoveOrphanFilesAction(
             String warehouse,
             String databaseName,
             @Nullable String tableName,
             Map<String, String> catalogConfig,
-            Map<String, String> dynamicOptions)
-            throws Catalog.TableNotExistException, Catalog.DatabaseNotExistException {
+            String parallelism) {
         super(warehouse, catalogConfig);
-        this.tableCleans =
-                OrphanFilesClean.createOrphanFilesCleans(
-                        catalog, dynamicOptions, databaseName, tableName);
+        this.databaseName = databaseName;
+        this.tableName = tableName;
+        this.parallelism = parallelism;
     }
 
     public void olderThan(String olderThan) {
-        tableCleans.forEach(clean -> clean.olderThan(olderThan));
+        this.olderThan = olderThan;
     }
 
     public void dryRun() {
-        tableCleans.forEach(clean -> clean.fileCleaner(path -> {}));
+        this.dryRun = true;
     }
 
     @Override
     public void run() throws Exception {
-        executeOrphanFilesClean(tableCleans);
+        executeDatabaseOrphanFiles(
+                env,
+                catalog,
+                olderThanMillis(olderThan),
+                createFileCleaner(catalog, dryRun),
+                parallelism == null ? null : Integer.parseInt(parallelism),
+                databaseName,
+                tableName);
     }
 }

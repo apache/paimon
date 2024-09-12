@@ -18,19 +18,13 @@
 
 package org.apache.paimon.flink.procedure;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.operation.OrphanFilesClean;
-import org.apache.paimon.utils.StringUtils;
+import org.apache.paimon.flink.orphan.FlinkOrphanFilesClean;
 
 import org.apache.flink.table.procedure.ProcedureContext;
 
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
-import static org.apache.paimon.operation.OrphanFilesClean.executeOrphanFilesClean;
+import static org.apache.paimon.operation.OrphanFilesClean.createFileCleaner;
+import static org.apache.paimon.operation.OrphanFilesClean.olderThanMillis;
 
 /**
  * Remove orphan files procedure. Usage:
@@ -62,7 +56,7 @@ public class RemoveOrphanFilesProcedure extends ProcedureBase {
     public String[] call(
             ProcedureContext procedureContext, String tableId, String olderThan, boolean dryRun)
             throws Exception {
-        return call(procedureContext, tableId, olderThan, dryRun, "");
+        return call(procedureContext, tableId, olderThan, dryRun, null);
     }
 
     public String[] call(
@@ -70,34 +64,22 @@ public class RemoveOrphanFilesProcedure extends ProcedureBase {
             String tableId,
             String olderThan,
             boolean dryRun,
-            String parallelism)
+            Integer parallelism)
             throws Exception {
         Identifier identifier = Identifier.fromString(tableId);
         String databaseName = identifier.getDatabaseName();
         String tableName = identifier.getObjectName();
 
-        Map<String, String> dynamicOptions =
-                StringUtils.isNullOrWhitespaceOnly(parallelism)
-                        ? Collections.emptyMap()
-                        : new HashMap<String, String>() {
-                            {
-                                put(CoreOptions.DELETE_FILE_THREAD_NUM.key(), parallelism);
-                            }
-                        };
-
-        List<OrphanFilesClean> tableCleans =
-                OrphanFilesClean.createOrphanFilesCleans(
-                        catalog, dynamicOptions, databaseName, tableName);
-
-        if (!StringUtils.isNullOrWhitespaceOnly(olderThan)) {
-            tableCleans.forEach(clean -> clean.olderThan(olderThan));
-        }
-
-        if (dryRun) {
-            tableCleans.forEach(clean -> clean.fileCleaner(path -> {}));
-        }
-
-        return executeOrphanFilesClean(tableCleans);
+        long deleted =
+                FlinkOrphanFilesClean.executeDatabaseOrphanFiles(
+                        procedureContext.getExecutionEnvironment(),
+                        catalog,
+                        olderThanMillis(olderThan),
+                        createFileCleaner(catalog, dryRun),
+                        parallelism,
+                        databaseName,
+                        tableName);
+        return new String[] {String.valueOf(deleted)};
     }
 
     @Override

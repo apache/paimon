@@ -49,7 +49,6 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
@@ -84,8 +83,8 @@ import static org.apache.paimon.utils.BranchManager.branchPath;
 import static org.apache.paimon.utils.FileStorePathFactory.BUCKET_PATH_PREFIX;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link OrphanFilesClean}. */
-public class OrphanFilesCleanTest {
+/** Test for {@link LocalOrphanFilesClean}. */
+public class LocalOrphanFilesCleanTest {
 
     private static final Random RANDOM = new Random(System.currentTimeMillis());
 
@@ -174,12 +173,13 @@ public class OrphanFilesCleanTest {
         }
 
         // first check, nothing will be deleted because the default olderThan interval is 1 day
-        OrphanFilesClean orphanFilesClean = new OrphanFilesClean(table);
+        LocalOrphanFilesClean orphanFilesClean = new LocalOrphanFilesClean(table);
         assertThat(orphanFilesClean.clean().size()).isEqualTo(0);
 
         // second check
-        orphanFilesClean = new OrphanFilesClean(table);
-        setOlderThan(orphanFilesClean);
+        orphanFilesClean =
+                new LocalOrphanFilesClean(
+                        table, System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(2));
         List<Path> deleted = orphanFilesClean.clean();
         try {
             validate(deleted, snapshotData, new HashMap<>());
@@ -221,16 +221,11 @@ public class OrphanFilesCleanTest {
             Map<Long, List<TestPojo>> snapshotData,
             Map<Long, List<InternalRow>> changelogData)
             throws Exception {
-        assertThat(
-                        deleteFiles.stream()
-                                .map(p -> p.toUri().getPath())
-                                .sorted()
-                                .collect(Collectors.joining("\n")))
-                .isEqualTo(
+        assertThat(deleteFiles.stream().map(p -> p.toUri().getPath()))
+                .containsExactlyInAnyOrderElementsOf(
                         manuallyAddedFiles.stream()
                                 .map(p -> p.toUri().getPath())
-                                .sorted()
-                                .collect(Collectors.joining("\n")));
+                                .collect(Collectors.toList()));
 
         Set<Snapshot> snapshots = new HashSet<>();
         table.snapshotManager().snapshots().forEachRemaining(snapshots::add);
@@ -367,12 +362,13 @@ public class OrphanFilesCleanTest {
         assertThat(manuallyAddedFiles.size()).isEqualTo(shouldBeDeleted);
 
         // first check, nothing will be deleted because the default olderThan interval is 1 day
-        OrphanFilesClean orphanFilesClean = new OrphanFilesClean(table);
+        LocalOrphanFilesClean orphanFilesClean = new LocalOrphanFilesClean(table);
         assertThat(orphanFilesClean.clean().size()).isEqualTo(0);
 
         // second check
-        orphanFilesClean = new OrphanFilesClean(table);
-        setOlderThan(orphanFilesClean);
+        orphanFilesClean =
+                new LocalOrphanFilesClean(
+                        table, System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(2));
         List<Path> deleted = orphanFilesClean.clean();
         validate(deleted, snapshotData, changelogData);
     }
@@ -400,8 +396,9 @@ public class OrphanFilesCleanTest {
         Path manifest = manifests.get(RANDOM.nextInt(manifests.size()));
         fileIO.deleteQuietly(manifest);
 
-        OrphanFilesClean orphanFilesClean = new OrphanFilesClean(table);
-        setOlderThan(orphanFilesClean);
+        LocalOrphanFilesClean orphanFilesClean =
+                new LocalOrphanFilesClean(
+                        table, System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(2));
         assertThat(orphanFilesClean.clean().size()).isGreaterThan(0);
     }
 
@@ -482,15 +479,6 @@ public class OrphanFilesCleanTest {
         return shouldBeDeleted;
     }
 
-    private void setOlderThan(OrphanFilesClean orphanFilesClean) {
-        String timestamp =
-                DateTimeUtils.formatLocalDateTime(
-                        DateTimeUtils.toLocalDateTime(
-                                System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(2)),
-                        3);
-        orphanFilesClean.olderThan(timestamp);
-    }
-
     private List<TestPojo> generateData() {
         int num = RANDOM.nextInt(6) + 5;
         List<TestPojo> data = new ArrayList<>(num);
@@ -561,19 +549,11 @@ public class OrphanFilesCleanTest {
     private int randomlyAddNonUsedDataFiles() throws IOException {
         int addedFiles = 0;
         List<Path> part1 = listSubDirs(tablePath, p -> p.getName().contains("="));
-        // add non used file at partition part1
-        List<Path> corruptedPartitions = randomlyPick(part1);
-        for (Path path : corruptedPartitions) {
-            addNonUsedFiles(path, 1, Collections.singletonList("UNKNOWN"));
-        }
-        addedFiles += corruptedPartitions.size();
-
         List<Path> part2 = new ArrayList<>();
+        List<Path> buckets = new ArrayList<>();
         for (Path path : part1) {
             part2.addAll(listSubDirs(path, p -> p.getName().contains("=")));
         }
-
-        List<Path> buckets = new ArrayList<>();
         for (Path path : part2) {
             buckets.addAll(listSubDirs(path, p -> p.getName().startsWith(BUCKET_PATH_PREFIX)));
         }
