@@ -121,9 +121,6 @@ public class MigrateTableProcedure extends BaseProcedure {
                             options);
 
             migrator.deleteOriginTable(deleteNeed);
-
-            // setup parallelism for executor
-            migrator.setParallelism(parallelism);
             migrator.executeMigrate();
             if (StringUtils.isEmpty(targetTable)) {
                 paimonCatalog.renameTable(tmpTableId, sourceTableId, false);

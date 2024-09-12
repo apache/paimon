@@ -257,6 +257,7 @@ public class MigrateDatabaseProcedureITCase extends ActionITCaseBase {
                         System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname),
                         "my_database",
                         catalogConf,
+                        "",
                         "");
         migrateDatabaseAction.run();
 
