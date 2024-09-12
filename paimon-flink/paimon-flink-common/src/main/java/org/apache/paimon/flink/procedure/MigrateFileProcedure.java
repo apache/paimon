@@ -64,7 +64,7 @@ public class MigrateFileProcedure extends ProcedureBase {
             deleteOrigin = true;
         }
         Integer p =
-                StringUtils.isNumeric(parallelism)
+                !StringUtils.isNumeric(parallelism)
                         ? Runtime.getRuntime().availableProcessors()
                         : Integer.parseInt(parallelism);
         migrateHandle(connector, sourceTablePath, targetPaimonTablePath, deleteOrigin, p);

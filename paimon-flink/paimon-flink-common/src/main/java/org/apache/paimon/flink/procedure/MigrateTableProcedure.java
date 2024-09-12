@@ -67,7 +67,7 @@ public class MigrateTableProcedure extends ProcedureBase {
         Identifier targetTableId = Identifier.fromString(targetPaimonTablePath);
 
         Integer p =
-                StringUtils.isNumeric(parallelism)
+                !StringUtils.isNumeric(parallelism)
                         ? Runtime.getRuntime().availableProcessors()
                         : Integer.parseInt(parallelism);
 

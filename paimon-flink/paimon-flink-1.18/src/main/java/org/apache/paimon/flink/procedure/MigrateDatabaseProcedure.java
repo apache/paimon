@@ -71,7 +71,7 @@ public class MigrateDatabaseProcedure extends ProcedureBase {
             String parallelism)
             throws Exception {
         Integer p =
-                StringUtils.isNumeric(parallelism)
+                !StringUtils.isNumeric(parallelism)
                         ? Runtime.getRuntime().availableProcessors()
                         : Integer.parseInt(parallelism);
         List<Migrator> migrators =

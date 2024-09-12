@@ -75,7 +75,7 @@ public class MigrateFileProcedure extends ProcedureBase {
             String parallelism)
             throws Exception {
         Integer p =
-                StringUtils.isNumeric(parallelism)
+                !StringUtils.isNumeric(parallelism)
                         ? Runtime.getRuntime().availableProcessors()
                         : Integer.parseInt(parallelism);
         migrateHandle(connector, sourceTablePath, targetPaimonTablePath, deleteOrigin, p);
