@@ -101,7 +101,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                 new OutputTag<Tuple2<String, String>>("manifest-output") {};
 
         SingleOutputStreamOperator<String> usedManifestFiles =
-                env.fromData(branches)
+                env.fromCollection(branches)
                         .process(
                                 new ProcessFunction<String, String>() {
                                     @Override
@@ -166,7 +166,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                         .map(Object::toString)
                         .collect(Collectors.toList());
         DataStream<String> candidates =
-                env.fromData(fileDirs)
+                env.fromCollection(fileDirs)
                         .flatMap(
                                 new FlatMapFunction<String, String>() {
                                     @Override
