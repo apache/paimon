@@ -46,14 +46,8 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
         String parallelism = params.get(PARALLELISM);
 
         Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
-        RemoveOrphanFilesAction action;
-        try {
-            action =
-                    new RemoveOrphanFilesAction(
-                            warehouse, database, table, catalogConfig, parallelism);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        RemoveOrphanFilesAction action =
+                new RemoveOrphanFilesAction(warehouse, database, table, parallelism, catalogConfig);
 
         if (params.has(OLDER_THAN)) {
             action.olderThan(params.get(OLDER_THAN));

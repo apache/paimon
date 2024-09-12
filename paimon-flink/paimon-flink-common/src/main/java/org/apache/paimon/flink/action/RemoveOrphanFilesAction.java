@@ -31,7 +31,7 @@ public class RemoveOrphanFilesAction extends ActionBase {
 
     private final String databaseName;
     @Nullable private final String tableName;
-    private final String parallelism;
+    @Nullable private final String parallelism;
 
     private String olderThan = null;
     private boolean dryRun = false;
@@ -40,8 +40,8 @@ public class RemoveOrphanFilesAction extends ActionBase {
             String warehouse,
             String databaseName,
             @Nullable String tableName,
-            Map<String, String> catalogConfig,
-            String parallelism) {
+            @Nullable String parallelism,
+            Map<String, String> catalogConfig) {
         super(warehouse, catalogConfig);
         this.databaseName = databaseName;
         this.tableName = tableName;
