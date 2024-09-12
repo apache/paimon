@@ -117,24 +117,21 @@ case class DeleteFromPaimonTableCommand(
   }
 
   def performNonPrimaryKeyDelete(sparkSession: SparkSession): Seq[CommitMessage] = {
-    val pathFactory = fileStore.pathFactory()
     // Step1: the candidate data splits which are filtered by Paimon Predicate.
     val candidateDataSplits = findCandidateDataSplits(condition, relation.output)
     val dataFilePathToMeta = candidateFileMap(candidateDataSplits)
 
     if (deletionVectorsEnabled) {
-      withSQLConf("spark.sql.adaptive.enabled" -> "false") {
-        // Step2: collect all the deletion vectors that marks the deleted rows.
-        val deletionVectors = collectDeletionVectors(
-          candidateDataSplits,
-          dataFilePathToMeta,
-          condition,
-          relation,
-          sparkSession)
+      // Step2: collect all the deletion vectors that marks the deleted rows.
+      val deletionVectors = collectDeletionVectors(
+        candidateDataSplits,
+        dataFilePathToMeta,
+        condition,
+        relation,
+        sparkSession)
 
-        // Step3: update the touched deletion vectors and index files
-        writer.persistDeletionVectors(deletionVectors)
-      }
+      // Step3: update the touched deletion vectors and index files
+      writer.persistDeletionVectors(deletionVectors)
     } else {
       // Step2: extract out the exactly files, which must have at least one record to be updated.
       val touchedFilePaths =
