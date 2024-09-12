@@ -49,7 +49,8 @@ public class MigrateFileProcedure extends BaseProcedure {
                 ProcedureParameter.required("source_type", StringType),
                 ProcedureParameter.required("source_table", StringType),
                 ProcedureParameter.required("target_table", StringType),
-                ProcedureParameter.optional("delete_origin", BooleanType)
+                ProcedureParameter.optional("delete_origin", BooleanType),
+                ProcedureParameter.optional("parallelism", BooleanType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -78,6 +79,10 @@ public class MigrateFileProcedure extends BaseProcedure {
         String sourceTable = args.getString(1);
         String targetTable = args.getString(2);
         boolean deleteNeed = args.isNullAt(3) ? true : args.getBoolean(3);
+        int parallelism =
+                args.isNullAt(4)
+                        ? Runtime.getRuntime().availableProcessors()
+                        : Integer.parseInt(args.getString(6));
 
         Identifier sourceTableId = Identifier.fromString(sourceTable);
         Identifier targetTableId = Identifier.fromString(targetTable);
@@ -98,6 +103,7 @@ public class MigrateFileProcedure extends BaseProcedure {
                             sourceTableId.getObjectName(),
                             targetTableId.getDatabaseName(),
                             targetTableId.getObjectName(),
+                            parallelism,
                             Collections.emptyMap());
 
             migrator.deleteOriginTable(deleteNeed);

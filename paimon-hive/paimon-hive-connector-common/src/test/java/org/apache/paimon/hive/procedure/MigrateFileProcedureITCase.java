@@ -169,6 +169,7 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
                         "default.paimontable02",
                         false,
                         catalogConf,
+                        "",
                         "");
         migrateFileAction.run();
 

@@ -21,6 +21,7 @@ package org.apache.paimon.flink.procedure;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.utils.TableMigrationUtils;
 import org.apache.paimon.utils.ParameterUtils;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
@@ -45,13 +46,18 @@ public class MigrateTableProcedure extends ProcedureBase {
             argument = {
                 @ArgumentHint(name = "connector", type = @DataTypeHint("STRING")),
                 @ArgumentHint(name = "source_table", type = @DataTypeHint("STRING")),
-                @ArgumentHint(name = "options", type = @DataTypeHint("STRING"), isOptional = true)
+                @ArgumentHint(name = "options", type = @DataTypeHint("STRING"), isOptional = true),
+                @ArgumentHint(
+                        name = "parallelism",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true)
             })
     public String[] call(
             ProcedureContext procedureContext,
             String connector,
             String sourceTablePath,
-            String properties)
+            String properties,
+            String parallelism)
             throws Exception {
         properties = notnull(properties);
 
@@ -60,6 +66,11 @@ public class MigrateTableProcedure extends ProcedureBase {
         Identifier sourceTableId = Identifier.fromString(sourceTablePath);
         Identifier targetTableId = Identifier.fromString(targetPaimonTablePath);
 
+        Integer p =
+                StringUtils.isNumeric(parallelism)
+                        ? Runtime.getRuntime().availableProcessors()
+                        : Integer.parseInt(parallelism);
+
         TableMigrationUtils.getImporter(
                         connector,
                         catalog,
@@ -67,6 +78,7 @@ public class MigrateTableProcedure extends ProcedureBase {
                         sourceTableId.getObjectName(),
                         targetTableId.getDatabaseName(),
                         targetTableId.getObjectName(),
+                        p,
                         ParameterUtils.parseCommaSeparatedKeyValues(properties))
                 .executeMigrate();
 

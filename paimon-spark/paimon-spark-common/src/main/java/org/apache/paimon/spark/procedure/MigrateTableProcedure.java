@@ -59,7 +59,8 @@ public class MigrateTableProcedure extends BaseProcedure {
                 ProcedureParameter.optional("delete_origin", BooleanType),
                 ProcedureParameter.optional("target_table", StringType),
                 ProcedureParameter.optional(
-                        "options_map", DataTypes.createMapType(StringType, StringType))
+                        "options_map", DataTypes.createMapType(StringType, StringType)),
+                ProcedureParameter.optional("parallelism", StringType),
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -91,6 +92,10 @@ public class MigrateTableProcedure extends BaseProcedure {
         String targetTable = args.isNullAt(4) ? null : args.getString(4);
         MapData mapData = args.isNullAt(5) ? null : args.getMap(5);
         Map<String, String> optionMap = mapDataToHashMap(mapData);
+        int parallelism =
+                args.isNullAt(6)
+                        ? Runtime.getRuntime().availableProcessors()
+                        : Integer.parseInt(args.getString(6));
 
         Identifier sourceTableId = Identifier.fromString(sourceTable);
         Identifier tmpTableId =
@@ -112,9 +117,13 @@ public class MigrateTableProcedure extends BaseProcedure {
                             sourceTableId.getObjectName(),
                             tmpTableId.getDatabaseName(),
                             tmpTableId.getObjectName(),
+                            parallelism,
                             options);
 
             migrator.deleteOriginTable(deleteNeed);
+
+            // setup parallelism for executor
+            migrator.setParallelism(parallelism);
             migrator.executeMigrate();
             if (StringUtils.isEmpty(targetTable)) {
                 paimonCatalog.renameTable(tmpTableId, sourceTableId, false);
