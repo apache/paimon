@@ -20,6 +20,7 @@ package org.apache.paimon.flink.orphan;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.flink.utils.BoundedTwoInputOperator;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -49,6 +50,7 @@ import org.apache.flink.util.OutputTag;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -61,6 +63,7 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.api.common.typeinfo.BasicTypeInfo.LONG_TYPE_INFO;
+import static org.apache.flink.api.common.typeinfo.BasicTypeInfo.STRING_TYPE_INFO;
 import static org.apache.flink.util.Preconditions.checkState;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -124,37 +127,51 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                 usedManifestFiles
                         .getSideOutput(manifestOutputTag)
                         .keyBy(tuple2 -> tuple2.f0 + ":" + tuple2.f1)
-                        .reduce((t1, t2) -> t1)
-                        .flatMap(
-                                new FlatMapFunction<Tuple2<String, String>, String>() {
+                        .transform(
+                                "datafile-reader",
+                                STRING_TYPE_INFO,
+                                new BoundedOneInputOperator<Tuple2<String, String>, String>() {
 
-                                    private final Map<String, ManifestFile> branchManifests =
-                                            new HashMap<>();
+                                    private final Set<Tuple2<String, String>> manifests =
+                                            new HashSet<>();
 
                                     @Override
-                                    public void flatMap(
-                                            Tuple2<String, String> value, Collector<String> out)
-                                            throws Exception {
-                                        ManifestFile manifestFile =
-                                                branchManifests.computeIfAbsent(
-                                                        value.f0,
-                                                        key ->
-                                                                table.switchToBranch(key)
-                                                                        .store()
-                                                                        .manifestFileFactory()
-                                                                        .create());
-                                        retryReadingFiles(
-                                                        () ->
-                                                                manifestFile.readWithIOException(
-                                                                        value.f1),
-                                                        Collections.<ManifestEntry>emptyList())
-                                                .forEach(
-                                                        f -> {
-                                                            out.collect(f.fileName());
-                                                            f.file()
-                                                                    .extraFiles()
-                                                                    .forEach(out::collect);
-                                                        });
+                                    public void processElement(
+                                            StreamRecord<Tuple2<String, String>> element) {
+                                        manifests.add(element.getValue());
+                                    }
+
+                                    @Override
+                                    public void endInput() throws IOException {
+                                        Map<String, ManifestFile> branchManifests = new HashMap<>();
+                                        for (Tuple2<String, String> tuple2 : manifests) {
+                                            ManifestFile manifestFile =
+                                                    branchManifests.computeIfAbsent(
+                                                            tuple2.f0,
+                                                            key ->
+                                                                    table.switchToBranch(key)
+                                                                            .store()
+                                                                            .manifestFileFactory()
+                                                                            .create());
+                                            retryReadingFiles(
+                                                            () ->
+                                                                    manifestFile
+                                                                            .readWithIOException(
+                                                                                    tuple2.f1),
+                                                            Collections.<ManifestEntry>emptyList())
+                                                    .forEach(
+                                                            f -> {
+                                                                List<String> files =
+                                                                        new ArrayList<>();
+                                                                files.add(f.fileName());
+                                                                files.addAll(f.file().extraFiles());
+                                                                files.forEach(
+                                                                        file ->
+                                                                                output.collect(
+                                                                                        new StreamRecord<>(
+                                                                                                file)));
+                                                            });
+                                        }
                                     }
                                 });
 
@@ -213,9 +230,8 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                             case 2:
                                                 checkState(buildEnd, "Should build ended.");
                                                 LOG.info("Finish probe phase.");
-                                                if (output != null) {
-                                                    output.collect(new StreamRecord<>(emitted));
-                                                }
+                                                LOG.info("Clean files: {}", emitted);
+                                                output.collect(new StreamRecord<>(emitted));
                                                 break;
                                         }
                                     }
@@ -232,6 +248,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                         Path path = new Path(value);
                                         if (!used.contains(path.getName())) {
                                             fileCleaner.accept(path);
+                                            LOG.info("Dry clean: {}", path);
                                             emitted++;
                                         }
                                     }
