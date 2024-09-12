@@ -39,6 +39,30 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class BranchSqlITCase extends CatalogITCaseBase {
 
     @Test
+    public void testBranchesTable() throws Exception {
+        sql("CREATE TABLE T (a INT, b INT)");
+        sql("INSERT INTO T VALUES (1, 2)");
+        sql("INSERT INTO T VALUES (3, 4)");
+
+        paimonTable("T").createTag("tag1", 1);
+
+        paimonTable("T").createBranch("branch1", "tag1");
+        paimonTable("T").createBranch("branch2", "tag1");
+
+        List<Row> result =
+                sql(
+                        "SELECT branch_name, created_from_tag, created_from_snapshot FROM T$branches ORDER BY branch_name");
+        assertThat(result)
+                .containsExactly(Row.of("branch1", "tag1", 1L), Row.of("branch2", "tag1", 1L));
+
+        result =
+                sql(
+                        "SELECT branch_name, created_from_tag, created_from_snapshot FROM T$branches where branch_name = 'branch1'");
+
+        assertThat(result).containsExactly(Row.of("branch1", "tag1", 1L));
+    }
+
+    @Test
     public void testAlterBranchTable() throws Exception {
         sql(
                 "CREATE TABLE T ("

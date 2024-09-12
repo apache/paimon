@@ -26,6 +26,9 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.predicate.Equal;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.LeafPredicateExtractor;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
@@ -52,6 +55,8 @@ import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -133,15 +138,22 @@ public class BranchesTable implements ReadonlyTable {
 
     private class BranchesScan extends ReadOnceTableScan {
 
+        private @Nullable LeafPredicate branchName;
+
         @Override
         public InnerTableScan withFilter(Predicate predicate) {
-            // TODO
+            if (predicate == null) {
+                return this;
+            }
+            Map<String, LeafPredicate> leafPredicates =
+                    predicate.visit(LeafPredicateExtractor.INSTANCE);
+            branchName = leafPredicates.get("branch_name");
             return this;
         }
 
         @Override
         public Plan innerPlan() {
-            return () -> Collections.singletonList(new BranchesSplit(location));
+            return () -> Collections.singletonList(new BranchesSplit(location, branchName));
         }
     }
 
@@ -150,8 +162,11 @@ public class BranchesTable implements ReadonlyTable {
 
         private final Path location;
 
-        private BranchesSplit(Path location) {
+        private final @Nullable LeafPredicate branchName;
+
+        private BranchesSplit(Path location, @Nullable LeafPredicate branchName) {
             this.location = location;
+            this.branchName = branchName;
         }
 
         @Override
@@ -163,7 +178,8 @@ public class BranchesTable implements ReadonlyTable {
                 return false;
             }
             BranchesSplit that = (BranchesSplit) o;
-            return Objects.equals(location, that.location);
+            return Objects.equals(location, that.location)
+                    && Objects.equals(branchName, that.branchName);
         }
 
         @Override
@@ -208,7 +224,7 @@ public class BranchesTable implements ReadonlyTable {
             FileStoreTable table = FileStoreTableFactory.create(fileIO, location);
             Iterator<InternalRow> rows;
             try {
-                rows = branches(table).iterator();
+                rows = branches(table, ((BranchesSplit) split).branchName).iterator();
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }
@@ -222,14 +238,46 @@ public class BranchesTable implements ReadonlyTable {
             return new IteratorRecordReader<>(rows);
         }
 
-        private List<InternalRow> branches(FileStoreTable table) throws IOException {
+        private List<InternalRow> branches(FileStoreTable table, LeafPredicate predicate)
+                throws IOException {
             BranchManager branchManager = table.branchManager();
             SchemaManager schemaManager = new SchemaManager(fileIO, table.location());
 
-            List<Pair<Path, Long>> paths =
-                    listVersionedDirectories(fileIO, branchManager.branchDirectory(), BRANCH_PREFIX)
-                            .map(status -> Pair.of(status.getPath(), status.getModificationTime()))
-                            .collect(Collectors.toList());
+            List<Pair<Path, Long>> paths = new ArrayList<>();
+            if (predicate != null
+                    && predicate.function() instanceof Equal
+                    && predicate.literals().get(0) instanceof BinaryString) {
+                String equalValue = predicate.literals().get(0).toString();
+                if (branchManager.branchExists(equalValue)) {
+                    paths =
+                            listVersionedDirectories(
+                                            fileIO, branchManager.branchDirectory(), BRANCH_PREFIX)
+                                    .filter(
+                                            fileStatus ->
+                                                    fileStatus
+                                                            .getPath()
+                                                            .getName()
+                                                            .substring(BRANCH_PREFIX.length())
+                                                            .equals(equalValue))
+                                    .map(
+                                            status ->
+                                                    Pair.of(
+                                                            status.getPath(),
+                                                            status.getModificationTime()))
+                                    .collect(Collectors.toList());
+                }
+            } else {
+                paths =
+                        listVersionedDirectories(
+                                        fileIO, branchManager.branchDirectory(), BRANCH_PREFIX)
+                                .map(
+                                        status ->
+                                                Pair.of(
+                                                        status.getPath(),
+                                                        status.getModificationTime()))
+                                .collect(Collectors.toList());
+            }
+
             List<InternalRow> result = new ArrayList<>();
 
             for (Pair<Path, Long> path : paths) {
