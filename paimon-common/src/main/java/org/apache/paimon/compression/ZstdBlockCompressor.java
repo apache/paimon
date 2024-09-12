@@ -90,7 +90,7 @@ public class ZstdBlockCompressor implements BlockCompressor {
             if ((off < 0) || (off > b.length) || (len < 0) || ((off + len) - b.length > 0)) {
                 throw new IndexOutOfBoundsException("Invalid offset or length");
             }
-            if (b.length == 0){
+            if (b.length == 0) {
                 return;
             }
             try {
