@@ -60,15 +60,12 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.hive.HiveTypeUtils.toPaimonType;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 
 /** Migrate hive table to paimon table. */
 public class HiveMigrator implements Migrator {
 
     private static final Logger LOG = LoggerFactory.getLogger(HiveMigrator.class);
-
-    //    private static final ThreadPoolExecutor EXECUTOR =
-    //            createCachedThreadPool(Runtime.getRuntime().availableProcessors(),
-    // "HIVE_MIGRATOR");
     private ThreadPoolExecutor executor;
 
     private static final Predicate<FileStatus> HIDDEN_PATH_FILTER =
@@ -104,6 +101,7 @@ public class HiveMigrator implements Migrator {
         this.targetTable = targetTable;
         this.parallelism = parallelism;
         this.coreOptions = new CoreOptions(options);
+        this.executor = createCachedThreadPool(parallelism, "HIVE_MIGRATOR");
     }
 
     public static List<Migrator> databaseMigrators(
