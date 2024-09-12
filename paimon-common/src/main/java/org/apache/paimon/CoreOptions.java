@@ -926,13 +926,6 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Full compaction will be constantly triggered after delta commits.");
 
-    public static final ConfigOption<Integer> AWARE_BUCKET_COMPACTION_PARALLELISM =
-            key("aware-bucket.compaction.read.parallelism")
-                    .intType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "The parallelism of reading bucket files in dedicated compaction.");
-
     @ExcludeFromDocumentation("Internal use only")
     public static final ConfigOption<StreamScanMode> STREAM_SCAN_MODE =
             key("stream-scan-mode")

@@ -661,8 +661,10 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     }
     assertResult(10)(table.snapshotManager().snapshotCount())
 
-    val taskBuffer = scala.collection.mutable.ListBuffer.empty[Int]
+    val buckets = table.newSnapshotReader().bucketEntries().asScala.map(_.bucket()).distinct.size
+    assertResult(3)(buckets)
 
+    val taskBuffer = scala.collection.mutable.ListBuffer.empty[Int]
     val listener = new SparkListener {
       override def onStageSubmitted(stageSubmitted: SparkListenerStageSubmitted): Unit = {
         taskBuffer += stageSubmitted.stageInfo.numTasks
@@ -671,13 +673,58 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
 
     try {
       spark.sparkContext.addSparkListener(listener)
+
+      // spark.default.parallelism cannot be change in spark session
+      // sparkParallelism is 2, bucket is 3, use 2 as the read parallelism
+      spark.conf.set("spark.sql.shuffle.partitions", 2)
       spark.sql("CALL sys.compact(table => 'T')")
-      spark.sql(
-        "CALL sys.compact(table => 'T', options => 'aware-bucket.compaction.read.parallelism=1')")
-      // default equal to the bucket num
-      assertResult(3)(taskBuffer(0))
-      // equal to the configured value
-      assertResult(1)(taskBuffer(1))
+
+      // sparkParallelism is 5, bucket is 3, use 3 as the read parallelism
+      spark.conf.set("spark.sql.shuffle.partitions", 5)
+      spark.sql("CALL sys.compact(table => 'T')")
+
+      assertResult(Seq(2, 3))(taskBuffer)
+    } finally {
+      spark.sparkContext.removeSparkListener(listener)
+    }
+  }
+
+  test("Paimon Procedure: test unaware-bucket compaction read parallelism") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, value STRING)
+                 |TBLPROPERTIES ('bucket'='-1', 'write-only'='true')
+                 |""".stripMargin)
+
+    val table = loadTable("T")
+    for (i <- 1 to 12) {
+      sql(s"INSERT INTO T VALUES ($i, '$i')")
+    }
+    assertResult(12)(table.snapshotManager().snapshotCount())
+
+    val buckets = table.newSnapshotReader().bucketEntries().asScala.map(_.bucket()).distinct.size
+    // only has bucket-0
+    assertResult(1)(buckets)
+
+    val taskBuffer = scala.collection.mutable.ListBuffer.empty[Int]
+    val listener = new SparkListener {
+      override def onStageSubmitted(stageSubmitted: SparkListenerStageSubmitted): Unit = {
+        taskBuffer += stageSubmitted.stageInfo.numTasks
+      }
+    }
+
+    try {
+      spark.sparkContext.addSparkListener(listener)
+
+      // spark.default.parallelism cannot be change in spark session
+      // sparkParallelism is 2, task groups is 6, use 2 as the read parallelism
+      spark.conf.set("spark.sql.shuffle.partitions", 2)
+      spark.sql("CALL sys.compact(table => 'T', options => 'compaction.max.file-num=2')")
+
+      // sparkParallelism is 5, task groups is 3, use 3 as the read parallelism
+      spark.conf.set("spark.sql.shuffle.partitions", 5)
+      spark.sql("CALL sys.compact(table => 'T', options => 'compaction.max.file-num=2')")
+
+      assertResult(Seq(2, 3))(taskBuffer)
     } finally {
       spark.sparkContext.removeSparkListener(listener)
     }

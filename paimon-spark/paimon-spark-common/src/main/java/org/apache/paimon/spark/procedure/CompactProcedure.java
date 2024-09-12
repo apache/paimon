@@ -56,6 +56,7 @@ import org.apache.spark.api.java.function.FlatMapFunction;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.PaimonUtils;
 import org.apache.spark.sql.Row;
+import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.catalyst.expressions.Expression;
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan;
@@ -66,6 +67,8 @@ import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -96,6 +99,8 @@ import static org.apache.spark.sql.types.DataTypes.StringType;
  * </code></pre>
  */
 public class CompactProcedure extends BaseProcedure {
+
+    private static final Logger LOG = LoggerFactory.getLogger(CompactProcedure.class);
 
     private static final ProcedureParameter[] PARAMETERS =
             new ProcedureParameter[] {
@@ -182,7 +187,6 @@ public class CompactProcedure extends BaseProcedure {
                         dynamicOptions.putAll(ParameterUtils.parseCommaSeparatedKeyValues(options));
                     }
                     table = table.copy(dynamicOptions);
-
                     InternalRow internalRow =
                             newInternalRow(
                                     execute(
@@ -279,22 +283,11 @@ public class CompactProcedure extends BaseProcedure {
             return;
         }
 
-        int defaultParallelism = partitionBuckets.size();
-        if (table.options().containsKey(CoreOptions.AWARE_BUCKET_COMPACTION_PARALLELISM.key())) {
-            int bucketReadParallelism =
-                    Integer.parseInt(
-                            table.options()
-                                    .get(CoreOptions.AWARE_BUCKET_COMPACTION_PARALLELISM.key()));
-            checkArgument(
-                    bucketReadParallelism > 0,
-                    "aware-bucket.compaction.read.parallelism config must be greater than 0.");
-            defaultParallelism = Math.min(defaultParallelism, bucketReadParallelism);
-        }
-
+        int readParallelism = readParallelism(partitionBuckets, spark());
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         JavaRDD<byte[]> commitMessageJavaRDD =
                 javaSparkContext
-                        .parallelize(partitionBuckets, defaultParallelism)
+                        .parallelize(partitionBuckets, readParallelism)
                         .mapPartitions(
                                 (FlatMapFunction<Iterator<Pair<byte[], Integer>>, byte[]>)
                                         pairIterator -> {
@@ -367,6 +360,7 @@ public class CompactProcedure extends BaseProcedure {
                             .collect(Collectors.toList());
         }
         if (compactionTasks.isEmpty()) {
+            System.out.println("compaction task is empty.");
             return;
         }
 
@@ -380,10 +374,11 @@ public class CompactProcedure extends BaseProcedure {
             throw new RuntimeException("serialize compaction task failed");
         }
 
+        int readParallelism = readParallelism(serializedTasks, spark());
         String commitUser = createCommitUser(table.coreOptions().toConfiguration());
         JavaRDD<byte[]> commitMessageJavaRDD =
                 javaSparkContext
-                        .parallelize(serializedTasks)
+                        .parallelize(serializedTasks, readParallelism)
                         .mapPartitions(
                                 (FlatMapFunction<Iterator<byte[]>, byte[]>)
                                         taskIterator -> {
@@ -495,6 +490,22 @@ public class CompactProcedure extends BaseProcedure {
                                 Collectors.collectingAndThen(
                                         Collectors.toList(),
                                         list -> list.toArray(new DataSplit[0]))));
+    }
+
+    private int readParallelism(List<?> list, SparkSession spark) {
+        int sparkParallelism =
+                Math.max(
+                        spark.sparkContext().defaultParallelism(),
+                        spark.sessionState().conf().numShufflePartitions());
+        int readParallelism = Math.min(list.size(), sparkParallelism);
+        if (sparkParallelism > readParallelism) {
+            LOG.warn(
+                    String.format(
+                            "Spark default parallelism (%s) is greater than bucket or task parallelism (%s),"
+                                    + "we use %s as the final read parallelism",
+                            sparkParallelism, readParallelism, readParallelism));
+        }
+        return readParallelism;
     }
 
     @VisibleForTesting
