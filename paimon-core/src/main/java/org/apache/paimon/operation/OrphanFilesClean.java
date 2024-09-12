@@ -149,8 +149,7 @@ public abstract class OrphanFilesClean implements Serializable {
 
         // safely get all snapshots to be read
         Set<Snapshot> readSnapshots = new HashSet<>(snapshotManager.safelyGetAllSnapshots());
-        List<Snapshot> taggedSnapshots = tagManager.taggedSnapshots();
-        readSnapshots.addAll(taggedSnapshots);
+        readSnapshots.addAll(tagManager.taggedSnapshots());
         readSnapshots.addAll(snapshotManager.safelyGetAllChangelogs());
 
         for (Snapshot snapshot : readSnapshots) {
@@ -221,7 +220,7 @@ public abstract class OrphanFilesClean implements Serializable {
         paimonFileDirs.add(new Path(location, "manifest"));
         paimonFileDirs.add(new Path(location, "index"));
         paimonFileDirs.add(new Path(location, "statistics"));
-        paimonFileDirs.addAll(listAndCleanDataDirs(location, partitionKeysNum));
+        paimonFileDirs.addAll(listFileDirs(location, partitionKeysNum));
 
         return paimonFileDirs;
     }
@@ -230,7 +229,7 @@ public abstract class OrphanFilesClean implements Serializable {
      * List directories that contains data files and may clean non Paimon data dirs/files. The
      * argument level is used to control recursive depth.
      */
-    private List<Path> listAndCleanDataDirs(Path dir, int level) {
+    private List<Path> listFileDirs(Path dir, int level) {
         List<FileStatus> dirs = tryBestListingDirs(dir);
 
         if (level == 0) {
@@ -242,7 +241,7 @@ public abstract class OrphanFilesClean implements Serializable {
 
         List<Path> result = new ArrayList<>();
         for (Path partitionPath : partitionPaths) {
-            result.addAll(listAndCleanDataDirs(partitionPath, level - 1));
+            result.addAll(listFileDirs(partitionPath, level - 1));
         }
         return result;
     }
