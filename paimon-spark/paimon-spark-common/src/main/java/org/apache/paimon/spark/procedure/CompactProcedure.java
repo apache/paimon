@@ -492,12 +492,12 @@ public class CompactProcedure extends BaseProcedure {
                                         list -> list.toArray(new DataSplit[0]))));
     }
 
-    private int readParallelism(List<?> list, SparkSession spark) {
+    private int readParallelism(List<?> groupedTasks, SparkSession spark) {
         int sparkParallelism =
                 Math.max(
                         spark.sparkContext().defaultParallelism(),
                         spark.sessionState().conf().numShufflePartitions());
-        int readParallelism = Math.min(list.size(), sparkParallelism);
+        int readParallelism = Math.min(groupedTasks.size(), sparkParallelism);
         if (sparkParallelism > readParallelism) {
             LOG.warn(
                     String.format(
