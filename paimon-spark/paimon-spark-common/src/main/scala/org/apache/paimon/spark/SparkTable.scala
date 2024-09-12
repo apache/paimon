@@ -81,7 +81,13 @@ case class SparkTable(table: Table)
   }
 
   override def metadataColumns: Array[MetadataColumn] = {
-    Array[MetadataColumn](PaimonMetadataColumn.FILE_PATH, PaimonMetadataColumn.ROW_INDEX)
+    val partitionType = SparkTypeUtils.toSparkPartitionType(table)
+    Array[MetadataColumn](
+      PaimonMetadataColumn.FILE_PATH,
+      PaimonMetadataColumn.ROW_INDEX,
+      PaimonMetadataColumn.PARTITION(partitionType),
+      PaimonMetadataColumn.BUCKET
+    )
   }
 
   override def newScanBuilder(options: CaseInsensitiveStringMap): ScanBuilder = {
