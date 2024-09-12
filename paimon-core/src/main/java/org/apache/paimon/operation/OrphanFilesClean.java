@@ -325,7 +325,7 @@ public abstract class OrphanFilesClean implements Serializable {
             Catalog catalog, @Nullable Boolean dryRun) {
         SerializableConsumer<Path> fileCleaner;
         if (Boolean.TRUE.equals(dryRun)) {
-            fileCleaner = path -> {};
+            fileCleaner = path -> LOG.info("Dry clean: {}", path);
         } else {
             FileIO fileIO = catalog.fileIO();
             fileCleaner =
