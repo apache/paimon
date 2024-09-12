@@ -21,6 +21,7 @@ package org.apache.paimon.flink.procedure;
 import org.apache.paimon.flink.utils.TableMigrationUtils;
 import org.apache.paimon.migrate.Migrator;
 import org.apache.paimon.utils.ParameterUtils;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.procedure.ProcedureContext;
 
@@ -51,6 +52,34 @@ public class MigrateDatabaseProcedure extends ProcedureBase {
                         connector,
                         catalog,
                         sourceDatabasePath,
+                        Runtime.getRuntime().availableProcessors(),
+                        ParameterUtils.parseCommaSeparatedKeyValues(properties));
+
+        for (Migrator migrator : migrators) {
+            migrator.executeMigrate();
+            migrator.renameTable(false);
+        }
+
+        return new String[] {"Success"};
+    }
+
+    public String[] call(
+            ProcedureContext procedureContext,
+            String connector,
+            String sourceDatabasePath,
+            String properties,
+            String parallelism)
+            throws Exception {
+        Integer p =
+                StringUtils.isNumeric(parallelism)
+                        ? Runtime.getRuntime().availableProcessors()
+                        : Integer.parseInt(parallelism);
+        List<Migrator> migrators =
+                TableMigrationUtils.getImporters(
+                        connector,
+                        catalog,
+                        sourceDatabasePath,
+                        p,
                         ParameterUtils.parseCommaSeparatedKeyValues(properties));
 
         for (Migrator migrator : migrators) {
