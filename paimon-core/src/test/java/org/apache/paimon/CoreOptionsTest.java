@@ -58,14 +58,6 @@ public class CoreOptionsTest {
     }
 
     @Test
-    public void testDeprecatedStartupMode() {
-        Options conf = new Options();
-        conf.set(CoreOptions.SCAN_MODE, CoreOptions.StartupMode.FULL);
-        assertThat(new CoreOptions(conf).startupMode())
-                .isEqualTo(CoreOptions.StartupMode.LATEST_FULL);
-    }
-
-    @Test
     public void testPrepareCommitWaitCompaction() {
         Options conf = new Options();
         CoreOptions options = new CoreOptions(conf);

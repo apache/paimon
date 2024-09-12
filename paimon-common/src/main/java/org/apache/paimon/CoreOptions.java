@@ -1846,8 +1846,6 @@ public class CoreOptions implements Serializable {
             } else {
                 return StartupMode.LATEST_FULL;
             }
-        } else if (mode == StartupMode.FULL) {
-            return StartupMode.LATEST_FULL;
         } else {
             return mode;
         }
@@ -2205,8 +2203,6 @@ public class CoreOptions implements Serializable {
                 "For streaming sources, produces the latest snapshot on the table upon first startup, "
                         + "and continue to read the latest changes. "
                         + "For batch sources, just produce the latest snapshot but does not read new changes."),
-
-        FULL("full", "Deprecated. Same as \"latest-full\"."),
 
         LATEST(
                 "latest",

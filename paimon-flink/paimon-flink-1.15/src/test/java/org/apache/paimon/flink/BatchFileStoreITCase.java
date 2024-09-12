@@ -168,7 +168,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         assertThatThrownBy(
                         () ->
                                 batchSql(
-                                        "SELECT * FROM T /*+ OPTIONS('scan.mode'='full', 'scan.snapshot-id'='1') */"))
+                                        "SELECT * FROM T /*+ OPTIONS('scan.mode'='latest-full', 'scan.snapshot-id'='1') */"))
                 .hasRootCauseInstanceOf(IllegalArgumentException.class)
                 .hasRootCauseMessage(
                         "%s must be null when you use latest-full for scan.mode",
