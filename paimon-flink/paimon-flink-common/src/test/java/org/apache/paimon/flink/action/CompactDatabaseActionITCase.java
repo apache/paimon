@@ -143,11 +143,10 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                 env.executeAsync();
                 break;
             case "procedure_indexed":
-                callProcedure(
-                        String.format("CALL sys.compact_database('', '%s')", mode), true, false);
+                executeSQL(String.format("CALL sys.compact_database('', '%s')", mode), true, false);
                 break;
             case "procedure_named":
-                callProcedure(
+                executeSQL(
                         String.format("CALL sys.compact_database(mode => '%s')", mode),
                         true,
                         false);
@@ -272,11 +271,10 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                 env.execute();
                 break;
             case "procedure_indexed":
-                callProcedure(
-                        String.format("CALL sys.compact_database('', '%s')", mode), false, true);
+                executeSQL(String.format("CALL sys.compact_database('', '%s')", mode), false, true);
                 break;
             case "procedure_named":
-                callProcedure(
+                executeSQL(
                         String.format("CALL sys.compact_database(mode => '%s')", mode),
                         false,
                         true);
@@ -383,9 +381,9 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                 break;
             case "procedure_indexed":
                 if (mode.equals("divided")) {
-                    callProcedure("CALL sys.compact_database()", true, false);
+                    executeSQL("CALL sys.compact_database()", true, false);
                 } else {
-                    callProcedure(
+                    executeSQL(
                             "CALL sys.compact_database('', 'combined', '', '', 'continuous.discovery-interval=1s')",
                             true,
                             false);
@@ -393,9 +391,9 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                 break;
             case "procedure_named":
                 if (mode.equals("divided")) {
-                    callProcedure("CALL sys.compact_database()", true, false);
+                    executeSQL("CALL sys.compact_database()", true, false);
                 } else {
-                    callProcedure(
+                    executeSQL(
                             "CALL sys.compact_database(mode => 'combined', table_options => 'continuous.discovery-interval=1s')",
                             true,
                             false);
@@ -628,7 +626,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                 env.execute();
                 break;
             case "procedure_indexed":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.compact_database('', '%s','','','','%s')",
                                 mode, partitionIdleTime),
@@ -636,7 +634,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                         true);
                 break;
             case "procedure_named":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.compact_database(mode => '%s', partition_idle_time => '%s')",
                                 mode, partitionIdleTime),
@@ -795,14 +793,14 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                 break;
             case "procedure_indexed":
                 if (mode.equals("divided")) {
-                    callProcedure(
+                    executeSQL(
                             String.format(
                                     "CALL sys.compact_database('', 'divided', '%s', '%s')",
                                     nonNull(includingPattern), nonNull(excludesPattern)),
                             false,
                             true);
                 } else {
-                    callProcedure(
+                    executeSQL(
                             String.format(
                                     "CALL sys.compact_database('', 'combined', '%s', '%s', 'continuous.discovery-interval=1s')",
                                     nonNull(includingPattern), nonNull(excludesPattern)),
@@ -812,14 +810,14 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                 break;
             case "procedure_named":
                 if (mode.equals("divided")) {
-                    callProcedure(
+                    executeSQL(
                             String.format(
                                     "CALL sys.compact_database(mode => 'divided', including_tables => '%s', excluding_tables => '%s')",
                                     nonNull(includingPattern), nonNull(excludesPattern)),
                             false,
                             true);
                 } else {
-                    callProcedure(
+                    executeSQL(
                             String.format(
                                     "CALL sys.compact_database(mode => 'combined', including_tables => '%s', excluding_tables => '%s', table_options => 'continuous.discovery-interval=1s')",
                                     nonNull(includingPattern), nonNull(excludesPattern)),
@@ -917,7 +915,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                     .build();
             env.executeAsync();
         } else {
-            callProcedure("CALL sys.compact_database()");
+            executeSQL("CALL sys.compact_database()");
         }
 
         for (FileStoreTable table : tables) {
@@ -991,7 +989,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                     .build();
             env.execute();
         } else {
-            callProcedure("CALL sys.compact_database()", false, true);
+            executeSQL("CALL sys.compact_database()", false, true);
         }
 
         for (FileStoreTable table : tables) {

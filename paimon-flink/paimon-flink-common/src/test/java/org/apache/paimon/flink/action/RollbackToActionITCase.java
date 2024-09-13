@@ -84,13 +84,13 @@ public class RollbackToActionITCase extends ActionITCaseBase {
                         .run();
                 break;
             case "procedure_indexed":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.rollback_to('%s.%s', '', cast(2 as bigint))",
                                 database, tableName));
                 break;
             case "procedure_named":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.rollback_to(`table` => '%s.%s', snapshot_id => cast(2 as bigint))",
                                 database, tableName));
@@ -142,12 +142,12 @@ public class RollbackToActionITCase extends ActionITCaseBase {
                         .run();
                 break;
             case "procedure_indexed":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.rollback_to('%s.%s', 'tag2')", database, tableName));
                 break;
             case "procedure_named":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.rollback_to(`table` => '%s.%s', tag => 'tag2')",
                                 database, tableName));

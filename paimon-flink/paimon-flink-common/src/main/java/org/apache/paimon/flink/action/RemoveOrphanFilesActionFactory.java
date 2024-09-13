@@ -18,9 +18,6 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.paimon.CoreOptions;
-
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
@@ -46,21 +43,11 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
         String database = params.get(DATABASE);
         checkNotNull(database);
         String table = params.get(TABLE);
+        String parallelism = params.get(PARALLELISM);
 
         Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
-        Map<String, String> dynamicOptions = new HashMap<>();
-        if (params.has(PARALLELISM)) {
-            dynamicOptions.put(CoreOptions.DELETE_FILE_THREAD_NUM.key(), params.get(PARALLELISM));
-        }
-
-        RemoveOrphanFilesAction action;
-        try {
-            action =
-                    new RemoveOrphanFilesAction(
-                            warehouse, database, table, catalogConfig, dynamicOptions);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        RemoveOrphanFilesAction action =
+                new RemoveOrphanFilesAction(warehouse, database, table, parallelism, catalogConfig);
 
         if (params.has(OLDER_THAN)) {
             action.olderThan(params.get(OLDER_THAN));

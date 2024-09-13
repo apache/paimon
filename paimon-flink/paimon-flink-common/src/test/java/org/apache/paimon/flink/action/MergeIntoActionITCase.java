@@ -589,7 +589,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
             throws Exception {
         BlockingIterator<Row, Row> iterator =
                 testStreamingRead(buildSimpleQuery("T"), initialRecords);
-        callProcedure(procedureStatement, true, true);
+        executeSQL(procedureStatement, true, true);
         // test batch read first to ensure TABLE_DML_SYNC works
         testBatchRead(buildSimpleQuery("T"), batchExpected);
         // test streaming read
