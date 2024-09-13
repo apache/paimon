@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.orphan;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.utils.BoundedOneInputOperator;
@@ -33,7 +34,6 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.SerializableConsumer;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
-import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.CoreOptions;
@@ -90,6 +90,8 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
         if (parallelism != null) {
             flinkConf.set(CoreOptions.DEFAULT_PARALLELISM, parallelism);
         }
+        // Flink 1.17 introduced this config, use string to keep compatibility
+        flinkConf.setString("execution.batch.adaptive.auto-parallelism.enabled", "false");
         env.configure(flinkConf);
 
         List<String> branches = validBranches();
@@ -106,11 +108,32 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
         SingleOutputStreamOperator<String> usedManifestFiles =
                 env.fromCollection(branches)
                         .process(
-                                new ProcessFunction<String, String>() {
+                                new ProcessFunction<String, Tuple2<String, String>>() {
                                     @Override
                                     public void processElement(
-                                            String branch, Context ctx, Collector<String> out)
+                                            String branch,
+                                            ProcessFunction<String, Tuple2<String, String>>.Context
+                                                    ctx,
+                                            Collector<Tuple2<String, String>> out)
                                             throws Exception {
+                                        for (Snapshot snapshot : safelyGetAllSnapshots(branch)) {
+                                            out.collect(new Tuple2<>(branch, snapshot.toJson()));
+                                        }
+                                    }
+                                })
+                        .rebalance()
+                        .process(
+                                new ProcessFunction<Tuple2<String, String>, String>() {
+
+                                    @Override
+                                    public void processElement(
+                                            Tuple2<String, String> branchAndSnapshot,
+                                            ProcessFunction<Tuple2<String, String>, String>.Context
+                                                    ctx,
+                                            Collector<String> out)
+                                            throws Exception {
+                                        String branch = branchAndSnapshot.f0;
+                                        Snapshot snapshot = Snapshot.fromJson(branchAndSnapshot.f1);
                                         Consumer<ManifestFileMeta> manifestConsumer =
                                                 manifest -> {
                                                     Tuple2<String, String> tuple2 =
@@ -119,7 +142,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                     ctx.output(manifestOutputTag, tuple2);
                                                 };
                                         collectWithoutDataFile(
-                                                branch, out::collect, manifestConsumer);
+                                                branch, snapshot, out::collect, manifestConsumer);
                                     }
                                 });
 
@@ -184,10 +207,13 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                         .collect(Collectors.toList());
         DataStream<String> candidates =
                 env.fromCollection(fileDirs)
-                        .flatMap(
-                                new FlatMapFunction<String, String>() {
+                        .process(
+                                new ProcessFunction<String, String>() {
                                     @Override
-                                    public void flatMap(String dir, Collector<String> out) {
+                                    public void processElement(
+                                            String dir,
+                                            ProcessFunction<String, String>.Context ctx,
+                                            Collector<String> out) {
                                         for (FileStatus fileStatus :
                                                 tryBestListingDirs(new Path(dir))) {
                                             if (oldEnough(fileStatus)) {

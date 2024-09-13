@@ -18,7 +18,6 @@
 
 package org.apache.paimon.operation;
 
-import org.apache.paimon.Changelog;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.fs.FileIO;
@@ -141,75 +140,80 @@ public abstract class OrphanFilesClean implements Serializable {
             Consumer<String> usedFileConsumer,
             Consumer<ManifestFileMeta> manifestConsumer)
             throws IOException {
+        for (Snapshot snapshot : safelyGetAllSnapshots(branch)) {
+            collectWithoutDataFile(branch, snapshot, usedFileConsumer, manifestConsumer);
+        }
+    }
+
+    protected Set<Snapshot> safelyGetAllSnapshots(String branch) throws IOException {
         FileStoreTable branchTable = table.switchToBranch(branch);
         SnapshotManager snapshotManager = branchTable.snapshotManager();
         TagManager tagManager = branchTable.tagManager();
-        ManifestList manifestList = branchTable.store().manifestListFactory().create();
-        IndexFileHandler indexFileHandler = branchTable.store().newIndexFileHandler();
-
-        // safely get all snapshots to be read
         Set<Snapshot> readSnapshots = new HashSet<>(snapshotManager.safelyGetAllSnapshots());
         readSnapshots.addAll(tagManager.taggedSnapshots());
         readSnapshots.addAll(snapshotManager.safelyGetAllChangelogs());
+        return readSnapshots;
+    }
 
-        for (Snapshot snapshot : readSnapshots) {
-            List<ManifestFileMeta> manifestFileMetas = new ArrayList<>();
-            // changelog manifest
-            if (snapshot.changelogManifestList() != null) {
-                usedFileConsumer.accept(snapshot.changelogManifestList());
-                manifestFileMetas.addAll(
-                        retryReadingFiles(
-                                () ->
-                                        manifestList.readWithIOException(
-                                                snapshot.changelogManifestList()),
-                                emptyList()));
-            }
-
-            // delta manifest
-            if (snapshot.deltaManifestList() != null) {
-                usedFileConsumer.accept(snapshot.deltaManifestList());
-                manifestFileMetas.addAll(
-                        retryReadingFiles(
-                                () ->
-                                        manifestList.readWithIOException(
-                                                snapshot.deltaManifestList()),
-                                emptyList()));
-            }
-
-            // base manifest
-            usedFileConsumer.accept(snapshot.baseManifestList());
+    protected void collectWithoutDataFile(
+            String branch,
+            Snapshot snapshot,
+            Consumer<String> usedFileConsumer,
+            Consumer<ManifestFileMeta> manifestConsumer)
+            throws IOException {
+        FileStoreTable branchTable = table.switchToBranch(branch);
+        ManifestList manifestList = branchTable.store().manifestListFactory().create();
+        IndexFileHandler indexFileHandler = branchTable.store().newIndexFileHandler();
+        List<ManifestFileMeta> manifestFileMetas = new ArrayList<>();
+        // changelog manifest
+        if (snapshot.changelogManifestList() != null) {
+            usedFileConsumer.accept(snapshot.changelogManifestList());
             manifestFileMetas.addAll(
                     retryReadingFiles(
-                            () -> manifestList.readWithIOException(snapshot.baseManifestList()),
+                            () ->
+                                    manifestList.readWithIOException(
+                                            snapshot.changelogManifestList()),
                             emptyList()));
+        }
 
-            // collect manifests
-            for (ManifestFileMeta manifest : manifestFileMetas) {
-                manifestConsumer.accept(manifest);
-                usedFileConsumer.accept(manifest.fileName());
-            }
-
-            if (!(snapshot instanceof Changelog)) {
-                // index files
-                String indexManifest = snapshot.indexManifest();
-                if (indexManifest != null && indexFileHandler.existsManifest(indexManifest)) {
-                    usedFileConsumer.accept(indexManifest);
+        // delta manifest
+        if (snapshot.deltaManifestList() != null) {
+            usedFileConsumer.accept(snapshot.deltaManifestList());
+            manifestFileMetas.addAll(
                     retryReadingFiles(
-                                    () ->
-                                            indexFileHandler.readManifestWithIOException(
-                                                    indexManifest),
-                                    Collections.<IndexManifestEntry>emptyList())
-                            .stream()
-                            .map(IndexManifestEntry::indexFile)
-                            .map(IndexFileMeta::fileName)
-                            .forEach(usedFileConsumer);
-                }
+                            () -> manifestList.readWithIOException(snapshot.deltaManifestList()),
+                            emptyList()));
+        }
 
-                // statistic file
-                if (snapshot.statistics() != null) {
-                    usedFileConsumer.accept(snapshot.statistics());
-                }
-            }
+        // base manifest
+        usedFileConsumer.accept(snapshot.baseManifestList());
+        manifestFileMetas.addAll(
+                retryReadingFiles(
+                        () -> manifestList.readWithIOException(snapshot.baseManifestList()),
+                        emptyList()));
+
+        // collect manifests
+        for (ManifestFileMeta manifest : manifestFileMetas) {
+            manifestConsumer.accept(manifest);
+            usedFileConsumer.accept(manifest.fileName());
+        }
+
+        // index files
+        String indexManifest = snapshot.indexManifest();
+        if (indexManifest != null && indexFileHandler.existsManifest(indexManifest)) {
+            usedFileConsumer.accept(indexManifest);
+            retryReadingFiles(
+                            () -> indexFileHandler.readManifestWithIOException(indexManifest),
+                            Collections.<IndexManifestEntry>emptyList())
+                    .stream()
+                    .map(IndexManifestEntry::indexFile)
+                    .map(IndexFileMeta::fileName)
+                    .forEach(usedFileConsumer);
+        }
+
+        // statistic file
+        if (snapshot.statistics() != null) {
+            usedFileConsumer.accept(snapshot.statistics());
         }
     }
 
