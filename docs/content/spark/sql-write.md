@@ -136,10 +136,9 @@ DELETE FROM my_table WHERE currency = 'UNKNOWN';
 Paimon currently supports Merge Into syntax in Spark 3+, which allow a set of updates, insertions and deletions based on a source table in a single commit.
 
 {{< hint into >}}
-1. This only work with primary-key table.
-2. In update clause, to update primary key columns is not supported.
-3. `WHEN NOT MATCHED BY SOURCE` syntax is not supported.
-   {{< /hint >}}
+1. In update clause, to update primary key columns is not supported.
+2. `WHEN NOT MATCHED BY SOURCE` syntax is not supported.
+{{< /hint >}}
 
 **Example: One**
 
