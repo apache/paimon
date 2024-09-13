@@ -41,20 +41,27 @@ public class MigrateDatabaseProcedure extends ProcedureBase {
             argument = {
                 @ArgumentHint(name = "connector", type = @DataTypeHint("STRING")),
                 @ArgumentHint(name = "source_database", type = @DataTypeHint("STRING")),
-                @ArgumentHint(name = "options", type = @DataTypeHint("STRING"), isOptional = true)
+                @ArgumentHint(name = "options", type = @DataTypeHint("STRING"), isOptional = true),
+                @ArgumentHint(
+                        name = "parallelism",
+                        type = @DataTypeHint("Integer"),
+                        isOptional = true)
             })
     public String[] call(
             ProcedureContext procedureContext,
             String connector,
             String sourceDatabasePath,
-            String properties)
+            String properties,
+            Integer parallelism)
             throws Exception {
         properties = notnull(properties);
+        Integer p = parallelism == null ? Runtime.getRuntime().availableProcessors() : parallelism;
         List<Migrator> migrators =
                 TableMigrationUtils.getImporters(
                         connector,
                         catalog,
                         sourceDatabasePath,
+                        p,
                         ParameterUtils.parseCommaSeparatedKeyValues(properties));
 
         for (Migrator migrator : migrators) {

@@ -36,6 +36,7 @@ public class TableMigrationUtils {
             String sourceTableName,
             String targetDatabase,
             String targetTableName,
+            Integer parallelism,
             Map<String, String> options) {
         switch (connector) {
             case "hive":
@@ -51,6 +52,7 @@ public class TableMigrationUtils {
                         sourceTableName,
                         targetDatabase,
                         targetTableName,
+                        parallelism,
                         options);
             default:
                 throw new UnsupportedOperationException("Unsupported connector " + connector);
