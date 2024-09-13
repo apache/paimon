@@ -109,7 +109,7 @@ public class ChangelogDeletion extends FileDeletionBase<Changelog> {
 
             // index manifests
             String indexManifest = skippingSnapshot.indexManifest();
-            if (indexManifest != null) {
+            if (indexManifest != null && indexFileHandler.existsManifest(indexManifest)) {
                 skippingSet.add(indexManifest);
                 indexFileHandler.readManifest(indexManifest).stream()
                         .map(IndexManifestEntry::indexFile)
