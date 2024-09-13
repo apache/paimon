@@ -42,7 +42,7 @@ public class MigrateTableActionFactory implements ActionFactory {
         String sourceHiveTable = params.get(TABLE);
         Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
         String tableConf = params.get(OPTIONS);
-        String parallelism = params.get(PARALLELISM);
+        Integer parallelism = Integer.parseInt(params.get(PARALLELISM));
 
         MigrateTableAction migrateTableAction =
                 new MigrateTableAction(

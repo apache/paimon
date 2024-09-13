@@ -38,6 +38,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.apache.spark.sql.types.DataTypes.BooleanType;
+import static org.apache.spark.sql.types.DataTypes.IntegerType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /**
@@ -60,7 +61,7 @@ public class MigrateTableProcedure extends BaseProcedure {
                 ProcedureParameter.optional("target_table", StringType),
                 ProcedureParameter.optional(
                         "options_map", DataTypes.createMapType(StringType, StringType)),
-                ProcedureParameter.optional("parallelism", StringType),
+                ProcedureParameter.optional("parallelism", IntegerType),
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -93,9 +94,7 @@ public class MigrateTableProcedure extends BaseProcedure {
         MapData mapData = args.isNullAt(5) ? null : args.getMap(5);
         Map<String, String> optionMap = mapDataToHashMap(mapData);
         int parallelism =
-                args.isNullAt(6)
-                        ? Runtime.getRuntime().availableProcessors()
-                        : Integer.parseInt(args.getString(6));
+                args.isNullAt(6) ? Runtime.getRuntime().availableProcessors() : args.getInt(6);
 
         Identifier sourceTableId = Identifier.fromString(sourceTable);
         Identifier tmpTableId =

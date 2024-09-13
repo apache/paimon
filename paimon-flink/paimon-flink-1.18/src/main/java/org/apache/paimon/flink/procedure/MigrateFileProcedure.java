@@ -21,7 +21,6 @@ package org.apache.paimon.flink.procedure;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.utils.TableMigrationUtils;
 import org.apache.paimon.migrate.Migrator;
-import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.procedure.ProcedureContext;
 
@@ -72,12 +71,9 @@ public class MigrateFileProcedure extends ProcedureBase {
             String sourceTablePath,
             String targetPaimonTablePath,
             boolean deleteOrigin,
-            String parallelism)
+            Integer parallelism)
             throws Exception {
-        Integer p =
-                !StringUtils.isNumeric(parallelism)
-                        ? Runtime.getRuntime().availableProcessors()
-                        : Integer.parseInt(parallelism);
+        Integer p = parallelism == null ? Runtime.getRuntime().availableProcessors() : parallelism;
         migrateHandle(connector, sourceTablePath, targetPaimonTablePath, deleteOrigin, p);
         return new String[] {"Success"};
     }

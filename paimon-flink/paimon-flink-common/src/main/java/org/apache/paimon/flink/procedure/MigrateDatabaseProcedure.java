@@ -21,7 +21,6 @@ package org.apache.paimon.flink.procedure;
 import org.apache.paimon.flink.utils.TableMigrationUtils;
 import org.apache.paimon.migrate.Migrator;
 import org.apache.paimon.utils.ParameterUtils;
-import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
@@ -45,7 +44,7 @@ public class MigrateDatabaseProcedure extends ProcedureBase {
                 @ArgumentHint(name = "options", type = @DataTypeHint("STRING"), isOptional = true),
                 @ArgumentHint(
                         name = "parallelism",
-                        type = @DataTypeHint("STRING"),
+                        type = @DataTypeHint("Integer"),
                         isOptional = true)
             })
     public String[] call(
@@ -53,13 +52,10 @@ public class MigrateDatabaseProcedure extends ProcedureBase {
             String connector,
             String sourceDatabasePath,
             String properties,
-            String parallelism)
+            Integer parallelism)
             throws Exception {
         properties = notnull(properties);
-        Integer p =
-                !StringUtils.isNumeric(parallelism)
-                        ? Runtime.getRuntime().availableProcessors()
-                        : Integer.parseInt(parallelism);
+        Integer p = parallelism == null ? Runtime.getRuntime().availableProcessors() : parallelism;
         List<Migrator> migrators =
                 TableMigrationUtils.getImporters(
                         connector,

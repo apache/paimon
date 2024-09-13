@@ -142,7 +142,7 @@ This section introduce all available spark procedures about paimon.
             <li>options_map: Options map for adding key-value options which is a map.</li>
             <li>parallelism: the parallelism for migrate process, default is core numbers of machine.</li>
       </td>
-      <td>CALL sys.migrate_table(source_type => 'hive', table => 'default.T', options => 'file.format=parquet', options_map => map('k1','v1'), parallelism => '6')</td>
+      <td>CALL sys.migrate_table(source_type => 'hive', table => 'default.T', options => 'file.format=parquet', options_map => map('k1','v1'), parallelism => 6)</td>
     </tr>
     <tr>
       <td>migrate_file</td>
@@ -154,7 +154,7 @@ This section introduce all available spark procedures about paimon.
             <li>delete_origin: If had set target_table, can set delete_origin to decide whether delete the origin table metadata from hms after migrate. Default is true</li>
             <li>parallelism: the parallelism for migrate process, default is core numbers of machine.</li>
       </td>
-      <td>CALL sys.migrate_file(source_type => 'hive', table => 'default.T', delete_origin => true, parallelism => '6')</td>
+      <td>CALL sys.migrate_file(source_type => 'hive', table => 'default.T', delete_origin => true, parallelism => 6)</td>
     </tr>
     <tr>
       <td>remove_orphan_files</td>

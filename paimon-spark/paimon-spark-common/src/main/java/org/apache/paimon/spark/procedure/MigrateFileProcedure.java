@@ -33,6 +33,7 @@ import org.apache.spark.sql.types.StructType;
 import java.util.Collections;
 
 import static org.apache.spark.sql.types.DataTypes.BooleanType;
+import static org.apache.spark.sql.types.DataTypes.IntegerType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /**
@@ -50,7 +51,7 @@ public class MigrateFileProcedure extends BaseProcedure {
                 ProcedureParameter.required("source_table", StringType),
                 ProcedureParameter.required("target_table", StringType),
                 ProcedureParameter.optional("delete_origin", BooleanType),
-                ProcedureParameter.optional("parallelism", BooleanType)
+                ProcedureParameter.optional("parallelism", IntegerType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -80,9 +81,7 @@ public class MigrateFileProcedure extends BaseProcedure {
         String targetTable = args.getString(2);
         boolean deleteNeed = args.isNullAt(3) ? true : args.getBoolean(3);
         int parallelism =
-                args.isNullAt(4)
-                        ? Runtime.getRuntime().availableProcessors()
-                        : Integer.parseInt(args.getString(6));
+                args.isNullAt(4) ? Runtime.getRuntime().availableProcessors() : args.getInt(6);
 
         Identifier sourceTableId = Identifier.fromString(sourceTable);
         Identifier targetTableId = Identifier.fromString(targetTable);

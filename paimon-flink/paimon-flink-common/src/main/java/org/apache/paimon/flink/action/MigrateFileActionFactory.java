@@ -51,7 +51,7 @@ public class MigrateFileActionFactory implements ActionFactory {
         boolean deleteOrigin = Boolean.parseBoolean(params.get(DELETE_ORIGIN));
         Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
         String tableConf = params.get(OPTIONS);
-        String parallelism = params.get(PARALLELISM);
+        Integer parallelism = Integer.parseInt(params.get(PARALLELISM));
 
         MigrateFileAction migrateFileAction =
                 new MigrateFileAction(

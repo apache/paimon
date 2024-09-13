@@ -258,7 +258,7 @@ public class MigrateDatabaseProcedureITCase extends ActionITCaseBase {
                         "my_database",
                         catalogConf,
                         "",
-                        "");
+                        6);
         migrateDatabaseAction.run();
 
         tEnv.executeSql(

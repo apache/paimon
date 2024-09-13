@@ -170,7 +170,7 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
                         false,
                         catalogConf,
                         "",
-                        "");
+                        6);
         migrateFileAction.run();
 
         tEnv.useCatalog("HIVE");

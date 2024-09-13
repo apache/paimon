@@ -29,7 +29,7 @@ public class MigrateDatabaseAction extends ActionBase {
     private final String connector;
     private final String hiveDatabaseName;
     private final String tableProperties;
-    private final String parallelism;
+    private final Integer parallelism;
 
     public MigrateDatabaseAction(
             String connector,
@@ -37,7 +37,7 @@ public class MigrateDatabaseAction extends ActionBase {
             String hiveDatabaseName,
             Map<String, String> catalogConfig,
             String tableProperties,
-            String parallelism) {
+            Integer parallelism) {
         super(warehouse, catalogConfig);
         this.connector = connector;
         this.hiveDatabaseName = hiveDatabaseName;
