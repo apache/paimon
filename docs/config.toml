@@ -34,11 +34,11 @@ pygmentsUseClasses = true
   # we change the version for the complete docs when forking of a release branch
   # etc.
   # The full version string as referenced in Maven (e.g. 1.2.1)
-  Version = "0.9-SNAPSHOT"
+  Version = "1.0-SNAPSHOT"
 
   # For stable releases, leave the bugfix version out (e.g. 1.2). For snapshot
   # release this should be the same as the regular version
-  VersionTitle = "0.9-SNAPSHOT"
+  VersionTitle = "1.0-SNAPSHOT"
 
   # The branch for this version of Apache Paimon
   Branch = "master"
@@ -67,15 +67,13 @@ pygmentsUseClasses = true
     ["JavaDocs", "//paimon.apache.org/docs/master/api/java/"],
   ]
 
-  StableDocs = "https://paimon.apache.org/docs/0.8"
+  StableDocs = "https://paimon.apache.org/docs/0.9"
 
   PreviousDocs = [
     ["master", "https://paimon.apache.org/docs/master"],
-    ["stable", "https://paimon.apache.org/docs/0.8"],
+    ["stable", "https://paimon.apache.org/docs/0.9"],
+    ["0.9", "https://paimon.apache.org/docs/0.9"],
     ["0.8", "https://paimon.apache.org/docs/0.8"],
-    ["0.7", "https://paimon.apache.org/docs/0.7"],
-    ["0.6", "https://paimon.apache.org/docs/0.6"],
-    ["0.5", "https://paimon.apache.org/docs/0.5"]
   ]
 
   BookSection = '/'
