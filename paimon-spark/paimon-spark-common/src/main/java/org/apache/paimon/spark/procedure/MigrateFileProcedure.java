@@ -81,7 +81,7 @@ public class MigrateFileProcedure extends BaseProcedure {
         String targetTable = args.getString(2);
         boolean deleteNeed = args.isNullAt(3) ? true : args.getBoolean(3);
         int parallelism =
-                args.isNullAt(4) ? Runtime.getRuntime().availableProcessors() : args.getInt(6);
+                args.isNullAt(4) ? Runtime.getRuntime().availableProcessors() : args.getInt(4);
 
         Identifier sourceTableId = Identifier.fromString(sourceTable);
         Identifier targetTableId = Identifier.fromString(targetTable);
