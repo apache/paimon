@@ -130,7 +130,7 @@ public class MigrateDatabaseProcedureITCase extends ActionITCaseBase {
             tEnv.executeSql(
                             "CALL sys.migrate_database(connector => 'hive', source_database => 'my_database', options => 'file.format="
                                     + format
-                                    + "')")
+                                    + "', parallelism => 6)")
                     .await();
         } else {
             tEnv.executeSql(
