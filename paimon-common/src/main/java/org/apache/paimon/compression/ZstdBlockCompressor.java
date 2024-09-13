@@ -84,8 +84,14 @@ public class ZstdBlockCompressor implements BlockCompressor {
 
         @Override
         public void write(byte[] b, int off, int len) throws IOException {
+            if (b == null || buf == null) {
+                throw new NullPointerException("Input array or buffer is null");
+            }
             if ((off < 0) || (off > b.length) || (len < 0) || ((off + len) - b.length > 0)) {
-                throw new IndexOutOfBoundsException();
+                throw new IndexOutOfBoundsException("Invalid offset or length");
+            }
+            if (b.length == 0) {
+                return;
             }
             try {
                 System.arraycopy(b, off, buf, position, len);
