@@ -167,36 +167,6 @@ class ExpireSnapshotsProcedureTest extends PaimonSparkTestBase with StreamTest {
     checkSnapshots(snapshotManager, 5, 5)
   }
 
-  test("test new parameter time_retained") {
-    sql(
-      "CREATE TABLE T (a INT, b STRING) " +
-        "TBLPROPERTIES ( 'num-sorted-run.compaction-trigger' = '999' )")
-    val table = loadTable("T")
-    val snapshotManager = table.snapshotManager
-
-    // generate 5 snapshot
-    for (i <- 1 to 5) {
-      sql(s"INSERT INTO T VALUES ($i, '$i')")
-    }
-    checkSnapshots(snapshotManager, 1, 5)
-
-    // no snapshots expired
-    spark.sql(s"CALL paimon.sys.expire_snapshots(table => 'test.T', time_retained => '1h')")
-    checkSnapshots(snapshotManager, 1, 5)
-
-    // expire assert throw exception
-    val timestamp = snapshotManager.latestSnapshot().timeMillis
-    assertThrows[IllegalArgumentException] {
-      spark.sql(
-        s"CALL paimon.sys.expire_snapshots(table => 'test.T', older_than => '${timestamp.toString}', time_retained => '1h')")
-    }
-
-    // all snapshot are expired, keep latest snapshot
-    Thread.sleep(1000)
-    spark.sql(s"CALL paimon.sys.expire_snapshots(table => 'test.T', time_retained => '1s')")
-    checkSnapshots(snapshotManager, 5, 5)
-  }
-
   def checkSnapshots(sm: SnapshotManager, earliest: Int, latest: Int): Unit = {
     assertThat(sm.snapshotCount).isEqualTo(latest - earliest + 1)
     assertThat(sm.earliestSnapshotId).isEqualTo(earliest)

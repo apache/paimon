@@ -22,7 +22,6 @@ import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.table.ExpireSnapshots;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.StringUtils;
-import org.apache.paimon.utils.TimeUtils;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
@@ -46,8 +45,7 @@ public class ExpireSnapshotsProcedure extends BaseProcedure {
                 ProcedureParameter.optional("retain_max", IntegerType),
                 ProcedureParameter.optional("retain_min", IntegerType),
                 ProcedureParameter.optional("older_than", StringType),
-                ProcedureParameter.optional("max_deletes", IntegerType),
-                ProcedureParameter.optional("time_retained", StringType)
+                ProcedureParameter.optional("max_deletes", IntegerType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -78,8 +76,6 @@ public class ExpireSnapshotsProcedure extends BaseProcedure {
         Integer retainMin = args.isNullAt(2) ? null : args.getInt(2);
         String olderThanStr = args.isNullAt(3) ? null : args.getString(3);
         Integer maxDeletes = args.isNullAt(4) ? null : args.getInt(4);
-        Duration timeRetained =
-                args.isNullAt(5) ? null : TimeUtils.parseDuration(args.getString(5));
 
         return modifyPaimonTable(
                 tableIdent,
@@ -92,11 +88,7 @@ public class ExpireSnapshotsProcedure extends BaseProcedure {
                     if (retainMin != null) {
                         builder.snapshotRetainMin(retainMin);
                     }
-                    if (!StringUtils.isBlank(olderThanStr) && timeRetained != null) {
-                        throw new IllegalArgumentException(
-                                "older_than and time_retained cannot be used together.");
-                    }
-                    if (!StringUtils.isBlank(olderThanStr)) {
+                    if (!StringUtils.isNullOrWhitespaceOnly(olderThanStr)) {
                         long olderThanMills;
                         // forward compatibility for timestamp type
                         if (StringUtils.isNumeric(olderThanStr)) {
@@ -114,9 +106,6 @@ public class ExpireSnapshotsProcedure extends BaseProcedure {
                     }
                     if (maxDeletes != null) {
                         builder.snapshotMaxDeletes(maxDeletes);
-                    }
-                    if (timeRetained != null) {
-                        builder.snapshotTimeRetain(timeRetained);
                     }
                     int deleted = expireSnapshots.config(builder.build()).expire();
                     return new InternalRow[] {newInternalRow(deleted)};
