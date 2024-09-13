@@ -81,13 +81,13 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
                         .run();
                 break;
             case "procedure_indexed":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.mark_partition_done('%s.%s', 'partKey0 = 0')",
                                 database, tableName));
                 break;
             case "procedure_named":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.mark_partition_done(`table` => '%s.%s', partitions => 'partKey0 = 0')",
                                 database, tableName));
@@ -125,13 +125,13 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
                         .run();
                 break;
             case "procedure_indexed":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.mark_partition_done('%s.%s', 'partKey0=0,partKey1=1;partKey0=1,partKey1=0')",
                                 database, tableName));
                 break;
             case "procedure_named":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.mark_partition_done(`table` => '%s.%s', partitions => 'partKey0=0,partKey1=1;partKey0=1,partKey1=0')",
                                 database, tableName));

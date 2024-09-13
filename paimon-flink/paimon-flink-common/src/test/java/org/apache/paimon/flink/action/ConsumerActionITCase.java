@@ -105,13 +105,13 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                 createAction(ResetConsumerAction.class, args).run();
                 break;
             case "procedure_indexed":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.reset_consumer('%s.%s', 'myid', 1)",
                                 database, tableName));
                 break;
             case "procedure_named":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.reset_consumer(`table` => '%s.%s', consumer_id => 'myid', next_snapshot_id => cast(1 as bigint))",
                                 database, tableName));
@@ -129,12 +129,12 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                 createAction(ResetConsumerAction.class, args.subList(0, 9)).run();
                 break;
             case "procedure_indexed":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.reset_consumer('%s.%s', 'myid')", database, tableName));
                 break;
             case "procedure_named":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.reset_consumer(`table` => '%s.%s', consumer_id => 'myid')",
                                 database, tableName));
@@ -213,13 +213,13 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                 createAction(ResetConsumerAction.class, args).run();
                 break;
             case "procedure_indexed":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.reset_consumer('%s.%s', 'myid', 1)",
                                 database, branchTableName));
                 break;
             case "procedure_named":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.reset_consumer(`table` => '%s.%s', consumer_id => 'myid', next_snapshot_id => cast(1 as bigint))",
                                 database, branchTableName));
@@ -237,13 +237,13 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                 createAction(ResetConsumerAction.class, args.subList(0, 9)).run();
                 break;
             case "procedure_indexed":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.reset_consumer('%s.%s', 'myid')",
                                 database, branchTableName));
                 break;
             case "procedure_named":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.reset_consumer(`table` => '%s.%s', consumer_id => 'myid')",
                                 database, branchTableName));
