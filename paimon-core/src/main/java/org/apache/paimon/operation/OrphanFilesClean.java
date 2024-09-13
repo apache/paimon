@@ -230,8 +230,8 @@ public abstract class OrphanFilesClean implements Serializable {
     }
 
     /**
-     * List directories that contains data files and may clean non Paimon data dirs/files. The
-     * argument level is used to control recursive depth.
+     * List directories that contains data files. The argument level is used to control recursive
+     * depth.
      */
     private List<Path> listFileDirs(Path dir, int level) {
         List<FileStatus> dirs = tryBestListingDirs(dir);
@@ -287,8 +287,8 @@ public abstract class OrphanFilesClean implements Serializable {
 
     /**
      * Retry reading files when {@link IOException} was thrown by the reader. If the exception is
-     * {@link FileNotFoundException}, return null. Finally, if retry times reaches the limits,
-     * rethrow the IOException.
+     * {@link FileNotFoundException}, return default value. Finally, if retry times reaches the
+     * limits, rethrow the IOException.
      */
     protected static <T> T retryReadingFiles(ReaderWithIOException<T> reader, T defaultValue)
             throws IOException {

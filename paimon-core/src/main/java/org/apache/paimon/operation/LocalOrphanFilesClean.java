@@ -28,7 +28,6 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.SerializableConsumer;
-import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
 
@@ -54,7 +53,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 import static org.apache.paimon.utils.ThreadPoolUtils.randomlyExecute;
 
-/** Flink {@link OrphanFilesClean}, it will use thread pool to execute deletion. */
+/** Local {@link OrphanFilesClean}, it will use thread pool to execute deletion. */
 public class LocalOrphanFilesClean extends OrphanFilesClean {
 
     private final ThreadPoolExecutor executor;
@@ -83,31 +82,24 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
     public List<Path> clean() throws IOException, ExecutionException, InterruptedException {
         List<String> branches = validBranches();
 
+        // specially handle to clear snapshot dir
+        cleanSnapshotDir(branches, deleteFiles::add);
+
+        // delete candidate files
         Map<String, Path> candidates = getCandidateDeletingFiles();
-        Set<String> usedFiles = new HashSet<>();
 
-        for (String branch : branches) {
-            FileStoreTable branchTable = table.switchToBranch(branch);
-            SnapshotManager snapshotManager = branchTable.snapshotManager();
+        // find used files
+        Set<String> usedFiles =
+                branches.stream()
+                        .flatMap(branch -> getUsedFiles(branch).stream())
+                        .collect(Collectors.toSet());
 
-            // specially handle the snapshot directory
-            List<Path> nonSnapshotFiles = snapshotManager.tryGetNonSnapshotFiles(this::oldEnough);
-            nonSnapshotFiles.forEach(fileCleaner);
-            deleteFiles.addAll(nonSnapshotFiles);
-
-            // specially handle the changelog directory
-            List<Path> nonChangelogFiles = snapshotManager.tryGetNonChangelogFiles(this::oldEnough);
-            nonChangelogFiles.forEach(fileCleaner);
-            deleteFiles.addAll(nonChangelogFiles);
-
-            usedFiles.addAll(getUsedFiles(branch));
-        }
-
+        // delete unused files
         Set<String> deleted = new HashSet<>(candidates.keySet());
         deleted.removeAll(usedFiles);
         deleted.stream().map(candidates::get).forEach(fileCleaner);
-
         deleteFiles.addAll(deleted.stream().map(candidates::get).collect(Collectors.toList()));
+
         return deleteFiles;
     }
 
