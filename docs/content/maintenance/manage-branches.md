@@ -38,7 +38,7 @@ Paimon supports creating branch from a specific tag or snapshot, or just creatin
 
 {{< tabs "create-branches" >}}
 
-{{< tab "Flink" >}}
+{{< tab "Flink SQL" >}}
 
 Run the following sql:
 
@@ -89,7 +89,7 @@ You can delete branch by its name.
 
 {{< tabs "delete-branches" >}}
 
-{{< tab "Flink" >}}
+{{< tab "Flink SQL" >}}
 
 Run the following sql:
 
@@ -173,7 +173,7 @@ Fast-Forward the custom branch to main will delete all the snapshots, tags and s
 
 {{< tabs "fast_forward" >}}
 
-{{< tab "Flink" >}}
+{{< tab "Flink SQL" >}}
 
 ```sql
 CALL sys.fast_forward('default.T', 'branch1');
