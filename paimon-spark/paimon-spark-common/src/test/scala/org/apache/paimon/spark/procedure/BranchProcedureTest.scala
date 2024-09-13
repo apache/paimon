@@ -24,10 +24,10 @@ import org.apache.spark.sql.{Dataset, Row}
 import org.apache.spark.sql.execution.streaming.MemoryStream
 import org.apache.spark.sql.streaming.StreamTest
 
-class CreateAndDeleteBranchProcedureTest extends PaimonSparkTestBase with StreamTest {
+class BranchProcedureTest extends PaimonSparkTestBase with StreamTest {
 
   import testImplicits._
-  test("Paimon Procedure: create and delete branch") {
+  test("Paimon Procedure: create, query, write and delete branch") {
     failAfter(streamingTimeout) {
       withTempDir {
         checkpointDir =>
@@ -86,12 +86,33 @@ class CreateAndDeleteBranchProcedureTest extends PaimonSparkTestBase with Stream
             val branchManager = table.branchManager()
             assert(branchManager.branchExists("test_branch"))
 
+            // query from branch
+            checkAnswer(
+              spark.sql("SELECT * FROM `T$branch_test_branch` ORDER BY a"),
+              Row(1, "a") :: Row(2, "b") :: Nil
+            )
+            checkAnswer(
+              spark.read.format("paimon").option("branch", "test_branch").table("T").orderBy("a"),
+              Row(1, "a") :: Row(2, "b") :: Nil
+            )
+
+            // update branch
+            spark.sql("INSERT INTO `T$branch_test_branch` VALUES (3, 'c')")
+            checkAnswer(
+              spark.sql("SELECT * FROM `T$branch_test_branch` ORDER BY a"),
+              Row(1, "a") :: Row(2, "b") :: Row(3, "c") :: Nil
+            )
+
             // create empty branch
             checkAnswer(
               spark.sql(
                 "CALL paimon.sys.create_branch(table => 'test.T', branch => 'empty_branch')"),
               Row(true) :: Nil)
             assert(branchManager.branchExists("empty_branch"))
+            checkAnswer(
+              spark.sql("SELECT * FROM `T$branch_empty_branch` ORDER BY a"),
+              Nil
+            )
 
             // delete branch
             checkAnswer(
@@ -99,6 +120,9 @@ class CreateAndDeleteBranchProcedureTest extends PaimonSparkTestBase with Stream
                 "CALL paimon.sys.delete_branch(table => 'test.T', branch => 'test_branch')"),
               Row(true) :: Nil)
             assert(!branchManager.branchExists("test_branch"))
+            intercept[Exception] {
+              spark.sql("SELECT * FROM `T$branch_test_branch` ORDER BY a")
+            }
 
           } finally {
             stream.stop()
