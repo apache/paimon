@@ -24,6 +24,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.SinkRecord;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -253,7 +254,10 @@ public class GlobalFullCompactionSinkWrite extends StoreSinkWriteImpl {
                                 bucket.f0, bucket.f1, longToBytes(entry.getKey())));
             }
         }
-        state.put(tableName, WRITTEN_BUCKETS_STATE_NAME, writtenBucketList);
+        Preconditions.checkNotNull(
+                        state,
+                        "State is null for GlobalFullCompactionSinkWrite. This is unexpected.")
+                .put(tableName, WRITTEN_BUCKETS_STATE_NAME, writtenBucketList);
     }
 
     private static byte[] longToBytes(long l) {

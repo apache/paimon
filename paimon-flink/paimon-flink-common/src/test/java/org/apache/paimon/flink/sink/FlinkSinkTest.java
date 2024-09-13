@@ -103,7 +103,8 @@ public class FlinkSinkTest {
                         null,
                         null,
                         null);
-        operator.initStateAndWriter(context, (a, b, c) -> true, new IOManagerAsync(), "123");
+        operator.initStateAndWriterWithState(
+                context, (a, b, c) -> true, new IOManagerAsync(), "123");
         return ((KeyValueFileStoreWrite) ((StoreSinkWriteImpl) operator.write).write.getWrite())
                 .bufferSpillable();
     }

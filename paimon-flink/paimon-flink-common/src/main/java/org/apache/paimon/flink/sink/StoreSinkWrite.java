@@ -87,7 +87,7 @@ public interface StoreSinkWrite {
         StoreSinkWrite provide(
                 FileStoreTable table,
                 String commitUser,
-                StoreSinkWriteState state,
+                @Nullable StoreSinkWriteState state,
                 IOManager ioManager,
                 @Nullable MemorySegmentPool memoryPool,
                 @Nullable MetricGroup metricGroup);

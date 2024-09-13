@@ -22,6 +22,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
@@ -91,6 +92,8 @@ public class AsyncLookupSinkWrite extends StoreSinkWriteImpl {
                                 partitions.getKey(), bucket, new byte[0]));
             }
         }
-        state.put(tableName, ACTIVE_BUCKETS_STATE_NAME, activeBucketsList);
+        Preconditions.checkNotNull(
+                        state, "State is null for AsyncLookupSinkWrite. This is unexpected.")
+                .put(tableName, ACTIVE_BUCKETS_STATE_NAME, activeBucketsList);
     }
 }

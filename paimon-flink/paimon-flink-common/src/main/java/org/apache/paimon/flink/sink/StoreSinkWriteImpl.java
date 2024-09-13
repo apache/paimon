@@ -24,6 +24,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.memory.MemorySegmentPool;
@@ -53,7 +54,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     private static final Logger LOG = LoggerFactory.getLogger(StoreSinkWriteImpl.class);
 
     protected final String commitUser;
-    protected final StoreSinkWriteState state;
+    @Nullable protected final StoreSinkWriteState state;
     private final IOManagerImpl paimonIOManager;
     private final boolean ignorePreviousFiles;
     private final boolean waitCompaction;
@@ -68,7 +69,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     public StoreSinkWriteImpl(
             FileStoreTable table,
             String commitUser,
-            StoreSinkWriteState state,
+            @Nullable StoreSinkWriteState state,
             IOManager ioManager,
             boolean ignorePreviousFiles,
             boolean waitCompaction,
@@ -91,7 +92,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     public StoreSinkWriteImpl(
             FileStoreTable table,
             String commitUser,
-            StoreSinkWriteState state,
+            @Nullable StoreSinkWriteState state,
             IOManager ioManager,
             boolean ignorePreviousFiles,
             boolean waitCompaction,
@@ -114,7 +115,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     private StoreSinkWriteImpl(
             FileStoreTable table,
             String commitUser,
-            StoreSinkWriteState state,
+            @Nullable StoreSinkWriteState state,
             IOManager ioManager,
             boolean ignorePreviousFiles,
             boolean waitCompaction,
@@ -139,11 +140,16 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                 !(memoryPool != null && memoryPoolFactory != null),
                 "memoryPool and memoryPoolFactory cannot be set at the same time.");
 
+        ManifestCacheFilter manifestFilter;
+        if (state == null) {
+            manifestFilter = (part, bucket) -> true;
+        } else {
+            manifestFilter =
+                    (part, bucket) -> state.stateValueFilter().filter(table.name(), part, bucket);
+        }
+
         TableWriteImpl<?> tableWrite =
-                table.newWrite(
-                                commitUser,
-                                (part, bucket) ->
-                                        state.stateValueFilter().filter(table.name(), part, bucket))
+                table.newWrite(commitUser, manifestFilter)
                         .withIOManager(paimonIOManager)
                         .withIgnorePreviousFiles(ignorePreviousFiles)
                         .withExecutionMode(isStreamingMode)
