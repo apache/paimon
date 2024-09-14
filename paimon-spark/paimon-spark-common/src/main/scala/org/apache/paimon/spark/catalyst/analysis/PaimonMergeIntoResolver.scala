@@ -27,36 +27,20 @@ object PaimonMergeIntoResolver extends PaimonMergeIntoResolverBase {
 
   def resolveNotMatchedBySourceActions(
       merge: MergeIntoTable,
-      target: LogicalPlan,
-      source: LogicalPlan,
       resolve: (Expression, LogicalPlan) => Expression): Seq[MergeAction] = {
-    val fakeSource = Project(source.output, source)
-
-    def resolveMergeAction(action: MergeAction): MergeAction = {
-      action match {
-        case DeleteAction(condition) =>
-          val resolvedCond = condition.map(resolve(_, target))
-          DeleteAction(resolvedCond)
-        case UpdateAction(condition, assignments) =>
-          val resolvedCond = condition.map(resolve(_, target))
-          val resolvedAssignments = assignments.map {
-            assignment =>
-              assignment.copy(
-                key = resolve(assignment.key, target),
-                value = resolve(assignment.value, target))
-          }
-          UpdateAction(resolvedCond, resolvedAssignments)
-        case UpdateStarAction(condition) =>
-          val resolvedCond = condition.map(resolve(_, target))
-          val resolvedAssignments = target.output.map {
-            attr =>
-              Assignment(attr, resolve(UnresolvedAttribute.quotedString(attr.name), fakeSource))
-          }
-          UpdateAction(resolvedCond, resolvedAssignments)
-      }
+    merge.notMatchedBySourceActions.map {
+      case DeleteAction(condition) =>
+        // The condition must be from the target table
+        val resolvedCond = condition.map(resolveCondition(resolve, _, merge, TARGET_ONLY))
+        DeleteAction(resolvedCond)
+      case UpdateAction(condition, assignments) =>
+        // The condition and value must be from the target table
+        val resolvedCond = condition.map(resolveCondition(resolve, _, merge, TARGET_ONLY))
+        val resolvedAssignments = resolveAssignments(resolve, assignments, merge, TARGET_ONLY)
+        UpdateAction(resolvedCond, resolvedAssignments)
+      case action =>
+        throw new RuntimeException(s"Can't recognize this action: $action")
     }
-
-    merge.notMatchedBySourceActions.map(resolveMergeAction)
   }
 
   def build(

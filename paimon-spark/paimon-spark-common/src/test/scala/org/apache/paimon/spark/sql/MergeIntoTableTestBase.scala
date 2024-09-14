@@ -497,6 +497,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
         Row(1, 10, Row("x1", "y")) :: Row(2, 20, Row("x", "y")) :: Nil)
     }
   }
+
   test(s"Paimon MergeInto: update on source eq target condition") {
     withTable("source", "target") {
       Seq((1, 100, "c11"), (3, 300, "c33")).toDF("a", "b", "c").createOrReplaceTempView("source")
@@ -515,6 +516,43 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
       checkAnswer(
         sql("SELECT * FROM target ORDER BY a, b"),
         Row(1, 100, "c11") :: Row(2, 20, "c2") :: Nil)
+    }
+  }
+
+  test(s"Paimon MergeInto: merge into with alias") {
+    withTable("source", "target") {
+
+      Seq((1, 100, "c11"), (3, 300, "c33"), (5, 500, "c55"), (7, 700, "c77"), (9, 900, "c99"))
+        .toDF("a", "b", "c")
+        .createOrReplaceTempView("source")
+
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
+      spark.sql(
+        "INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2'), (3, 30, 'c3'), (4, 40, 'c4'), (5, 50, 'c5')")
+
+      spark.sql(s"""
+                   |MERGE INTO target t
+                   |USING source s
+                   |ON t.a = s.a
+                   |WHEN MATCHED AND t.a = 5 THEN
+                   |UPDATE SET t.b = s.b + t.b
+                   |WHEN MATCHED AND s.c > 'c2' THEN
+                   |UPDATE SET *
+                   |WHEN MATCHED THEN
+                   |DELETE
+                   |WHEN NOT MATCHED AND s.c > 'c9' THEN
+                   |INSERT (t.a, t.b, t.c) VALUES (s.a, s.b * 1.1, s.c)
+                   |WHEN NOT MATCHED THEN
+                   |INSERT *
+                   |""".stripMargin)
+
+      checkAnswer(
+        spark.sql("SELECT * FROM target ORDER BY a, b"),
+        Row(2, 20, "c2") :: Row(3, 300, "c33") :: Row(4, 40, "c4") :: Row(5, 550, "c5") :: Row(
+          7,
+          700,
+          "c77") :: Row(9, 990, "c99") :: Nil
+      )
     }
   }
 }
