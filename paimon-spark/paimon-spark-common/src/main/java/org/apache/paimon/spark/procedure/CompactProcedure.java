@@ -280,6 +280,7 @@ public class CompactProcedure extends BaseProcedure {
                         .collect(Collectors.toList());
 
         if (partitionBuckets.isEmpty()) {
+            LOG.info("Partition bucket is empty, no compact job to execute.");
             return;
         }
 
@@ -360,7 +361,7 @@ public class CompactProcedure extends BaseProcedure {
                             .collect(Collectors.toList());
         }
         if (compactionTasks.isEmpty()) {
-            System.out.println("compaction task is empty.");
+            LOG.info("Task plan is empty, no compact job to execute.");
             return;
         }
 
