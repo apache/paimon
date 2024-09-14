@@ -46,6 +46,15 @@ public abstract class TableActionBase extends ActionBase {
             String databaseName,
             String tableName,
             Map<String, String> catalogConfig) {
+        this(warehouse, databaseName, tableName, catalogConfig, Collections.emptyMap());
+    }
+
+    TableActionBase(
+            String warehouse,
+            String databaseName,
+            String tableName,
+            Map<String, String> catalogConfig,
+            Map<String, String> tableConf) {
         super(warehouse, catalogConfig);
         identifier = new Identifier(databaseName, tableName);
         try {
@@ -53,6 +62,11 @@ public abstract class TableActionBase extends ActionBase {
         } catch (Catalog.TableNotExistException e) {
             throw new RuntimeException(e);
         }
+        table = table.copy(dynamicOptions(tableConf));
+    }
+
+    protected Map<String, String> dynamicOptions(Map<String, String> tableConf) {
+        return tableConf;
     }
 
     /** Sink {@link DataStream} dataStream to table with Flink Table API in batch environment. */
