@@ -70,4 +70,7 @@ public interface EventParser<T> {
 
         EventParser<T> create();
     }
+
+    /** generate values for computed columns. */
+    void evalComputedColumns(List<DataField> fields);
 }

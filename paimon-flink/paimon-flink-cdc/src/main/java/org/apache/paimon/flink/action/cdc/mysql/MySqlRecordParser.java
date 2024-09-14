@@ -20,7 +20,6 @@ package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
-import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils;
 import org.apache.paimon.flink.action.cdc.mysql.format.DebeziumEvent;
@@ -74,7 +73,6 @@ public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichC
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ZoneId serverTimeZone;
-    private final List<ComputedColumn> computedColumns;
     private final TypeMapping typeMapping;
     private final boolean isDebeziumSchemaCommentsEnabled;
     private DebeziumEvent root;
@@ -88,10 +86,8 @@ public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichC
 
     public MySqlRecordParser(
             Configuration mySqlConfig,
-            List<ComputedColumn> computedColumns,
             TypeMapping typeMapping,
             CdcMetadataConverter[] metadataConverters) {
-        this.computedColumns = computedColumns;
         this.typeMapping = typeMapping;
         this.metadataConverters = metadataConverters;
         objectMapper
@@ -245,13 +241,6 @@ public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichC
                             objectValue,
                             serverTimeZone);
             resultMap.put(fieldName, newValue);
-        }
-
-        // generate values of computed columns
-        for (ComputedColumn computedColumn : computedColumns) {
-            resultMap.put(
-                    computedColumn.columnName(),
-                    computedColumn.eval(resultMap.get(computedColumn.fieldReference())));
         }
 
         for (CdcMetadataConverter metadataConverter : metadataConverters) {

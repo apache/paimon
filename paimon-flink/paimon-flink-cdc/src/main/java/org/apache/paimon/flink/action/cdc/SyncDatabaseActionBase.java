@@ -35,7 +35,6 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -58,6 +57,8 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
     @Nullable protected String excludingTables;
     protected List<FileStoreTable> tables = new ArrayList<>();
     protected Map<String, List<String>> partitionKeyMultiple = new HashMap<>();
+    protected List<String> computedColumnArgs = new ArrayList<>();
+    protected Map<String, List<ComputedColumn>> computedColumnsMap = new HashMap<>();
 
     public SyncDatabaseActionBase(
             String warehouse,
@@ -119,6 +120,11 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
         return this;
     }
 
+    public SyncDatabaseActionBase withComputedColumnArgs(List<String> computedColumnArgs) {
+        this.computedColumnArgs = computedColumnArgs;
+        return this;
+    }
+
     @Override
     protected void validateCaseSensitivity() {
         Catalog.validateCaseInsensitive(allowUpperCase, "Database", database);
@@ -128,8 +134,7 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
 
     @Override
     protected FlatMapFunction<CdcSourceRecord, RichCdcMultiplexRecord> recordParse() {
-        return syncJobHandler.provideRecordParser(
-                Collections.emptyList(), typeMapping, metadataConverters);
+        return syncJobHandler.provideRecordParser(typeMapping, metadataConverters);
     }
 
     public SyncDatabaseActionBase withPartitionKeyMultiple(
@@ -161,13 +166,15 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
         } catch (Catalog.DatabaseNotExistException e) {
             throw new RuntimeException(e);
         }
+        List<String> computedColumnArgs = this.computedColumnArgs;
         return () ->
                 new RichCdcMultiplexRecordEventParser(
                         schemaBuilder,
                         includingPattern,
                         excludingPattern,
                         tableNameConverter,
-                        createdTables);
+                        createdTables,
+                        computedColumnArgs);
     }
 
     @Override
@@ -182,6 +189,7 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
                 .withTables(tables)
                 .withMode(mode)
                 .withTableOptions(tableConfig)
+                .withComputedColumnArgs(computedColumnArgs)
                 .build();
     }
 }

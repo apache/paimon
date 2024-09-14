@@ -76,4 +76,7 @@ public class RichEventParser implements EventParser<RichCdcRecord> {
             return Collections.emptyList();
         }
     }
+
+    @Override
+    public void evalComputedColumns(List<DataField> fields) {}
 }

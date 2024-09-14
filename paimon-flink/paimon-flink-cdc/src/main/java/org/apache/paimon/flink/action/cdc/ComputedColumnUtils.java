@@ -37,7 +37,10 @@ public class ComputedColumnUtils {
         return buildComputedColumns(computedColumnArgs, physicFields, true);
     }
 
-    /** The caseSensitive only affects check. We don't change field names at building phase. */
+    /**
+     * Filter computed columns based on table columns, The caseSensitive only affects check. We
+     * don't change field names at building phase.
+     */
     public static List<ComputedColumn> buildComputedColumns(
             List<String> computedColumnArgs, List<DataField> physicFields, boolean caseSensitive) {
         Map<String, DataType> typeMapping =
@@ -69,12 +72,15 @@ public class ComputedColumnUtils {
             String[] args = expression.substring(left + 1, right).split(",");
             checkArgument(args.length >= 1, "Computed column needs at least one argument.");
 
-            computedColumns.add(
-                    new ComputedColumn(
-                            columnName,
-                            Expression.create(typeMapping, caseSensitive, exprName, args)));
+            String fieldReference = caseSensitive ? args[0] : args[0].toLowerCase();
+            // The cast function is constant function and doesn't reference the columns of the table
+            if ("cast".equals(exprName) || typeMapping.containsKey(fieldReference)) {
+                computedColumns.add(
+                        new ComputedColumn(
+                                columnName,
+                                Expression.create(typeMapping, caseSensitive, exprName, args)));
+            }
         }
-
         return computedColumns;
     }
 }

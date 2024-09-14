@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action.cdc.format.debezium;
 
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
-import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.format.AbstractJsonRecordParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
@@ -82,8 +81,8 @@ public class DebeziumJsonRecordParser extends AbstractJsonRecordParser {
     private final Map<String, String> classNames = new HashMap<>();
     private final Map<String, Map<String, String>> parameters = new HashMap<>();
 
-    public DebeziumJsonRecordParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        super(typeMapping, computedColumns);
+    public DebeziumJsonRecordParser(TypeMapping typeMapping) {
+        super(typeMapping);
     }
 
     @Override
@@ -210,9 +209,6 @@ public class DebeziumJsonRecordParser extends AbstractJsonRecordParser {
                     DebeziumSchemaUtils.toDataType(
                             debeziumType, className, parameters.get(fieldName)));
         }
-
-        evalComputedColumns(resultMap, rowTypeBuilder);
-
         return resultMap;
     }
 

@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb.strategy;
 
-import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.mongodb.SchemaAcquisitionMode;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.DataTypes;
@@ -77,10 +76,7 @@ public interface MongoVersionStrategy {
      * @throws JsonProcessingException If there's an error during JSON processing.
      */
     default Map<String, String> getExtractRow(
-            JsonNode jsonNode,
-            RowType.Builder rowTypeBuilder,
-            List<ComputedColumn> computedColumns,
-            Configuration mongodbConfig)
+            JsonNode jsonNode, RowType.Builder rowTypeBuilder, Configuration mongodbConfig)
             throws JsonProcessingException {
         SchemaAcquisitionMode mode =
                 SchemaAcquisitionMode.valueOf(mongodbConfig.getString(START_MODE).toUpperCase());
@@ -103,10 +99,9 @@ public interface MongoVersionStrategy {
                         document.toString(),
                         mongodbConfig.getString(PARSER_PATH),
                         mongodbConfig.getString(FIELD_NAME),
-                        computedColumns,
                         rowTypeBuilder);
             case DYNAMIC:
-                return parseAndTypeJsonRow(document.toString(), rowTypeBuilder, computedColumns);
+                return parseAndTypeJsonRow(document.toString(), rowTypeBuilder);
             default:
                 throw new RuntimeException("Unsupported extraction mode: " + mode);
         }
@@ -114,18 +109,14 @@ public interface MongoVersionStrategy {
 
     /** Parses and types a JSON row based on the given parameters. */
     default Map<String, String> parseAndTypeJsonRow(
-            String evaluate, RowType.Builder rowTypeBuilder, List<ComputedColumn> computedColumns) {
+            String evaluate, RowType.Builder rowTypeBuilder) {
         Map<String, String> parsedRow = JsonSerdeUtil.parseJsonMap(evaluate, String.class);
-        return processParsedData(parsedRow, rowTypeBuilder, computedColumns);
+        return processParsedData(parsedRow, rowTypeBuilder);
     }
 
     /** Parses fields from a JSON record based on the given parameters. */
     static Map<String, String> parseFieldsFromJsonRecord(
-            String record,
-            String fieldPaths,
-            String fieldNames,
-            List<ComputedColumn> computedColumns,
-            RowType.Builder rowTypeBuilder) {
+            String record, String fieldPaths, String fieldNames, RowType.Builder rowTypeBuilder) {
         String[] columnNames = fieldNames.split(",");
         String[] parseNames = fieldPaths.split(",");
         Map<String, String> parsedRow = new HashMap<>();
@@ -135,30 +126,19 @@ public interface MongoVersionStrategy {
             parsedRow.put(columnNames[i], Optional.ofNullable(evaluate).orElse("{}"));
         }
 
-        return processParsedData(parsedRow, rowTypeBuilder, computedColumns);
+        return processParsedData(parsedRow, rowTypeBuilder);
     }
 
     /** Processes the parsed data to generate the result map and update field types. */
     static Map<String, String> processParsedData(
-            Map<String, String> parsedRow,
-            RowType.Builder rowTypeBuilder,
-            List<ComputedColumn> computedColumns) {
-        int initialCapacity = parsedRow.size() + computedColumns.size();
+            Map<String, String> parsedRow, RowType.Builder rowTypeBuilder) {
+        int initialCapacity = parsedRow.size();
         Map<String, String> resultMap = new HashMap<>(initialCapacity);
 
         parsedRow.forEach(
                 (column, value) -> {
                     rowTypeBuilder.field(column, DataTypes.STRING());
                     resultMap.put(column, value);
-                });
-        computedColumns.forEach(
-                computedColumn -> {
-                    String columnName = computedColumn.columnName();
-                    String fieldReference = computedColumn.fieldReference();
-                    String computedValue = computedColumn.eval(parsedRow.get(fieldReference));
-
-                    resultMap.put(columnName, computedValue);
-                    rowTypeBuilder.field(columnName, computedColumn.columnType());
                 });
         return resultMap;
     }

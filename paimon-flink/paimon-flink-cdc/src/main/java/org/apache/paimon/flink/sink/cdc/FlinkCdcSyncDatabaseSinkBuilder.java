@@ -29,6 +29,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -37,6 +38,7 @@ import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -78,6 +80,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     private String database;
     private MultiTablesSinkMode mode;
     private String commitUser;
+    protected List<String> computedColumnArgs = new ArrayList<>();
 
     public FlinkCdcSyncDatabaseSinkBuilder<T> withInput(DataStream<T> input) {
         this.input = input;
@@ -97,6 +100,12 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
 
     public FlinkCdcSyncDatabaseSinkBuilder<T> withTableOptions(Map<String, String> options) {
         return withTableOptions(Options.fromMap(options));
+    }
+
+    public FlinkCdcSyncDatabaseSinkBuilder<T> withComputedColumnArgs(
+            List<String> computedColumnArgs) {
+        this.computedColumnArgs = computedColumnArgs;
+        return this;
     }
 
     public FlinkCdcSyncDatabaseSinkBuilder<T> withTableOptions(Options options) {
@@ -141,7 +150,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                 input.forward()
                         .process(
                                 new CdcDynamicTableParsingProcessFunction<>(
-                                        database, catalogLoader, parserFactory))
+                                        database, catalogLoader, parserFactory, getTableFields()))
                         .name("Side Output")
                         .setParallelism(input.getParallelism());
 
@@ -183,12 +192,23 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         new CdcUnawareBucketSink(table, parallelism).sinkFrom(parsed);
     }
 
+    public Map<String, List<DataField>> getTableFields() {
+        Map<String, List<DataField>> dataFiledMap = new HashMap<>();
+        tables.forEach(
+                table -> {
+                    dataFiledMap.put(table.name(), table.schema().fields());
+                });
+        return dataFiledMap;
+    }
+
     private void buildDividedCdcSink() {
         Preconditions.checkNotNull(tables);
 
         SingleOutputStreamOperator<Void> parsed =
                 input.forward()
-                        .process(new CdcMultiTableParsingProcessFunction<>(parserFactory))
+                        .process(
+                                new CdcMultiTableParsingProcessFunction<>(
+                                        parserFactory, getTableFields()))
                         .name("Side Output")
                         .setParallelism(input.getParallelism());
 

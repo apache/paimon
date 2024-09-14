@@ -16,26 +16,5 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.format;
-
-import org.apache.paimon.flink.action.cdc.TypeMapping;
-
-/**
- * Represents a factory for creating instances of {@link AbstractRecordParser}.
- *
- * <p>This interface provides a method to create a new RecordParser with specific configurations
- * such as case sensitivity, table name conversion, and computed columns.
- *
- * @see AbstractRecordParser
- */
-@FunctionalInterface
-public interface RecordParserFactory {
-
-    /**
-     * Creates a new instance of {@link AbstractRecordParser} with the specified configurations.
-     *
-     * @param typeMapping Data type mapping options.
-     * @return A new instance of {@link AbstractRecordParser}.
-     */
-    AbstractRecordParser createParser(TypeMapping typeMapping);
-}
+{"database":"paimon_sync_database_computedcolumn","table":"t1","type":"insert","ts":1596684883,"xid":7125,"xoffset":0,"data":{"id":101,"name":"scooter","description":"Small 2-wheel scooter","weight":3.14},"primary_key_columns": ["id"]}
+{"database":"paimon_sync_database_computedcolumn","table":"t1","type":"insert","ts":1596684883,"xid":7125,"xoffset":1,"data":{"id":102,"name":"car battery","description":"12V car battery","weight":8.1},"primary_key_columns": ["id"]}

@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.action.cdc.format.maxwell;
 
-import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.format.AbstractJsonRecordParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
@@ -50,8 +49,8 @@ public class MaxwellRecordParser extends AbstractJsonRecordParser {
     private static final String OP_UPDATE = "update";
     private static final String OP_DELETE = "delete";
 
-    public MaxwellRecordParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        super(typeMapping, computedColumns);
+    public MaxwellRecordParser(TypeMapping typeMapping) {
+        super(typeMapping);
     }
 
     @Override
