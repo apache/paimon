@@ -1,6 +1,6 @@
 ---
 title: "Catalog API"
-weight: 3
+weight: 4
 type: docs
 aliases:
 - /api/catalog-api.html
