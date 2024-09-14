@@ -1381,6 +1381,34 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Test
+    public void testStreamingReadOptimizedTable() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(options -> options.set(TARGET_FILE_SIZE, new MemorySize(1)));
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowDataWithKind(RowKind.INSERT, 1, 10, 100L));
+        write.compact(binaryRow(1), 0, true);
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        ReadOptimizedTable roTable = new ReadOptimizedTable(table);
+        Function<InternalRow, String> rowDataToString =
+                row ->
+                        internalRowToString(
+                                row,
+                                DataTypes.ROW(
+                                        DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()));
+
+        TableRead read = roTable.newRead();
+        List<String> result = getResult(read, roTable.newScan().plan().splits(), rowDataToString);
+        assertThat(result).containsExactlyInAnyOrder("+I[1, 10, 100]");
+
+        assertThatThrownBy(roTable::newStreamScan)
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Unsupported streaming scan for read optimized table");
+    }
+
+    @Test
     public void testReadDeletionVectorTable() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
