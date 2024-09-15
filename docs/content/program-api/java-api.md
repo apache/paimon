@@ -725,3 +725,110 @@ public class StreamWriteTable {
 | <=           | org.apache.paimon.predicate.PredicateBuilder.LessOrEqual     |
 | >            | org.apache.paimon.predicate.PredicateBuilder.GreaterThan     |
 | >=           | org.apache.paimon.predicate.PredicateBuilder.GreaterOrEqual  |
+
+## Batch Delete
+
+For all engines, you can delete partitions, but only the `Deduplication` engine can delete rows.
+```java
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.operation.FileStoreCommit;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowKind;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+
+import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
+import static org.apache.paimon.CoreOptions.createCommitUser;
+
+public class DeleteTable {
+    public static void main(String[] args) throws Exception {
+        DeleteTable t = new DeleteTable();
+        Table pkTable = t.createPKTable("my_db", "my_table");
+        t.deletePartition(pkTable);
+        t.deleteRecord(pkTable);
+    }
+
+    public Table createPKTable(String db, String table) throws Exception {
+        Catalog catalog = CreateCatalog.createFilesystemCatalog();
+        catalog.createDatabase(db, true);
+        Identifier tableId = Identifier.create(db, table);
+        Schema.Builder builder = Schema.newBuilder();
+        builder.column("id", DataTypes.BIGINT());
+        builder.column("a", DataTypes.INT());
+        builder.column("b", DataTypes.STRING());
+        builder.column("dt", DataTypes.STRING());
+        builder.primaryKey("id", "dt");
+        builder.partitionKeys("dt");
+        builder.option(CoreOptions.MERGE_ENGINE.key(), DEDUPLICATE.toString());
+        builder.option(CoreOptions.BUCKET.key(), "3");
+        Schema schema = builder.build();
+        if (catalog.tableExists(tableId)) {
+            catalog.dropTable(tableId, true);
+        }
+        catalog.createTable(tableId, schema, false);
+        return catalog.getTable(tableId);
+    }
+
+    public void deletePartition(Table t) throws Exception {
+        // 1. Read the partitions of the table to be deleted using a predicate
+        FileStoreTable storeTable = (FileStoreTable)t;
+        PredicateBuilder predicateBuilder = new PredicateBuilder(storeTable.rowType());
+        Predicate predicate = predicateBuilder.greaterOrEqual(3, BinaryString.fromString("20230503"));
+        InnerTableScan innerTableScan = storeTable.newScan().withFilter(predicate);
+        List<BinaryRow> binaryRows = innerTableScan.listPartitions();
+        List<Map<String, String>> partitions = new ArrayList<>();
+        for (BinaryRow r:binaryRows) {
+            BinaryString dt = r.getString(0);
+            partitions.add(Collections.singletonMap("dt", dt.toString()));
+        }
+        try(FileStoreCommit storeCommit = storeTable.store().newCommit(createCommitUser(storeTable.coreOptions().toConfiguration()))) {
+            storeCommit.dropPartitions(partitions, Long.MAX_VALUE);
+        }
+    }
+
+    public void deleteRecord(Table t) throws Exception {
+        // 1. Read the rows to be deleted
+        FileStoreTable storeTable = (FileStoreTable)t;
+        PredicateBuilder predicateBuilder = new PredicateBuilder(storeTable.rowType());
+        Predicate predicate = predicateBuilder.equal(1, 10001);
+        ReadBuilder readBuilder = t.newReadBuilder();
+        RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(storeTable.newScan().withFilter(predicate).plan());
+        BatchWriteBuilder batchWriteBuilder = storeTable.newBatchWriteBuilder();
+        try (BatchTableWrite batchTableWrite = batchWriteBuilder.newWrite()) {
+            reader.forEachRemaining(r -> {
+                // 2. Set the rowKind of the row to DELETE
+                r.setRowKind(RowKind.DELETE);
+                try {
+                    batchTableWrite.write(r);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            });
+            List<CommitMessage> commitMessages = batchTableWrite.prepareCommit();
+            try (BatchTableCommit batchTableCommit = batchWriteBuilder.newCommit()) {
+                batchTableCommit.commit(commitMessages);
+            }
+        }
+    }
+}
+```
