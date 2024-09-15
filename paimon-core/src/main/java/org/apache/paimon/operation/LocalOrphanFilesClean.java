@@ -72,9 +72,6 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
             FileStoreTable table, long olderThanMillis, SerializableConsumer<Path> fileCleaner) {
         super(table, olderThanMillis, fileCleaner);
         this.deleteFiles = new ArrayList<>();
-        //        this.executor =
-        //                createCachedThreadPool(
-        //                        table.coreOptions().deleteFileThreadNum(), "ORPHAN_FILES_CLEAN");
     }
 
     public List<Path> clean() throws IOException, ExecutionException, InterruptedException {
