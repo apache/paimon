@@ -44,21 +44,19 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 import static org.apache.paimon.utils.ThreadPoolUtils.randomlyExecute;
 
 /** Local {@link OrphanFilesClean}, it will use thread pool to execute deletion. */
 public class LocalOrphanFilesClean extends OrphanFilesClean {
 
-    private final ThreadPoolExecutor executor;
+    //    private final ThreadPoolExecutor executor;
 
-    private static final int SHOW_LIMIT = 200;
+    public static final int SHOW_LIMIT = 200;
 
     private final List<Path> deleteFiles;
 
@@ -74,9 +72,9 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
             FileStoreTable table, long olderThanMillis, SerializableConsumer<Path> fileCleaner) {
         super(table, olderThanMillis, fileCleaner);
         this.deleteFiles = new ArrayList<>();
-        this.executor =
-                createCachedThreadPool(
-                        table.coreOptions().deleteFileThreadNum(), "ORPHAN_FILES_CLEAN");
+        //        this.executor =
+        //                createCachedThreadPool(
+        //                        table.coreOptions().deleteFileThreadNum(), "ORPHAN_FILES_CLEAN");
     }
 
     public List<Path> clean() throws IOException, ExecutionException, InterruptedException {
@@ -130,6 +128,8 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
                                 .filter(this::oldEnough)
                                 .map(FileStatus::getPath)
                                 .collect(Collectors.toList());
+        ExecutorService executor =
+                Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
         Iterator<Path> allPaths = randomlyExecute(executor, processor, fileDirs);
         Map<String, Path> result = new HashMap<>();
         while (allPaths.hasNext()) {
@@ -216,6 +216,7 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
     public static String[] executeOrphanFilesClean(List<LocalOrphanFilesClean> tableCleans) {
         ExecutorService executorService =
                 Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+
         List<Future<List<Path>>> tasks = new ArrayList<>();
         for (LocalOrphanFilesClean clean : tableCleans) {
             tasks.add(executorService.submit(clean::clean));

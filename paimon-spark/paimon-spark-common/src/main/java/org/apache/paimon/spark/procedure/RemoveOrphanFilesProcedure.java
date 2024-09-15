@@ -19,11 +19,13 @@
 package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.LocalOrphanFilesClean;
 import org.apache.paimon.operation.OrphanFilesClean;
 import org.apache.paimon.spark.catalog.WithPaimonCatalog;
 import org.apache.paimon.utils.Preconditions;
 
+import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.types.Metadata;
@@ -37,7 +39,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-import static org.apache.paimon.operation.LocalOrphanFilesClean.executeOrphanFilesClean;
 import static org.apache.spark.sql.types.DataTypes.BooleanType;
 import static org.apache.spark.sql.types.DataTypes.IntegerType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
@@ -118,8 +119,26 @@ public class RemoveOrphanFilesProcedure extends BaseProcedure {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+        int parallelism =
+                args.isNullAt(3) ? Runtime.getRuntime().availableProcessors() : args.getInt(3);
+        JavaSparkContext javaSparkContext = new JavaSparkContext(spark().sparkContext());
+        List<Path> rets =
+                javaSparkContext
+                        .parallelize(tableCleans, parallelism)
+                        .mapPartitions(
+                                iterator -> {
+                                    ArrayList<Path> paths = new ArrayList<>();
+                                    while (iterator.hasNext()) {
+                                        LocalOrphanFilesClean fileClean = iterator.next();
+                                        paths.addAll(fileClean.clean());
+                                    }
+                                    return paths.iterator();
+                                })
+                        .collect();
+        String[] result =
+                LocalOrphanFilesClean.showDeletedFiles(rets, LocalOrphanFilesClean.SHOW_LIMIT)
+                        .toArray(new String[0]);
 
-        String[] result = executeOrphanFilesClean(tableCleans);
         List<InternalRow> rows = new ArrayList<>();
         Arrays.stream(result)
                 .forEach(line -> rows.add(newInternalRow(UTF8String.fromString(line))));
