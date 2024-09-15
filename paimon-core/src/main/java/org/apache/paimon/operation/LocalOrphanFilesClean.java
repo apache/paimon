@@ -54,8 +54,6 @@ import static org.apache.paimon.utils.ThreadPoolUtils.randomlyExecute;
 /** Local {@link OrphanFilesClean}, it will use thread pool to execute deletion. */
 public class LocalOrphanFilesClean extends OrphanFilesClean {
 
-    //    private final ThreadPoolExecutor executor;
-
     public static final int SHOW_LIMIT = 200;
 
     private final List<Path> deleteFiles;
