@@ -119,8 +119,7 @@ public class RemoveOrphanFilesProcedure extends BaseProcedure {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-        int parallelism =
-                args.isNullAt(3) ? tableCleans.size() : args.getInt(3);
+        int parallelism = args.isNullAt(3) ? tableCleans.size() : args.getInt(3);
         JavaSparkContext javaSparkContext = new JavaSparkContext(spark().sparkContext());
         List<Path> rets =
                 javaSparkContext
