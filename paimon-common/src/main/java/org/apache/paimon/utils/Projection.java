@@ -26,6 +26,7 @@ import org.apache.paimon.types.RowType;
 import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
@@ -439,7 +440,14 @@ public abstract class Projection {
                 return dataType.copy();
             }
 
-            if (!fieldBuilders.isEmpty() && !projectedFieldIds.isEmpty()) {
+            if (fieldBuilders.isEmpty()) {
+                // can't reach here
+                throw new RuntimeException();
+            }
+
+            if (projectedFieldIds.isEmpty()) {
+                return new RowType(dataType.isNullable(), Collections.emptyList());
+            } else {
                 List<DataField> oldFields = ((RowType) dataType).getFields();
                 List<DataField> fields = new ArrayList<>(fieldBuilders.size());
                 for (int i = 0; i < fieldBuilders.size(); i++) {
@@ -449,8 +457,6 @@ public abstract class Projection {
                     }
                 }
                 return new RowType(dataType.isNullable(), fields);
-            } else {
-                throw new RuntimeException();
             }
         }
     }
