@@ -34,15 +34,16 @@ abstract class PaimonBaseScanBuilder(table: Table)
   with SupportsPushDownRequiredColumns
   with Logging {
 
-  protected var requiredSchema: StructType = SparkTypeUtils.fromPaimonRowType(table.rowType())
+  private var prunedSchema: Option[StructType] = None
 
-  protected var pushed: Array[(Filter, Predicate)] = Array.empty
+  private var pushed: Array[(Filter, Predicate)] = Array.empty
 
   protected var reservedFilters: Array[Filter] = Array.empty
 
   protected var pushDownLimit: Option[Int] = None
 
   override def build(): Scan = {
+    val requiredSchema = prunedSchema.getOrElse(SparkTypeUtils.fromPaimonRowType(table.rowType))
     PaimonScan(table, requiredSchema, pushed.map(_._2), reservedFilters, pushDownLimit)
   }
 
@@ -87,6 +88,6 @@ abstract class PaimonBaseScanBuilder(table: Table)
   }
 
   override def pruneColumns(requiredSchema: StructType): Unit = {
-    this.requiredSchema = requiredSchema
+    this.prunedSchema = Some(requiredSchema)
   }
 }

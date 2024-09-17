@@ -21,6 +21,8 @@ package org.apache.paimon.spark;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.apache.spark.sql.types.Metadata;
+import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 import org.junit.jupiter.api.Test;
 
@@ -31,7 +33,7 @@ import static org.apache.paimon.spark.SparkTypeUtils.toPaimonType;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link SparkTypeUtils}. */
-public class SparkTypeTest {
+public class SparkTypeUtilsTest {
 
     public static final RowType ALL_TYPES =
             RowType.builder(
@@ -106,5 +108,82 @@ public class SparkTypeTest {
         assertThat(sparkType.toString().replace(", ", ",")).isEqualTo(expected);
 
         assertThat(toPaimonType(sparkType)).isEqualTo(ALL_TYPES);
+    }
+
+    @Test
+    public void testPopulateProjection() {
+        RowType rowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "f0", DataTypes.INT()),
+                        DataTypes.FIELD(
+                                1,
+                                "f1",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(0, "f0", DataTypes.INT()),
+                                        DataTypes.FIELD(1, "f1", DataTypes.INT()))),
+                        DataTypes.FIELD(
+                                2,
+                                "f2",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(
+                                                0,
+                                                "f0",
+                                                DataTypes.ROW(
+                                                        DataTypes.FIELD(0, "f0", DataTypes.INT()),
+                                                        DataTypes.FIELD(
+                                                                1, "f1", DataTypes.INT()))))));
+
+        StructType structType =
+                new StructType(
+                        new StructField[] {
+                            new StructField(
+                                    "f0",
+                                    org.apache.spark.sql.types.DataTypes.IntegerType,
+                                    false,
+                                    Metadata.empty()),
+                            new StructField(
+                                    "f1",
+                                    new StructType(
+                                            new StructField[] {
+                                                new StructField(
+                                                        "f0",
+                                                        org.apache.spark.sql.types.DataTypes
+                                                                .IntegerType,
+                                                        false,
+                                                        Metadata.empty()),
+                                                new StructField(
+                                                        "f1",
+                                                        org.apache.spark.sql.types.DataTypes
+                                                                .IntegerType,
+                                                        false,
+                                                        Metadata.empty())
+                                            }),
+                                    false,
+                                    Metadata.empty()),
+                            new StructField(
+                                    "f2",
+                                    new StructType(
+                                            new StructField[] {
+                                                new StructField(
+                                                        "f0",
+                                                        new StructType(
+                                                                new StructField[] {
+                                                                    new StructField(
+                                                                            "f1",
+                                                                            org.apache.spark.sql
+                                                                                    .types.DataTypes
+                                                                                    .IntegerType,
+                                                                            false,
+                                                                            Metadata.empty())
+                                                                }),
+                                                        false,
+                                                        Metadata.empty())
+                                            }),
+                                    false,
+                                    Metadata.empty())
+                        });
+
+        assertThat(SparkTypeUtils.populateProjection(structType, rowType))
+                .isEqualTo(new int[][] {{0}, {1, 0}, {1, 1}, {2, 0, 1}});
     }
 }

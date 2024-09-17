@@ -24,7 +24,6 @@ import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Projection;
-import org.apache.paimon.utils.TypeUtils;
 
 import java.util.Arrays;
 import java.util.Map;
@@ -65,7 +64,7 @@ public class ReadBuilderImpl implements ReadBuilder {
         if (projection == null) {
             return table.rowType();
         }
-        return TypeUtils.project(table.rowType(), Projection.of(projection).toTopLevelIndexes());
+        return Projection.of(projection).project(table.rowType());
     }
 
     @Override

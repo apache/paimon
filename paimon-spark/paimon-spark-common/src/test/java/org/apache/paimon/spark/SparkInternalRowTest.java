@@ -45,7 +45,7 @@ import scala.Function1;
 import scala.collection.JavaConverters;
 
 import static org.apache.paimon.data.BinaryString.fromString;
-import static org.apache.paimon.spark.SparkTypeTest.ALL_TYPES;
+import static org.apache.paimon.spark.SparkTypeUtilsTest.ALL_TYPES;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link SparkInternalRow}. */

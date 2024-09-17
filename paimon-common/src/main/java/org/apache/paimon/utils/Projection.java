@@ -27,13 +27,12 @@ import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.ListIterator;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
-
-import static org.apache.paimon.types.DataTypeRoot.ROW;
 
 /**
  * {@link Projection} represents a list of (possibly nested) indexes that can be used to project
@@ -238,28 +237,18 @@ public abstract class Projection {
 
         @Override
         public RowType project(RowType rowType) {
-            final List<DataField> updatedFields = new ArrayList<>();
-            Set<String> nameDomain = new HashSet<>();
-            int duplicateCount = 0;
-            for (int[] indexPath : this.projection) {
-                DataField field = rowType.getFields().get(indexPath[0]);
-                StringBuilder builder =
-                        new StringBuilder(rowType.getFieldNames().get(indexPath[0]));
-                for (int index = 1; index < indexPath.length; index++) {
-                    Preconditions.checkArgument(
-                            field.type().getTypeRoot() == ROW, "Row data type expected.");
-                    RowType rowtype = ((RowType) field.type());
-                    builder.append("_").append(rowtype.getFieldNames().get(indexPath[index]));
-                    field = rowtype.getFields().get(indexPath[index]);
+            ProjectedDataTypeBuilder builder = new ProjectedDataTypeBuilder(rowType);
+            for (int[] path : projection) {
+                ProjectedDataTypeBuilder current = builder;
+                for (int i = 0; i < path.length; i++) {
+                    current.projectField(path[i]);
+                    if (i == path.length - 1) {
+                        current.fieldBuilder(path[i]).project();
+                    }
+                    current = current.fieldBuilder(path[i]);
                 }
-                String path = builder.toString();
-                while (nameDomain.contains(path)) {
-                    path = builder.append("_$").append(duplicateCount++).toString();
-                }
-                updatedFields.add(field.newName(path));
-                nameDomain.add(path);
             }
-            return new RowType(rowType.isNullable(), updatedFields);
+            return (RowType) builder.build();
         }
 
         @Override
@@ -321,10 +310,7 @@ public abstract class Projection {
 
         @Override
         public int[] toTopLevelIndexes() {
-            if (isNested()) {
-                throw new IllegalStateException(
-                        "Cannot convert a nested projection to a top level projection");
-            }
+            // todo: fix it usage
             return Arrays.stream(projection).mapToInt(arr -> arr[0]).toArray();
         }
 
@@ -414,6 +400,58 @@ public abstract class Projection {
         @Override
         public int[][] toNestedIndexes() {
             return Arrays.stream(projection).mapToObj(i -> new int[] {i}).toArray(int[][]::new);
+        }
+    }
+
+    private static class ProjectedDataTypeBuilder {
+        private final DataType dataType;
+        private boolean projected = false;
+        private final Set<Integer> projectedFieldIds = new HashSet<>();
+        private final LinkedList<ProjectedDataTypeBuilder> fieldBuilders = new LinkedList<>();
+
+        public ProjectedDataTypeBuilder(DataType dataType) {
+            this.dataType = dataType;
+            if (dataType instanceof RowType) {
+                for (DataField field : ((RowType) dataType).getFields()) {
+                    fieldBuilders.add(new ProjectedDataTypeBuilder(field.type()));
+                }
+            }
+        }
+
+        public ProjectedDataTypeBuilder project() {
+            this.projected = true;
+            return this;
+        }
+
+        public ProjectedDataTypeBuilder projectField(int fieldId) {
+            if (!projected) {
+                this.projectedFieldIds.add(fieldId);
+            }
+            return this;
+        }
+
+        public ProjectedDataTypeBuilder fieldBuilder(int fieldId) {
+            return fieldBuilders.get(fieldId);
+        }
+
+        public DataType build() {
+            if (projected) {
+                return dataType.copy();
+            }
+
+            if (!fieldBuilders.isEmpty() && !projectedFieldIds.isEmpty()) {
+                List<DataField> oldFields = ((RowType) dataType).getFields();
+                List<DataField> fields = new ArrayList<>(fieldBuilders.size());
+                for (int i = 0; i < fieldBuilders.size(); i++) {
+                    if (projectedFieldIds.contains(i)) {
+                        DataType newType = fieldBuilders.get(i).build();
+                        fields.add(oldFields.get(i).newType(newType));
+                    }
+                }
+                return new RowType(dataType.isNullable(), fields);
+            } else {
+                throw new RuntimeException();
+            }
         }
     }
 }

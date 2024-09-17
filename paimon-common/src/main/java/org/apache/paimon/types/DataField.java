@@ -84,6 +84,10 @@ public final class DataField implements Serializable {
         return new DataField(id, newName, type, description);
     }
 
+    public DataField newType(DataType newType) {
+        return new DataField(id, name, newType, description);
+    }
+
     public DataField newDescription(String newDescription) {
         return new DataField(id, name, type, newDescription);
     }

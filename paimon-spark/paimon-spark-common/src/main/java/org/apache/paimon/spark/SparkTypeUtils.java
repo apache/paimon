@@ -50,6 +50,7 @@ import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.types.UserDefinedType;
 
 import java.util.ArrayList;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -183,10 +184,6 @@ public class SparkTypeUtils {
                     mapType.getValueType().isNullable());
         }
 
-        /**
-         * For simplicity, as a temporary solution, we directly convert the non-null attribute to
-         * nullable on the Spark side.
-         */
         @Override
         public DataType visit(RowType rowType) {
             List<StructField> fields = new ArrayList<>(rowType.getFieldCount());
@@ -331,6 +328,32 @@ public class SparkTypeUtils {
 
             throw new UnsupportedOperationException(
                     "Not a supported type: " + atomic.catalogString());
+        }
+    }
+
+    public static int[][] populateProjection(StructType structType, RowType type) {
+        LinkedList<int[]> projectionList = new LinkedList<>();
+        populateProjection(structType, type, projectionList, new LinkedList<>());
+        return projectionList.toArray(new int[0][]);
+    }
+
+    private static void populateProjection(
+            StructType structType,
+            RowType rowType,
+            LinkedList<int[]> projectionList,
+            LinkedList<Integer> currentPath) {
+        for (StructField field : structType.fields()) {
+            currentPath.add(rowType.getFieldIndex(field.name()));
+            if (field.dataType() instanceof StructType) {
+                populateProjection(
+                        (StructType) field.dataType(),
+                        (RowType) rowType.getField(field.name()).type(),
+                        projectionList,
+                        currentPath);
+            } else {
+                projectionList.add(currentPath.stream().mapToInt(Integer::intValue).toArray());
+            }
+            currentPath.removeLast();
         }
     }
 }

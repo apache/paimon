@@ -55,13 +55,12 @@ abstract class PaimonBaseScan(
   private lazy val tableSchema = SparkTypeUtils.fromPaimonRowType(tableRowType)
 
   private[paimon] val (requiredTableFields, metadataFields) = {
-    val nameToField = tableSchema.map(field => (field.name, field)).toMap
-    val _tableFields = requiredSchema.flatMap(field => nameToField.get(field.name))
-    val _metadataFields =
-      requiredSchema
-        .filterNot(field => tableSchema.fieldNames.contains(field.name))
-        .filter(field => PaimonMetadataColumn.SUPPORTED_METADATA_COLUMNS.contains(field.name))
-    (_tableFields, _metadataFields)
+    assert(
+      requiredSchema.fields.forall(
+        field =>
+          tableRowType.containsField(field.name) ||
+            PaimonMetadataColumn.SUPPORTED_METADATA_COLUMNS.contains(field.name)))
+    requiredSchema.fields.partition(field => tableRowType.containsField(field.name))
   }
 
   protected var runtimeFilters: Array[Filter] = Array.empty
@@ -82,9 +81,8 @@ abstract class PaimonBaseScan(
   lazy val readBuilder: ReadBuilder = {
     val _readBuilder = table.newReadBuilder()
 
-    val projection =
-      requiredTableFields.map(field => tableSchema.fieldNames.indexOf(field.name)).toArray
-    _readBuilder.withProjection(projection)
+    _readBuilder.withProjection(
+      SparkTypeUtils.populateProjection(StructType(requiredTableFields), tableRowType))
     if (filters.nonEmpty) {
       val pushedPredicate = PredicateBuilder.and(filters: _*)
       _readBuilder.withFilter(pushedPredicate)
@@ -114,7 +112,7 @@ abstract class PaimonBaseScan(
   }
 
   override def readSchema(): StructType = {
-    StructType(requiredTableFields ++ metadataFields)
+    requiredSchema
   }
 
   override def toBatch: Batch = {

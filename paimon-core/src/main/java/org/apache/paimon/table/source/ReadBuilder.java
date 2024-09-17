@@ -113,7 +113,7 @@ public interface ReadBuilder extends Serializable {
     /**
      * Apply projection to the reader.
      *
-     * <p>NOTE: Nested row projection is currently not supported.
+     * <p>todo: update it.
      */
     default ReadBuilder withProjection(int[] projection) {
         if (projection == null) {

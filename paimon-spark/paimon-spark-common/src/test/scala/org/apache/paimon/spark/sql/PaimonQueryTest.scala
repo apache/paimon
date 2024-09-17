@@ -175,6 +175,33 @@ class PaimonQueryTest extends PaimonSparkTestBase {
       }
   }
 
+  test("Paimon Query: query nested cols") {
+    withTable("students") {
+      sql("""
+            |CREATE TABLE students (
+            |    name STRING,
+            |    age INT,
+            |    course STRUCT<course_name: STRING, grade: DOUBLE>
+            |) USING paimon;
+            |""".stripMargin)
+
+      sql("""
+            |INSERT INTO students VALUES
+            |('Alice', 20, STRUCT('Math', 85.0)),
+            |('Bob', 22, STRUCT('Biology', 92.0)),
+            |('Cathy', 21, STRUCT('History', 95.0));
+            |""".stripMargin)
+
+      sql("""
+            |SELECT
+            |    name,
+            |    course.course_name
+            |FROM
+            |    students;
+            |""".stripMargin).show()
+    }
+  }
+
   private def getAllFiles(
       tableName: String,
       partitions: Seq[String],
