@@ -137,6 +137,10 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
 
     @Override
     public StreamDataTableScan newStreamScan() {
+        if (wrapped.schema().primaryKeys().size() > 0) {
+            throw new UnsupportedOperationException(
+                    "Unsupported streaming scan for read optimized table");
+        }
         return new DataTableStreamScan(
                 coreOptions(),
                 newSnapshotReader(),
