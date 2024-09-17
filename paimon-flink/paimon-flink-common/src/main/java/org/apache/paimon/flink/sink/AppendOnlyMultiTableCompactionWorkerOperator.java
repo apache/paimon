@@ -111,7 +111,10 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
     private UnawareBucketCompactor compactor(Identifier tableId) {
         try {
             return new UnawareBucketCompactor(
-                    (FileStoreTable) catalog.getTable(tableId), commitUser, this::workerExecutor);
+                    (FileStoreTable) catalog.getTable(tableId),
+                    commitUser,
+                    this::workerExecutor,
+                    getMetricGroup());
         } catch (Catalog.TableNotExistException e) {
             throw new RuntimeException(e);
         }
