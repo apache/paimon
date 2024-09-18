@@ -241,11 +241,13 @@ public class SparkOrphanFilesClean extends OrphanFilesClean {
                                     Iterator<String> pathStrs = tuple._2.iterator();
 
                                     if (!usedStrs.hasNext()) {
-                                        String value = pathStrs.next();
-                                        Path path = new Path(value);
-                                        fileCleaner.accept(path);
-                                        LOG.info("Dry clean: {}", path);
-                                        emitted.add(1L);
+                                        while (pathStrs.hasNext()) {
+                                            String value = pathStrs.next();
+                                            Path path = new Path(value);
+                                            fileCleaner.accept(path);
+                                            LOG.info("Dry clean: {}", path);
+                                            emitted.add(1L);
+                                        }
                                     }
 
                                     return null;
