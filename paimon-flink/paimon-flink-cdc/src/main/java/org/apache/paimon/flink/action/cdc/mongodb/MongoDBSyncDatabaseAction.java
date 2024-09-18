@@ -73,4 +73,9 @@ public class MongoDBSyncDatabaseAction extends SyncDatabaseActionBase {
                         includingTables,
                         Collections.emptyList()));
     }
+
+    @Override
+    protected boolean requirePrimaryKeys() {
+        return true;
+    }
 }

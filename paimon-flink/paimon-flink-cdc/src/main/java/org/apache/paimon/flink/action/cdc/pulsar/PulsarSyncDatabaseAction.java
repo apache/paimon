@@ -40,4 +40,9 @@ public class PulsarSyncDatabaseAction extends SyncDatabaseActionBase {
     protected CdcTimestampExtractor createCdcTimestampExtractor() {
         return new MessageQueueCdcTimestampExtractor();
     }
+
+    @Override
+    protected boolean requirePrimaryKeys() {
+        return false;
+    }
 }
