@@ -55,7 +55,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     private final ChangelogProducer changelogProducer;
 
     public KeyValueFileStoreScan(
-            ManifestPlanner manifestPlanner,
+            ManifestsReader manifestsReader,
             RowType partitionType,
             ScanBucketFilter bucketFilter,
             SnapshotManager snapshotManager,
@@ -70,7 +70,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             MergeEngine mergeEngine,
             ChangelogProducer changelogProducer) {
         super(
-                manifestPlanner,
+                manifestsReader,
                 partitionType,
                 bucketFilter,
                 snapshotManager,

@@ -51,7 +51,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
     private final Map<Long, Predicate> dataFilterMapping = new HashMap<>();
 
     public AppendOnlyFileStoreScan(
-            ManifestPlanner manifestPlanner,
+            ManifestsReader manifestsReader,
             RowType partitionType,
             ScanBucketFilter bucketFilter,
             SnapshotManager snapshotManager,
@@ -63,7 +63,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
             Integer scanManifestParallelism,
             boolean fileIndexReadEnabled) {
         super(
-                manifestPlanner,
+                manifestsReader,
                 partitionType,
                 bucketFilter,
                 snapshotManager,

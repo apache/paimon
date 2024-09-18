@@ -37,9 +37,9 @@ import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
-/** A util class to plan manifest files. */
+/** A util class to read manifest files. */
 @ThreadSafe
-public class ManifestPlanner {
+public class ManifestsReader {
 
     private final RowType partitionType;
     private final SnapshotManager snapshotManager;
@@ -47,7 +47,7 @@ public class ManifestPlanner {
 
     @Nullable private PartitionPredicate partitionFilter = null;
 
-    public ManifestPlanner(
+    public ManifestsReader(
             RowType partitionType,
             SnapshotManager snapshotManager,
             ManifestList.Factory manifestListFactory) {
@@ -56,17 +56,17 @@ public class ManifestPlanner {
         this.manifestListFactory = manifestListFactory;
     }
 
-    public ManifestPlanner withPartitionFilter(Predicate predicate) {
+    public ManifestsReader withPartitionFilter(Predicate predicate) {
         this.partitionFilter = PartitionPredicate.fromPredicate(partitionType, predicate);
         return this;
     }
 
-    public ManifestPlanner withPartitionFilter(List<BinaryRow> partitions) {
+    public ManifestsReader withPartitionFilter(List<BinaryRow> partitions) {
         this.partitionFilter = PartitionPredicate.fromMultiple(partitionType, partitions);
         return this;
     }
 
-    public ManifestPlanner withPartitionFilter(PartitionPredicate predicate) {
+    public ManifestsReader withPartitionFilter(PartitionPredicate predicate) {
         this.partitionFilter = predicate;
         return this;
     }
@@ -76,7 +76,7 @@ public class ManifestPlanner {
         return partitionFilter;
     }
 
-    public Pair<Snapshot, List<ManifestFileMeta>> plan(
+    public Pair<Snapshot, List<ManifestFileMeta>> read(
             @Nullable Snapshot specifiedSnapshot, ScanMode scanMode) {
         List<ManifestFileMeta> manifests;
         Snapshot snapshot =

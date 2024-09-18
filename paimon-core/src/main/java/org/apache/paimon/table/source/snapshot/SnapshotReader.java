@@ -26,7 +26,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
-import org.apache.paimon.operation.ManifestPlanner;
+import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ScanMode;
@@ -45,9 +45,12 @@ import java.util.Map;
 /** Read splits from specified {@link Snapshot} with given configuration. */
 public interface SnapshotReader {
 
+    @Nullable
+    Integer parallelism();
+
     SnapshotManager snapshotManager();
 
-    ManifestPlanner manifestPlanner();
+    ManifestsReader manifestsReader();
 
     List<ManifestEntry> readManifest(ManifestFileMeta manifest);
 

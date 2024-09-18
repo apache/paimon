@@ -33,7 +33,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
-import org.apache.paimon.operation.ManifestPlanner;
+import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -244,13 +244,18 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public Integer parallelism() {
+            return snapshotReader.parallelism();
+        }
+
+        @Override
         public SnapshotManager snapshotManager() {
             return snapshotReader.snapshotManager();
         }
 
         @Override
-        public ManifestPlanner manifestPlanner() {
-            return snapshotReader.manifestPlanner();
+        public ManifestsReader manifestsReader() {
+            return snapshotReader.manifestsReader();
         }
 
         @Override

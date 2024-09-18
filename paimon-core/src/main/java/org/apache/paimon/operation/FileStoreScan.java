@@ -77,7 +77,10 @@ public interface FileStoreScan {
 
     FileStoreScan withMetrics(ScanMetrics metrics);
 
-    ManifestPlanner manifestPlanner();
+    @Nullable
+    Integer parallelism();
+
+    ManifestsReader manifestsReader();
 
     List<ManifestEntry> readManifest(ManifestFileMeta manifest);
 

@@ -25,7 +25,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
-import org.apache.paimon.operation.ManifestPlanner;
+import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.PlanImpl;
@@ -78,7 +78,7 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
             return checkResult.get();
         }
         Map<Pair<BinaryRow, Integer>, List<DataFileMeta>> grouped = new ConcurrentHashMap<>();
-        ManifestPlanner manifestPlanner = reader.manifestPlanner();
+        ManifestsReader manifestsReader = reader.manifestsReader();
 
         List<Long> snapshots =
                 LongStream.range(startingSnapshotId + 1, endingSnapshotId + 1)
@@ -87,9 +87,9 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
         ManifestReadThreadPool.randomlyOnlyExecute(
                 id -> {
                     Snapshot snapshot = snapshotManager.snapshot(id);
-                    Pair<Snapshot, List<ManifestFileMeta>> plan =
-                            manifestPlanner.plan(snapshot, scanMode);
-                    for (ManifestFileMeta manifest : plan.getValue()) {
+                    List<ManifestFileMeta> manifests =
+                            manifestsReader.read(snapshot, scanMode).getRight();
+                    for (ManifestFileMeta manifest : manifests) {
                         List<ManifestEntry> entries = reader.readManifest(manifest);
                         for (ManifestEntry entry : entries) {
                             checkArgument(
@@ -108,7 +108,7 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
                     }
                 },
                 snapshots,
-                null);
+                reader.parallelism());
 
         List<Split> result = new ArrayList<>();
         for (Map.Entry<Pair<BinaryRow, Integer>, List<DataFileMeta>> entry : grouped.entrySet()) {
