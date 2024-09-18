@@ -27,11 +27,10 @@ import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.ListIterator;
-import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -407,7 +406,7 @@ public abstract class Projection {
     private static class ProjectedDataTypeBuilder {
         private final DataType dataType;
         private boolean projected = false;
-        private final Set<Integer> projectedFieldIds = new HashSet<>();
+        private final LinkedHashSet<Integer> projectedFieldIds = new LinkedHashSet<>();
         private final LinkedList<ProjectedDataTypeBuilder> fieldBuilders = new LinkedList<>();
 
         public ProjectedDataTypeBuilder(DataType dataType) {
@@ -450,11 +449,9 @@ public abstract class Projection {
             } else {
                 List<DataField> oldFields = ((RowType) dataType).getFields();
                 List<DataField> fields = new ArrayList<>(fieldBuilders.size());
-                for (int i = 0; i < fieldBuilders.size(); i++) {
-                    if (projectedFieldIds.contains(i)) {
-                        DataType newType = fieldBuilders.get(i).build();
-                        fields.add(oldFields.get(i).newType(newType));
-                    }
+                for (Integer i : projectedFieldIds) {
+                    DataType newType = fieldBuilders.get(i).build();
+                    fields.add(oldFields.get(i).newType(newType));
                 }
                 return new RowType(dataType.isNullable(), fields);
             }
