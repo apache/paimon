@@ -27,7 +27,6 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
@@ -76,8 +75,7 @@ public class ManifestsReader {
         return partitionFilter;
     }
 
-    public Pair<Snapshot, List<ManifestFileMeta>> read(
-            @Nullable Snapshot specifiedSnapshot, ScanMode scanMode) {
+    public Result read(@Nullable Snapshot specifiedSnapshot, ScanMode scanMode) {
         List<ManifestFileMeta> manifests;
         Snapshot snapshot =
                 specifiedSnapshot == null ? snapshotManager.latestSnapshot() : specifiedSnapshot;
@@ -87,11 +85,11 @@ public class ManifestsReader {
             manifests = readManifests(snapshot, scanMode);
         }
 
-        manifests =
+        List<ManifestFileMeta> filtered =
                 manifests.stream()
                         .filter(this::filterManifestFileMeta)
                         .collect(Collectors.toList());
-        return Pair.of(snapshot, manifests);
+        return new Result(snapshot, manifests, filtered);
     }
 
     private List<ManifestFileMeta> readManifests(Snapshot snapshot, ScanMode scanMode) {
@@ -125,5 +123,26 @@ public class ManifestsReader {
                         stats.minValues(),
                         stats.maxValues(),
                         stats.nullCounts());
+    }
+
+    /** Result for reading manifest files. */
+    public static final class Result {
+
+        public final Snapshot snapshot;
+        public final List<ManifestFileMeta> allManifests;
+        public final List<ManifestFileMeta> filteredManifests;
+
+        public Result(
+                Snapshot snapshot,
+                List<ManifestFileMeta> allManifests,
+                List<ManifestFileMeta> filteredManifests) {
+            this.snapshot = snapshot;
+            this.allManifests = allManifests;
+            this.filteredManifests = filteredManifests;
+        }
+    }
+
+    public static Result emptyResult() {
+        return new Result(null, Collections.emptyList(), Collections.emptyList());
     }
 }

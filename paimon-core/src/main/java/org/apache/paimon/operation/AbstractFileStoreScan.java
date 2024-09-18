@@ -257,7 +257,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     @Override
     public List<SimpleFileEntry> readSimpleEntries() {
-        List<ManifestFileMeta> manifests = readManifests().getRight();
+        List<ManifestFileMeta> manifests = readManifests().filteredManifests;
         Collection<SimpleFileEntry> mergedEntries =
                 readAndMergeFileEntries(manifests, this::readSimpleEntries);
         return new ArrayList<>(mergedEntries);
@@ -265,7 +265,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     @Override
     public List<PartitionEntry> readPartitionEntries() {
-        List<ManifestFileMeta> manifests = readManifests().getRight();
+        List<ManifestFileMeta> manifests = readManifests().filteredManifests;
         Map<BinaryRow, PartitionEntry> partitions = new ConcurrentHashMap<>();
         Consumer<ManifestFileMeta> processor =
                 m -> PartitionEntry.merge(PartitionEntry.merge(readManifest(m)), partitions);
@@ -277,7 +277,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     @Override
     public List<BucketEntry> readBucketEntries() {
-        List<ManifestFileMeta> manifests = readManifests().getRight();
+        List<ManifestFileMeta> manifests = readManifests().filteredManifests;
         Map<Pair<BinaryRow, Integer>, BucketEntry> buckets = new ConcurrentHashMap<>();
         Consumer<ManifestFileMeta> processor =
                 m -> BucketEntry.merge(BucketEntry.merge(readManifest(m)), buckets);
@@ -289,12 +289,14 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     private Pair<Snapshot, List<ManifestEntry>> doPlan() {
         long started = System.nanoTime();
-        Pair<Snapshot, List<ManifestFileMeta>> snapshotListPair = readManifests();
-        Snapshot snapshot = snapshotListPair.getLeft();
-        List<ManifestFileMeta> manifests = snapshotListPair.getRight();
+        ManifestsReader.Result manifestsResult = readManifests();
+        Snapshot snapshot = manifestsResult.snapshot;
+        List<ManifestFileMeta> manifests = manifestsResult.filteredManifests;
 
         long startDataFiles =
-                manifests.stream().mapToLong(f -> f.numAddedFiles() - f.numDeletedFiles()).sum();
+                manifestsResult.allManifests.stream()
+                        .mapToLong(f -> f.numAddedFiles() - f.numDeletedFiles())
+                        .sum();
 
         Collection<ManifestEntry> mergedEntries =
                 readAndMergeFileEntries(manifests, this::readManifest);
@@ -377,9 +379,9 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                 sequentialBatchedExecute(manifestReader, manifests, parallelism));
     }
 
-    private Pair<Snapshot, List<ManifestFileMeta>> readManifests() {
+    private ManifestsReader.Result readManifests() {
         if (specifiedManifests != null) {
-            return Pair.of(null, specifiedManifests);
+            return ManifestsReader.emptyResult();
         }
 
         return manifestsReader.read(specifiedSnapshot, scanMode);

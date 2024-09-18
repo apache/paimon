@@ -104,7 +104,7 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
                                             "Unsupported scan mode: " + scanMode);
                             }
 
-                            return manifestsReader.read(snapshot, scanMode).getRight();
+                            return manifestsReader.read(snapshot, scanMode).filteredManifests;
                         },
                         snapshots,
                         reader.parallelism());
