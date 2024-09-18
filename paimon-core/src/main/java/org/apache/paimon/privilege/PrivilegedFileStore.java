@@ -31,6 +31,7 @@ import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.FileStoreWrite;
+import org.apache.paimon.operation.ManifestPlanner;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.SplitRead;
@@ -89,6 +90,11 @@ public class PrivilegedFileStore<T> implements FileStore<T> {
     @Override
     public BucketMode bucketMode() {
         return wrapped.bucketMode();
+    }
+
+    @Override
+    public ManifestPlanner newManifestPlanner(boolean forWrite) {
+        return wrapped.newManifestPlanner(forWrite);
     }
 
     @Override

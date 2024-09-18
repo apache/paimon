@@ -22,12 +22,18 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.operation.ManifestPlanner;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.PlanImpl;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
+import org.apache.paimon.utils.ManifestReadThreadPool;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
@@ -38,11 +44,13 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
+import java.util.stream.LongStream;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -51,9 +59,8 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
 
     private static final Logger LOG = LoggerFactory.getLogger(IncrementalStartingScanner.class);
 
-    private long endingSnapshotId;
-
-    private ScanMode scanMode;
+    private final long endingSnapshotId;
+    private final ScanMode scanMode;
 
     public IncrementalStartingScanner(
             SnapshotManager snapshotManager, long start, long end, ScanMode scanMode) {
@@ -70,31 +77,44 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
         if (checkResult.isPresent()) {
             return checkResult.get();
         }
-        Map<SplitInfo, List<DataFileMeta>> grouped = new HashMap<>();
-        for (long i = startingSnapshotId + 1; i < endingSnapshotId + 1; i++) {
-            List<DataSplit> splits = readSplits(reader, snapshotManager.snapshot(i));
-            for (DataSplit split : splits) {
-                grouped.computeIfAbsent(
-                                new SplitInfo(
-                                        split.partition(),
-                                        split.bucket(),
-                                        // take it for false, because multiple snapshot read may
-                                        // need merge for primary key table
-                                        false,
-                                        split.bucketPath(),
-                                        split.deletionFiles().orElse(null)),
-                                k -> new ArrayList<>())
-                        .addAll(split.dataFiles());
-            }
-        }
+        Map<Pair<BinaryRow, Integer>, List<DataFileMeta>> grouped = new ConcurrentHashMap<>();
+        ManifestPlanner manifestPlanner = reader.manifestPlanner();
+
+        List<Long> snapshots =
+                LongStream.range(startingSnapshotId + 1, endingSnapshotId + 1)
+                        .boxed()
+                        .collect(Collectors.toList());
+        ManifestReadThreadPool.randomlyOnlyExecute(
+                id -> {
+                    Snapshot snapshot = snapshotManager.snapshot(id);
+                    Pair<Snapshot, List<ManifestFileMeta>> plan =
+                            manifestPlanner.plan(snapshot, scanMode);
+                    for (ManifestFileMeta manifest : plan.getValue()) {
+                        List<ManifestEntry> entries = reader.readManifest(manifest);
+                        for (ManifestEntry entry : entries) {
+                            checkArgument(
+                                    entry.kind() == FileKind.ADD,
+                                    "Delta or changelog should only have ADD files.");
+                            grouped.compute(
+                                    Pair.of(entry.partition(), entry.bucket()),
+                                    (key, files) -> {
+                                        if (files == null) {
+                                            files = new ArrayList<>();
+                                        }
+                                        files.add(entry.file());
+                                        return files;
+                                    });
+                        }
+                    }
+                },
+                snapshots,
+                null);
 
         List<Split> result = new ArrayList<>();
-        for (Map.Entry<SplitInfo, List<DataFileMeta>> entry : grouped.entrySet()) {
-            BinaryRow partition = entry.getKey().partition;
-            int bucket = entry.getKey().bucket;
-            boolean rawConvertible = entry.getKey().rawConvertible;
-            String bucketPath = entry.getKey().bucketPath;
-            List<DeletionFile> deletionFiles = entry.getKey().deletionFiles;
+        for (Map.Entry<Pair<BinaryRow, Integer>, List<DataFileMeta>> entry : grouped.entrySet()) {
+            BinaryRow partition = entry.getKey().getLeft();
+            int bucket = entry.getKey().getRight();
+            String bucketPath = reader.pathFactory().bucketPath(partition, bucket).toString();
             for (SplitGenerator.SplitGroup splitGroup :
                     reader.splitGenerator().splitForBatch(entry.getValue())) {
                 DataSplit.Builder dataSplitBuilder =
@@ -103,11 +123,8 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
                                 .withPartition(partition)
                                 .withBucket(bucket)
                                 .withDataFiles(splitGroup.files)
-                                .rawConvertible(rawConvertible)
+                                .rawConvertible(splitGroup.rawConvertible)
                                 .withBucketPath(bucketPath);
-                if (deletionFiles != null) {
-                    dataSplitBuilder.withDataDeletionFiles(deletionFiles);
-                }
                 result.add(dataSplitBuilder.build());
             }
         }

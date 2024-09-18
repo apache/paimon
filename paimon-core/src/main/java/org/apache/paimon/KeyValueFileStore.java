@@ -229,6 +229,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                     }
                 };
         return new KeyValueFileStoreScan(
+                newManifestPlanner(forWrite),
                 partitionType,
                 bucketFilter,
                 snapshotManager(),
@@ -236,7 +237,6 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 schema,
                 keyValueFieldsExtractor,
                 manifestFileFactory(forWrite),
-                manifestListFactory(forWrite),
                 options.bucket(),
                 forWrite,
                 options.scanManifestParallelism(),

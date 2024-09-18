@@ -23,14 +23,17 @@ import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.operation.ManifestPlanner;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -44,9 +47,15 @@ public interface SnapshotReader {
 
     SnapshotManager snapshotManager();
 
+    ManifestPlanner manifestPlanner();
+
+    List<ManifestEntry> readManifest(ManifestFileMeta manifest);
+
     ConsumerManager consumerManager();
 
     SplitGenerator splitGenerator();
+
+    FileStorePathFactory pathFactory();
 
     SnapshotReader withSnapshot(long snapshotId);
 

@@ -23,7 +23,6 @@ import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
-import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
@@ -56,6 +55,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     private final ChangelogProducer changelogProducer;
 
     public KeyValueFileStoreScan(
+            ManifestPlanner manifestPlanner,
             RowType partitionType,
             ScanBucketFilter bucketFilter,
             SnapshotManager snapshotManager,
@@ -63,7 +63,6 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             TableSchema schema,
             KeyValueFieldsExtractor keyValueFieldsExtractor,
             ManifestFile.Factory manifestFileFactory,
-            ManifestList.Factory manifestListFactory,
             int numOfBuckets,
             boolean checkNumOfBuckets,
             Integer scanManifestParallelism,
@@ -71,13 +70,13 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             MergeEngine mergeEngine,
             ChangelogProducer changelogProducer) {
         super(
+                manifestPlanner,
                 partitionType,
                 bucketFilter,
                 snapshotManager,
                 schemaManager,
                 schema,
                 manifestFileFactory,
-                manifestListFactory,
                 numOfBuckets,
                 checkNumOfBuckets,
                 scanManifestParallelism);

@@ -28,6 +28,7 @@ import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.FileStoreWrite;
+import org.apache.paimon.operation.ManifestPlanner;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.SplitRead;
@@ -64,6 +65,12 @@ public interface FileStore<T> {
     CoreOptions options();
 
     BucketMode bucketMode();
+
+    default ManifestPlanner newManifestPlanner() {
+        return newManifestPlanner(false);
+    }
+
+    ManifestPlanner newManifestPlanner(boolean forWrite);
 
     FileStoreScan newScan();
 

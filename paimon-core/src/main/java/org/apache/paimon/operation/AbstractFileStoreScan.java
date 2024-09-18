@@ -29,7 +29,6 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestEntrySerializer;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
-import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.operation.metrics.ScanMetrics;
@@ -38,7 +37,6 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -69,10 +67,10 @@ import static org.apache.paimon.utils.ThreadPoolUtils.randomlyOnlyExecute;
 /** Default implementation of {@link FileStoreScan}. */
 public abstract class AbstractFileStoreScan implements FileStoreScan {
 
+    private final ManifestPlanner manifestPlanner;
     private final RowType partitionType;
     private final SnapshotManager snapshotManager;
     private final ManifestFile.Factory manifestFileFactory;
-    private final ManifestList manifestList;
     private final int numOfBuckets;
     private final boolean checkNumOfBuckets;
     private final Integer scanManifestParallelism;
@@ -82,7 +80,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private final TableSchema schema;
     protected final ScanBucketFilter bucketKeyFilter;
 
-    private PartitionPredicate partitionFilter;
     private Snapshot specifiedSnapshot = null;
     private Filter<Integer> bucketFilter = null;
     private List<ManifestFileMeta> specifiedManifests = null;
@@ -95,23 +92,23 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private ScanMetrics scanMetrics = null;
 
     public AbstractFileStoreScan(
+            ManifestPlanner manifestPlanner,
             RowType partitionType,
             ScanBucketFilter bucketKeyFilter,
             SnapshotManager snapshotManager,
             SchemaManager schemaManager,
             TableSchema schema,
             ManifestFile.Factory manifestFileFactory,
-            ManifestList.Factory manifestListFactory,
             int numOfBuckets,
             boolean checkNumOfBuckets,
             Integer scanManifestParallelism) {
+        this.manifestPlanner = manifestPlanner;
         this.partitionType = partitionType;
         this.bucketKeyFilter = bucketKeyFilter;
         this.snapshotManager = snapshotManager;
         this.schemaManager = schemaManager;
         this.schema = schema;
         this.manifestFileFactory = manifestFileFactory;
-        this.manifestList = manifestListFactory.create();
         this.numOfBuckets = numOfBuckets;
         this.checkNumOfBuckets = checkNumOfBuckets;
         this.tableSchemas = new ConcurrentHashMap<>();
@@ -120,19 +117,19 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     @Override
     public FileStoreScan withPartitionFilter(Predicate predicate) {
-        this.partitionFilter = PartitionPredicate.fromPredicate(partitionType, predicate);
+        manifestPlanner.withPartitionFilter(predicate);
         return this;
     }
 
     @Override
     public FileStoreScan withPartitionFilter(List<BinaryRow> partitions) {
-        this.partitionFilter = PartitionPredicate.fromMultiple(partitionType, partitions);
+        manifestPlanner.withPartitionFilter(partitions);
         return this;
     }
 
     @Override
     public FileStoreScan withPartitionFilter(PartitionPredicate predicate) {
-        this.partitionFilter = predicate;
+        manifestPlanner.withPartitionFilter(predicate);
         return this;
     }
 
@@ -220,6 +217,11 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     @Override
+    public ManifestPlanner manifestPlanner() {
+        return manifestPlanner;
+    }
+
+    @Override
     public Plan plan() {
 
         Pair<Snapshot, List<ManifestEntry>> planResult = doPlan();
@@ -251,7 +253,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     public List<SimpleFileEntry> readSimpleEntries() {
         List<ManifestFileMeta> manifests = readManifests().getRight();
         Collection<SimpleFileEntry> mergedEntries =
-                readAndMergeFileEntries(manifests, this::readSimpleEntries, Filter.alwaysTrue());
+                readAndMergeFileEntries(manifests, this::readSimpleEntries);
         return new ArrayList<>(mergedEntries);
     }
 
@@ -260,9 +262,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         List<ManifestFileMeta> manifests = readManifests().getRight();
         Map<BinaryRow, PartitionEntry> partitions = new ConcurrentHashMap<>();
         Consumer<ManifestFileMeta> processor =
-                m ->
-                        PartitionEntry.merge(
-                                PartitionEntry.merge(readManifestFileMeta(m)), partitions);
+                m -> PartitionEntry.merge(PartitionEntry.merge(readManifest(m)), partitions);
         randomlyOnlyExecute(getExecutorService(scanManifestParallelism), processor, manifests);
         return partitions.values().stream()
                 .filter(p -> p.fileCount() > 0)
@@ -274,7 +274,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         List<ManifestFileMeta> manifests = readManifests().getRight();
         Map<Pair<BinaryRow, Integer>, BucketEntry> buckets = new ConcurrentHashMap<>();
         Consumer<ManifestFileMeta> processor =
-                m -> BucketEntry.merge(BucketEntry.merge(readManifestFileMeta(m)), buckets);
+                m -> BucketEntry.merge(BucketEntry.merge(readManifest(m)), buckets);
         randomlyOnlyExecute(getExecutorService(scanManifestParallelism), processor, manifests);
         return buckets.values().stream()
                 .filter(p -> p.fileCount() > 0)
@@ -291,8 +291,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                 manifests.stream().mapToLong(f -> f.numAddedFiles() - f.numDeletedFiles()).sum();
 
         Collection<ManifestEntry> mergedEntries =
-                readAndMergeFileEntries(
-                        manifests, this::readManifestFileMeta, this::filterUnmergedManifestEntry);
+                readAndMergeFileEntries(manifests, this::readManifest);
 
         List<ManifestEntry> files = new ArrayList<>();
         long skippedByPartitionAndStats = startDataFiles - mergedEntries.size();
@@ -367,69 +366,17 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     public <T extends FileEntry> Collection<T> readAndMergeFileEntries(
-            List<ManifestFileMeta> manifests,
-            Function<ManifestFileMeta, List<T>> manifestReader,
-            @Nullable Filter<T> filterUnmergedEntry) {
-        // in memory filter, do it first
-        manifests =
-                manifests.stream()
-                        .filter(this::filterManifestFileMeta)
-                        .collect(Collectors.toList());
-        Function<ManifestFileMeta, List<T>> reader =
-                file -> {
-                    List<T> entries = manifestReader.apply(file);
-                    if (filterUnmergedEntry != null) {
-                        entries =
-                                entries.stream()
-                                        .filter(filterUnmergedEntry::test)
-                                        .collect(Collectors.toList());
-                    }
-                    return entries;
-                };
+            List<ManifestFileMeta> manifests, Function<ManifestFileMeta, List<T>> manifestReader) {
         return FileEntry.mergeEntries(
-                sequentialBatchedExecute(reader, manifests, scanManifestParallelism));
+                sequentialBatchedExecute(manifestReader, manifests, scanManifestParallelism));
     }
 
     private Pair<Snapshot, List<ManifestFileMeta>> readManifests() {
-        List<ManifestFileMeta> manifests = specifiedManifests;
-        Snapshot snapshot = null;
-        if (manifests == null) {
-            snapshot =
-                    specifiedSnapshot == null
-                            ? snapshotManager.latestSnapshot()
-                            : specifiedSnapshot;
-            if (snapshot == null) {
-                manifests = Collections.emptyList();
-            } else {
-                manifests = readManifests(snapshot);
-            }
+        if (specifiedManifests != null) {
+            return Pair.of(null, specifiedManifests);
         }
-        return Pair.of(snapshot, manifests);
-    }
 
-    private List<ManifestFileMeta> readManifests(Snapshot snapshot) {
-        switch (scanMode) {
-            case ALL:
-                return manifestList.readDataManifests(snapshot);
-            case DELTA:
-                return manifestList.readDeltaManifests(snapshot);
-            case CHANGELOG:
-                if (snapshot.version() > Snapshot.TABLE_STORE_02_VERSION) {
-                    return manifestList.readChangelogManifests(snapshot);
-                }
-
-                // compatible with Paimon 0.2, we'll read extraFiles in DataFileMeta
-                // see comments on DataFileMeta#extraFiles
-                if (snapshot.commitKind() == Snapshot.CommitKind.APPEND) {
-                    return manifestList.readDeltaManifests(snapshot);
-                }
-                throw new IllegalStateException(
-                        String.format(
-                                "Incremental scan does not accept %s snapshot",
-                                snapshot.commitKind()));
-            default:
-                throw new UnsupportedOperationException("Unknown scan kind " + scanMode.name());
-        }
+        return manifestPlanner.plan(specifiedSnapshot, scanMode);
     }
 
     // ------------------------------------------------------------------------
@@ -441,30 +388,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     protected TableSchema scanTableSchema(long id) {
         return tableSchemas.computeIfAbsent(
                 id, key -> key == schema.id() ? schema : schemaManager.schema(id));
-    }
-
-    /** Note: Keep this thread-safe. */
-    private boolean filterManifestFileMeta(ManifestFileMeta manifest) {
-        if (partitionFilter == null) {
-            return true;
-        }
-
-        SimpleStats stats = manifest.partitionStats();
-        return partitionFilter == null
-                || partitionFilter.test(
-                        manifest.numAddedFiles() + manifest.numDeletedFiles(),
-                        stats.minValues(),
-                        stats.maxValues(),
-                        stats.nullCounts());
-    }
-
-    /** Note: Keep this thread-safe. */
-    private boolean filterUnmergedManifestEntry(ManifestEntry entry) {
-        if (manifestEntryFilter != null && !manifestEntryFilter.test(entry)) {
-            return false;
-        }
-
-        return filterByStats(entry);
     }
 
     /** Note: Keep this thread-safe. */
@@ -481,15 +404,28 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     protected abstract List<ManifestEntry> filterWholeBucketByStats(List<ManifestEntry> entries);
 
     /** Note: Keep this thread-safe. */
-    private List<ManifestEntry> readManifestFileMeta(ManifestFileMeta manifest) {
-        return manifestFileFactory
-                .create()
-                .read(
-                        manifest.fileName(),
-                        manifest.fileSize(),
-                        createCacheRowFilter(manifestCacheFilter, numOfBuckets),
-                        createEntryRowFilter(
-                                partitionFilter, bucketFilter, fileNameFilter, numOfBuckets));
+    @Override
+    public List<ManifestEntry> readManifest(ManifestFileMeta manifest) {
+        List<ManifestEntry> entries =
+                manifestFileFactory
+                        .create()
+                        .read(
+                                manifest.fileName(),
+                                manifest.fileSize(),
+                                createCacheRowFilter(manifestCacheFilter, numOfBuckets),
+                                createEntryRowFilter(
+                                        manifestPlanner.partitionFilter(),
+                                        bucketFilter,
+                                        fileNameFilter,
+                                        numOfBuckets));
+        List<ManifestEntry> filteredEntries = new ArrayList<>(entries.size());
+        for (ManifestEntry entry : entries) {
+            if ((manifestEntryFilter == null || manifestEntryFilter.test(entry))
+                    && filterByStats(entry)) {
+                filteredEntries.add(entry);
+            }
+        }
+        return filteredEntries;
     }
 
     /** Note: Keep this thread-safe. */
@@ -504,7 +440,10 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                         // see SimpleFileEntrySerializer
                         createCacheRowFilter(manifestCacheFilter, numOfBuckets),
                         createEntryRowFilter(
-                                partitionFilter, bucketFilter, fileNameFilter, numOfBuckets));
+                                manifestPlanner.partitionFilter(),
+                                bucketFilter,
+                                fileNameFilter,
+                                numOfBuckets));
     }
 
     /**
@@ -560,11 +499,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                 return false;
             }
 
-            if (fileNameFilter != null && !fileNameFilter.test((fileNameGetter.apply(row)))) {
-                return false;
-            }
-
-            return true;
+            return fileNameFilter == null || fileNameFilter.test((fileNameGetter.apply(row)));
         };
     }
 
