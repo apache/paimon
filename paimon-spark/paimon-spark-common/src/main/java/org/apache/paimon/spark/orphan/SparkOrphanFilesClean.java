@@ -36,7 +36,6 @@ import org.apache.spark.SparkContext;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
-import org.apache.spark.util.CollectionAccumulator;
 import org.apache.spark.util.LongAccumulator;
 
 import javax.annotation.Nullable;
@@ -119,9 +118,6 @@ public class SparkOrphanFilesClean extends OrphanFilesClean {
         AtomicLong deletedInLocal = new AtomicLong(0);
         cleanSnapshotDir(branches, p -> deletedInLocal.incrementAndGet());
 
-        // branch and manifest file
-        CollectionAccumulator<Pair<String, String>> pairsAccumulator =
-                sc.collectionAccumulator("manifest-output");
         LongAccumulator emitted = sc.longAccumulator();
 
         JavaRDD<Pair> repartitionRDD =
