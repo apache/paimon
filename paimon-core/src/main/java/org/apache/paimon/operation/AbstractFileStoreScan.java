@@ -381,7 +381,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     private ManifestsReader.Result readManifests() {
         if (specifiedManifests != null) {
-            return ManifestsReader.emptyResult();
+            return new ManifestsReader.Result(null, specifiedManifests, specifiedManifests);
         }
 
         return manifestsReader.read(specifiedSnapshot, scanMode);
