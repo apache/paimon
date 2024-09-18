@@ -129,9 +129,8 @@ case class SparkOrphanFilesClean(
             file => (file.getPath.getName, file.getPath.toUri.toString)
           }
       }
-      .toDS()
-      .repartition(parallelism)
       .toDF("name", "path")
+      .repartition(parallelism)
 
     // use left anti to filter files which is not used
     val deleted = candidates
@@ -157,9 +156,12 @@ case class SparkOrphanFilesClean(
 }
 
 /**
- * @param branch The branch name
- * @param manifestName The manifest file name, including manifest-list, manifest, index-manifest, statistics
- * @param isManifestFile If it is the manifest file
+ * @param branch
+ *   The branch name
+ * @param manifestName
+ *   The manifest file name, including manifest-list, manifest, index-manifest, statistics
+ * @param isManifestFile
+ *   If it is the manifest file
  */
 case class BranchAndManifestFile(branch: String, manifestName: String, isManifestFile: Boolean)
 
