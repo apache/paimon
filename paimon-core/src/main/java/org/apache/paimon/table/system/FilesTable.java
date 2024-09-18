@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.system;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
@@ -75,6 +76,7 @@ import java.util.Objects;
 import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
@@ -134,7 +136,7 @@ public class FilesTable implements ReadonlyTable {
 
     @Override
     public InnerTableScan newScan() {
-        return new FilesScan();
+        return new FilesScan(storeTable.newScan().listPartitions());
     }
 
     @Override
@@ -154,6 +156,12 @@ public class FilesTable implements ReadonlyTable {
         @Nullable private LeafPredicate bucketPredicate;
         @Nullable private LeafPredicate levelPredicate;
 
+        private final List<BinaryRow> partitions;
+
+        public FilesScan(List<BinaryRow> partitions) {
+            this.partitions = partitions;
+        }
+
         @Override
         public InnerTableScan withFilter(Predicate pushdown) {
             if (pushdown == null) {
@@ -170,9 +178,24 @@ public class FilesTable implements ReadonlyTable {
 
         @Override
         public Plan innerPlan() {
-            return () ->
-                    Collections.singletonList(
-                            new FilesSplit(partitionPredicate, bucketPredicate, levelPredicate));
+
+            if (partitionPredicate != null) {
+                return () ->
+                        Collections.singletonList(
+                                new FilesSplit(
+                                        partitionPredicate, bucketPredicate, levelPredicate, null));
+            } else {
+                return () ->
+                        partitions.stream()
+                                .map(
+                                        p ->
+                                                new FilesSplit(
+                                                        partitionPredicate,
+                                                        bucketPredicate,
+                                                        levelPredicate,
+                                                        p))
+                                .collect(Collectors.toList());
+            }
         }
     }
 
@@ -181,14 +204,17 @@ public class FilesTable implements ReadonlyTable {
         @Nullable private final LeafPredicate partitionPredicate;
         @Nullable private final LeafPredicate bucketPredicate;
         @Nullable private final LeafPredicate levelPredicate;
+        @Nullable private final BinaryRow partition;
 
         private FilesSplit(
                 @Nullable LeafPredicate partitionPredicate,
                 @Nullable LeafPredicate bucketPredicate,
-                @Nullable LeafPredicate levelPredicate) {
+                @Nullable LeafPredicate levelPredicate,
+                @Nullable BinaryRow partition) {
             this.partitionPredicate = partitionPredicate;
             this.bucketPredicate = bucketPredicate;
             this.levelPredicate = levelPredicate;
+            this.partition = partition;
         }
 
         @Override
@@ -237,6 +263,8 @@ public class FilesTable implements ReadonlyTable {
                     scan.withPartitionFilter(partSpec);
                 }
                 // TODO support range?
+            } else if (partition != null) {
+                scan.withPartitionFilter(Collections.singletonList(partition));
             }
             if (bucketPredicate != null) {
                 scan.withBucketFilter(
