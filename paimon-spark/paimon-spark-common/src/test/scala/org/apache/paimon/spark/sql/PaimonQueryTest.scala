@@ -194,6 +194,7 @@ class PaimonQueryTest extends PaimonSparkTestBase {
 
       sql("""
             |SELECT
+            |    course.grade,
             |    name,
             |    course.course_name
             |FROM

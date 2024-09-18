@@ -310,8 +310,11 @@ public abstract class Projection {
 
         @Override
         public int[] toTopLevelIndexes() {
-            // todo: fix it usage
-            return Arrays.stream(projection).mapToInt(arr -> arr[0]).toArray();
+            return Arrays.stream(projection)
+                    .map(arr -> arr[0])
+                    .distinct()
+                    .mapToInt(Integer::intValue)
+                    .toArray();
         }
 
         @Override
