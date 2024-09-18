@@ -229,7 +229,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                     }
                 };
         return new KeyValueFileStoreScan(
-                newManifestPlanner(forWrite),
+                newManifestsReader(forWrite),
                 partitionType,
                 bucketFilter,
                 snapshotManager(),

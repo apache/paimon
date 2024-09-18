@@ -136,7 +136,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 };
 
         return new AppendOnlyFileStoreScan(
-                newManifestPlanner(forWrite),
+                newManifestsReader(forWrite),
                 partitionType,
                 bucketFilter,
                 snapshotManager(),

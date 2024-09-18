@@ -177,8 +177,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 new StatsFile(fileIO, pathFactory().statsFileFactory()));
     }
 
-    @Override
-    public ManifestsReader newManifestPlanner(boolean forWrite) {
+    protected ManifestsReader newManifestsReader(boolean forWrite) {
         return new ManifestsReader(partitionType, snapshotManager(), manifestListFactory(forWrite));
     }
 

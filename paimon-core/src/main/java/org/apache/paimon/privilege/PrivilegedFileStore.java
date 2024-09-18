@@ -93,8 +93,8 @@ public class PrivilegedFileStore<T> implements FileStore<T> {
     }
 
     @Override
-    public ManifestsReader newManifestPlanner(boolean forWrite) {
-        return wrapped.newManifestPlanner(forWrite);
+    public ManifestsReader newManifestsReader(boolean forWrite) {
+        return wrapped.newManifestsReader(forWrite);
     }
 
     @Override
