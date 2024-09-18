@@ -124,7 +124,7 @@ public class SparkOrphanFilesClean extends OrphanFilesClean {
                 sc.collectionAccumulator("manifest-output");
         LongAccumulator emitted = sc.longAccumulator();
 
-        JavaRDD<String> usedManifestFiles =
+        JavaRDD<Pair> repartitionRDD =
                 ctx.parallelize(branches)
                         .mapPartitions(
                                 iterator -> {
@@ -137,31 +137,43 @@ public class SparkOrphanFilesClean extends OrphanFilesClean {
                                     }
                                     return pairs.iterator();
                                 })
-                        .repartition(parallelism)
-                        .mapPartitions(
-                                iterator -> {
-                                    List<String> collect = new ArrayList<String>();
-                                    while (iterator.hasNext()) {
-                                        Pair pair = iterator.next();
-                                        String branch = (String) pair.getLeft();
+                        .repartition(parallelism);
+        JavaRDD<Pair<String, String>> outputRdd =
+                repartitionRDD.mapPartitions(
+                        iterator -> {
+                            List<Pair<String, String>> collect =
+                                    new ArrayList<Pair<String, String>>();
+                            while (iterator.hasNext()) {
+                                Pair pair = iterator.next();
+                                String branch = (String) pair.getLeft();
 
-                                        Snapshot snapshot =
-                                                Snapshot.fromJson((String) pair.getRight());
-                                        Consumer<ManifestFileMeta> manifestConsumer =
-                                                manifest -> {
-                                                    Pair<String, String> pair0 =
-                                                            Pair.of(branch, manifest.fileName());
-                                                    pairsAccumulator.add(pair0);
-                                                };
-                                        collectWithoutDataFile(
-                                                branch, snapshot, collect::add, manifestConsumer);
-                                    }
-                                    return collect.iterator();
-                                });
-        usedManifestFiles.collect();
+                                Snapshot snapshot = Snapshot.fromJson((String) pair.getRight());
+                                Consumer<ManifestFileMeta> manifestConsumer =
+                                        manifest -> {
+                                            Pair<String, String> pair0 =
+                                                    Pair.of(branch, manifest.fileName());
+                                            collect.add(pair0);
+                                        };
+                                collectWithoutDataFile(branch, snapshot, null, manifestConsumer);
+                            }
+                            return collect.iterator();
+                        });
+        JavaRDD<String> usedManifestFiles =
+                repartitionRDD.mapPartitions(
+                        iterator -> {
+                            List<String> collect = new ArrayList<String>();
+                            while (iterator.hasNext()) {
+                                Pair pair = iterator.next();
+                                String branch = (String) pair.getLeft();
+
+                                Snapshot snapshot = Snapshot.fromJson((String) pair.getRight());
+                                collectWithoutDataFile(branch, snapshot, collect::add, null);
+                            }
+                            return collect.iterator();
+                        });
 
         JavaRDD<String> usedFiles =
-                ctx.parallelize(pairsAccumulator.value(), parallelism)
+                outputRdd
                         .keyBy(pair -> pair.getLeft().toString() + ":" + pair.getRight().toString())
                         .mapPartitions(
                                 iterator -> {

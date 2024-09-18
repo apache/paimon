@@ -167,7 +167,9 @@ public abstract class OrphanFilesClean implements Serializable {
         List<ManifestFileMeta> manifestFileMetas = new ArrayList<>();
         // changelog manifest
         if (snapshot.changelogManifestList() != null) {
-            usedFileConsumer.accept(snapshot.changelogManifestList());
+            if (usedFileConsumer != null) {
+                usedFileConsumer.accept(snapshot.changelogManifestList());
+            }
             manifestFileMetas.addAll(
                     retryReadingFiles(
                             () ->
@@ -178,7 +180,9 @@ public abstract class OrphanFilesClean implements Serializable {
 
         // delta manifest
         if (snapshot.deltaManifestList() != null) {
-            usedFileConsumer.accept(snapshot.deltaManifestList());
+            if (usedFileConsumer != null) {
+                usedFileConsumer.accept(snapshot.deltaManifestList());
+            }
             manifestFileMetas.addAll(
                     retryReadingFiles(
                             () -> manifestList.readWithIOException(snapshot.deltaManifestList()),
@@ -186,7 +190,10 @@ public abstract class OrphanFilesClean implements Serializable {
         }
 
         // base manifest
-        usedFileConsumer.accept(snapshot.baseManifestList());
+        if (usedFileConsumer != null) {
+            usedFileConsumer.accept(snapshot.baseManifestList());
+        }
+
         manifestFileMetas.addAll(
                 retryReadingFiles(
                         () -> manifestList.readWithIOException(snapshot.baseManifestList()),
@@ -194,13 +201,19 @@ public abstract class OrphanFilesClean implements Serializable {
 
         // collect manifests
         for (ManifestFileMeta manifest : manifestFileMetas) {
-            manifestConsumer.accept(manifest);
-            usedFileConsumer.accept(manifest.fileName());
+            if (manifestConsumer != null) {
+                manifestConsumer.accept(manifest);
+            }
+            if (usedFileConsumer != null) {
+                usedFileConsumer.accept(manifest.fileName());
+            }
         }
 
         // index files
         String indexManifest = snapshot.indexManifest();
-        if (indexManifest != null && indexFileHandler.existsManifest(indexManifest)) {
+        if (indexManifest != null
+                && indexFileHandler.existsManifest(indexManifest)
+                && usedFileConsumer != null) {
             usedFileConsumer.accept(indexManifest);
             retryReadingFiles(
                             () -> indexFileHandler.readManifestWithIOException(indexManifest),
@@ -212,7 +225,7 @@ public abstract class OrphanFilesClean implements Serializable {
         }
 
         // statistic file
-        if (snapshot.statistics() != null) {
+        if (snapshot.statistics() != null && usedFileConsumer != null) {
             usedFileConsumer.accept(snapshot.statistics());
         }
     }
