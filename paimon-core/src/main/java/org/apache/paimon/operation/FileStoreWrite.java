@@ -104,6 +104,9 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
      */
     void write(BinaryRow partition, int bucket, T data) throws Exception;
 
+    /** If this writer will actually perform compactions. */
+    boolean hasCompaction();
+
     /**
      * Compact data stored in given partition and bucket. Note that compaction process is only
      * submitted and may not be completed when the method returns.

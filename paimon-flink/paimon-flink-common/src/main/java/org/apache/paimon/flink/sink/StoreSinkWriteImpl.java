@@ -33,6 +33,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
@@ -154,6 +155,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                         .withIgnorePreviousFiles(ignorePreviousFiles)
                         .withExecutionMode(isStreamingMode)
                         .withBucketMode(table.bucketMode());
+        Preconditions.checkArgument(tableWrite.hasCompaction() == (state != null));
 
         if (metricGroup != null) {
             tableWrite.withMetricRegistry(new FlinkMetricRegistry(metricGroup));

@@ -235,9 +235,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             ExecutorService compactExecutor,
             Levels levels,
             @Nullable DeletionVectorsMaintainer dvMaintainer) {
-        if (options.writeOnly()) {
-            return new NoopCompactManager();
-        } else {
+        if (hasCompaction()) {
             Comparator<InternalRow> keyComparator = keyComparatorSupplier.get();
             @Nullable FieldsComparator userDefinedSeqComparator = udsComparatorSupplier.get();
             CompactRewriter rewriter =
@@ -261,6 +259,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                             : compactionMetrics.createReporter(partition, bucket),
                     dvMaintainer,
                     options.prepareCommitWaitCompaction());
+        } else {
+            return new NoopCompactManager();
         }
     }
 
@@ -387,6 +387,11 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 lookupStoreFactory,
                 bfGenerator(options),
                 lookupFileCache);
+    }
+
+    @Override
+    public boolean hasCompaction() {
+        return !options.writeOnly();
     }
 
     @Override

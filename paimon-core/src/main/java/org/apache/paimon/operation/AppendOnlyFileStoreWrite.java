@@ -88,7 +88,6 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow>
     private final FileIndexOptions fileIndexOptions;
     private final BucketMode bucketMode;
     private boolean forceBufferSpill = false;
-    private final boolean skipCompaction;
 
     public AppendOnlyFileStoreWrite(
             FileIO fileIO,
@@ -115,14 +114,13 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow>
         this.compactionMinFileNum = options.compactionMinFileNum();
         this.compactionMaxFileNum = options.compactionMaxFileNum().orElse(5);
         this.commitForceCompact = options.commitForceCompact();
+
         // AppendOnlyFileStoreWrite is sensitive with bucket mode. It will act difference in
         // unaware-bucket mode (no compaction and force empty-writer).
         if (bucketMode == BucketMode.BUCKET_UNAWARE) {
             super.withIgnorePreviousFiles(true);
-            this.skipCompaction = true;
-        } else {
-            this.skipCompaction = options.writeOnly();
         }
+
         this.fileCompression = options.fileCompression();
         this.spillCompression = options.spillCompressOptions();
         this.useWriteBuffer = options.useWriteBufferForAppend();
@@ -144,7 +142,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow>
             ExecutorService compactExecutor,
             @Nullable DeletionVectorsMaintainer dvMaintainer) {
         CompactManager compactManager = new NoopCompactManager();
-        if (!skipCompaction) {
+        if (hasCompaction()) {
             Function<String, DeletionVector> dvFactory =
                     dvMaintainer != null
                             ? f -> dvMaintainer.deletionVectorOf(f).orElse(null)
@@ -257,6 +255,11 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow>
     public void withIgnorePreviousFiles(boolean ignorePrevious) {
         // in unaware bucket mode, we need all writers to be empty
         super.withIgnorePreviousFiles(ignorePrevious || bucketMode == BucketMode.BUCKET_UNAWARE);
+    }
+
+    @Override
+    public boolean hasCompaction() {
+        return !(options.writeOnly() || bucketMode == BucketMode.BUCKET_UNAWARE);
     }
 
     @Override

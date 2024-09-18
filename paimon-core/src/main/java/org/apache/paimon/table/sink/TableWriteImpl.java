@@ -225,6 +225,10 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
                 record.row());
     }
 
+    public boolean hasCompaction() {
+        return write.hasCompaction();
+    }
+
     @Override
     public void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception {
         write.compact(partition, bucket, fullCompaction);

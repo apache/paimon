@@ -52,6 +52,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.Function;
 
 import static org.apache.paimon.io.DataFileMeta.getMaxSequenceNumber;
 
@@ -64,6 +65,10 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     private static final Logger LOG = LoggerFactory.getLogger(AbstractFileStoreWrite.class);
 
+    // TODO: for write-only writers, commitUser might be some random value, because write-only
+    //  writers won't compact files and have no conflicts. If commitUser will be used in write-only
+    //  writers, I highly suggest a refactor to split writer class into a write-only class and a
+    //  with-compaction class.
     private final String commitUser;
     protected final SnapshotManager snapshotManager;
     private final FileStoreScan scan;
@@ -169,28 +174,50 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     @Override
     public List<CommitMessage> prepareCommit(boolean waitCompaction, long commitIdentifier)
             throws Exception {
-        long latestCommittedIdentifier;
-        if (writers.values().stream()
-                        .map(Map::values)
-                        .flatMap(Collection::stream)
-                        .mapToLong(w -> w.lastModifiedCommitIdentifier)
-                        .max()
-                        .orElse(Long.MIN_VALUE)
-                == Long.MIN_VALUE) {
-            // Optimization for the first commit.
+        Function<WriterContainer<T>, Boolean> shouldCloseWriter;
+        if (hasCompaction()) {
+            long latestCommittedIdentifier;
+            if (writers.values().stream()
+                            .map(Map::values)
+                            .flatMap(Collection::stream)
+                            .mapToLong(w -> w.lastModifiedCommitIdentifier)
+                            .max()
+                            .orElse(Long.MIN_VALUE)
+                    == Long.MIN_VALUE) {
+                // Optimization for the first commit.
+                //
+                // If this is the first commit, no writer has previous modified commit, so the value
+                // of `latestCommittedIdentifier` does not matter.
+                //
+                // Without this optimization, we may need to scan through all snapshots only to find
+                // that there is no previous snapshot by this user, which is very inefficient.
+                latestCommittedIdentifier = Long.MIN_VALUE;
+            } else {
+                latestCommittedIdentifier =
+                        snapshotManager
+                                .latestSnapshotOfUser(commitUser)
+                                .map(Snapshot::commitIdentifier)
+                                .orElse(Long.MIN_VALUE);
+            }
+
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Latest committed identifier is {}", latestCommittedIdentifier);
+            }
+
+            // Condition 1: There is no more record waiting to be committed. Note that the condition
+            // is < (instead of <=), because each commit identifier may have multiple snapshots. We
+            // must make sure all snapshots of this identifier are committed.
             //
-            // If this is the first commit, no writer has previous modified commit, so the value of
-            // `latestCommittedIdentifier` does not matter.
-            //
-            // Without this optimization, we may need to scan through all snapshots only to find
-            // that there is no previous snapshot by this user, which is very inefficient.
-            latestCommittedIdentifier = Long.MIN_VALUE;
+            // Condition 2: No compaction is in progress. That is, no more changelog will be
+            // produced.
+            shouldCloseWriter =
+                    writerContainer ->
+                            writerContainer.lastModifiedCommitIdentifier < latestCommittedIdentifier
+                                    && !writerContainer.writer.isCompacting();
         } else {
-            latestCommittedIdentifier =
-                    snapshotManager
-                            .latestSnapshotOfUser(commitUser)
-                            .map(Snapshot::commitIdentifier)
-                            .orElse(Long.MIN_VALUE);
+            // No conflict for write-only writers, so we can always close writer if it has nothing
+            // to commit.
+            shouldCloseWriter = writerContainer -> true;
         }
 
         List<CommitMessage> result = new ArrayList<>();
@@ -226,28 +253,17 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 result.add(committable);
 
                 if (committable.isEmpty()) {
-                    // Condition 1: There is no more record waiting to be committed. Note that the
-                    // condition is < (instead of <=), because each commit identifier may have
-                    // multiple snapshots. We must make sure all snapshots of this identifier are
-                    // committed.
-                    // Condition 2: No compaction is in progress. That is, no more changelog will be
-                    // produced.
-                    if (writerContainer.lastModifiedCommitIdentifier < latestCommittedIdentifier
-                            && !writerContainer.writer.isCompacting()) {
-                        // Clear writer if no update, and if its latest modification has committed.
-                        //
-                        // We need a mechanism to clear writers, otherwise there will be more and
-                        // more such as yesterday's partition that no longer needs to be written.
+                    // We need a mechanism to clear writers, otherwise there will be more and more
+                    // such as yesterday's partition that no longer needs to be written.
+                    if (shouldCloseWriter.apply(writerContainer)) {
                         if (LOG.isDebugEnabled()) {
                             LOG.debug(
                                     "Closing writer for partition {}, bucket {}. "
                                             + "Writer's last modified identifier is {}, "
-                                            + "while latest committed identifier is {}, "
-                                            + "current commit identifier is {}.",
+                                            + "while current commit identifier is {}.",
                                     partition,
                                     bucket,
                                     writerContainer.lastModifiedCommitIdentifier,
-                                    latestCommittedIdentifier,
                                     commitIdentifier);
                         }
                         writerContainer.writer.close();
