@@ -35,10 +35,13 @@ import org.apache.paimon.utils.ManifestReadThreadPool;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -78,49 +81,51 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
                 LongStream.range(startingSnapshotId + 1, endingSnapshotId + 1)
                         .boxed()
                         .collect(Collectors.toList());
-        ManifestReadThreadPool.randomlyOnlyExecute(
-                id -> {
-                    Snapshot snapshot = snapshotManager.snapshot(id);
-                    switch (scanMode) {
-                        case DELTA:
-                            if (snapshot.commitKind() != CommitKind.APPEND) {
-                                // ignore COMPACT and OVERWRITE
-                                return;
-                            }
-                            break;
-                        case CHANGELOG:
-                            if (snapshot.commitKind() == CommitKind.OVERWRITE) {
-                                // ignore OVERWRITE
-                                return;
-                            }
-                            break;
-                        default:
-                            throw new UnsupportedOperationException(
-                                    "Unsupported scan mode: " + scanMode);
-                    }
 
-                    List<ManifestFileMeta> manifests =
-                            manifestsReader.read(snapshot, scanMode).getRight();
-                    for (ManifestFileMeta manifest : manifests) {
-                        List<ManifestEntry> entries = reader.readManifest(manifest);
-                        for (ManifestEntry entry : entries) {
-                            checkArgument(
-                                    entry.kind() == FileKind.ADD,
-                                    "Delta or changelog should only have ADD files.");
-                            grouped.compute(
-                                    Pair.of(entry.partition(), entry.bucket()),
-                                    (key, files) -> {
-                                        if (files == null) {
-                                            files = new ArrayList<>();
-                                        }
-                                        files.add(entry.file());
-                                        return files;
-                                    });
+        Iterable<ManifestFileMeta> manifests =
+                ManifestReadThreadPool.sequentialBatchedExecute(
+                        id -> {
+                            Snapshot snapshot = snapshotManager.snapshot(id);
+                            switch (scanMode) {
+                                case DELTA:
+                                    if (snapshot.commitKind() != CommitKind.APPEND) {
+                                        // ignore COMPACT and OVERWRITE
+                                        return Collections.emptyList();
+                                    }
+                                    break;
+                                case CHANGELOG:
+                                    if (snapshot.commitKind() == CommitKind.OVERWRITE) {
+                                        // ignore OVERWRITE
+                                        return Collections.emptyList();
+                                    }
+                                    break;
+                                default:
+                                    throw new UnsupportedOperationException(
+                                            "Unsupported scan mode: " + scanMode);
+                            }
+
+                            return manifestsReader.read(snapshot, scanMode).getRight();
+                        },
+                        snapshots,
+                        reader.parallelism());
+
+        Iterable<ManifestEntry> entries =
+                ManifestReadThreadPool.sequentialBatchedExecute(
+                        reader::readManifest, Lists.newArrayList(manifests), reader.parallelism());
+
+        for (ManifestEntry entry : entries) {
+            checkArgument(
+                    entry.kind() == FileKind.ADD, "Delta or changelog should only have ADD files.");
+            grouped.compute(
+                    Pair.of(entry.partition(), entry.bucket()),
+                    (key, files) -> {
+                        if (files == null) {
+                            files = new ArrayList<>();
                         }
-                    }
-                },
-                snapshots,
-                reader.parallelism());
+                        files.add(entry.file());
+                        return files;
+                    });
+        }
 
         List<Split> result = new ArrayList<>();
         for (Map.Entry<Pair<BinaryRow, Integer>, List<DataFileMeta>> entry : grouped.entrySet()) {

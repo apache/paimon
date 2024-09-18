@@ -20,10 +20,8 @@ package org.apache.paimon.utils;
 
 import javax.annotation.Nullable;
 
-import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.ThreadPoolExecutor;
-import java.util.function.Consumer;
 import java.util.function.Function;
 
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
@@ -52,11 +50,5 @@ public class ManifestReadThreadPool {
             Function<U, List<T>> processor, List<U> input, @Nullable Integer threadNum) {
         ThreadPoolExecutor executor = getExecutorService(threadNum);
         return ThreadPoolUtils.sequentialBatchedExecute(executor, processor, input, threadNum);
-    }
-
-    public static <U> void randomlyOnlyExecute(
-            Consumer<U> processor, Collection<U> input, @Nullable Integer threadNum) {
-        ThreadPoolExecutor executor = getExecutorService(threadNum);
-        ThreadPoolUtils.randomlyOnlyExecute(executor, processor, input);
     }
 }
