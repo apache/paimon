@@ -75,7 +75,7 @@ case class PaimonStatistics[T <: PaimonBaseScan](scan: T) extends Statistics {
 
     val metadataSchemaSize = scan.metadataFields.map {
       field =>
-        val dataField = PaimonMetadataColumn.get(field.name).toPaimonDataField
+        val dataField = PaimonMetadataColumn.get(field.name, scan.partitionType).toPaimonDataField
         getSizeForField(dataField)
     }.sum
     val metadataSizeInBytes = paimonStats.mergedRecordCount().getAsLong * metadataSchemaSize

@@ -113,12 +113,15 @@ abstract class PaimonBaseScan(
     inputPartitions
   }
 
+  final def partitionType: StructType = {
+    SparkTypeUtils.toSparkPartitionType(table)
+  }
+
   override def readSchema(): StructType = {
     StructType(requiredTableFields ++ metadataFields)
   }
 
   override def toBatch: Batch = {
-    val partitionType = SparkTypeUtils.toSparkPartitionType(table)
     val metadataColumns =
       metadataFields.map(field => PaimonMetadataColumn.get(field.name, partitionType))
     PaimonBatch(lazyInputPartitions, readBuilder, metadataColumns)
