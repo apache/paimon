@@ -70,6 +70,11 @@ public class HiveCatalogTest extends CatalogTestBase {
         catalog = new HiveCatalog(fileIO, hiveConf, metastoreClientClass, warehouse);
     }
 
+    @Override
+    protected void assertUUID(String uuid, Identifier identifier) {
+        assertThat(uuid).startsWith(identifier.getFullName() + ".");
+    }
+
     @Test
     @Override
     public void testListDatabasesWhenNoDatabases() {

@@ -56,6 +56,11 @@ public interface Table extends Serializable {
         return name();
     }
 
+    /** UUID of the table. */
+    default String uuid() {
+        return fullName();
+    }
+
     /** Returns the row type of this table. */
     RowType rowType();
 
