@@ -26,7 +26,7 @@ public class ExpireTagsActionFactory implements ActionFactory {
 
     public static final String IDENTIFIER = "expire_tags";
 
-    private static final String EXPIRATION_TIME = "expiration_time";
+    private static final String OLDER_THAN = "older_than";
 
     @Override
     public String identifier() {
@@ -37,11 +37,11 @@ public class ExpireTagsActionFactory implements ActionFactory {
     public Optional<Action> create(MultipleParameterToolAdapter params) {
         String warehouse = params.get(WAREHOUSE);
         String table = params.get(TABLE);
-        String expirationTime = params.get(EXPIRATION_TIME);
+        String olderThan = params.get(OLDER_THAN);
         Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
 
         ExpireTagsAction expireTagsAction =
-                new ExpireTagsAction(warehouse, table, expirationTime, catalogConfig);
+                new ExpireTagsAction(warehouse, table, olderThan, catalogConfig);
         return Optional.of(expireTagsAction);
     }
 
@@ -54,6 +54,6 @@ public class ExpireTagsActionFactory implements ActionFactory {
         System.out.println(
                 "  expire_tags --warehouse <warehouse_path> "
                         + "--table <database.table_name> "
-                        + "[--expiration_time <expiration_time>]");
+                        + "[--older_than <older_than>]");
     }
 }

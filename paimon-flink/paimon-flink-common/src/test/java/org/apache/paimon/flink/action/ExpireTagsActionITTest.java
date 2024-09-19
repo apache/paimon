@@ -87,11 +87,10 @@ public class ExpireTagsActionITTest extends ActionITCaseBase {
         assertThat(table.tagManager().tagExists("tag-4")).isFalse();
         assertThat(table.tagManager().tagExists("tag-5")).isFalse();
 
-        // tag-3 as the base expiration_time
-        LocalDateTime expirationTime = table.tagManager().tag("tag-3").getTagCreateTime();
+        // tag-3 as the base older_than time
+        LocalDateTime olderThanTime = table.tagManager().tag("tag-3").getTagCreateTime();
         java.sql.Timestamp timestamp =
-                new java.sql.Timestamp(
-                        Timestamp.fromLocalDateTime(expirationTime).getMillisecond());
+                new java.sql.Timestamp(Timestamp.fromLocalDateTime(olderThanTime).getMillisecond());
         createAction(
                         ExpireTagsAction.class,
                         "expire_tags",
@@ -99,7 +98,7 @@ public class ExpireTagsActionITTest extends ActionITCaseBase {
                         warehouse,
                         "--table",
                         database + ".T",
-                        "--expiration_time",
+                "--older_than",
                         timestamp.toString())
                 .run();
         // tag-2 expires

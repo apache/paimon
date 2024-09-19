@@ -28,22 +28,19 @@ import java.util.Map;
 public class ExpireTagsAction extends ActionBase {
 
     private final String table;
-    private final String expirationTime;
+    private final String olderThan;
 
     public ExpireTagsAction(
-            String warehouse,
-            String table,
-            String expirationTime,
-            Map<String, String> catalogConfig) {
+            String warehouse, String table, String olderThan, Map<String, String> catalogConfig) {
         super(warehouse, catalogConfig);
         this.table = table;
-        this.expirationTime = expirationTime;
+        this.olderThan = olderThan;
     }
 
     @Override
     public void run() throws Exception {
         ExpireTagsProcedure expireTagsProcedure = new ExpireTagsProcedure();
         expireTagsProcedure.withCatalog(catalog);
-        expireTagsProcedure.call(new DefaultProcedureContext(env), table, expirationTime);
+        expireTagsProcedure.call(new DefaultProcedureContext(env), table, olderThan);
     }
 }

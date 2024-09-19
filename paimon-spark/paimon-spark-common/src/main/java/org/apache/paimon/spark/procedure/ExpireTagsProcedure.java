@@ -41,7 +41,7 @@ public class ExpireTagsProcedure extends BaseProcedure {
     private static final ProcedureParameter[] PARAMETERS =
             new ProcedureParameter[] {
                 ProcedureParameter.required("table", StringType),
-                ProcedureParameter.optional("expiration_time", StringType)
+                ProcedureParameter.optional("older_than", StringType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -67,17 +67,17 @@ public class ExpireTagsProcedure extends BaseProcedure {
     @Override
     public InternalRow[] call(InternalRow args) {
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
-        String expirationTimeStr = args.isNullAt(1) ? null : args.getString(1);
+        String olderThanStr = args.isNullAt(1) ? null : args.getString(1);
         return modifyPaimonTable(
                 tableIdent,
                 table -> {
                     TagTimeExpire tagTimeExpire = table.newExpireTags();
-                    if (expirationTimeStr != null) {
-                        LocalDateTime expirationTime =
+                    if (olderThanStr != null) {
+                        LocalDateTime olderThanTime =
                                 DateTimeUtils.parseTimestampData(
-                                                expirationTimeStr, 3, TimeZone.getDefault())
+                                                olderThanStr, 3, TimeZone.getDefault())
                                         .toLocalDateTime();
-                        tagTimeExpire.withExpirationTime(expirationTime);
+                        tagTimeExpire.withOlderThanTime(olderThanTime);
                     }
                     List<String> expired = tagTimeExpire.expire();
                     return expired.isEmpty()

@@ -42,7 +42,7 @@ public class TagTimeExpire {
     private final TagDeletion tagDeletion;
     private final List<TagCallback> callbacks;
 
-    private LocalDateTime expirationTime;
+    private LocalDateTime olderThanTime;
 
     private TagTimeExpire(
             SnapshotManager snapshotManager,
@@ -66,9 +66,9 @@ public class TagTimeExpire {
             if (createTime == null || timeRetained == null) {
                 continue;
             }
-            if ((expirationTime == null
+            if ((olderThanTime == null
                             && LocalDateTime.now().isAfter(createTime.plus(timeRetained)))
-                    || (expirationTime != null && expirationTime.isAfter(createTime))) {
+                    || (olderThanTime != null && olderThanTime.isAfter(createTime))) {
                 LOG.info(
                         "Delete tag {}, because its existence time has reached its timeRetained of {}.",
                         tagName,
@@ -80,8 +80,8 @@ public class TagTimeExpire {
         return expired;
     }
 
-    public TagTimeExpire withExpirationTime(LocalDateTime expirationTime) {
-        this.expirationTime = expirationTime;
+    public TagTimeExpire withOlderThanTime(LocalDateTime olderThanTime) {
+        this.olderThanTime = olderThanTime;
         return this;
     }
 

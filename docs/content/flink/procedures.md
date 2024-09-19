@@ -190,10 +190,10 @@ All available procedures are listed below.
       <td>
          To expire tags by time. Arguments:
             <li>identifier: the target table identifier. Cannot be empty.</li>
-            <li>expiration_time: tagCreateTime before which tags will be removed.</li>
+            <li>older_than: tagCreateTime before which tags will be removed.</li>
       </td>
       <td>
-         CALL sys.expire_tags(table => 'default.T', expiration_time => '2024-09-06 11:00:00')
+         CALL sys.expire_tags(table => 'default.T', older_than => '2024-09-06 11:00:00')
       </td>
    </tr>
    <tr>

@@ -70,7 +70,7 @@ public class ExpireTagsProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testExpireTagsByExpirationTime() throws Exception {
+    public void testExpireTagsByOlderThanTime() throws Exception {
         sql(
                 "CREATE TABLE T (id STRING, name STRING,"
                         + " PRIMARY KEY (id) NOT ENFORCED)"
@@ -94,14 +94,13 @@ public class ExpireTagsProcedureITCase extends CatalogITCaseBase {
         sql(
                 "CALL sys.create_tag(`table` => 'default.T', tag => 'tag-4', snapshot => 4, time_retained => '1d')");
 
-        // tag-4 as the base expiration_time
-        LocalDateTime expirationTime = table.tagManager().tag("tag-4").getTagCreateTime();
+        // tag-4 as the base older_than time
+        LocalDateTime olderThanTime = table.tagManager().tag("tag-4").getTagCreateTime();
         java.sql.Timestamp timestamp =
-                new java.sql.Timestamp(
-                        Timestamp.fromLocalDateTime(expirationTime).getMillisecond());
+                new java.sql.Timestamp(Timestamp.fromLocalDateTime(olderThanTime).getMillisecond());
         assertThat(
                         sql(
-                                "CALL sys.expire_tags(`table` => 'default.T', expiration_time => '"
+                                "CALL sys.expire_tags(`table` => 'default.T', older_than => '"
                                         + timestamp.toString()
                                         + "')"))
                 .containsExactlyInAnyOrder(Row.of("tag-1"), Row.of("tag-2"), Row.of("tag-3"));

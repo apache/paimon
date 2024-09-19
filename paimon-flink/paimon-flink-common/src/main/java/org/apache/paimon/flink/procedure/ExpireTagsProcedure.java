@@ -43,19 +43,19 @@ public class ExpireTagsProcedure extends ProcedureBase {
             argument = {
                 @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
                 @ArgumentHint(
-                        name = "expiration_time",
+                        name = "older_than",
                         type = @DataTypeHint("STRING"),
                         isOptional = true)
             })
     public @DataTypeHint("ROW<expired_tags STRING>") Row[] call(
-            ProcedureContext procedureContext, String tableId, @Nullable String expirationTimeStr)
+            ProcedureContext procedureContext, String tableId, @Nullable String olderThanStr)
             throws Catalog.TableNotExistException {
         TagTimeExpire tagTimeExpire = table(tableId).newExpireTags();
-        if (expirationTimeStr != null) {
-            LocalDateTime expirationTime =
-                    DateTimeUtils.parseTimestampData(expirationTimeStr, 3, TimeZone.getDefault())
+        if (olderThanStr != null) {
+            LocalDateTime olderThanTime =
+                    DateTimeUtils.parseTimestampData(olderThanStr, 3, TimeZone.getDefault())
                             .toLocalDateTime();
-            tagTimeExpire.withExpirationTime(expirationTime);
+            tagTimeExpire.withOlderThanTime(olderThanTime);
         }
         List<String> expired = tagTimeExpire.expire();
         return expired.isEmpty()
