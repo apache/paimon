@@ -19,22 +19,37 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.flink.sink.Committable;
+import org.apache.paimon.flink.sink.FlinkWriteSink;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
-import org.apache.paimon.flink.sink.UnawareBucketSink;
 import org.apache.paimon.table.FileStoreTable;
 
+import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 
-/** CDC Sink for unaware bucket table. */
-public class CdcUnawareBucketSink extends UnawareBucketSink<CdcRecord> {
+import javax.annotation.Nullable;
+
+/**
+ * CDC Sink for unaware bucket table. It should not add compaction node, because the compaction may
+ * have old schema.
+ */
+public class CdcUnawareBucketSink extends FlinkWriteSink<CdcRecord> {
+
+    private final Integer parallelism;
 
     public CdcUnawareBucketSink(FileStoreTable table, Integer parallelism) {
-        super(table, null, null, parallelism);
+        super(table, null);
+        this.parallelism = parallelism;
     }
 
     @Override
     protected OneInputStreamOperator<CdcRecord, Committable> createWriteOperator(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
         return new CdcUnawareBucketWriteOperator(table, writeProvider, commitUser);
+    }
+
+    @Override
+    public DataStream<Committable> doWrite(
+            DataStream<CdcRecord> input, String initialCommitUser, @Nullable Integer parallelism) {
+        return super.doWrite(input, initialCommitUser, this.parallelism);
     }
 }
