@@ -114,8 +114,7 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
                 table.switchToBranch(branch).store().manifestFileFactory().create();
         try {
             List<String> manifests = new ArrayList<>();
-            collectWithoutDataFile(
-                    branch, usedFiles::add, manifest -> manifests.add(manifest.fileName()));
+            collectWithoutDataFile(branch, usedFiles::add, manifests::add);
             usedFiles.addAll(retryReadingDataFiles(manifestFile, manifests));
         } catch (IOException e) {
             throw new RuntimeException(e);

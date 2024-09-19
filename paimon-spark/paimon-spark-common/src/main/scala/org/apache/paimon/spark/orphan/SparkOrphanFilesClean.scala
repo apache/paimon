@@ -18,10 +18,10 @@
 
 package org.apache.paimon.spark.orphan
 
-import org.apache.paimon.Snapshot
+import org.apache.paimon.{utils, Snapshot}
 import org.apache.paimon.catalog.{Catalog, Identifier}
 import org.apache.paimon.fs.Path
-import org.apache.paimon.manifest.{ManifestEntry, ManifestFile, ManifestFileMeta}
+import org.apache.paimon.manifest.{ManifestEntry, ManifestFile}
 import org.apache.paimon.operation.OrphanFilesClean
 import org.apache.paimon.operation.OrphanFilesClean.retryReadingFiles
 import org.apache.paimon.table.FileStoreTable
@@ -50,7 +50,7 @@ case class SparkOrphanFilesClean(
   with SQLConfHelper
   with Logging {
 
-  def doOrphanClean(): Dataset[Long] = {
+  def doOrphanClean(): (Dataset[Long], Dataset[BranchAndManifestFile]) = {
     import spark.implicits._
 
     val branches = validBranches()
@@ -69,24 +69,19 @@ case class SparkOrphanFilesClean(
       .repartition(parallelism)
       .flatMap {
         case (branch, snapshotJson) =>
-          var isManifestMetaFile: Boolean = false
           val usedFileBuffer = new ArrayBuffer[BranchAndManifestFile]()
-          val usedFileConsumer = new Consumer[String] {
-            override def accept(file: String): Unit = {
-              usedFileBuffer.append(BranchAndManifestFile(branch, file, isManifestMetaFile))
-              isManifestMetaFile = false
+          val usedFileConsumer =
+            new Consumer[org.apache.paimon.utils.Pair[String, java.lang.Boolean]] {
+              override def accept(pair: utils.Pair[String, java.lang.Boolean]): Unit = {
+                usedFileBuffer.append(BranchAndManifestFile(branch, pair.getLeft, pair.getRight))
+              }
             }
-          }
-          val manifestConsumer = new Consumer[ManifestFileMeta] {
-            override def accept(t: ManifestFileMeta): Unit = {
-              isManifestMetaFile = true
-            }
-          }
           val snapshot = Snapshot.fromJson(snapshotJson)
-          collectWithoutDataFile(branch, snapshot, usedFileConsumer, manifestConsumer)
+          collectWithoutDataFileWithManifestFlag(branch, snapshot, usedFileConsumer)
           usedFileBuffer
       }
       .toDS()
+      .cache()
 
     // find all data files
     val dataFiles = usedManifestFiles
@@ -147,11 +142,13 @@ case class SparkOrphanFilesClean(
           logInfo(s"Total cleaned files: $deleted");
           Iterator.single(deleted)
       }
-    if (deletedInLocal.get() != 0) {
+    val finalDeletedDataset = if (deletedInLocal.get() != 0) {
       deleted.union(spark.createDataset(Seq(deletedInLocal.get())))
     } else {
       deleted
     }
+
+    (finalDeletedDataset, usedManifestFiles)
   }
 }
 
@@ -197,27 +194,31 @@ object SparkOrphanFilesClean extends SQLConfHelper {
     if (tables.isEmpty) {
       return 0
     }
-    val result = tables
-      .map {
-        table =>
-          new SparkOrphanFilesClean(
-            table,
-            olderThanMillis,
-            fileCleaner,
-            parallelism,
-            spark
-          ).doOrphanClean()
+    val (deleted, waitToRelease) = tables.map {
+      table =>
+        new SparkOrphanFilesClean(
+          table,
+          olderThanMillis,
+          fileCleaner,
+          parallelism,
+          spark
+        ).doOrphanClean()
+    }.unzip
+    try {
+      val result = deleted
+        .reduce((l, r) => l.union(r))
+        .toDF("deleted")
+        .agg(sum("deleted"))
+        .head()
+      assert(result.schema.size == 1, result.schema)
+      if (result.isNullAt(0)) {
+        // no files can be deleted
+        0
+      } else {
+        result.getLong(0)
       }
-      .reduce((l, r) => l.union(r))
-      .toDF("deleted")
-      .agg(sum("deleted"))
-      .head()
-    assert(result.schema.size == 1, result.schema)
-    if (result.isNullAt(0)) {
-      // no files can be deleted
-      0
-    } else {
-      result.getLong(0)
+    } finally {
+      waitToRelease.foreach(_.unpersist())
     }
   }
 }

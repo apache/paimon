@@ -72,6 +72,8 @@ class RemoveOrphanFilesProcedureTest extends PaimonSparkTestBase {
     checkAnswer(
       spark.sql(s"CALL sys.remove_orphan_files(table => 'T', older_than => '$older_than2')"),
       Row(1) :: Nil)
+
+    checkAnswer(spark.sql(s"CALL sys.remove_orphan_files(table => 'T')"), Row(0) :: Nil)
   }
 
   test("Paimon procedure: dry run remove orphan files") {
@@ -106,6 +108,8 @@ class RemoveOrphanFilesProcedureTest extends PaimonSparkTestBase {
         s"CALL sys.remove_orphan_files(table => 'T', older_than => '$older_than', dry_run => true)"),
       Row(2) :: Nil
     )
+
+    checkAnswer(spark.sql(s"CALL sys.remove_orphan_files(table => 'T')"), Row(0) :: Nil)
   }
 
   test("Paimon procedure: remove database orphan files") {
@@ -164,6 +168,8 @@ class RemoveOrphanFilesProcedureTest extends PaimonSparkTestBase {
       spark.sql(s"CALL sys.remove_orphan_files(table => 'test.*', older_than => '$older_than2')"),
       Row(2) :: Nil
     )
+
+    checkAnswer(spark.sql(s"CALL sys.remove_orphan_files(table => 'test.*')"), Row(0) :: Nil)
   }
 
 }
