@@ -350,7 +350,6 @@ under the License.
                     <archive>
                         <manifestEntries>
                             <SCM-Revision>${git.commit.id}</SCM-Revision>
-                            <SCM-Branch>${git.branch}</SCM-Branch><!-- TODO: remove this non-reproducible config once maven-jar-plugin upgrade works -->
                         </manifestEntries>
                         <manifest>
                             <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
