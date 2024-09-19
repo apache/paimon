@@ -22,6 +22,7 @@ import org.apache.paimon.data.{BinaryString, GenericRow, InternalRow => PaimonIn
 import org.apache.paimon.fs.Path
 import org.apache.paimon.reader.{FileRecordIterator, RecordReader}
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
+import org.apache.paimon.table.source.{DataSplit, Split}
 import org.apache.paimon.utils.CloseableIterator
 
 import org.apache.spark.sql.PaimonUtils
@@ -30,7 +31,8 @@ import java.io.IOException
 
 case class PaimonRecordReaderIterator(
     reader: RecordReader[PaimonInternalRow],
-    metadataColumns: Seq[PaimonMetadataColumn])
+    metadataColumns: Seq[PaimonMetadataColumn],
+    split: Split)
   extends CloseableIterator[PaimonInternalRow] {
 
   private var lastFilePath: Path = _
@@ -43,6 +45,15 @@ case class PaimonRecordReaderIterator(
   private val metadataRow: GenericRow =
     GenericRow.of(Array.fill(metadataColumns.size)(null.asInstanceOf[AnyRef]): _*)
   private val joinedRow: JoinedRow = JoinedRow.join(null, metadataRow)
+
+  private def validateMetadataColumns(): Unit = {
+    if (needMetadata) {
+      if (!isFileRecordIterator || !split.isInstanceOf[DataSplit]) {
+        throw new RuntimeException(
+          "There need be FileRecordIterator when metadata columns are required.")
+      }
+    }
+  }
 
   override def hasNext: Boolean = {
     if (currentIterator == null) {
@@ -98,10 +109,7 @@ case class PaimonRecordReaderIterator(
           val dataRow = currentIterator.next()
           if (dataRow != null) {
             if (needMetadata) {
-              if (!isFileRecordIterator) {
-                throw new RuntimeException(
-                  "There need be FileRecoredIterator when metadata columns are required.")
-              }
+              validateMetadataColumns()
               updateMetadataRow(currentIterator.asInstanceOf[FileRecordIterator[PaimonInternalRow]])
               currentResult = joinedRow.replace(dataRow, metadataRow)
             } else {
@@ -133,10 +141,14 @@ case class PaimonRecordReaderIterator(
     metadataColumns.zipWithIndex.foreach {
       case (metadataColumn, index) =>
         metadataColumn.name match {
-          case PaimonMetadataColumn.ROW_INDEX.name =>
+          case PaimonMetadataColumn.ROW_INDEX_COLUMN =>
             metadataRow.setField(index, fileRecordIterator.returnedPosition())
-          case PaimonMetadataColumn.FILE_PATH.name =>
+          case PaimonMetadataColumn.FILE_PATH_COLUMN =>
             metadataRow.setField(index, BinaryString.fromString(lastFilePath.toUri.toString))
+          case PaimonMetadataColumn.PARTITION_COLUMN =>
+            metadataRow.setField(index, split.asInstanceOf[DataSplit].partition())
+          case PaimonMetadataColumn.BUCKET_COLUMN =>
+            metadataRow.setField(index, split.asInstanceOf[DataSplit].bucket())
         }
     }
   }

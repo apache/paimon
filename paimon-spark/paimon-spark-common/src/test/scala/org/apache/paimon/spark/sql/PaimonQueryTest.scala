@@ -29,6 +29,7 @@ import java.util
 import scala.collection.JavaConverters._
 
 class PaimonQueryTest extends PaimonSparkTestBase {
+  import testImplicits._
 
   fileFormats.foreach {
     fileFormat =>
@@ -66,13 +67,55 @@ class PaimonQueryTest extends PaimonSparkTestBase {
 
   }
 
+  test("Query metadata columns for bucket") {
+    withTable("T") {
+      spark.sql(
+        """
+          |CREATE TABLE T (c1 INT, c2 STRING) TBLPROPERTIES ('bucket-key'='c1', 'bucket'='3')
+          |""".stripMargin)
+
+      spark.sql("""
+                  |INSERT INTO T
+                  |VALUES (1, 'x1'), (2, 'x3'), (3, 'x3'), (4, 'x4'), (5, 'x5'), (6, 'x6')
+                  |""".stripMargin)
+
+      val res = spark.sql("""
+                            |SELECT __paimon_partition, __paimon_bucket FROM T
+                            |GROUP BY __paimon_partition, __paimon_bucket
+                            |ORDER BY __paimon_partition, __paimon_bucket
+                            |""".stripMargin)
+      checkAnswer(res, Row(Row(), 0) :: Row(Row(), 1) :: Row(Row(), 2) :: Nil)
+    }
+  }
+
+  test("Query metadata columns for partition") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (c1 INT) PARTITIONED BY(p1 INT, p2 String)
+                  |""".stripMargin)
+
+      spark.sql("""
+                  |INSERT INTO T
+                  |VALUES (1, 1, 'x1'), (2, 1, 'x2'), (3, 2, 'x1'), (4, 2, 'x2'), (5, 3, 'x3')
+                  |""".stripMargin)
+
+      val res = spark.sql("""
+                            |SELECT __paimon_partition, __paimon_bucket FROM T
+                            |GROUP BY __paimon_partition, __paimon_bucket
+                            |ORDER BY __paimon_partition, __paimon_bucket
+                            |""".stripMargin)
+      checkAnswer(
+        res,
+        Row(Row(1, "x1"), 0) :: Row(Row(1, "x2"), 0) :: Row(Row(2, "x1"), 0) ::
+          Row(Row(2, "x2"), 0) :: Row(Row(3, "x3"), 0) :: Nil)
+    }
+  }
+
   fileFormats.foreach {
     fileFormat =>
       bucketModes.foreach {
         bucketMode =>
           test(s"Query input_file_name(): file.format=$fileFormat, bucket=$bucketMode") {
-            val _spark: SparkSession = spark
-            import _spark.implicits._
 
             withTable("T") {
               val bucketProp = if (bucketMode != -1) {
