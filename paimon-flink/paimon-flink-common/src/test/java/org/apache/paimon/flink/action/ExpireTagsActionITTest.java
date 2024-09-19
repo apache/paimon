@@ -98,7 +98,7 @@ public class ExpireTagsActionITTest extends ActionITCaseBase {
                         warehouse,
                         "--table",
                         database + ".T",
-                "--older_than",
+                        "--older_than",
                         timestamp.toString())
                 .run();
         // tag-2 expires
