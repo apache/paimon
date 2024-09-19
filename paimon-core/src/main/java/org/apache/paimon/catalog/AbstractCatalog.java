@@ -479,9 +479,8 @@ public abstract class AbstractCatalog implements Catalog {
         return new TableMeta(getDataTableSchema(identifier), null);
     }
 
-    protected TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
-        throw new UnsupportedOperationException();
-    }
+    protected abstract TableSchema getDataTableSchema(Identifier identifier)
+            throws TableNotExistException;
 
     /** Get metastore client factory for the table specified by {@code identifier}. */
     public Optional<MetastoreClient.Factory> metastoreClientFactory(
@@ -642,6 +641,15 @@ public abstract class AbstractCatalog implements Catalog {
         public TableMeta(TableSchema schema, @Nullable String uuid) {
             this.schema = schema;
             this.uuid = uuid;
+        }
+
+        public TableSchema schema() {
+            return schema;
+        }
+
+        @Nullable
+        public String uuid() {
+            return uuid;
         }
     }
 }
