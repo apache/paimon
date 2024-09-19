@@ -131,6 +131,18 @@ This section introduce all available spark procedures about paimon.
       </td>
     </tr>
     <tr>
+      <td>migrate_database</td>
+      <td>
+         Migrate hive table to a paimon table. Arguments:
+            <li>source_type: the origin table's type to be migrated, such as hive. Cannot be empty.</li>
+            <li>database: name of the origin database to be migrated. Cannot be empty.</li>
+            <li>options: the table options of the paimon table to migrate.</li>
+            <li>options_map: Options map for adding key-value options which is a map.</li>
+            <li>parallelism: the parallelism for migrate process, default is core numbers of machine.</li>
+      </td>
+      <td>CALL sys.migrate_table(source_type => 'hive', table => 'default.T', options => 'file.format=parquet', options_map => map('k1','v1'), parallelism => 6)</td>
+    </tr>
+    <tr>
       <td>migrate_table</td>
       <td>
          Migrate hive table to a paimon table. Arguments:

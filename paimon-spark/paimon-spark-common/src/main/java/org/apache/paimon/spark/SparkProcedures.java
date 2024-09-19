@@ -18,24 +18,7 @@
 
 package org.apache.paimon.spark;
 
-import org.apache.paimon.spark.procedure.CompactProcedure;
-import org.apache.paimon.spark.procedure.CreateBranchProcedure;
-import org.apache.paimon.spark.procedure.CreateTagFromTimestampProcedure;
-import org.apache.paimon.spark.procedure.CreateTagProcedure;
-import org.apache.paimon.spark.procedure.DeleteBranchProcedure;
-import org.apache.paimon.spark.procedure.DeleteTagProcedure;
-import org.apache.paimon.spark.procedure.ExpirePartitionsProcedure;
-import org.apache.paimon.spark.procedure.ExpireSnapshotsProcedure;
-import org.apache.paimon.spark.procedure.FastForwardProcedure;
-import org.apache.paimon.spark.procedure.MarkPartitionDoneProcedure;
-import org.apache.paimon.spark.procedure.MigrateFileProcedure;
-import org.apache.paimon.spark.procedure.MigrateTableProcedure;
-import org.apache.paimon.spark.procedure.Procedure;
-import org.apache.paimon.spark.procedure.ProcedureBuilder;
-import org.apache.paimon.spark.procedure.RemoveOrphanFilesProcedure;
-import org.apache.paimon.spark.procedure.RepairProcedure;
-import org.apache.paimon.spark.procedure.ResetConsumerProcedure;
-import org.apache.paimon.spark.procedure.RollbackProcedure;
+import org.apache.paimon.spark.procedure.*;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
@@ -66,6 +49,7 @@ public class SparkProcedures {
         procedureBuilders.put("create_branch", CreateBranchProcedure::builder);
         procedureBuilders.put("delete_branch", DeleteBranchProcedure::builder);
         procedureBuilders.put("compact", CompactProcedure::builder);
+        procedureBuilders.put("migrate_database", MigrateDatabaseProcedure::builder);
         procedureBuilders.put("migrate_table", MigrateTableProcedure::builder);
         procedureBuilders.put("migrate_file", MigrateFileProcedure::builder);
         procedureBuilders.put("remove_orphan_files", RemoveOrphanFilesProcedure::builder);
