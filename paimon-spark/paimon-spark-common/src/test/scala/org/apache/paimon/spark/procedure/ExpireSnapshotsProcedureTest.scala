@@ -141,7 +141,7 @@ class ExpireSnapshotsProcedureTest extends PaimonSparkTestBase with StreamTest {
     }
   }
 
-  test("test parameter order_than with old timestamp type and new string type") {
+  test("Paimon Procedure: test parameter order_than with string type") {
     sql(
       "CREATE TABLE T (a INT, b STRING) " +
         "TBLPROPERTIES ( 'num-sorted-run.compaction-trigger' = '999' )")
@@ -154,17 +154,10 @@ class ExpireSnapshotsProcedureTest extends PaimonSparkTestBase with StreamTest {
     }
     checkSnapshots(snapshotManager, 1, 5)
 
-    // older_than with old timestamp type, like "1724664000000"
-    val nanosecond: Long = snapshotManager.latestSnapshot().timeMillis * 1000
-    spark.sql(
-      s"CALL paimon.sys.expire_snapshots(table => 'test.T', older_than => $nanosecond, max_deletes => 2)")
-    checkSnapshots(snapshotManager, 3, 5)
-
-    // older_than with new string type, like "2024-08-26 17:20:00"
     val timestamp = new Timestamp(snapshotManager.latestSnapshot().timeMillis)
     spark.sql(
       s"CALL paimon.sys.expire_snapshots(table => 'test.T', older_than => '${timestamp.toString}', max_deletes => 2)")
-    checkSnapshots(snapshotManager, 5, 5)
+    checkSnapshots(snapshotManager, 3, 5)
   }
 
   def checkSnapshots(sm: SnapshotManager, earliest: Int, latest: Int): Unit = {

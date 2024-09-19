@@ -89,20 +89,12 @@ public class ExpireSnapshotsProcedure extends BaseProcedure {
                         builder.snapshotRetainMin(retainMin);
                     }
                     if (!StringUtils.isNullOrWhitespaceOnly(olderThanStr)) {
-                        long olderThanMills;
-                        // forward compatibility for timestamp type
-                        if (StringUtils.isNumeric(olderThanStr)) {
-                            olderThanMills = Long.parseLong(olderThanStr) / 1000;
-                            builder.snapshotTimeRetain(
-                                    Duration.ofMillis(System.currentTimeMillis() - olderThanMills));
-                        } else {
-                            olderThanMills =
-                                    DateTimeUtils.parseTimestampData(
-                                                    olderThanStr, 3, TimeZone.getDefault())
-                                            .getMillisecond();
-                            builder.snapshotTimeRetain(
-                                    Duration.ofMillis(System.currentTimeMillis() - olderThanMills));
-                        }
+                        long olderThanMills =
+                                DateTimeUtils.parseTimestampData(
+                                                olderThanStr, 3, TimeZone.getDefault())
+                                        .getMillisecond();
+                        builder.snapshotTimeRetain(
+                                Duration.ofMillis(System.currentTimeMillis() - olderThanMills));
                     }
                     if (maxDeletes != null) {
                         builder.snapshotMaxDeletes(maxDeletes);
