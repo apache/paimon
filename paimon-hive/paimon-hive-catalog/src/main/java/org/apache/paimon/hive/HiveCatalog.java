@@ -471,6 +471,11 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
+    protected TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
+        return getDataTableMeta(identifier).schema();
+    }
+
+    @Override
     public FormatTable getFormatTable(Identifier identifier) throws TableNotExistException {
         if (!formatTableEnabled()) {
             throw new TableNotExistException(identifier);
