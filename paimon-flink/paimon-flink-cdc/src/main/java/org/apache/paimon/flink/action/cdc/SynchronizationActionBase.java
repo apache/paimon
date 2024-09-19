@@ -198,6 +198,10 @@ public abstract class SynchronizationActionBase extends ActionBase {
                                         || Objects.equals(
                                                 oldOptions.get(entry.getKey()), entry.getValue()));
 
+        if (dynamicOptions.isEmpty()) {
+            return table;
+        }
+
         // alter the table dynamic options
         List<SchemaChange> optionChanges =
                 dynamicOptions.entrySet().stream()
