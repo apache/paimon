@@ -52,11 +52,15 @@ public interface Table extends Serializable {
     /** A name to identify this table. */
     String name();
 
+    /** Full name of the table, default is database.tableName. */
     default String fullName() {
         return name();
     }
 
-    /** UUID of the table. */
+    /**
+     * UUID of the table, metastore can provide the true UUID of this table, default is the full
+     * name.
+     */
     default String uuid() {
         return fullName();
     }
