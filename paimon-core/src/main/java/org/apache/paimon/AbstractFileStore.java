@@ -31,6 +31,7 @@ import org.apache.paimon.metastore.AddPartitionTagCallback;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.operation.FileStoreCommitImpl;
+import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.TagDeletion;
@@ -174,6 +175,10 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 snapshotManager(),
                 schemaManager,
                 new StatsFile(fileIO, pathFactory().statsFileFactory()));
+    }
+
+    protected ManifestsReader newManifestsReader(boolean forWrite) {
+        return new ManifestsReader(partitionType, snapshotManager(), manifestListFactory(forWrite));
     }
 
     @Override

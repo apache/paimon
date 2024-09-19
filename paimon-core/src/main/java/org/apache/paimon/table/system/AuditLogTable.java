@@ -33,6 +33,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -57,6 +58,7 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.SimpleFileReader;
@@ -242,8 +244,23 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public Integer parallelism() {
+            return snapshotReader.parallelism();
+        }
+
+        @Override
         public SnapshotManager snapshotManager() {
             return snapshotReader.snapshotManager();
+        }
+
+        @Override
+        public ManifestsReader manifestsReader() {
+            return snapshotReader.manifestsReader();
+        }
+
+        @Override
+        public List<ManifestEntry> readManifest(ManifestFileMeta manifest) {
+            return snapshotReader.readManifest(manifest);
         }
 
         @Override
@@ -254,6 +271,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public SplitGenerator splitGenerator() {
             return snapshotReader.splitGenerator();
+        }
+
+        @Override
+        public FileStorePathFactory pathFactory() {
+            return snapshotReader.pathFactory();
         }
 
         public SnapshotReader withSnapshot(long snapshotId) {

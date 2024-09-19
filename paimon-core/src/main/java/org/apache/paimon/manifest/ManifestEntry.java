@@ -26,6 +26,7 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TinyIntType;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
@@ -159,5 +160,18 @@ public class ManifestEntry implements FileEntry {
                 .filter(manifestEntry -> FileKind.DELETE.equals(manifestEntry.kind()))
                 .mapToLong(manifest -> manifest.file().rowCount())
                 .sum();
+    }
+
+    // ----------------------- Serialization -----------------------------
+
+    private static final ThreadLocal<ManifestEntrySerializer> SERIALIZER_THREAD_LOCAL =
+            ThreadLocal.withInitial(ManifestEntrySerializer::new);
+
+    public byte[] toBytes() throws IOException {
+        return SERIALIZER_THREAD_LOCAL.get().serializeToBytes(this);
+    }
+
+    public ManifestEntry fromBytes(byte[] bytes) throws IOException {
+        return SERIALIZER_THREAD_LOCAL.get().deserializeFromBytes(bytes);
     }
 }

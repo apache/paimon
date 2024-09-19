@@ -136,13 +136,13 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 };
 
         return new AppendOnlyFileStoreScan(
+                newManifestsReader(forWrite),
                 partitionType,
                 bucketFilter,
                 snapshotManager(),
                 schemaManager,
                 schema,
                 manifestFileFactory(forWrite),
-                manifestListFactory(forWrite),
                 options.bucket(),
                 forWrite,
                 options.scanManifestParallelism(),
