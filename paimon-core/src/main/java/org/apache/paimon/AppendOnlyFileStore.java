@@ -25,6 +25,8 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.operation.AppendOnlyFileStoreScan;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
+import org.apache.paimon.operation.AppendOnlyFixedBucketFileStoreWrite;
+import org.apache.paimon.operation.AppendOnlyUnawareBucketFileStoreWrite;
 import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.operation.ScanBucketFilter;
 import org.apache.paimon.predicate.Predicate;
@@ -94,21 +96,36 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
     @Override
     public AppendOnlyFileStoreWrite newWrite(
             String commitUser, ManifestCacheFilter manifestFilter) {
-        return new AppendOnlyFileStoreWrite(
-                fileIO,
-                newRead(),
-                schema.id(),
-                commitUser,
-                rowType,
-                pathFactory(),
-                snapshotManager(),
-                newScan(true).withManifestCacheFilter(manifestFilter),
-                options,
-                bucketMode(),
+        DeletionVectorsMaintainer.Factory dvMaintainerFactory =
                 options.deletionVectorsEnabled()
                         ? DeletionVectorsMaintainer.factory(newIndexFileHandler())
-                        : null,
-                tableName);
+                        : null;
+        if (bucketMode() == BucketMode.BUCKET_UNAWARE) {
+            return new AppendOnlyUnawareBucketFileStoreWrite(
+                    fileIO,
+                    newRead(),
+                    schema.id(),
+                    rowType,
+                    pathFactory(),
+                    snapshotManager(),
+                    newScan(true).withManifestCacheFilter(manifestFilter),
+                    options,
+                    dvMaintainerFactory,
+                    tableName);
+        } else {
+            return new AppendOnlyFixedBucketFileStoreWrite(
+                    fileIO,
+                    newRead(),
+                    schema.id(),
+                    commitUser,
+                    rowType,
+                    pathFactory(),
+                    snapshotManager(),
+                    newScan(true).withManifestCacheFilter(manifestFilter),
+                    options,
+                    dvMaintainerFactory,
+                    tableName);
+        }
     }
 
     private AppendOnlyFileStoreScan newScan(boolean forWrite) {
@@ -129,7 +146,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                                         splitAnd(predicate),
                                         rowType.getFieldNames(),
                                         bucketKeyType.getFieldNames());
-                        if (bucketFilters.size() > 0) {
+                        if (!bucketFilters.isEmpty()) {
                             setBucketKeyFilter(and(bucketFilters));
                         }
                     }

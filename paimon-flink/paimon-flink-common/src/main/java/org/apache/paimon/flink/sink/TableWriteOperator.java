@@ -24,7 +24,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.ChannelComputer;
 
-import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 
@@ -39,7 +38,7 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
     private final StoreSinkWrite.Provider storeSinkWriteProvider;
     private final String initialCommitUser;
 
-    private transient StoreSinkWriteState state;
+    protected transient StoreSinkWriteState state;
     protected transient StoreSinkWrite write;
 
     public TableWriteOperator(
@@ -74,27 +73,21 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
                     return task == getRuntimeContext().getIndexOfThisSubtask();
                 };
 
-        initStateAndWriter(
-                context,
-                stateFilter,
-                getContainingTask().getEnvironment().getIOManager(),
-                commitUser);
-    }
-
-    @VisibleForTesting
-    void initStateAndWriter(
-            StateInitializationContext context,
-            StateValueFilter stateFilter,
-            IOManager ioManager,
-            String commitUser)
-            throws Exception {
-        // We put state and write init in this method for convenient testing. Without construct a
-        // runtime context, we can test to construct a writer here
-        state = new StoreSinkWriteState(context, stateFilter);
-
+        state = createState(context, stateFilter);
         write =
                 storeSinkWriteProvider.provide(
-                        table, commitUser, state, ioManager, memoryPool, getMetricGroup());
+                        table,
+                        commitUser,
+                        state,
+                        getContainingTask().getEnvironment().getIOManager(),
+                        memoryPool,
+                        getMetricGroup());
+    }
+
+    protected StoreSinkWriteState createState(
+            StateInitializationContext context, StoreSinkWriteState.StateValueFilter stateFilter)
+            throws Exception {
+        return new StoreSinkWriteStateImpl(context, stateFilter);
     }
 
     protected abstract boolean containLogSystem();
