@@ -181,7 +181,7 @@ public class FilesTable implements ReadonlyTable {
         public Plan innerPlan() {
             List<BinaryRow> partitions = new ArrayList<>();
             if (partitionPredicate != null
-                    && fileStoreTable.partitionKeys().isEmpty()
+                    && !fileStoreTable.partitionKeys().isEmpty()
                     && partitionPredicate.function() instanceof Equal) {
                 GenericRow partitionRow = new GenericRow(fileStoreTable.partitionKeys().size());
                 RowType partitionRowType = fileStoreTable.schema().logicalPartitionType();
