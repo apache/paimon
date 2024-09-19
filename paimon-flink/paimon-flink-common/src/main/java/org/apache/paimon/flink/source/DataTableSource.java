@@ -36,10 +36,14 @@ import org.apache.paimon.utils.Projection;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
+import org.apache.flink.table.connector.source.LookupTableSource;
 import org.apache.flink.table.connector.source.LookupTableSource.LookupContext;
 import org.apache.flink.table.connector.source.LookupTableSource.LookupRuntimeProvider;
 import org.apache.flink.table.connector.source.ScanTableSource.ScanContext;
 import org.apache.flink.table.connector.source.ScanTableSource.ScanRuntimeProvider;
+import org.apache.flink.table.connector.source.abilities.SupportsDynamicFiltering;
+import org.apache.flink.table.connector.source.abilities.SupportsStatisticReport;
+import org.apache.flink.table.connector.source.abilities.SupportsWatermarkPushDown;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.plan.stats.TableStats;
@@ -66,13 +70,13 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 
 /**
  * Table source to create {@link StaticFileStoreSource} or {@link ContinuousFileStoreSource} under
- * batch mode or change-tracking is disabled. For streaming mode with change-tracking enabled and
- * FULL scan mode, it will create a {@link
- * org.apache.flink.connector.base.source.hybrid.HybridSource} of {@code
- * LogHybridSourceFactory.FlinkHybridFirstSource} and kafka log source created by {@link
- * LogSourceProvider}.
+ * batch mode or streaming mode.
  */
-public class DataTableSource extends FlinkTableSource {
+public class DataTableSource extends FlinkTableSource
+        implements LookupTableSource,
+                SupportsWatermarkPushDown,
+                SupportsStatisticReport,
+                SupportsDynamicFiltering {
 
     private final ObjectIdentifier tableIdentifier;
     private final boolean streaming;
@@ -225,7 +229,7 @@ public class DataTableSource extends FlinkTableSource {
     }
 
     @Override
-    public void pushWatermark(WatermarkStrategy<RowData> watermarkStrategy) {
+    public void applyWatermark(WatermarkStrategy<RowData> watermarkStrategy) {
         this.watermarkStrategy = watermarkStrategy;
     }
 

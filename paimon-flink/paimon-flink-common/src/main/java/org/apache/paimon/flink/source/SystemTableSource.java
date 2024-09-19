@@ -32,16 +32,11 @@ import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
-import org.apache.flink.table.connector.source.LookupTableSource;
 import org.apache.flink.table.connector.source.ScanTableSource.ScanContext;
 import org.apache.flink.table.connector.source.ScanTableSource.ScanRuntimeProvider;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.plan.stats.TableStats;
 
 import javax.annotation.Nullable;
-
-import java.util.Collections;
-import java.util.List;
 
 /** A {@link FlinkTableSource} for system table. */
 public class SystemTableSource extends FlinkTableSource {
@@ -125,36 +120,6 @@ public class SystemTableSource extends FlinkTableSource {
     @Override
     public String asSummaryString() {
         return "Paimon-SystemTable-Source";
-    }
-
-    @Override
-    public void pushWatermark(WatermarkStrategy<RowData> watermarkStrategy) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public LookupTableSource.LookupRuntimeProvider getLookupRuntimeProvider(
-            LookupTableSource.LookupContext context) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public TableStats reportStatistics() {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public List<String> listAcceptedFilterFields() {
-        // system table doesn't support dynamic filtering
-        return Collections.emptyList();
-    }
-
-    @Override
-    public void applyDynamicFiltering(List<String> candidateFilterFields) {
-        throw new UnsupportedOperationException(
-                String.format(
-                        "Cannot apply dynamic filtering to Paimon system table '%s'.",
-                        table.name()));
     }
 
     @Override

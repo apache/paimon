@@ -30,18 +30,13 @@ import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.Split;
 
-import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.table.connector.ChangelogMode;
-import org.apache.flink.table.connector.source.LookupTableSource.LookupContext;
-import org.apache.flink.table.connector.source.LookupTableSource.LookupRuntimeProvider;
 import org.apache.flink.table.connector.source.ScanTableSource;
-import org.apache.flink.table.connector.source.ScanTableSource.ScanContext;
-import org.apache.flink.table.connector.source.ScanTableSource.ScanRuntimeProvider;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.connector.source.abilities.SupportsFilterPushDown;
+import org.apache.flink.table.connector.source.abilities.SupportsLimitPushDown;
+import org.apache.flink.table.connector.source.abilities.SupportsProjectionPushDown;
 import org.apache.flink.table.expressions.ResolvedExpression;
-import org.apache.flink.table.plan.stats.TableStats;
 import org.apache.flink.table.types.logical.RowType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -55,7 +50,11 @@ import java.util.Optional;
 import static org.apache.paimon.options.OptionsUtils.PAIMON_PREFIX;
 
 /** A Flink {@link ScanTableSource} for paimon. */
-public abstract class FlinkTableSource {
+public abstract class FlinkTableSource
+        implements ScanTableSource,
+                SupportsFilterPushDown,
+                SupportsProjectionPushDown,
+                SupportsLimitPushDown {
 
     private static final Logger LOG = LoggerFactory.getLogger(FlinkTableSource.class);
 
@@ -85,8 +84,8 @@ public abstract class FlinkTableSource {
         this.limit = limit;
     }
 
-    /** @return The unconsumed filters. */
-    public List<ResolvedExpression> pushFilters(List<ResolvedExpression> filters) {
+    @Override
+    public Result applyFilters(List<ResolvedExpression> filters) {
         List<String> partitionKeys = table.partitionKeys();
         RowType rowType = LogicalTypeConversion.toLogicalType(table.rowType());
 
@@ -115,34 +114,23 @@ public abstract class FlinkTableSource {
         predicate = converted.isEmpty() ? null : PredicateBuilder.and(converted);
         LOG.info("Consumed filters: {} of {}", consumedFilters, filters);
 
-        return unConsumedFilters;
+        return Result.of(filters, unConsumedFilters);
     }
 
-    public void pushProjection(int[][] projectedFields) {
+    @Override
+    public boolean supportsNestedProjection() {
+        return false;
+    }
+
+    @Override
+    public void applyProjection(int[][] projectedFields) {
         this.projectFields = projectedFields;
     }
 
-    public void pushLimit(long limit) {
+    @Override
+    public void applyLimit(long limit) {
         this.limit = limit;
     }
-
-    public abstract ChangelogMode getChangelogMode();
-
-    public abstract ScanRuntimeProvider getScanRuntimeProvider(ScanContext scanContext);
-
-    public abstract void pushWatermark(WatermarkStrategy<RowData> watermarkStrategy);
-
-    public abstract LookupRuntimeProvider getLookupRuntimeProvider(LookupContext context);
-
-    public abstract TableStats reportStatistics();
-
-    public abstract FlinkTableSource copy();
-
-    public abstract String asSummaryString();
-
-    public abstract List<String> listAcceptedFilterFields();
-
-    public abstract void applyDynamicFiltering(List<String> candidateFilterFields);
 
     public abstract boolean isStreaming();
 
