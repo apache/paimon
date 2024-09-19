@@ -32,7 +32,7 @@ import org.apache.spark.sql.{Column, Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils._
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
-import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, BasePredicate, EqualTo, Expression, Literal, Or, UnsafeProjection}
+import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, BasePredicate, Expression, Literal, UnsafeProjection}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.expressions.codegen.GeneratePredicate
 import org.apache.spark.sql.catalyst.plans.logical._
@@ -110,8 +110,7 @@ case class MergeIntoPaimonTable(
         createNewScanPlan(
           candidateDataSplits,
           targetOnlyCondition.getOrElse(TrueLiteral),
-          relation,
-          metadataCols))
+          relation))
       val ds = constructChangedRows(
         sparkSession,
         filteredRelation,
