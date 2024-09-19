@@ -204,6 +204,19 @@ public abstract class CatalogTestBase {
     }
 
     @Test
+    public void testTableUUID() throws Exception {
+        catalog.createDatabase("test_db", false);
+        Identifier identifier = Identifier.create("test_db", "test_table");
+        catalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, false);
+        Table table = catalog.getTable(identifier);
+        assertUUID(table.uuid(), identifier);
+    }
+
+    protected void assertUUID(String uuid, Identifier identifier) {
+        assertThat(uuid).isEqualTo(identifier.getFullName());
+    }
+
+    @Test
     public void testCreateTable() throws Exception {
         catalog.createDatabase("test_db", false);
         // Create table creates a new table when it does not exist
