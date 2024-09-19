@@ -88,6 +88,13 @@ public class TagManager {
         return new Path(branchPath(tablePath, branch) + "/tag/" + TAG_PREFIX + tagName);
     }
 
+    public List<Path> tagPaths(Predicate<Path> predicate) throws IOException {
+        return listVersionedFileStatus(fileIO, tagDirectory(), TAG_PREFIX)
+                .map(FileStatus::getPath)
+                .filter(predicate)
+                .collect(Collectors.toList());
+    }
+
     /** Create a tag from given snapshot and save it in the storage. */
     public void createTag(
             Snapshot snapshot,
@@ -307,10 +314,7 @@ public class TagManager {
         TreeMap<Snapshot, List<String>> tags =
                 new TreeMap<>(Comparator.comparingLong(Snapshot::id));
         try {
-            List<Path> paths =
-                    listVersionedFileStatus(fileIO, tagDirectory(), TAG_PREFIX)
-                            .map(FileStatus::getPath)
-                            .collect(Collectors.toList());
+            List<Path> paths = tagPaths(path -> true);
 
             for (Path path : paths) {
                 String tagName = path.getName().substring(TAG_PREFIX.length());
@@ -335,10 +339,7 @@ public class TagManager {
     /** Get all {@link Tag}s. */
     public List<Pair<Tag, String>> tagObjects() {
         try {
-            List<Path> paths =
-                    listVersionedFileStatus(fileIO, tagDirectory(), TAG_PREFIX)
-                            .map(FileStatus::getPath)
-                            .collect(Collectors.toList());
+            List<Path> paths = tagPaths(path -> true);
             List<Pair<Tag, String>> tags = new ArrayList<>();
             for (Path path : paths) {
                 String tagName = path.getName().substring(TAG_PREFIX.length());

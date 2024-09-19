@@ -391,9 +391,16 @@ public class SnapshotManager implements Serializable {
 
     public Iterator<Snapshot> snapshots() throws IOException {
         return listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX)
-                .map(id -> snapshot(id))
+                .map(this::snapshot)
                 .sorted(Comparator.comparingLong(Snapshot::id))
                 .iterator();
+    }
+
+    public List<Path> snapshotPaths(Predicate<Long> predicate) throws IOException {
+        return listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX)
+                .filter(predicate)
+                .map(this::snapshotPath)
+                .collect(Collectors.toList());
     }
 
     public Iterator<Snapshot> snapshotsWithinRange(

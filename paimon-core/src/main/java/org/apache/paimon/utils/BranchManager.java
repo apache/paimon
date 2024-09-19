@@ -20,7 +20,6 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -29,12 +28,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.Collection;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.apache.paimon.utils.FileUtils.listVersionedDirectories;
-import static org.apache.paimon.utils.FileUtils.listVersionedFileStatus;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Manager for {@code Branch}. */
@@ -87,20 +86,7 @@ public class BranchManager {
 
     /** Create empty branch. */
     public void createBranch(String branchName) {
-        checkArgument(
-                !isMainBranch(branchName),
-                String.format(
-                        "Branch name '%s' is the default branch and cannot be used.",
-                        DEFAULT_MAIN_BRANCH));
-        checkArgument(
-                !StringUtils.isNullOrWhitespaceOnly(branchName),
-                "Branch name '%s' is blank.",
-                branchName);
-        checkArgument(!branchExists(branchName), "Branch name '%s' already exists.", branchName);
-        checkArgument(
-                !branchName.chars().allMatch(Character::isDigit),
-                "Branch name cannot be pure numeric string but is '%s'.",
-                branchName);
+        validateBranch(branchName);
 
         try {
             TableSchema latestSchema = schemaManager.latest().get();
@@ -118,21 +104,8 @@ public class BranchManager {
     }
 
     public void createBranch(String branchName, String tagName) {
-        checkArgument(
-                !isMainBranch(branchName),
-                String.format(
-                        "Branch name '%s' is the default branch and cannot be created.",
-                        DEFAULT_MAIN_BRANCH));
-        checkArgument(
-                !StringUtils.isNullOrWhitespaceOnly(branchName),
-                "Branch name '%s' is blank.",
-                branchName);
-        checkArgument(!branchExists(branchName), "Branch name '%s' already exists.", branchName);
+        validateBranch(branchName);
         checkArgument(tagManager.tagExists(tagName), "Tag name '%s' not exists.", tagName);
-        checkArgument(
-                !branchName.chars().allMatch(Character::isDigit),
-                "Branch name cannot be pure numeric string but is '%s'.",
-                branchName);
 
         Snapshot snapshot = tagManager.taggedSnapshot(tagName);
 
@@ -176,10 +149,7 @@ public class BranchManager {
     /** Check if path exists. */
     public boolean fileExists(Path path) {
         try {
-            if (fileIO.exists(path)) {
-                return true;
-            }
-            return false;
+            return fileIO.exists(path);
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format("Failed to determine if path '%s' exists.", path), e);
@@ -206,37 +176,15 @@ public class BranchManager {
             // Delete snapshot, schema, and tag from the main branch which occurs after
             // earliestSnapshotId
             List<Path> deleteSnapshotPaths =
-                    listVersionedFileStatus(
-                                    fileIO, snapshotManager.snapshotDirectory(), "snapshot-")
-                            .map(FileStatus::getPath)
-                            .filter(
-                                    path ->
-                                            Snapshot.fromPath(fileIO, path).id()
-                                                    >= earliestSnapshotId)
-                            .collect(Collectors.toList());
-            List<Path> deleteSchemaPaths =
-                    listVersionedFileStatus(fileIO, schemaManager.schemaDirectory(), "schema-")
-                            .map(FileStatus::getPath)
-                            .filter(
-                                    path ->
-                                            TableSchema.fromPath(fileIO, path).id()
-                                                    >= earliestSchemaId)
-                            .collect(Collectors.toList());
+                    snapshotManager.snapshotPaths(id -> id >= earliestSnapshotId);
+            List<Path> deleteSchemaPaths = schemaManager.schemaPaths(id -> id >= earliestSchemaId);
             List<Path> deleteTagPaths =
-                    listVersionedFileStatus(fileIO, tagManager.tagDirectory(), "tag-")
-                            .map(FileStatus::getPath)
-                            .filter(
-                                    path ->
-                                            Snapshot.fromPath(fileIO, path).id()
-                                                    >= earliestSnapshotId)
-                            .collect(Collectors.toList());
+                    tagManager.tagPaths(
+                            path -> Snapshot.fromPath(fileIO, path).id() >= earliestSnapshotId);
 
             List<Path> deletePaths =
-                    Stream.concat(
-                                    Stream.concat(
-                                            deleteSnapshotPaths.stream(),
-                                            deleteSchemaPaths.stream()),
-                                    deleteTagPaths.stream())
+                    Stream.of(deleteSnapshotPaths, deleteSchemaPaths, deleteTagPaths)
+                            .flatMap(Collection::stream)
                             .collect(Collectors.toList());
 
             // Delete latest snapshot hint
@@ -279,5 +227,22 @@ public class BranchManager {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private void validateBranch(String branchName) {
+        checkArgument(
+                !isMainBranch(branchName),
+                String.format(
+                        "Branch name '%s' is the default branch and cannot be used.",
+                        DEFAULT_MAIN_BRANCH));
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(branchName),
+                "Branch name '%s' is blank.",
+                branchName);
+        checkArgument(!branchExists(branchName), "Branch name '%s' already exists.", branchName);
+        checkArgument(
+                !branchName.chars().allMatch(Character::isDigit),
+                "Branch name cannot be pure numeric string but is '%s'.",
+                branchName);
     }
 }
