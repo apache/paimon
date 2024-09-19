@@ -27,7 +27,6 @@ import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
-import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.operation.OrphanFilesClean;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -134,11 +133,10 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                             throws Exception {
                                         String branch = branchAndSnapshot.f0;
                                         Snapshot snapshot = Snapshot.fromJson(branchAndSnapshot.f1);
-                                        Consumer<ManifestFileMeta> manifestConsumer =
+                                        Consumer<String> manifestConsumer =
                                                 manifest -> {
                                                     Tuple2<String, String> tuple2 =
-                                                            new Tuple2<>(
-                                                                    branch, manifest.fileName());
+                                                            new Tuple2<>(branch, manifest);
                                                     ctx.output(manifestOutputTag, tuple2);
                                                 };
                                         collectWithoutDataFile(

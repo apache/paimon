@@ -52,7 +52,7 @@ class RemoveOrphanFilesProcedureTest extends PaimonSparkTestBase {
     fileIO.tryToWriteAtomic(orphanFile2, "b")
 
     // by default, no file deleted
-    checkAnswer(spark.sql(s"CALL sys.remove_orphan_files(table => 'T')"), Nil)
+    checkAnswer(spark.sql(s"CALL sys.remove_orphan_files(table => 'T')"), Row(0) :: Nil)
 
     val orphanFile2ModTime = fileIO.getFileStatus(orphanFile2).getModificationTime
     val older_than1 = DateTimeUtils.formatLocalDateTime(
@@ -63,7 +63,7 @@ class RemoveOrphanFilesProcedureTest extends PaimonSparkTestBase {
 
     checkAnswer(
       spark.sql(s"CALL sys.remove_orphan_files(table => 'T', older_than => '$older_than1')"),
-      Row(orphanFile1.toUri.getPath) :: Nil)
+      Row(1) :: Nil)
 
     val older_than2 = DateTimeUtils.formatLocalDateTime(
       DateTimeUtils.toLocalDateTime(System.currentTimeMillis()),
@@ -71,7 +71,9 @@ class RemoveOrphanFilesProcedureTest extends PaimonSparkTestBase {
 
     checkAnswer(
       spark.sql(s"CALL sys.remove_orphan_files(table => 'T', older_than => '$older_than2')"),
-      Row(orphanFile2.toUri.getPath) :: Nil)
+      Row(1) :: Nil)
+
+    checkAnswer(spark.sql(s"CALL sys.remove_orphan_files(table => 'T')"), Row(0) :: Nil)
   }
 
   test("Paimon procedure: dry run remove orphan files") {
@@ -95,7 +97,7 @@ class RemoveOrphanFilesProcedureTest extends PaimonSparkTestBase {
     fileIO.writeFile(orphanFile2, "b", true)
 
     // by default, no file deleted
-    checkAnswer(spark.sql(s"CALL sys.remove_orphan_files(table => 'T')"), Nil)
+    checkAnswer(spark.sql(s"CALL sys.remove_orphan_files(table => 'T')"), Row(0) :: Nil)
 
     val older_than = DateTimeUtils.formatLocalDateTime(
       DateTimeUtils.toLocalDateTime(System.currentTimeMillis()),
@@ -104,8 +106,10 @@ class RemoveOrphanFilesProcedureTest extends PaimonSparkTestBase {
     checkAnswer(
       spark.sql(
         s"CALL sys.remove_orphan_files(table => 'T', older_than => '$older_than', dry_run => true)"),
-      Row(orphanFile1.toUri.getPath) :: Row(orphanFile2.toUri.getPath) :: Nil
+      Row(2) :: Nil
     )
+
+    checkAnswer(spark.sql(s"CALL sys.remove_orphan_files(table => 'T')"), Row(0) :: Nil)
   }
 
   test("Paimon procedure: remove database orphan files") {
@@ -142,7 +146,7 @@ class RemoveOrphanFilesProcedureTest extends PaimonSparkTestBase {
     fileIO2.tryToWriteAtomic(orphanFile22, "b")
 
     // by default, no file deleted
-    checkAnswer(spark.sql(s"CALL sys.remove_orphan_files(table => 'test.*')"), Nil)
+    checkAnswer(spark.sql(s"CALL sys.remove_orphan_files(table => 'test.*')"), Row(0) :: Nil)
 
     val orphanFile12ModTime = fileIO1.getFileStatus(orphanFile12).getModificationTime
     val older_than1 = DateTimeUtils.formatLocalDateTime(
@@ -153,7 +157,7 @@ class RemoveOrphanFilesProcedureTest extends PaimonSparkTestBase {
 
     checkAnswer(
       spark.sql(s"CALL sys.remove_orphan_files(table => 'test.*', older_than => '$older_than1')"),
-      Row(orphanFile11.toUri.getPath) :: Row(orphanFile21.toUri.getPath) :: Nil
+      Row(2) :: Nil
     )
 
     val older_than2 = DateTimeUtils.formatLocalDateTime(
@@ -162,8 +166,10 @@ class RemoveOrphanFilesProcedureTest extends PaimonSparkTestBase {
 
     checkAnswer(
       spark.sql(s"CALL sys.remove_orphan_files(table => 'test.*', older_than => '$older_than2')"),
-      Row(orphanFile12.toUri.getPath) :: Row(orphanFile22.toUri.getPath) :: Nil
+      Row(2) :: Nil
     )
+
+    checkAnswer(spark.sql(s"CALL sys.remove_orphan_files(table => 'test.*')"), Row(0) :: Nil)
   }
 
 }

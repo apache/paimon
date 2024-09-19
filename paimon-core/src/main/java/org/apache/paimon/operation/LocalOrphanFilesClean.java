@@ -53,7 +53,12 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 import static org.apache.paimon.utils.ThreadPoolUtils.randomlyExecute;
 
-/** Local {@link OrphanFilesClean}, it will use thread pool to execute deletion. */
+/**
+ * Local {@link OrphanFilesClean}, it will use thread pool to execute deletion.
+ *
+ * <p>Note that, this class is not used any more since each engine should implement its own
+ * distributed one. See `FlinkOrphanFilesClean` and `SparkOrphanFilesClean`.
+ */
 public class LocalOrphanFilesClean extends OrphanFilesClean {
 
     private final ThreadPoolExecutor executor;
@@ -109,8 +114,7 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
                 table.switchToBranch(branch).store().manifestFileFactory().create();
         try {
             List<String> manifests = new ArrayList<>();
-            collectWithoutDataFile(
-                    branch, usedFiles::add, manifest -> manifests.add(manifest.fileName()));
+            collectWithoutDataFile(branch, usedFiles::add, manifests::add);
             usedFiles.addAll(retryReadingDataFiles(manifestFile, manifests));
         } catch (IOException e) {
             throw new RuntimeException(e);
