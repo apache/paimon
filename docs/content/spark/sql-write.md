@@ -196,7 +196,7 @@ Paimon Structured Streaming only supports the two `append` and `complete` modes.
 // Create a paimon table if not exists.
 spark.sql(s"""
            |CREATE TABLE T (k INT, v STRING)
-           |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
+           |TBLPROPERTIES ('primary-key'='k', 'bucket'='3')
            |""".stripMargin)
 
 // Here we use MemoryStream to fake a streaming source.
