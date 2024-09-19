@@ -633,6 +633,7 @@ public abstract class AbstractCatalog implements Catalog {
                         });
     }
 
+    /** Table metadata. */
     protected static class TableMeta {
 
         private final TableSchema schema;
