@@ -48,6 +48,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Tests for {@link ManifestFileMeta}. */
 public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
@@ -228,50 +229,125 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         List<ManifestFileMeta> input = new ArrayList<>();
 
         // base manifest
-        input.add(makeManifest(entries.toArray(new ManifestEntry[0])));
+        ManifestFileMeta manifest1 = makeManifest(entries.toArray(new ManifestEntry[0]));
 
         // delta manifest
-        input.add(makeManifest(makeEntry(true, "A"), makeEntry(true, "B"), makeEntry(true, "C")));
-        input.add(makeManifest(makeEntry(true, "D")));
-        input.add(makeManifest(makeEntry(false, "A"), makeEntry(false, "B"), makeEntry(true, "F")));
-        input.add(makeManifest(makeEntry(false, "14"), makeEntry(false, "15")));
-        input.add(
+        ManifestFileMeta manifest2 =
+                makeManifest(makeEntry(true, "A"), makeEntry(true, "B"), makeEntry(true, "C"));
+        ManifestFileMeta manifest3 = makeManifest(makeEntry(true, "D"));
+        ManifestFileMeta manifest4 =
+                makeManifest(makeEntry(false, "A"), makeEntry(false, "B"), makeEntry(true, "F"));
+        ManifestFileMeta manifest5 = makeManifest(makeEntry(false, "14"), makeEntry(false, "15"));
+        ManifestFileMeta manifest6 =
                 makeManifest(
                         makeEntry(false, "C"),
                         makeEntry(false, "D"),
                         makeEntry(false, "F"),
-                        makeEntry(true, "G")));
+                        makeEntry(true, "G"));
+        ManifestFileMeta manifest7 =
+                makeManifest(makeEntry(true, "H"), makeEntry(true, "I"), makeEntry(false, "H"));
 
         // no trigger for delta size
-        List<ManifestFileMeta> newMetas2 = new ArrayList<>();
-        Optional<List<ManifestFileMeta>> fullCompacted =
+        // case1: the total file size which must change do not reach the sizeTrigger
+        input.addAll(
+                Arrays.asList(manifest1, manifest2, manifest3, manifest4, manifest5, manifest6));
+        List<ManifestFileMeta> newMetas1 = new ArrayList<>();
+        Optional<List<ManifestFileMeta>> fullCompacted1 =
                 ManifestFileMerger.tryFullCompaction(
                         input,
-                        newMetas2,
+                        newMetas1,
                         manifestFile,
                         500,
                         Long.MAX_VALUE,
                         getPartitionType(),
                         null);
-        assertThat(fullCompacted).isEmpty();
+        assertThat(fullCompacted1).isEmpty();
+        assertThat(newMetas1).isEmpty();
+
+        // case2: only one manifest file in input, it won't be rewritten
+        input.clear();
+        input.add(manifest7);
+        List<ManifestFileMeta> newMetas2 = new ArrayList<>();
+        Optional<List<ManifestFileMeta>> fullCompacted2 =
+                ManifestFileMerger.tryFullCompaction(
+                        input, newMetas1, manifestFile, 500, 100, getPartitionType(), null);
+        assertThat(fullCompacted2).isEmpty();
         assertThat(newMetas2).isEmpty();
 
-        // trigger full compaction
+        // case3: all the manifest files have sizes exceeding suggestedMetaSize, and have no delete
+        // files
+        input.clear();
+        input.addAll(Arrays.asList(manifest1, manifest2, manifest3));
         List<ManifestFileMeta> newMetas3 = new ArrayList<>();
-        List<ManifestFileMeta> merged =
+        Optional<List<ManifestFileMeta>> fullCompacted3 =
                 ManifestFileMerger.tryFullCompaction(
-                                input, newMetas3, manifestFile, 500, 100, getPartitionType(), null)
+                        input, newMetas3, manifestFile, 500, 100, getPartitionType(), null);
+        assertThat(fullCompacted3).isEmpty();
+        assertThat(newMetas3).isEmpty();
+
+        // case4: the sizes of all the manifest files are less than suggestedMetaSize, and have no
+        // delete files
+        input.clear();
+        input.addAll(Arrays.asList(manifest1, manifest2, manifest3));
+        List<ManifestFileMeta> newMetas4 = new ArrayList<>();
+        List<ManifestFileMeta> fullCompacted4 =
+                ManifestFileMerger.tryFullCompaction(
+                                input, newMetas4, manifestFile, 5000, 100, getPartitionType(), null)
+                        .get();
+        assertThat(fullCompacted4.size()).isEqualTo(1);
+        assertThat(newMetas4.size()).isEqualTo(1);
+
+        // case5:the sizes of some manifest files are greater than suggestedMetaSize, while the
+        // sizes of other manifest files is less than. All manifest files have no delete files
+        input.clear();
+        input.addAll(Arrays.asList(manifest1, manifest2, manifest3));
+        List<ManifestFileMeta> newMetas5 = new ArrayList<>();
+        List<ManifestFileMeta> fullCompacted5 =
+                ManifestFileMerger.tryFullCompaction(
+                                input, newMetas5, manifestFile, 1800, 100, getPartitionType(), null)
+                        .get();
+        assertThat(fullCompacted5.size()).isEqualTo(2);
+        assertThat(newMetas5.size()).isEqualTo(1);
+
+        // trigger full compaction
+        // case6: sizes of all files are greater than suggestedMinMetaCount, m files has no delete
+        // entries while n files have deleted entries
+        input.clear();
+        input.addAll(
+                Arrays.asList(
+                        manifest1, manifest2, manifest3, manifest4, manifest5, manifest6,
+                        manifest7));
+        List<ManifestFileMeta> newMetas6 = new ArrayList<>();
+        List<ManifestFileMeta> fullCompacted6 =
+                ManifestFileMerger.tryFullCompaction(
+                                input, newMetas6, manifestFile, 500, 100, getPartitionType(), null)
                         .get();
 
-        List<String> entryFileNameExptected = new ArrayList<>();
-        entryFileNameExptected.add("ADD-G");
+        List<String> entryFileNameExptected = new ArrayList<>(Arrays.asList("ADD-G", "ADD-I"));
         for (int i = 0; i < 14; i++) {
             entryFileNameExptected.add("ADD-" + i);
         }
+        containSameEntryFile(fullCompacted6, entryFileNameExptected);
 
-        containSameEntryFile(merged, entryFileNameExptected);
+        // case7: sizeTrigger = 0
+        List<ManifestFileMeta> newMetas7 = new ArrayList<>();
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> {
+                    ManifestFileMerger.tryFullCompaction(
+                            input, newMetas7, manifestFile, 500, 0, getPartitionType(), null);
+                });
 
-        assertThat(newMetas3).isNotEmpty();
+        // case8: manifest file is deleted when reading
+        List<ManifestFileMeta> newMetas8 = new ArrayList<>();
+        manifestFile.delete(manifest7.fileName());
+        assertThrows(
+                Exception.class,
+                () -> {
+                    ManifestFileMerger.tryFullCompaction(
+                            input, newMetas8, manifestFile, 500, 100, getPartitionType(), null);
+                });
+        assertThat(newMetas8).isEmpty();
     }
 
     @Test
@@ -303,7 +379,71 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
             }
         }
 
+        assertThat(mergedManifest.size()).isEqualTo(2);
+        assertThat(newMetas.size()).isEqualTo(1);
+
         containSameEntryFile(mergedManifest, expected);
+    }
+
+    @Test
+    public void testIdentifierAfterFullCompaction() throws Exception {
+        List<ManifestEntry> entries = new ArrayList<>();
+        List<ManifestEntry> expectedEntries = new ArrayList<>();
+        for (int i = 0; i < 16; i++) {
+            entries.add(
+                    makeEntry(
+                            true,
+                            String.valueOf(i),
+                            0,
+                            1,
+                            Lists.newArrayList("extra-" + i),
+                            new byte[] {1, 2, 3}));
+        }
+        expectedEntries.addAll(entries.subList(0, 15));
+
+        ManifestFileMeta manifest1 = makeManifest(entries.toArray(new ManifestEntry[0]));
+
+        entries.clear();
+        entries.add(
+                makeEntry(true, "A", 0, 2, Lists.newArrayList("extra-A"), new byte[] {1, 2, 3}));
+        entries.add(
+                makeEntry(true, "B", 0, 2, Lists.newArrayList("extra-B"), new byte[] {1, 2, 3}));
+        entries.add(
+                makeEntry(true, "C", 0, 2, Lists.newArrayList("extra-C"), new byte[] {1, 2, 3}));
+        expectedEntries.add(entries.get(2));
+        ManifestFileMeta manifest2 = makeManifest(entries.toArray(new ManifestEntry[0]));
+
+        entries.clear();
+        entries.add(
+                makeEntry(false, "A", 0, 2, Lists.newArrayList("extra-A"), new byte[] {1, 2, 3}));
+        entries.add(
+                makeEntry(false, "B", 0, 2, Lists.newArrayList("extra-B"), new byte[] {1, 2, 3}));
+        entries.add(
+                makeEntry(true, "F", 0, 3, Lists.newArrayList("extra-F"), new byte[] {1, 2, 3}));
+        expectedEntries.add(entries.get(2));
+        ManifestFileMeta manifest3 = makeManifest(entries.toArray(new ManifestEntry[0]));
+
+        entries.clear();
+        entries.add(
+                makeEntry(false, "14", 0, 0, Lists.newArrayList("extra-14"), new byte[] {1, 2, 3}));
+        entries.add(
+                makeEntry(false, "15", 0, 1, Lists.newArrayList("extra-15"), new byte[] {1, 2, 3}));
+        ManifestFileMeta manifest4 = makeManifest(entries.toArray(new ManifestEntry[0]));
+
+        List<ManifestFileMeta> input =
+                new ArrayList<>(Arrays.asList(manifest1, manifest2, manifest3, manifest4));
+        List<ManifestFileMeta> newMetas = new ArrayList<>();
+        List<ManifestFileMeta> fullCompacted =
+                ManifestFileMerger.tryFullCompaction(
+                                input, newMetas, manifestFile, 500, 100, getPartitionType(), null)
+                        .get();
+        assertThat(fullCompacted.size()).isEqualTo(1);
+        assertThat(newMetas.size()).isEqualTo(1);
+        List<FileEntry.Identifier> entryIdentifierExpected =
+                expectedEntries.stream()
+                        .map(ManifestEntry::identifier)
+                        .collect(Collectors.toList());
+        containSameIdentifyEntryFile(fullCompacted, entryIdentifierExpected);
     }
 
     private void createData(

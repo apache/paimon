@@ -53,6 +53,16 @@ public abstract class ManifestFileMetaTestBase {
     }
 
     protected ManifestEntry makeEntry(boolean isAdd, String fileName, Integer partition) {
+        return makeEntry(isAdd, fileName, partition, 0, Collections.emptyList(), null);
+    }
+
+    protected ManifestEntry makeEntry(
+            boolean isAdd,
+            String fileName,
+            Integer partition,
+            int level,
+            List<String> extraFiles,
+            byte[] embeddedIndex) {
         BinaryRow binaryRow;
         if (partition != null) {
             binaryRow = new BinaryRow(1);
@@ -79,11 +89,11 @@ public abstract class ManifestFileMetaTestBase {
                         0, // not used
                         0, // not used
                         0, // not used
-                        0, // not used
-                        Collections.emptyList(),
+                        level, // not used
+                        extraFiles,
                         Timestamp.fromEpochMillis(200000),
                         0L, // not used
-                        null, // not used
+                        embeddedIndex, // not used
                         FileSource.APPEND));
     }
 
@@ -150,6 +160,19 @@ public abstract class ManifestFileMetaTestBase {
                                         getManifestFile().read(file.fileName(), file.fileSize())
                                                 .stream())
                         .map(f -> f.kind() + "-" + f.file().fileName())
+                        .collect(Collectors.toList());
+        assertThat(actual).hasSameElementsAs(expecteded);
+    }
+
+    protected void containSameIdentifyEntryFile(
+            List<ManifestFileMeta> mergedManifest, List<FileEntry.Identifier> expecteded) {
+        List<FileEntry.Identifier> actual =
+                mergedManifest.stream()
+                        .flatMap(
+                                file ->
+                                        getManifestFile().read(file.fileName(), file.fileSize())
+                                                .stream())
+                        .map(ManifestEntry::identifier)
                         .collect(Collectors.toList());
         assertThat(actual).hasSameElementsAs(expecteded);
     }
