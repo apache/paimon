@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.system;
 
+import org.apache.paimon.codegen.SimpleProjection;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -59,6 +60,7 @@ import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.apache.paimon.utils.SerializationUtils;
+import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
@@ -69,7 +71,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -136,7 +137,7 @@ public class FilesTable implements ReadonlyTable {
 
     @Override
     public InnerTableScan newScan() {
-        return new FilesScan(storeTable.newScan().listPartitions());
+        return new FilesScan(storeTable);
     }
 
     @Override
@@ -156,10 +157,10 @@ public class FilesTable implements ReadonlyTable {
         @Nullable private LeafPredicate bucketPredicate;
         @Nullable private LeafPredicate levelPredicate;
 
-        private final List<BinaryRow> partitions;
+        private final FileStoreTable fileStoreTable;
 
-        public FilesScan(List<BinaryRow> partitions) {
-            this.partitions = partitions;
+        public FilesScan(FileStoreTable fileStoreTable) {
+            this.fileStoreTable = fileStoreTable;
         }
 
         @Override
@@ -178,43 +179,56 @@ public class FilesTable implements ReadonlyTable {
 
         @Override
         public Plan innerPlan() {
+            List<BinaryRow> partitions = new ArrayList<>();
+            if (partitionPredicate != null && partitionPredicate.function() instanceof Equal) {
+                GenericRow partitionRow = new GenericRow(fileStoreTable.partitionKeys().size());
+                RowType partitionRowType = fileStoreTable.schema().logicalPartitionType();
+                String partitionStr = partitionPredicate.literals().get(0).toString();
+                if (partitionStr.startsWith("[")) {
+                    partitionStr = partitionStr.substring(1);
+                }
+                if (partitionStr.endsWith("]")) {
+                    partitionStr = partitionStr.substring(0, partitionStr.length() - 1);
+                }
+                String[] partFields = partitionStr.split(", ");
+                List<String> partitionKeys = fileStoreTable.partitionKeys();
+                if (partitionKeys.size() != partFields.length) {
+                    return Collections::emptyList;
+                }
+                for (int i = 0; i < partitionKeys.size(); i++) {
+                    partitionRow.setField(
+                            i,
+                            TypeUtils.castFromString(partFields[i], partitionRowType.getTypeAt(i)));
+                }
 
-            if (partitionPredicate != null) {
-                return () ->
-                        Collections.singletonList(
-                                new FilesSplit(
-                                        partitionPredicate, bucketPredicate, levelPredicate, null));
+                partitions.add(
+                        new SimpleProjection(partitionRowType, fileStoreTable.partitionKeys())
+                                .apply(partitionRow));
+                // TODO support range?
             } else {
-                return () ->
-                        partitions.stream()
-                                .map(
-                                        p ->
-                                                new FilesSplit(
-                                                        partitionPredicate,
-                                                        bucketPredicate,
-                                                        levelPredicate,
-                                                        p))
-                                .collect(Collectors.toList());
+                partitions.addAll(fileStoreTable.newScan().listPartitions());
             }
+
+            return () ->
+                    partitions.stream()
+                            .map(p -> new FilesSplit(p, bucketPredicate, levelPredicate))
+                            .collect(Collectors.toList());
         }
     }
 
     private static class FilesSplit extends SingletonSplit {
 
-        @Nullable private final LeafPredicate partitionPredicate;
+        @Nullable private final BinaryRow partition;
         @Nullable private final LeafPredicate bucketPredicate;
         @Nullable private final LeafPredicate levelPredicate;
-        @Nullable private final BinaryRow partition;
 
         private FilesSplit(
-                @Nullable LeafPredicate partitionPredicate,
+                @Nullable BinaryRow partition,
                 @Nullable LeafPredicate bucketPredicate,
-                @Nullable LeafPredicate levelPredicate,
-                @Nullable BinaryRow partition) {
-            this.partitionPredicate = partitionPredicate;
+                @Nullable LeafPredicate levelPredicate) {
+            this.partition = partition;
             this.bucketPredicate = bucketPredicate;
             this.levelPredicate = levelPredicate;
-            this.partition = partition;
         }
 
         @Override
@@ -226,14 +240,14 @@ public class FilesTable implements ReadonlyTable {
                 return false;
             }
             FilesSplit that = (FilesSplit) o;
-            return Objects.equals(partitionPredicate, that.partitionPredicate)
+            return Objects.equals(partition, that.partition)
                     && Objects.equals(bucketPredicate, that.bucketPredicate)
                     && Objects.equals(this.levelPredicate, that.levelPredicate);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(partitionPredicate, bucketPredicate, levelPredicate);
+            return Objects.hash(partition, bucketPredicate, levelPredicate);
         }
 
         public List<Split> splits(FileStoreTable storeTable) {
@@ -242,28 +256,7 @@ public class FilesTable implements ReadonlyTable {
 
         private TableScan.Plan tablePlan(FileStoreTable storeTable) {
             InnerTableScan scan = storeTable.newScan();
-            if (partitionPredicate != null) {
-                if (partitionPredicate.function() instanceof Equal) {
-                    String partitionStr = partitionPredicate.literals().get(0).toString();
-                    if (partitionStr.startsWith("[")) {
-                        partitionStr = partitionStr.substring(1);
-                    }
-                    if (partitionStr.endsWith("]")) {
-                        partitionStr = partitionStr.substring(0, partitionStr.length() - 1);
-                    }
-                    String[] partFields = partitionStr.split(", ");
-                    LinkedHashMap<String, String> partSpec = new LinkedHashMap<>();
-                    List<String> partitionKeys = storeTable.partitionKeys();
-                    if (partitionKeys.size() != partFields.length) {
-                        return Collections::emptyList;
-                    }
-                    for (int i = 0; i < partitionKeys.size(); i++) {
-                        partSpec.put(partitionKeys.get(i), partFields[i]);
-                    }
-                    scan.withPartitionFilter(partSpec);
-                }
-                // TODO support range?
-            } else if (partition != null) {
+            if (partition != null) {
                 scan.withPartitionFilter(Collections.singletonList(partition));
             }
             if (bucketPredicate != null) {
