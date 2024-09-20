@@ -42,6 +42,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unit tests for {@link PartitionsTable}. */
@@ -100,6 +101,18 @@ public class PartitionsTableTest extends TableTestBase {
         expectedRow.add(GenericRow.of(BinaryString.fromString("[2]"), 2L, 2L));
 
         List<InternalRow> result = read(partitionsTable, new int[][] {{0}, {1}, {3}});
+        assertThat(result).containsExactlyInAnyOrderElementsOf(expectedRow);
+    }
+
+    @Test
+    public void testLevel0FileCountValue() throws Exception {
+        compact(table, row(1), 0);
+        write(table, GenericRow.of(2, 1, 3), GenericRow.of(3, 1, 4));
+        List<InternalRow> expectedRow = new ArrayList<>();
+        expectedRow.add(GenericRow.of(BinaryString.fromString("[1]"), 2L, 1L));
+        expectedRow.add(GenericRow.of(BinaryString.fromString("[2]"), 2L, 2L));
+
+        List<InternalRow> result = read(partitionsTable, new int[][] {{0}, {3}, {4}});
         assertThat(result).containsExactlyInAnyOrderElementsOf(expectedRow);
     }
 }
