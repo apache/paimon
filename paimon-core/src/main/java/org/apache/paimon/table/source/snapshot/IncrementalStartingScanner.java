@@ -42,6 +42,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -82,8 +83,8 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
                         .boxed()
                         .collect(Collectors.toList());
 
-        Iterable<ManifestFileMeta> manifests =
-                ManifestReadThreadPool.sequentialBatchedExecute(
+        Iterator<ManifestFileMeta> manifests =
+                ManifestReadThreadPool.randomlyExecute(
                         id -> {
                             Snapshot snapshot = snapshotManager.snapshot(id);
                             switch (scanMode) {
@@ -109,11 +110,12 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
                         snapshots,
                         reader.parallelism());
 
-        Iterable<ManifestEntry> entries =
-                ManifestReadThreadPool.sequentialBatchedExecute(
+        Iterator<ManifestEntry> entries =
+                ManifestReadThreadPool.randomlyExecute(
                         reader::readManifest, Lists.newArrayList(manifests), reader.parallelism());
 
-        for (ManifestEntry entry : entries) {
+        while (entries.hasNext()) {
+            ManifestEntry entry = entries.next();
             checkArgument(
                     entry.kind() == FileKind.ADD, "Delta or changelog should only have ADD files.");
             grouped.compute(
