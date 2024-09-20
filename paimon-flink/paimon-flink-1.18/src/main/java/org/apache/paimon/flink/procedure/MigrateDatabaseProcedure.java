@@ -58,24 +58,7 @@ public class MigrateDatabaseProcedure extends ProcedureBase {
                         Runtime.getRuntime().availableProcessors(),
                         ParameterUtils.parseCommaSeparatedKeyValues(properties));
 
-        int errorCount = 0;
-        int successCount = 0;
-
-        for (Migrator migrator : migrators) {
-            try {
-                migrator.executeMigrate();
-                migrator.renameTable(false);
-                successCount++;
-            } catch (Exception e) {
-                errorCount++;
-                LOG.error("Call migrate_database error:" + e.getMessage());
-            }
-        }
-        String retStr =
-                String.format(
-                        "migrate database is finished, success cnt: %s , failed cnt: %s",
-                        String.valueOf(successCount), String.valueOf(errorCount));
-
+        String retStr = handleMigrators(migrators);
         return new String[] {retStr};
     }
 
@@ -95,6 +78,11 @@ public class MigrateDatabaseProcedure extends ProcedureBase {
                         p,
                         ParameterUtils.parseCommaSeparatedKeyValues(properties));
 
+        String retStr = handleMigrators(migrators);
+        return new String[] {retStr};
+    }
+
+    public String handleMigrators(List<Migrator> migrators) {
         int errorCount = 0;
         int successCount = 0;
 
@@ -112,7 +100,6 @@ public class MigrateDatabaseProcedure extends ProcedureBase {
                 String.format(
                         "migrate database is finished, success cnt: %s , failed cnt: %s",
                         String.valueOf(successCount), String.valueOf(errorCount));
-
-        return new String[] {retStr};
+        return retStr;
     }
 }
