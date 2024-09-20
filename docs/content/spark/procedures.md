@@ -140,7 +140,7 @@ This section introduce all available spark procedures about paimon.
             <li>options_map: Options map for adding key-value options which is a map.</li>
             <li>parallelism: the parallelism for migrate process, default is core numbers of machine.</li>
       </td>
-      <td>CALL sys.migrate_database(source_type => 'hive', db => 'db01', options => 'file.format=parquet', options_map => map('k1','v1'), parallelism => 6)</td>
+      <td>CALL sys.migrate_database(source_type => 'hive', database => 'db01', options => 'file.format=parquet', options_map => map('k1','v1'), parallelism => 6)</td>
     </tr>
     <tr>
       <td>migrate_table</td>
