@@ -185,7 +185,7 @@ All available procedures are listed below.
    <tr>
       <td>expire_tags</td>
       <td>
-         CALL [catalog.]sys.expire_tags('identifier', 'expiration_time')
+         CALL [catalog.]sys.expire_tags('identifier', 'older_than')
       </td>
       <td>
          To expire tags by time. Arguments:

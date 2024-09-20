@@ -50,18 +50,18 @@ public class ExpireTagsProcedureITCase extends CatalogITCaseBase {
         }
         checkSnapshots(snapshotManager, 1, 5);
 
-        sql("CALL sys.create_tag(`table` => 'default.T', tag => 'tag-1', snapshot => 1)");
+        sql("CALL sys.create_tag(`table` => 'default.T', tag => 'tag-1', snapshot_id => 1)");
         sql(
-                "CALL sys.create_tag(`table` => 'default.T', tag => 'tag-2', snapshot => 2, time_retained => '1h')");
+                "CALL sys.create_tag(`table` => 'default.T', tag => 'tag-2', snapshot_id => 2, time_retained => '1h')");
 
         // no tags expired
         assertThat(sql("CALL sys.expire_tags(`table` => 'default.T')"))
                 .containsExactly(Row.of("No expired tags."));
 
         sql(
-                "CALL sys.create_tag(`table` => 'default.T', tag => 'tag-3', snapshot => 3, time_retained => '1s')");
+                "CALL sys.create_tag(`table` => 'default.T', tag => 'tag-3', snapshot_id => 3, time_retained => '1s')");
         sql(
-                "CALL sys.create_tag(`table` => 'default.T', tag => 'tag-4', snapshot => 4, time_retained => '1s')");
+                "CALL sys.create_tag(`table` => 'default.T', tag => 'tag-4', snapshot_id => 4, time_retained => '1s')");
 
         Thread.sleep(2000);
         // tag-3,tag-4 expired
@@ -86,13 +86,13 @@ public class ExpireTagsProcedureITCase extends CatalogITCaseBase {
         checkSnapshots(snapshotManager, 1, 5);
 
         sql(
-                "CALL sys.create_tag(`table` => 'default.T', tag => 'tag-1', snapshot => 1, time_retained => '1d')");
+                "CALL sys.create_tag(`table` => 'default.T', tag => 'tag-1', snapshot_id => 1, time_retained => '1d')");
         sql(
-                "CALL sys.create_tag(`table` => 'default.T', tag => 'tag-2', snapshot => 2, time_retained => '1d')");
+                "CALL sys.create_tag(`table` => 'default.T', tag => 'tag-2', snapshot_id => 2, time_retained => '1d')");
         sql(
-                "CALL sys.create_tag(`table` => 'default.T', tag => 'tag-3', snapshot => 3, time_retained => '1d')");
+                "CALL sys.create_tag(`table` => 'default.T', tag => 'tag-3', snapshot_id => 3, time_retained => '1d')");
         sql(
-                "CALL sys.create_tag(`table` => 'default.T', tag => 'tag-4', snapshot => 4, time_retained => '1d')");
+                "CALL sys.create_tag(`table` => 'default.T', tag => 'tag-4', snapshot_id => 4, time_retained => '1d')");
 
         // tag-4 as the base older_than time
         LocalDateTime olderThanTime = table.tagManager().tag("tag-4").getTagCreateTime();
