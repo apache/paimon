@@ -31,6 +31,8 @@ import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 import java.util.List;
@@ -48,6 +50,8 @@ import static org.apache.spark.sql.types.DataTypes.StringType;
  */
 public class MigrateDatabaseProcedure extends BaseProcedure {
 
+    private static final Logger LOG = LoggerFactory.getLogger(MigrateDatabaseProcedure.class);
+
     private static final ProcedureParameter[] PARAMETERS =
             new ProcedureParameter[] {
                 ProcedureParameter.required("source_type", StringType),
@@ -61,7 +65,7 @@ public class MigrateDatabaseProcedure extends BaseProcedure {
     private static final StructType OUTPUT_TYPE =
             new StructType(
                     new StructField[] {
-                        new StructField("result", DataTypes.BooleanType, true, Metadata.empty())
+                        new StructField("result", StringType, true, Metadata.empty())
                     });
 
     protected MigrateDatabaseProcedure(TableCatalog tableCatalog) {
@@ -93,20 +97,29 @@ public class MigrateDatabaseProcedure extends BaseProcedure {
         Map<String, String> options = ParameterUtils.parseCommaSeparatedKeyValues(properties);
         options.putAll(optionMap);
 
-        try {
-            List<Migrator> migrators =
-                    TableMigrationUtils.getImporters(
-                            format, paimonCatalog, database, parallelism, options);
+        List<Migrator> migrators =
+                TableMigrationUtils.getImporters(
+                        format, paimonCatalog, database, parallelism, options);
 
-            for (Migrator migrator : migrators) {
+        int errorCount = 0;
+        int successCount = 0;
+
+        for (Migrator migrator : migrators) {
+            try {
                 migrator.executeMigrate();
                 migrator.renameTable(false);
+                successCount++;
+            } catch (Exception e) {
+                errorCount++;
+                LOG.error("Call migrate_database error:" + e.getMessage());
             }
-        } catch (Exception e) {
-            throw new RuntimeException("Call migrate_database error: " + e.getMessage(), e);
         }
+        String retStr =
+                String.format(
+                        "migrate database is finished, success cnt: %s , failed cnt: %s",
+                        String.valueOf(successCount), String.valueOf(errorCount));
 
-        return new InternalRow[] {newInternalRow(true)};
+        return new InternalRow[] {newInternalRow(retStr)};
     }
 
     public static Map<String, String> mapDataToHashMap(MapData mapData) {
