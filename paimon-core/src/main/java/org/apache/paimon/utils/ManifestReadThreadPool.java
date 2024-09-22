@@ -20,6 +20,7 @@ package org.apache.paimon.utils;
 
 import javax.annotation.Nullable;
 
+import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.function.Function;
@@ -50,5 +51,12 @@ public class ManifestReadThreadPool {
             Function<U, List<T>> processor, List<U> input, @Nullable Integer threadNum) {
         ThreadPoolExecutor executor = getExecutorService(threadNum);
         return ThreadPoolUtils.sequentialBatchedExecute(executor, processor, input, threadNum);
+    }
+
+    /** This method aims to parallel process tasks with randomly but return values sequentially. */
+    public static <T, U> Iterator<T> randomlyExecute(
+            Function<U, List<T>> processor, List<U> input, @Nullable Integer threadNum) {
+        ThreadPoolExecutor executor = getExecutorService(threadNum);
+        return ThreadPoolUtils.randomlyExecute(executor, processor, input);
     }
 }
