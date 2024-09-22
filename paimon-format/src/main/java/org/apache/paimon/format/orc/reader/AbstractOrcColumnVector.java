@@ -48,7 +48,10 @@ public abstract class AbstractOrcColumnVector
     }
 
     protected int rowMapper(int r) {
-        return selected[r];
+        if (this.selected != null) {
+            return selected[r];
+        }
+        return r;
     }
 
     @Override

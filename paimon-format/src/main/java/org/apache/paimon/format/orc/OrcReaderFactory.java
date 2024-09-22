@@ -123,7 +123,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
         for (int i = 0; i < vectors.length; i++) {
             String name = tableFieldNames.get(i);
             DataType type = tableFieldTypes.get(i);
-            int[] selected = orcBatch.getSelected();
+            int[] selected = orcBatch.selectedInUse ? orcBatch.getSelected() : null;
             vectors[i] =
                     createPaimonVector(
                             orcBatch.cols[tableFieldNames.indexOf(name)], selected, type);
