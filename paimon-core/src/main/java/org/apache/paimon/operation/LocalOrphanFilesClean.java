@@ -92,6 +92,9 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
 
         // delete candidate files
         Map<String, Path> candidates = getCandidateDeletingFiles();
+        if (candidates.isEmpty()) {
+            return deleteFiles;
+        }
 
         // find used files
         Set<String> usedFiles =
