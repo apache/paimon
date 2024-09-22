@@ -26,6 +26,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
 
 import java.util.Arrays;
 
@@ -213,6 +214,13 @@ public class ProjectedRow implements InternalRow {
      */
     public static ProjectedRow from(int[] projection) {
         return new ProjectedRow(projection);
+    }
+
+    public static ProjectedRow from(RowType readType, RowType tableType) {
+        return new ProjectedRow(
+                readType.getFields().stream()
+                        .mapToInt(field -> tableType.getFieldIndexByFieldId(field.id()))
+                        .toArray());
     }
 
     /**

@@ -231,11 +231,6 @@ public class CompactBucketsTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public InnerTableRead withProjection(int[][] projection) {
-            throw new UnsupportedOperationException("BucketsRead does not support projection");
-        }
-
-        @Override
         public TableRead withIOManager(IOManager ioManager) {
             return this;
         }

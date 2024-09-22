@@ -26,6 +26,7 @@ import org.apache.paimon.operation.ReverseReader;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOFunction;
 import org.apache.paimon.utils.LazyField;
 
@@ -52,7 +53,7 @@ public class IncrementalChangelogReadProvider implements SplitReadProvider {
     }
 
     private SplitRead<InternalRow> create(Supplier<MergeFileSplitRead> supplier) {
-        final MergeFileSplitRead read = supplier.get().withKeyProjection(new int[0][]);
+        final MergeFileSplitRead read = supplier.get().withReadKeyType(RowType.of());
         IOFunction<DataSplit, RecordReader<InternalRow>> convertedFactory =
                 split -> {
                     RecordReader<KeyValue> reader =

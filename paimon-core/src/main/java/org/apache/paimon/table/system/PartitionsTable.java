@@ -146,7 +146,7 @@ public class PartitionsTable implements ReadonlyTable {
 
         private final FileStoreTable fileStoreTable;
 
-        private int[][] projection;
+        private RowType readType;
 
         public PartitionsRead(FileStoreTable table) {
             this.fileStoreTable = table;
@@ -159,8 +159,8 @@ public class PartitionsTable implements ReadonlyTable {
         }
 
         @Override
-        public InnerTableRead withProjection(int[][] projection) {
-            this.projection = projection;
+        public InnerTableRead withReadType(RowType readType) {
+            this.readType = readType;
             return this;
         }
 
@@ -187,10 +187,13 @@ public class PartitionsTable implements ReadonlyTable {
             }
 
             Iterator<InternalRow> iterator = results.iterator();
-            if (projection != null) {
+            if (readType != null) {
                 iterator =
                         Iterators.transform(
-                                iterator, row -> ProjectedRow.from(projection).replaceRow(row));
+                                iterator,
+                                row ->
+                                        ProjectedRow.from(readType, PartitionsTable.TABLE_TYPE)
+                                                .replaceRow(row));
             }
             return new IteratorRecordReader<>(iterator);
         }

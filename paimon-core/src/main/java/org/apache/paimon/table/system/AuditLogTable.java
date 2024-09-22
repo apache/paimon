@@ -42,6 +42,7 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
+import org.apache.paimon.table.SystemFields;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
@@ -56,7 +57,6 @@ import org.apache.paimon.table.source.snapshot.StartingContext;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
@@ -65,13 +65,10 @@ import org.apache.paimon.utils.SimpleFileReader;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
-import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
-
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -85,8 +82,6 @@ import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 public class AuditLogTable implements DataTable, ReadonlyTable {
 
     public static final String AUDIT_LOG = "audit_log";
-
-    public static final String ROW_KIND = "rowkind";
 
     public static final PredicateReplaceVisitor PREDICATE_CONVERTER =
             p -> {
@@ -141,7 +136,7 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     @Override
     public RowType rowType() {
         List<DataField> fields = new ArrayList<>();
-        fields.add(new DataField(0, ROW_KIND, new VarCharType(VarCharType.MAX_LENGTH)));
+        fields.add(SystemFields.ROW_KIND);
         fields.addAll(wrapped.rowType().getFields());
         return new RowType(fields);
     }
@@ -554,31 +549,31 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public InnerTableRead withProjection(int[][] projection) {
+        public InnerTableRead withReadType(RowType readType) {
             // data projection to push down to dataRead
-            List<int[]> dataProjection = new ArrayList<>();
-            // read projection to handle record returned by dataRead
-            List<Integer> readProjection = new ArrayList<>();
-            boolean rowKindAppeared = false;
-            for (int i = 0; i < projection.length; i++) {
-                int[] field = projection[i];
-                int topField = field[0];
-                if (topField == 0) {
-                    rowKindAppeared = true;
-                    readProjection.add(-1);
-                } else {
-                    int[] newField = Arrays.copyOf(field, field.length);
-                    newField[0] = newField[0] - 1;
-                    dataProjection.add(newField);
+            List<DataField> dataReadFields = new ArrayList<>();
 
+            // read projection to handle record returned by dataRead
+            List<DataField> fields = readType.getFields();
+            int[] readProjection = new int[fields.size()];
+
+            boolean rowKindAppeared = false;
+            for (int i = 0; i < fields.size(); i++) {
+                String fieldName = fields.get(i).name();
+                if (fieldName.equals(SystemFields.ROW_KIND.name())) {
+                    rowKindAppeared = true;
+                    readProjection[i] = -1;
+                } else {
+                    dataReadFields.add(fields.get(i));
                     // There is no row kind field. Keep it as it is
                     // Row kind field has occurred, and the following fields are offset by 1
                     // position
-                    readProjection.add(rowKindAppeared ? i - 1 : i);
+                    readProjection[i] = rowKindAppeared ? i - 1 : i;
                 }
             }
-            this.readProjection = Ints.toArray(readProjection);
-            dataRead.withProjection(dataProjection.toArray(new int[0][]));
+
+            this.readProjection = readProjection;
+            dataRead.withReadType(new RowType(readType.isNullable(), dataReadFields));
             return this;
         }
 

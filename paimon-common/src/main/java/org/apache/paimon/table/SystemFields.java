@@ -20,6 +20,7 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.VarCharType;
 
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -42,8 +43,12 @@ public class SystemFields {
     public static final DataField LEVEL =
             new DataField(Integer.MAX_VALUE - 3, "_LEVEL", DataTypes.INT().notNull());
 
+    public static final DataField ROW_KIND =
+            new DataField(
+                    Integer.MAX_VALUE - 4, "rowkind", new VarCharType(VarCharType.MAX_LENGTH));
+
     public static final Set<String> SYSTEM_FIELD_NAMES =
-            Stream.of(SEQUENCE_NUMBER.name(), VALUE_KIND.name(), LEVEL.name())
+            Stream.of(SEQUENCE_NUMBER.name(), VALUE_KIND.name(), LEVEL.name(), ROW_KIND.name())
                     .collect(Collectors.toSet());
 
     public static boolean isSystemField(int fieldId) {

@@ -199,7 +199,7 @@ public class SchemasTable implements ReadonlyTable {
     private class SchemasRead implements InnerTableRead {
 
         private final FileIO fileIO;
-        private int[][] projection;
+        private RowType readType;
 
         private Optional<Long> optionalFilterSchemaIdMax = Optional.empty();
         private Optional<Long> optionalFilterSchemaIdMin = Optional.empty();
@@ -260,8 +260,8 @@ public class SchemasTable implements ReadonlyTable {
         }
 
         @Override
-        public InnerTableRead withProjection(int[][] projection) {
-            this.projection = projection;
+        public InnerTableRead withReadType(RowType readType) {
+            this.readType = readType;
             return this;
         }
 
@@ -282,10 +282,13 @@ public class SchemasTable implements ReadonlyTable {
             Collection<TableSchema> tableSchemas =
                     manager.listWithRange(optionalFilterSchemaIdMax, optionalFilterSchemaIdMin);
             Iterator<InternalRow> rows = Iterators.transform(tableSchemas.iterator(), this::toRow);
-            if (projection != null) {
+            if (readType != null) {
                 rows =
                         Iterators.transform(
-                                rows, row -> ProjectedRow.from(projection).replaceRow(row));
+                                rows,
+                                row ->
+                                        ProjectedRow.from(readType, SchemasTable.TABLE_TYPE)
+                                                .replaceRow(row));
             }
             return new IteratorRecordReader<>(rows);
         }

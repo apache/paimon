@@ -139,7 +139,7 @@ public class ManifestsTable implements ReadonlyTable {
 
     private static class ManifestsRead implements InnerTableRead {
 
-        private int[][] projection;
+        private RowType readType;
 
         private final FileStoreTable dataTable;
 
@@ -154,8 +154,8 @@ public class ManifestsTable implements ReadonlyTable {
         }
 
         @Override
-        public InnerTableRead withProjection(int[][] projection) {
-            this.projection = projection;
+        public InnerTableRead withReadType(RowType readType) {
+            this.readType = readType;
             return this;
         }
 
@@ -173,10 +173,13 @@ public class ManifestsTable implements ReadonlyTable {
 
             Iterator<InternalRow> rows =
                     Iterators.transform(manifestFileMetas.iterator(), this::toRow);
-            if (projection != null) {
+            if (readType != null) {
                 rows =
                         Iterators.transform(
-                                rows, row -> ProjectedRow.from(projection).replaceRow(row));
+                                rows,
+                                row ->
+                                        ProjectedRow.from(readType, ManifestsTable.TABLE_TYPE)
+                                                .replaceRow(row));
             }
             return new IteratorRecordReader<>(rows);
         }

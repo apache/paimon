@@ -144,7 +144,7 @@ public class CatalogOptionsTable implements ReadonlyTable {
 
     private static class CatalogOptionsRead implements InnerTableRead {
 
-        private int[][] projection;
+        private RowType readType;
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
@@ -152,8 +152,8 @@ public class CatalogOptionsTable implements ReadonlyTable {
         }
 
         @Override
-        public InnerTableRead withProjection(int[][] projection) {
-            this.projection = projection;
+        public InnerTableRead withReadType(RowType readType) {
+            this.readType = readType;
             return this;
         }
 
@@ -171,10 +171,13 @@ public class CatalogOptionsTable implements ReadonlyTable {
                     Iterators.transform(
                             ((CatalogOptionsSplit) split).catalogOptions.entrySet().iterator(),
                             this::toRow);
-            if (projection != null) {
+            if (readType != null) {
                 rows =
                         Iterators.transform(
-                                rows, row -> ProjectedRow.from(projection).replaceRow(row));
+                                rows,
+                                row ->
+                                        ProjectedRow.from(readType, CatalogOptionsTable.TABLE_TYPE)
+                                                .replaceRow(row));
             }
             return new IteratorRecordReader<>(rows);
         }

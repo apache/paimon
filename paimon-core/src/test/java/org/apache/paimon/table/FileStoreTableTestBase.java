@@ -30,6 +30,7 @@ import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.JoinedRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.FileStatus;
@@ -387,6 +388,51 @@ public abstract class FileStoreTableTestBase {
                         .splits();
         assertThat(splits.size()).isEqualTo(1);
         assertThat(((DataSplit) splits.get(0)).bucket()).isEqualTo(1);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"avro", "orc", "parquet"})
+    public void testReadRowType(String format) throws Exception {
+        RowType writeType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "pt", DataTypes.INT()),
+                        DataTypes.FIELD(1, "a", DataTypes.INT()),
+                        DataTypes.FIELD(2, "f0", DataTypes.INT()),
+                        DataTypes.FIELD(
+                                3,
+                                "f1",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(4, "f0", DataTypes.INT()),
+                                        DataTypes.FIELD(5, "f1", DataTypes.INT()),
+                                        DataTypes.FIELD(6, "f2", DataTypes.INT()))));
+
+        FileStoreTable table =
+                createFileStoreTable(conf -> conf.setString(FILE_FORMAT.key(), format), writeType);
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                InnerTableCommit commit = table.newCommit(commitUser)) {
+            write.write(GenericRow.of(0, 0, 0, GenericRow.of(10, 11, 12)));
+            commit.commit(0, write.prepareCommit(true, 0));
+        }
+
+        RowType readType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                3,
+                                "f1",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(6, "f2", DataTypes.INT()),
+                                        DataTypes.FIELD(4, "f0", DataTypes.INT()))));
+
+        ReadBuilder readBuilder = table.newReadBuilder().withReadType(readType);
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        List<InternalRow> result = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(splits.get(0))) {
+            InternalRowSerializer serializer = new InternalRowSerializer(readType);
+            reader.forEachRemaining(row -> result.add(serializer.copy(row)));
+        }
+
+        assertThat(result).containsExactly(GenericRow.of(GenericRow.of(12, 10)));
     }
 
     protected void innerTestWithShard(FileStoreTable table) throws Exception {
@@ -1220,7 +1266,7 @@ public abstract class FileStoreTableTestBase {
     }
 
     @Test
-    public void testfastForward() throws Exception {
+    public void testFastForward() throws Exception {
         FileStoreTable table = createFileStoreTable();
         generateBranch(table);
         FileStoreTable tableBranch = createFileStoreTable(BRANCH_NAME);
@@ -1701,8 +1747,12 @@ public abstract class FileStoreTableTestBase {
         return createFileStoreTable(1);
     }
 
-    protected abstract FileStoreTable createFileStoreTable(Consumer<Options> configure)
-            throws Exception;
+    protected FileStoreTable createFileStoreTable(Consumer<Options> configure) throws Exception {
+        return createFileStoreTable(configure, ROW_TYPE);
+    }
+
+    protected abstract FileStoreTable createFileStoreTable(
+            Consumer<Options> configure, RowType rowType) throws Exception;
 
     protected abstract FileStoreTable createFileStoreTable(
             String branch, Consumer<Options> configure) throws Exception;

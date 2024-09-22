@@ -159,7 +159,7 @@ public class OptionsTable implements ReadonlyTable {
     private class OptionsRead implements InnerTableRead {
 
         private final FileIO fileIO;
-        private int[][] projection;
+        private RowType readType;
 
         public OptionsRead(FileIO fileIO) {
             this.fileIO = fileIO;
@@ -171,8 +171,8 @@ public class OptionsTable implements ReadonlyTable {
         }
 
         @Override
-        public InnerTableRead withProjection(int[][] projection) {
-            this.projection = projection;
+        public InnerTableRead withReadType(RowType readType) {
+            this.readType = readType;
             return this;
         }
 
@@ -190,10 +190,13 @@ public class OptionsTable implements ReadonlyTable {
             Iterator<InternalRow> rows =
                     Iterators.transform(
                             options(fileIO, location, branch).entrySet().iterator(), this::toRow);
-            if (projection != null) {
+            if (readType != null) {
                 rows =
                         Iterators.transform(
-                                rows, row -> ProjectedRow.from(projection).replaceRow(row));
+                                rows,
+                                row ->
+                                        ProjectedRow.from(readType, OptionsTable.TABLE_TYPE)
+                                                .replaceRow(row));
             }
             return new IteratorRecordReader<>(rows);
         }

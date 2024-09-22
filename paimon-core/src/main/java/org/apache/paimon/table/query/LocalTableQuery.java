@@ -76,6 +76,7 @@ public class LocalTableQuery implements TableQuery {
 
     @Nullable private Cache<String, LookupFile> lookupFileCache;
 
+    private final RowType rowType;
     private final RowType partitionType;
 
     public LocalTableQuery(FileStoreTable table) {
@@ -89,6 +90,7 @@ public class LocalTableQuery implements TableQuery {
         KeyValueFileStore store = (KeyValueFileStore) tableStore;
 
         this.readerFactoryBuilder = store.newReaderFactoryBuilder();
+        this.rowType = table.schema().logicalRowType();
         this.partitionType = table.schema().logicalPartitionType();
         RowType keyType = readerFactoryBuilder.keyType();
         this.keyComparatorSupplier = new KeyComparatorSupplier(readerFactoryBuilder.keyType());
@@ -151,8 +153,7 @@ public class LocalTableQuery implements TableQuery {
                         levels,
                         keyComparatorSupplier.get(),
                         readerFactoryBuilder.keyType(),
-                        new LookupLevels.KeyValueProcessor(
-                                readerFactoryBuilder.projectedValueType()),
+                        new LookupLevels.KeyValueProcessor(readerFactoryBuilder.readValueType()),
                         file ->
                                 factory.createRecordReader(
                                         file.schemaId(),
@@ -194,9 +195,11 @@ public class LocalTableQuery implements TableQuery {
         }
     }
 
+    // todo: replace it with withReadType
     @Override
     public LocalTableQuery withValueProjection(int[][] projection) {
-        this.readerFactoryBuilder.withValueProjection(projection);
+        this.readerFactoryBuilder.withReadValueType(
+                rowType.project(projection).copyAndSetOriginalRowType(rowType));
         return this;
     }
 
@@ -207,7 +210,7 @@ public class LocalTableQuery implements TableQuery {
 
     @Override
     public InternalRowSerializer createValueSerializer() {
-        return InternalSerializers.create(readerFactoryBuilder.projectedValueType());
+        return InternalSerializers.create(readerFactoryBuilder.readValueType());
     }
 
     @Override

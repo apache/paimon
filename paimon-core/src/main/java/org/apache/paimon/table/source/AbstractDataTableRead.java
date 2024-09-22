@@ -25,7 +25,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateProjectionConverter;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.utils.Projection;
+import org.apache.paimon.types.RowType;
 
 import java.io.IOException;
 import java.util.Optional;
@@ -35,15 +35,17 @@ public abstract class AbstractDataTableRead<T> implements InnerTableRead {
 
     private final DefaultValueAssigner defaultValueAssigner;
 
-    private int[][] projection;
+    private RowType readType;
     private boolean executeFilter = false;
     private Predicate predicate;
+    private final TableSchema schema;
 
     public AbstractDataTableRead(TableSchema schema) {
+        this.schema = schema;
         this.defaultValueAssigner = schema == null ? null : DefaultValueAssigner.create(schema);
     }
 
-    public abstract void projection(int[][] projection);
+    public abstract void applyReadType(RowType readType);
 
     public abstract RecordReader<InternalRow> reader(Split split) throws IOException;
 
@@ -71,9 +73,17 @@ public abstract class AbstractDataTableRead<T> implements InnerTableRead {
 
     @Override
     public final InnerTableRead withProjection(int[][] projection) {
-        this.projection = projection;
-        this.defaultValueAssigner.handleProject(projection);
-        projection(projection);
+        if (projection == null) {
+            return this;
+        }
+        return withReadType(schema.logicalRowType().project(projection));
+    }
+
+    @Override
+    public final InnerTableRead withReadType(RowType readType) {
+        this.readType = readType.copyAndSetOriginalRowType(schema.logicalRowType());
+        this.defaultValueAssigner.handleReadRowType(this.readType);
+        applyReadType(this.readType);
         return this;
     }
 
@@ -96,11 +106,9 @@ public abstract class AbstractDataTableRead<T> implements InnerTableRead {
         }
 
         Predicate predicate = this.predicate;
-        if (projection != null) {
+        if (readType != null) {
             Optional<Predicate> optional =
-                    predicate.visit(
-                            new PredicateProjectionConverter(
-                                    Projection.of(projection).toTopLevelIndexes()));
+                    predicate.visit(new PredicateProjectionConverter(readType.toProjection()));
             if (!optional.isPresent()) {
                 return reader;
             }

@@ -156,7 +156,7 @@ public class AllTableOptionsTable implements ReadonlyTable {
     private static class AllTableOptionsRead implements InnerTableRead {
 
         private final FileIO fileIO;
-        private int[][] projection;
+        private RowType readType;
 
         public AllTableOptionsRead(FileIO fileIO) {
             this.fileIO = fileIO;
@@ -168,8 +168,8 @@ public class AllTableOptionsTable implements ReadonlyTable {
         }
 
         @Override
-        public InnerTableRead withProjection(int[][] projection) {
-            this.projection = projection;
+        public InnerTableRead withReadType(RowType readType) {
+            this.readType = readType;
             return this;
         }
 
@@ -185,10 +185,14 @@ public class AllTableOptionsTable implements ReadonlyTable {
             }
             Map<String, Map<String, Path>> location = ((AllTableSplit) split).allTablePaths;
             Iterator<InternalRow> rows = toRow(options(fileIO, location));
-            if (projection != null) {
+            if (readType != null) {
                 rows =
                         Iterators.transform(
-                                rows, row -> ProjectedRow.from(projection).replaceRow(row));
+                                rows,
+                                row ->
+                                        ProjectedRow.from(
+                                                        readType, AggregationFieldsTable.TABLE_TYPE)
+                                                .replaceRow(row));
             }
             return new IteratorRecordReader<>(rows);
         }

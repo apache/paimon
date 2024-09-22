@@ -32,6 +32,7 @@ import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
@@ -88,7 +89,8 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
     }
 
     @Override
-    protected FileStoreTable createFileStoreTable(Consumer<Options> configure) throws Exception {
+    protected FileStoreTable createFileStoreTable(Consumer<Options> configure, RowType rowType)
+            throws Exception {
         Options options = new Options();
         options.set(CoreOptions.BUCKET, 1);
         options.set(CoreOptions.PATH, tablePath.toString());
@@ -102,7 +104,7 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
                 SchemaUtils.forceCommit(
                         new SchemaManager(LocalFileIO.create(), tablePath),
                         new Schema(
-                                ROW_TYPE.getFields(),
+                                rowType.getFields(),
                                 Collections.singletonList("pt"),
                                 Arrays.asList("pt", "a"),
                                 options.toMap(),

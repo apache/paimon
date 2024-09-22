@@ -145,6 +145,10 @@ public abstract class DataType implements Serializable {
         return isNullable == that.isNullable && typeRoot == that.typeRoot;
     }
 
+    public boolean subsetOf(Object o) {
+        return equals(o);
+    }
+
     @Override
     public int hashCode() {
         return Objects.hash(isNullable, typeRoot);

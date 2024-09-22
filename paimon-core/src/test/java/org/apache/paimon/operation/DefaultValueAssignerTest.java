@@ -29,7 +29,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.utils.Projection;
+import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
@@ -83,10 +83,9 @@ class DefaultValueAssignerTest {
     @Test
     public void testGeneralRow() {
         DefaultValueAssigner defaultValueAssigner = DefaultValueAssigner.create(tableSchema);
-        int[] projection = tableSchema.projection(Lists.newArrayList("col5", "col4", "col0"));
-        Projection top = Projection.of(projection);
-        int[][] nest = top.toNestedIndexes();
-        defaultValueAssigner = defaultValueAssigner.handleProject(nest);
+        RowType readRowType =
+                tableSchema.projectedLogicalRowType(Lists.newArrayList("col5", "col4", "col0"));
+        defaultValueAssigner = defaultValueAssigner.handleReadRowType(readRowType);
         InternalRow row = defaultValueAssigner.createDefaultValueRow().defaultValueRow();
         assertThat(String.format("%s|%s|%s", row.getString(0), row.getString(1), row.getString(2)))
                 .isEqualTo("1|0|null");

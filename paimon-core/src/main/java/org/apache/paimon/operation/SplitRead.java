@@ -22,6 +22,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOFunction;
 
 import javax.annotation.Nullable;
@@ -39,7 +40,7 @@ public interface SplitRead<T> {
 
     SplitRead<T> withIOManager(@Nullable IOManager ioManager);
 
-    SplitRead<T> withProjection(@Nullable int[][] projectedFields);
+    SplitRead<T> withReadType(@Nullable RowType readType);
 
     SplitRead<T> withFilter(@Nullable Predicate predicate);
 
@@ -62,8 +63,8 @@ public interface SplitRead<T> {
             }
 
             @Override
-            public SplitRead<R> withProjection(@Nullable int[][] projectedFields) {
-                read.withProjection(projectedFields);
+            public SplitRead<R> withReadType(@Nullable RowType readType) {
+                read.withReadType(readType);
                 return this;
             }
 

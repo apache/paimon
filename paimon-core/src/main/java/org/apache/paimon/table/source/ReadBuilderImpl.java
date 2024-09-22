@@ -23,10 +23,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
-import org.apache.paimon.utils.Projection;
-import org.apache.paimon.utils.TypeUtils;
 
-import java.util.Arrays;
 import java.util.Map;
 import java.util.Objects;
 
@@ -40,7 +37,6 @@ public class ReadBuilderImpl implements ReadBuilder {
     private final InnerTable table;
 
     private Predicate filter;
-    private int[][] projection;
 
     private Integer limit = null;
 
@@ -50,6 +46,8 @@ public class ReadBuilderImpl implements ReadBuilder {
     private Map<String, String> partitionSpec;
 
     private Filter<Integer> bucketFilter;
+
+    private RowType readType;
 
     public ReadBuilderImpl(InnerTable table) {
         this.table = table;
@@ -62,10 +60,11 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     @Override
     public RowType readType() {
-        if (projection == null) {
+        if (readType != null) {
+            return readType;
+        } else {
             return table.rowType();
         }
-        return TypeUtils.project(table.rowType(), Projection.of(projection).toTopLevelIndexes());
     }
 
     @Override
@@ -85,9 +84,23 @@ public class ReadBuilderImpl implements ReadBuilder {
     }
 
     @Override
-    public ReadBuilder withProjection(int[][] projection) {
-        this.projection = projection;
+    public ReadBuilder withReadType(RowType readType) {
+        RowType tableRowType = table.rowType();
+        checkState(
+                readType.subsetOf(tableRowType),
+                "read row type must be subset of table row type, read row type: %s, table row type: %s",
+                readType,
+                tableRowType);
+        this.readType = readType;
         return this;
+    }
+
+    @Override
+    public ReadBuilder withProjection(int[][] projection) {
+        if (projection == null) {
+            return this;
+        }
+        return withReadType(table.rowType().project(projection));
     }
 
     @Override
@@ -147,8 +160,8 @@ public class ReadBuilderImpl implements ReadBuilder {
     @Override
     public TableRead newRead() {
         InnerTableRead read = table.newRead().withFilter(filter);
-        if (projection != null) {
-            read.withProjection(projection);
+        if (readType != null) {
+            read.withReadType(readType);
         }
         return read;
     }
@@ -164,13 +177,13 @@ public class ReadBuilderImpl implements ReadBuilder {
         ReadBuilderImpl that = (ReadBuilderImpl) o;
         return Objects.equals(table.name(), that.table.name())
                 && Objects.equals(filter, that.filter)
-                && Arrays.deepEquals(projection, that.projection);
+                && Objects.equals(readType, that.readType);
     }
 
     @Override
     public int hashCode() {
         int result = Objects.hash(table.name(), filter);
-        result = 31 * result + Arrays.deepHashCode(projection);
+        result = 31 * result + Objects.hash(readType);
         return result;
     }
 }

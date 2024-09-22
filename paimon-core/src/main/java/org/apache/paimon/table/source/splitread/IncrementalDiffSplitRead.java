@@ -32,6 +32,7 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.KeyValueTableRead;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.ProjectedRow;
 
@@ -52,7 +53,7 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
     private final MergeFileSplitRead mergeRead;
 
     private boolean forceKeepDelete = false;
-    @Nullable private int[][] projectedFields;
+    @Nullable private RowType readType;
 
     public IncrementalDiffSplitRead(MergeFileSplitRead mergeRead) {
         this.mergeRead = mergeRead;
@@ -71,8 +72,8 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
     }
 
     @Override
-    public SplitRead<InternalRow> withProjection(@Nullable int[][] projectedFields) {
-        this.projectedFields = projectedFields;
+    public SplitRead<InternalRow> withReadType(@Nullable RowType readType) {
+        this.readType = readType;
         return this;
     }
 
@@ -102,8 +103,8 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
                         mergeRead.createUdsComparator(),
                         mergeRead.mergeSorter(),
                         forceKeepDelete);
-        if (projectedFields != null) {
-            ProjectedRow projectedRow = ProjectedRow.from(projectedFields);
+        if (readType != null) {
+            ProjectedRow projectedRow = ProjectedRow.from(readType.toProjection());
             reader = reader.transform(kv -> kv.replaceValue(projectedRow.replaceRow(kv.value())));
         }
         return KeyValueTableRead.unwrap(reader);
