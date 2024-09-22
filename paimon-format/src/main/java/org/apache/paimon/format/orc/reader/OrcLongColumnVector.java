@@ -33,33 +33,38 @@ public class OrcLongColumnVector extends AbstractOrcColumnVector
 
     private final LongColumnVector vector;
 
-    public OrcLongColumnVector(LongColumnVector vector) {
-        super(vector);
+    public OrcLongColumnVector(LongColumnVector vector, int[] selected) {
+        super(vector, selected);
         this.vector = vector;
     }
 
     @Override
     public long getLong(int i) {
+        i = rowMapper(i);
         return vector.vector[vector.isRepeating ? 0 : i];
     }
 
     @Override
     public boolean getBoolean(int i) {
+        i = rowMapper(i);
         return vector.vector[vector.isRepeating ? 0 : i] == 1;
     }
 
     @Override
     public byte getByte(int i) {
+        i = rowMapper(i);
         return (byte) vector.vector[vector.isRepeating ? 0 : i];
     }
 
     @Override
     public int getInt(int i) {
+        i = rowMapper(i);
         return (int) vector.vector[vector.isRepeating ? 0 : i];
     }
 
     @Override
     public short getShort(int i) {
+        i = rowMapper(i);
         return (short) vector.vector[vector.isRepeating ? 0 : i];
     }
 }

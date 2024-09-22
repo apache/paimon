@@ -32,14 +32,15 @@ public class OrcArrayColumnVector extends AbstractOrcColumnVector
     private final ListColumnVector hiveVector;
     private final ColumnVector paimonVector;
 
-    public OrcArrayColumnVector(ListColumnVector hiveVector, ArrayType type) {
-        super(hiveVector);
+    public OrcArrayColumnVector(ListColumnVector hiveVector, int[] selected, ArrayType type) {
+        super(hiveVector, selected);
         this.hiveVector = hiveVector;
-        this.paimonVector = createPaimonVector(hiveVector.child, type.getElementType());
+        this.paimonVector = createPaimonVector(hiveVector.child, selected, type.getElementType());
     }
 
     @Override
     public InternalArray getArray(int i) {
+        i = rowMapper(i);
         long offset = hiveVector.offsets[i];
         long length = hiveVector.lengths[i];
         return new ColumnarArray(paimonVector, (int) offset, (int) length);

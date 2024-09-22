@@ -26,17 +26,18 @@ public class OrcBytesColumnVector extends AbstractOrcColumnVector
 
     private final BytesColumnVector vector;
 
-    public OrcBytesColumnVector(BytesColumnVector vector) {
-        super(vector);
+    public OrcBytesColumnVector(BytesColumnVector vector, int[] selected) {
+        super(vector, selected);
         this.vector = vector;
     }
 
     @Override
     public Bytes getBytes(int i) {
         int rowId = vector.isRepeating ? 0 : i;
+        int selectedRowId = rowMapper(rowId);
         byte[][] data = vector.vector;
         int[] start = vector.start;
         int[] length = vector.length;
-        return new Bytes(data[rowId], start[rowId], length[rowId]);
+        return new Bytes(data[selectedRowId], start[selectedRowId], length[selectedRowId]);
     }
 }

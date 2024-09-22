@@ -33,15 +33,17 @@ public class OrcMapColumnVector extends AbstractOrcColumnVector
     private final ColumnVector keyPaimonVector;
     private final ColumnVector valuePaimonVector;
 
-    public OrcMapColumnVector(MapColumnVector hiveVector, MapType type) {
-        super(hiveVector);
+    public OrcMapColumnVector(MapColumnVector hiveVector, int[] selected, MapType type) {
+        super(hiveVector, selected);
         this.hiveVector = hiveVector;
-        this.keyPaimonVector = createPaimonVector(hiveVector.keys, type.getKeyType());
-        this.valuePaimonVector = createPaimonVector(hiveVector.values, type.getValueType());
+        this.keyPaimonVector = createPaimonVector(hiveVector.keys, selected, type.getKeyType());
+        this.valuePaimonVector =
+                createPaimonVector(hiveVector.values, selected, type.getValueType());
     }
 
     @Override
     public InternalMap getMap(int i) {
+        i = rowMapper(i);
         long offset = hiveVector.offsets[i];
         long length = hiveVector.lengths[i];
         return new ColumnarMap(keyPaimonVector, valuePaimonVector, (int) offset, (int) length);

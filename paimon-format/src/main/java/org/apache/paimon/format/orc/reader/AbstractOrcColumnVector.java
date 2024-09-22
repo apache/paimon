@@ -40,8 +40,15 @@ public abstract class AbstractOrcColumnVector
 
     private final ColumnVector vector;
 
-    AbstractOrcColumnVector(ColumnVector vector) {
+    private final int[] selected;
+
+    AbstractOrcColumnVector(ColumnVector vector, int[] selected) {
         this.vector = vector;
+        this.selected = selected;
+    }
+
+    protected int rowMapper(int r) {
+        return selected[r];
     }
 
     @Override
@@ -50,27 +57,29 @@ public abstract class AbstractOrcColumnVector
     }
 
     public static org.apache.paimon.data.columnar.ColumnVector createPaimonVector(
-            ColumnVector vector, DataType dataType) {
+            ColumnVector vector, int[] selected, DataType dataType) {
         if (vector instanceof LongColumnVector) {
             if (dataType.getTypeRoot() == DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE) {
-                return new OrcLegacyTimestampColumnVector((LongColumnVector) vector);
+                return new OrcLegacyTimestampColumnVector((LongColumnVector) vector, selected);
             } else {
-                return new OrcLongColumnVector((LongColumnVector) vector);
+                return new OrcLongColumnVector((LongColumnVector) vector, selected);
             }
         } else if (vector instanceof DoubleColumnVector) {
-            return new OrcDoubleColumnVector((DoubleColumnVector) vector);
+            return new OrcDoubleColumnVector((DoubleColumnVector) vector, selected);
         } else if (vector instanceof BytesColumnVector) {
-            return new OrcBytesColumnVector((BytesColumnVector) vector);
+            return new OrcBytesColumnVector((BytesColumnVector) vector, selected);
         } else if (vector instanceof DecimalColumnVector) {
-            return new OrcDecimalColumnVector((DecimalColumnVector) vector);
+            return new OrcDecimalColumnVector((DecimalColumnVector) vector, selected);
         } else if (vector instanceof TimestampColumnVector) {
-            return new OrcTimestampColumnVector(vector);
+            return new OrcTimestampColumnVector(vector, selected);
         } else if (vector instanceof ListColumnVector) {
-            return new OrcArrayColumnVector((ListColumnVector) vector, (ArrayType) dataType);
+            return new OrcArrayColumnVector(
+                    (ListColumnVector) vector, selected, (ArrayType) dataType);
         } else if (vector instanceof StructColumnVector) {
-            return new OrcRowColumnVector((StructColumnVector) vector, (RowType) dataType);
+            return new OrcRowColumnVector(
+                    (StructColumnVector) vector, selected, (RowType) dataType);
         } else if (vector instanceof MapColumnVector) {
-            return new OrcMapColumnVector((MapColumnVector) vector, (MapType) dataType);
+            return new OrcMapColumnVector((MapColumnVector) vector, selected, (MapType) dataType);
         } else {
             throw new UnsupportedOperationException(
                     "Unsupported vector: " + vector.getClass().getName());

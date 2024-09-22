@@ -99,7 +99,6 @@ public class OrcFileFormat extends FileFormat {
     public FormatReaderFactory createReaderFactory(
             RowType projectedRowType, @Nullable List<Predicate> filters) {
         List<OrcFilters.Predicate> orcPredicates = new ArrayList<>();
-
         if (filters != null) {
             for (Predicate pred : filters) {
                 Optional<OrcFilters.Predicate> orcPred =

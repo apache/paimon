@@ -30,18 +30,20 @@ public class OrcDoubleColumnVector extends AbstractOrcColumnVector
 
     private final DoubleColumnVector vector;
 
-    public OrcDoubleColumnVector(DoubleColumnVector vector) {
-        super(vector);
+    public OrcDoubleColumnVector(DoubleColumnVector vector, int[] selected) {
+        super(vector, selected);
         this.vector = vector;
     }
 
     @Override
     public double getDouble(int i) {
+        i = rowMapper(i);
         return vector.vector[vector.isRepeating ? 0 : i];
     }
 
     @Override
     public float getFloat(int i) {
+        i = rowMapper(i);
         return (float) vector.vector[vector.isRepeating ? 0 : i];
     }
 }
